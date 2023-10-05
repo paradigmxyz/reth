@@ -16,8 +16,8 @@ use reth_primitives::{
     hex, AccessList, Address, Bytes, FromRecoveredPooledTransaction, FromRecoveredTransaction,
     IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
     TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
-    TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID, U128, U256,
+    TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
@@ -44,6 +44,9 @@ macro_rules! set_value {
             MockTransaction::Eip4844 { ref mut $field, .. } => {
                 *$field = new_value;
             }
+            MockTransaction::Eip2930 { ref mut $field, .. } => {
+                *$field = new_value;
+            }
         }
     };
 }
@@ -55,6 +58,7 @@ macro_rules! get_value {
             MockTransaction::Legacy { $field, .. } => $field,
             MockTransaction::Eip1559 { $field, .. } => $field,
             MockTransaction::Eip4844 { $field, .. } => $field,
+            MockTransaction::Eip2930 { $field, .. } => $field,
         }
     };
 }
@@ -117,6 +121,17 @@ pub enum MockTransaction {
         value: U256,
         accesslist: AccessList,
         input: Bytes,
+    },
+    Eip2930 {
+        hash: B256,
+        sender: Address,
+        nonce: u64,
+        to: TransactionKind,
+        gas_limit: u64,
+        input: Bytes,
+        value: U256,
+        gas_price: u128,
+        accesslist: AccessList,
     },
 }
 
@@ -251,6 +266,9 @@ impl MockTransaction {
             MockTransaction::Eip4844 { accesslist, .. } => {
                 *accesslist = list;
             }
+            MockTransaction::Eip2930 { accesslist, .. } => {
+                *accesslist = list;
+            }
         }
         self
     }
@@ -268,6 +286,7 @@ impl MockTransaction {
                 *max_fee_per_gas = val;
                 *max_priority_fee_per_gas = val;
             }
+            MockTransaction::Eip2930 { gas_price, .. } => *gas_price = val,
         }
         self
     }
@@ -293,6 +312,9 @@ impl MockTransaction {
                 *max_fee_per_gas = val;
                 *max_priority_fee_per_gas = val;
             }
+            MockTransaction::Eip2930 { ref mut gas_price, .. } => {
+                *gas_price = val;
+            }
         }
         self
     }
@@ -302,6 +324,7 @@ impl MockTransaction {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
             MockTransaction::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
+            MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
         }
     }
 
@@ -377,6 +400,7 @@ impl MockTransaction {
             Self::Legacy { .. } => LEGACY_TX_TYPE_ID,
             Self::Eip1559 { .. } => EIP1559_TX_TYPE_ID,
             Self::Eip4844 { .. } => EIP4844_TX_TYPE_ID,
+            Self::Eip2930 { .. } => EIP2930_TX_TYPE_ID,
         }
     }
 
@@ -391,6 +415,10 @@ impl MockTransaction {
     pub fn is_eip4844(&self) -> bool {
         matches!(self, MockTransaction::Eip4844 { .. })
     }
+
+    pub fn is_eip2930(&self) -> bool {
+        matches!(self, MockTransaction::Eip2930 { .. })
+    }
 }
 
 impl PoolTransaction for MockTransaction {
@@ -399,6 +427,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { hash, .. } => hash,
             MockTransaction::Eip1559 { hash, .. } => hash,
             MockTransaction::Eip4844 { hash, .. } => hash,
+            MockTransaction::Eip2930 { hash, .. } => hash,
         }
     }
 
@@ -407,6 +436,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { sender, .. } => *sender,
             MockTransaction::Eip1559 { sender, .. } => *sender,
             MockTransaction::Eip4844 { sender, .. } => *sender,
+            MockTransaction::Eip2930 { sender, .. } => *sender,
         }
     }
 
@@ -415,6 +445,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { nonce, .. } => *nonce,
             MockTransaction::Eip1559 { nonce, .. } => *nonce,
             MockTransaction::Eip4844 { nonce, .. } => *nonce,
+            MockTransaction::Eip2930 { nonce, .. } => *nonce,
         }
     }
 
@@ -429,6 +460,9 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip4844 { max_fee_per_gas, value, gas_limit, .. } => {
                 U256::from(*gas_limit) * U256::from(*max_fee_per_gas) + *value
             }
+            MockTransaction::Eip2930 { gas_limit, gas_price, value, .. } => {
+                U256::from(*gas_limit) * U256::from(*gas_price) + *value
+            }
         }
     }
 
@@ -441,6 +475,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
             MockTransaction::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
+            MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
         }
     }
 
@@ -449,6 +484,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { .. } => None,
             MockTransaction::Eip1559 { accesslist: accessslist, .. } => Some(accessslist),
             MockTransaction::Eip4844 { accesslist: accessslist, .. } => Some(accessslist),
+            MockTransaction::Eip2930 { accesslist, .. } => Some(accesslist),
         }
     }
 
@@ -461,6 +497,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } => {
                 Some(*max_priority_fee_per_gas)
             }
+            MockTransaction::Eip2930 { .. } => None,
         }
     }
 
@@ -491,6 +528,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
             MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
+            MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
         }
     }
 
@@ -499,6 +537,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { to, .. } => to,
             MockTransaction::Eip1559 { to, .. } => to,
             MockTransaction::Eip4844 { to, .. } => to,
+            MockTransaction::Eip2930 { to, .. } => to,
         }
     }
 
@@ -507,6 +546,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { .. } => &[],
             MockTransaction::Eip1559 { input, .. } => input,
             MockTransaction::Eip4844 { input, .. } => input,
+            MockTransaction::Eip2930 { input, .. } => input,
         }
     }
 
@@ -519,6 +559,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { .. } => TxType::Legacy.into(),
             MockTransaction::Eip1559 { .. } => TxType::EIP1559.into(),
             MockTransaction::Eip4844 { .. } => TxType::EIP4844.into(),
+            MockTransaction::Eip2930 { .. } => TxType::EIP2930.into(),
         }
     }
 
@@ -602,9 +643,26 @@ impl FromRecoveredTransaction for MockTransaction {
                 input,
                 accesslist: access_list,
             },
-            Transaction::Eip2930 { .. } => {
-                unimplemented!()
-            }
+            Transaction::Eip2930(TxEip2930 {
+                chain_id: _,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+                access_list,
+            }) => MockTransaction::Eip2930 {
+                hash,
+                sender,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value: value.into(),
+                input,
+                accesslist: access_list,
+            },
         }
     }
 }
