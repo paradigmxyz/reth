@@ -34,7 +34,6 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 /// functions in the Execution layer that are crucial for the consensus process.
 pub struct EngineApi<Provider> {
     inner: Arc<EngineApiInner<Provider>>,
-    metrics: EngineApiMetrics,
 }
 
 struct EngineApiInner<Provider> {
@@ -48,6 +47,8 @@ struct EngineApiInner<Provider> {
     payload_store: PayloadStore,
     /// For spawning and executing async tasks
     task_spawner: Box<dyn TaskSpawner>,
+    /// The metrics for engine api calls
+    metrics: EngineApiMetrics,
 }
 
 impl<Provider> EngineApi<Provider>
@@ -68,8 +69,9 @@ where
             beacon_consensus,
             payload_store,
             task_spawner,
+            metrics: EngineApiMetrics::default(),
         });
-        Self { inner, metrics: EngineApiMetrics::default() }
+        Self { inner }
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -595,7 +597,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         let start = Instant::now();
         let res = EngineApi::new_payload_v1(self, payload).await;
-        self.metrics.new_payload_v1.record(start.elapsed());
+        self.inner.metrics.new_payload_v1.record(start.elapsed());
         Ok(res?)
     }
 
@@ -605,7 +607,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         let start = Instant::now();
         let res = EngineApi::new_payload_v2(self, payload).await;
-        self.metrics.new_payload_v2.record(start.elapsed());
+        self.inner.metrics.new_payload_v2.record(start.elapsed());
         Ok(res?)
     }
 
@@ -622,7 +624,7 @@ where
         let res =
             EngineApi::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
                 .await;
-        self.metrics.new_payload_v3.record(start.elapsed());
+        self.inner.metrics.new_payload_v3.record(start.elapsed());
         Ok(res?)
     }
 
@@ -639,7 +641,7 @@ where
         let start = Instant::now();
         let res =
             EngineApi::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
-        self.metrics.fork_choice_updated_v1.record(start.elapsed());
+        self.inner.metrics.fork_choice_updated_v1.record(start.elapsed());
         Ok(res?)
     }
 
@@ -654,7 +656,7 @@ where
         let start = Instant::now();
         let res =
             EngineApi::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
-        self.metrics.fork_choice_updated_v2.record(start.elapsed());
+        self.inner.metrics.fork_choice_updated_v2.record(start.elapsed());
         Ok(res?)
     }
 
@@ -670,7 +672,7 @@ where
         let start = Instant::now();
         let res =
             EngineApi::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
-        self.metrics.fork_choice_updated_v3.record(start.elapsed());
+        self.inner.metrics.fork_choice_updated_v3.record(start.elapsed());
         Ok(res?)
     }
 
@@ -689,7 +691,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
         let start = Instant::now();
         let res = EngineApi::get_payload_v1(self, payload_id).await;
-        self.metrics.get_payload_v1.record(start.elapsed());
+        self.inner.metrics.get_payload_v1.record(start.elapsed());
         Ok(res?)
     }
 
@@ -706,7 +708,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         let start = Instant::now();
         let res = EngineApi::get_payload_v2(self, payload_id).await;
-        self.metrics.get_payload_v2.record(start.elapsed());
+        self.inner.metrics.get_payload_v2.record(start.elapsed());
         Ok(res?)
     }
 
@@ -723,7 +725,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
         let start = Instant::now();
         let res = EngineApi::get_payload_v3(self, payload_id).await;
-        self.metrics.get_payload_v3.record(start.elapsed());
+        self.inner.metrics.get_payload_v3.record(start.elapsed());
         Ok(res?)
     }
 
@@ -736,7 +738,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
         let start = Instant::now();
         let res = EngineApi::get_payload_bodies_by_hash(self, block_hashes);
-        self.metrics.get_payload_bodies_by_hash_v1.record(start.elapsed());
+        self.inner.metrics.get_payload_bodies_by_hash_v1.record(start.elapsed());
         Ok(res?)
     }
 
@@ -764,7 +766,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         let start_time = Instant::now();
         let res = EngineApi::get_payload_bodies_by_range(self, start.to(), count.to()).await;
-        self.metrics.get_payload_bodies_by_range_v1.record(start_time.elapsed());
+        self.inner.metrics.get_payload_bodies_by_range_v1.record(start_time.elapsed());
         Ok(res?)
     }
 
@@ -776,20 +778,15 @@ where
     ) -> RpcResult<TransitionConfiguration> {
         trace!(target: "rpc::engine", "Serving engine_exchangeTransitionConfigurationV1");
         let start = Instant::now();
-        // TODO: might not be worth including this
         let res = EngineApi::exchange_transition_configuration(self, config).await;
-        self.metrics.exchange_transition_configuration.record(start.elapsed());
+        self.inner.metrics.exchange_transition_configuration.record(start.elapsed());
         Ok(res?)
     }
 
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        let start = Instant::now();
-        // TODO: might not be worth including this
-        let res = CAPABILITIES.into_iter().map(str::to_owned).collect();
-        self.metrics.exchange_capabilities.record(start.elapsed());
-        Ok(res)
+        Ok(CAPABILITIES.into_iter().map(str::to_owned).collect())
     }
 }
 

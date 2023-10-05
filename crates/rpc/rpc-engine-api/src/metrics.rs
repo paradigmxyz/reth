@@ -29,6 +29,4 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) get_payload_bodies_by_hash_v1: Histogram,
     /// Latency for `engine_exchangeTransitionConfigurationV1`
     pub(crate) exchange_transition_configuration: Histogram,
-    /// Latency for `engine_exchangeCapabilitiesV1`
-    pub(crate) exchange_capabilities: Histogram,
 }
