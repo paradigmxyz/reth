@@ -49,7 +49,6 @@ pub(crate) trait Segment<DB: Database> {
 }
 
 /// Segment pruning input, see [Segment::prune].
-// TODO(alexey): include `previous_checkpoint: PruneCheckpoint`
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PruneInput {
     pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
