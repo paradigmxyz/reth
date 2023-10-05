@@ -1,12 +1,16 @@
 //! Support for integrating customizations into the CLI.
 
 use crate::cli::{
-    components::{RethNodeComponents,RethRpcComponents},
+    components::{RethNodeComponents, RethRpcComponents},
     config::{PayloadBuilderConfig, RethRpcConfig},
 };
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+#[doc(hidden)]
+#[allow(unused)]
+/// For doc purposes
+use reth_rpc_builder::TransportRpcModules;
 use reth_tasks::TaskSpawner;
 use std::fmt;
 
@@ -51,11 +55,11 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     /// This is expected to call the merge functions of [TransportRpcModules], for example
     /// [TransportRpcModules::merge_configured]
     #[allow(clippy::type_complexity)]
-    fn extend_rpc_modules<'a,Conf, Reth>(
+    fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         config: &Conf,
         components: &Reth,
-        node_components:& mut RethRpcComponents<'a,Reth>
+        node_components: &mut RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
@@ -184,11 +188,11 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         }
     }
 
-    fn extend_rpc_modules<'a,Conf, Reth>(
+    fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         config: &Conf,
         components: &Reth,
-        node_components:& mut RethRpcComponents<'a,Reth>
+        node_components: &mut RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,

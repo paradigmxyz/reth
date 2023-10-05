@@ -13,14 +13,11 @@
 //! ```
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth::{
-    cli::{
-        components::{RethNodeComponents,RethRpcComponents},
-        config::RethRpcConfig,
-        ext::{RethCliExt, RethNodeCommandConfig},
-        Cli,
-    },
-    rpc::builder::{RethModuleRegistry, TransportRpcModules},
+use reth::cli::{
+    components::{RethNodeComponents, RethRpcComponents},
+    config::RethRpcConfig,
+    ext::{RethCliExt, RethNodeCommandConfig},
+    Cli,
 };
 use reth_transaction_pool::TransactionPool;
 
@@ -46,11 +43,11 @@ struct RethCliTxpoolExt {
 
 impl RethNodeCommandConfig for RethCliTxpoolExt {
     // This is the entrypoint for the CLI to extend the RPC server with custom rpc namespaces.
-    fn extend_rpc_modules<'a,Conf, Reth>(
+    fn extend_rpc_modules<Conf, Reth>(
         &mut self,
-        config: &Conf,
-        components: &Reth,
-        node_components:& mut RethRpcComponents<'a,Reth>
+        _config: &Conf,
+        _components: &Reth,
+        node_components: &mut RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
