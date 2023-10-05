@@ -72,7 +72,6 @@ pub trait RethNodeComponents {
     }
 }
 
-
 /// Helper function to encapsulate [RethModuleRegistry] and [TransportRpcModules]
 /// generic over [RethNodeComponents]
 pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
@@ -82,7 +81,6 @@ pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
     /// Holds installed modules per transport type.
     pub modules: &'a mut TransportRpcModules,
 }
-
 
 /// A Generic implementation of the RethNodeComponents trait.
 #[derive(Clone, Debug)]
