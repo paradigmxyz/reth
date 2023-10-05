@@ -861,10 +861,8 @@ where
 
     let mut payload = BuiltPayload::new(attributes.id, sealed_block, total_fees);
 
-    if !blob_sidecars.is_empty() {
-        // extend the payload with the blob sidecars from the executed txs
-        payload.extend_sidecars(blob_sidecars);
-    }
+    // extend the payload with the blob sidecars from the executed txs
+    payload.extend_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
