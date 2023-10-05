@@ -322,7 +322,7 @@ impl MockTransaction {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
             MockTransaction::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
-            MockTransaction::Eip2930 { gas_price,.. } => *gas_price
+            MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
         }
     }
 
@@ -454,7 +454,9 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip4844 { max_fee_per_gas, value, gas_limit, .. } => {
                 U256::from(*gas_limit) * U256::from(*max_fee_per_gas) + *value
             }
-            MockTransaction::Eip2930 { .. } => U256::ZERO,
+            MockTransaction::Eip2930 { gas_limit, gas_price, value, .. } => {
+                U256::from(*gas_limit) * U256::from(*gas_price) + *value
+            }
         }
     }
 
@@ -467,7 +469,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
             MockTransaction::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
-            MockTransaction::Eip2930 { gas_price,.. } => *gas_price,
+            MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
         }
     }
 
@@ -520,7 +522,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
             MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
-            MockTransaction::Eip2930 { gas_price,.. } => *gas_price,
+            MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
         }
     }
 
