@@ -5416,6 +5416,7 @@ dependencies = [
  "human_bytes",
  "humantime",
  "hyper",
+ "itertools 0.11.0",
  "jemalloc-ctl",
  "jemallocator",
  "metrics",

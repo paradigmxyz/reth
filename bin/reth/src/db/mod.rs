@@ -24,7 +24,7 @@ mod clear;
 mod diff;
 mod get;
 mod list;
-mod snap;
+mod snapshots;
 /// DB List TUI
 mod tui;
 
@@ -87,7 +87,7 @@ pub enum Subcommands {
     /// Deletes all table entries
     Clear(clear::Command),
     /// Snapshots tables from database
-    Snapshot(snap::Command),
+    Snapshot(snapshots::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path

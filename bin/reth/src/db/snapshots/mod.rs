@@ -1,0 +1,211 @@
+use crate::utils::DbTool;
+use clap::{clap_derive::ValueEnum, Parser};
+use eyre::WrapErr;
+use itertools::Itertools;
+use reth_db::{database::Database, open_db_read_only, table::Table, tables, DatabaseEnvRO};
+use reth_interfaces::db::LogLevel;
+use reth_nippy_jar::{
+    compression::{DecoderDictionary, Decompressor},
+    NippyJar,
+};
+use reth_primitives::ChainSpec;
+use reth_provider::providers::SnapshotProvider;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+mod bench;
+mod headers;
+
+#[derive(Parser, Debug)]
+/// The arguments for the `reth db snapshot` command
+pub struct Command {
+    /// Which snapshot categories to create
+    modes: Vec<Snapshots>,
+    /// From which block to snapshot from
+    #[arg(long, short, default_value = "0")]
+    from: usize,
+    /// How many blocks to snapshot
+    #[arg(long, short, default_value = "500000")]
+    block_interval: usize,
+    /// Print out a quick benchmark between the database and the created snapshots
+    #[arg(long, default_value = "false")]
+    bench: bool,
+    /// Does not create a snapshot, and prints out a quick benchmark between the database and
+    /// previous snapshots
+    #[arg(long, default_value = "false")]
+    only_bench: bool,
+    /// Compression schemes to use
+    #[arg(long, short, value_delimiter = ',', default_value = "lz4")]
+    compression: Vec<Compression>,
+    /// Whether to use inclusion list filters and PHF
+    #[arg(long, default_value = "true")]
+    with_filters: bool,
+    /// Which perfect hashing function to use
+    #[arg(long, value_delimiter = ',', default_value = "mphf")]
+    phf: Vec<PerfectHashingFunction>,
+}
+
+impl Command {
+    /// Execute `db list` command
+    pub fn execute(
+        self,
+        db_path: &Path,
+        log_level: Option<LogLevel>,
+        chain: Arc<ChainSpec>,
+    ) -> eyre::Result<()> {
+        let all_combinations = self
+            .modes
+            .iter()
+            .cartesian_product(self.compression.iter())
+            .cartesian_product(self.phf.iter());
+
+        {
+            let db = open_db_read_only(db_path, None)?;
+            let tool = DbTool::new(&db, chain.clone())?;
+
+            if !self.only_bench {
+                for ((mode, compression), phf) in all_combinations.clone() {
+                    match mode {
+                        Snapshots::Headers => {
+                            self.generate_headers_snapshot(&tool, compression, phf)?
+                        }
+                        Snapshots::Transactions => todo!(),
+                        Snapshots::Receipts => todo!(),
+                    }
+                }
+            }
+        }
+
+        if self.only_bench || self.bench {
+            for ((mode, compression), phf) in all_combinations {
+                match mode {
+                    Snapshots::Headers => self.bench_headers_snapshot(
+                        db_path,
+                        log_level,
+                        chain.clone(),
+                        compression,
+                        phf,
+                    )?,
+                    Snapshots::Transactions => todo!(),
+                    Snapshots::Receipts => todo!(),
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn prepare_jar_provider<'a>(
+        &self,
+        jar: &'a mut NippyJar,
+        dictionaries: &'a mut Option<Vec<DecoderDictionary<'_>>>,
+    ) -> eyre::Result<(SnapshotProvider<'a>, Vec<Decompressor<'a>>)> {
+        let mut decompressors: Vec<Decompressor<'_>> = vec![];
+        if let Some(reth_nippy_jar::compression::Compressors::Zstd(zstd)) = jar.compressor_mut() {
+            if zstd.use_dict {
+                *dictionaries = zstd.generate_decompress_dictionaries();
+                decompressors =
+                    zstd.generate_decompressors(dictionaries.as_ref().unwrap()).unwrap();
+            }
+        }
+
+        Ok((SnapshotProvider { jar: &*jar, jar_start_block: self.from as u64 }, decompressors))
+    }
+
+    fn prepare_jar<F: Fn() -> eyre::Result<Option<Vec<Vec<Vec<u8>>>>>>(
+        &self,
+        num_columns: usize,
+        tool: &DbTool<'_, DatabaseEnvRO>,
+        mode: Snapshots,
+        compression: &Compression,
+        phf: &PerfectHashingFunction,
+        prepare_compression: F,
+    ) -> eyre::Result<NippyJar> {
+        let snap_file = self.get_file_path(mode, compression, phf);
+        let table_name = match mode {
+            Snapshots::Headers => tables::Headers::NAME,
+            Snapshots::Transactions | Snapshots::Receipts => tables::Transactions::NAME,
+        };
+
+        let total_rows = tool.db.view(|tx| {
+            let table_db = tx.inner.open_db(Some(table_name)).wrap_err("Could not open db.")?;
+            let stats = tx
+                .inner
+                .db_stat(&table_db)
+                .wrap_err(format!("Could not find table: {}", table_name))?;
+
+            Ok::<usize, eyre::Error>((stats.entries() - self.from).min(self.block_interval))
+        })??;
+
+        assert!(
+            total_rows >= self.block_interval,
+            "Not enough rows on database {} < {}.",
+            total_rows,
+            self.block_interval
+        );
+
+        let mut nippy_jar = NippyJar::new_without_header(num_columns, snap_file.as_path());
+        nippy_jar = match compression {
+            Compression::Lz4 => nippy_jar.with_lz4(),
+            Compression::Zstd => nippy_jar.with_zstd(false, 0),
+            Compression::ZstdWithDictionary => {
+                let dataset = prepare_compression()?;
+                assert!(dataset.is_some(), "Expected a dataset for the dictionary");
+
+                nippy_jar = nippy_jar.with_zstd(true, 5_000_000);
+                nippy_jar.prepare_compression(dataset.expect("qed"))?;
+                nippy_jar
+            }
+            Compression::Uncompressed => nippy_jar,
+        };
+
+        if self.with_filters {
+            nippy_jar = nippy_jar.with_cuckoo_filter(self.block_interval);
+        }
+
+        nippy_jar = match phf {
+            PerfectHashingFunction::Mphf => nippy_jar.with_mphf(),
+            PerfectHashingFunction::GoMphf => nippy_jar.with_gomphf(),
+        };
+
+        Ok(nippy_jar)
+    }
+
+    fn get_file_path(
+        &self,
+        mode: Snapshots,
+        compression: &Compression,
+        phf: &PerfectHashingFunction,
+    ) -> PathBuf {
+        format!(
+            "snapshot_{mode:?}_{}_{}_{compression:?}_{phf:?}",
+            self.from,
+            self.from + self.block_interval
+        )
+        .into()
+    }
+}
+
+#[derive(Debug, Copy, Clone, ValueEnum)]
+pub(crate) enum Snapshots {
+    Headers,
+    Transactions,
+    Receipts,
+}
+
+#[derive(Debug, Copy, Clone, ValueEnum, Default)]
+pub(crate) enum Compression {
+    Lz4,
+    Zstd,
+    ZstdWithDictionary,
+    #[default]
+    Uncompressed,
+}
+
+#[derive(Debug, Copy, Clone, ValueEnum)]
+pub(crate) enum PerfectHashingFunction {
+    Mphf,
+    GoMphf,
+}
