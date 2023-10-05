@@ -1,20 +1,20 @@
-//! SharedStream sits transparently between P2PStream and EthStream
-//!
-//!                                        ,--BytesMut--> EthStream
-//! P2PStream --BytesMut--> SharedStream -|
-//!                                        `--BytesMut--> <some other capability>
-//!
-//!                                      ,--Bytes-- EthStream
-//! P2PStream <--Bytes-- SharedStream <-|
-//!                                      `--Bytes-- <some other capability>
+//! [`SharedStream`] sits transparently between P2PStream and EthStream.
 //!
 //! Under the hood, SharedStream uses a [`CapStream`] for demux/mux of the [`crate::P2PStream`]
-//! and capability streams. Demux includes normalizing the message ID so that all capability
-//! streams receive messages with IDs starting from 0x0.
+//! and capability streams like [`crate::EthStream`]. Demux includes normalizing the message ID so
+//! that all capability streams receive messages with IDs starting from 0x0. Mux includes masking
+//! the message ID again with the same offset.
 //!
 //! Only the [`SharedStream`] owning the [`CapStream`] can poll it. [`SharedStream`]s wrapping a
 //! [`WeakCapStreamClone`] rely on the first [`SharedStream`].
-
+//
+//                                        --BytesMut--> EthStream
+// P2PStream --BytesMut--> SharedStream -|
+//                                        --BytesMut--> <some other capability>
+//
+//                                      --Bytes-- EthStream
+// P2PStream <--Bytes-- SharedStream <-|
+//                                      --Bytes-- <some other capability>
 use std::{
     collections::HashMap,
     mem,
