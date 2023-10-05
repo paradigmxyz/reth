@@ -489,7 +489,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip4844 { max_priority_fee_per_gas, .. } => {
                 Some(*max_priority_fee_per_gas)
             }
-            MockTransaction::Eip2930 { .. } => Some(0),
+            MockTransaction::Eip2930 { .. } => None,
         }
     }
 
