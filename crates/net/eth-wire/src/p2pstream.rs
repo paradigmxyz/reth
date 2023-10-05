@@ -33,7 +33,7 @@ const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 
 /// [`MAX_RESERVED_MESSAGE_ID`] is the maximum message ID reserved for the `p2p` subprotocol. If
 /// there are any incoming messages with an ID greater than this, they are subprotocol messages.
-const MAX_RESERVED_MESSAGE_ID: u8 = 0x0f;
+pub const MAX_RESERVED_MESSAGE_ID: u8 = 0x0f;
 
 /// [`MAX_P2P_MESSAGE_ID`] is the maximum message ID in use for the `p2p` subprotocol.
 const MAX_P2P_MESSAGE_ID: u8 = P2PMessageID::Pong as u8;
@@ -579,16 +579,6 @@ impl SharedCapabilities {
 
     pub fn iter_caps(&self) -> impl Iterator<Item = &SharedCapability> {
         self.0.iter()
-    }
-
-    pub fn try_shared_from(&self, cap: Capability) -> Result<SharedCapability, P2PStreamError> {
-        for shared_cap in self.iter_caps() {
-            if cap.name == shared_cap.name() && cap.version as u8 == shared_cap.version() {
-                return Ok(shared_cap.clone())
-            }
-        }
-
-        Err(P2PStreamError::CapabilityNotShared)
     }
 
     pub fn first(&self) -> Result<&SharedCapability, P2PStreamError> {

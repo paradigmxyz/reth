@@ -16,6 +16,7 @@
 // P2PStream <--Bytes-- SharedStream <-|
 //                                      --Bytes-- <some other capability>
 use std::{
+    any::TypeId,
     collections::HashMap,
     mem,
     mem::Discriminant,
@@ -24,7 +25,7 @@ use std::{
 };
 
 use futures::{Sink, SinkExt, StreamExt};
-use reth_primitives::bytes::{BufMut, Bytes, BytesMut};
+use reth_primitives::bytes::{Bytes, BytesMut};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::Stream;
@@ -33,7 +34,7 @@ use crate::{
     capability::{Capability, SharedCapability, SharedCapabilityError},
     errors::P2PStreamError,
     p2pstream::SharedCapabilities,
-    CanDisconnect,
+    CanDisconnect, EthMessage,
 };
 
 use CapStreamError::*;
@@ -84,7 +85,7 @@ impl From<IngressCapBytes> for BytesMut {
 #[derive(Debug)]
 pub enum CapStreamMsg {
     /// Control message to clone the shared stream.
-    Clone(Capability, oneshot::Sender<SharedStream<WeakCapStreamClone>>),
+    Clone(TypeId, oneshot::Sender<SharedStream<WeakCapStreamClone>>),
     /// Wrapper around egress message with unmasked message ID.
     EgressBytes(Bytes),
 }
@@ -197,9 +198,8 @@ where
     CapStreamError: From<<S as Sink<CapStreamMsg>>::Error>,
 {
     #[allow(clippy::type_complexity)]
-    fn _clone_for(
+    fn _clone_for<T: 'static>(
         &mut self,
-        cap: Capability,
     ) -> Result<
         Pin<
             Box<
@@ -210,16 +210,19 @@ where
         >,
         CapStreamError,
     > {
+        let cap_msg_type = TypeId::of::<T>();
         let (tx, rx) = oneshot::channel();
-        self.inner.start_send_unpin(CapStreamMsg::Clone(cap, tx))?;
+        self.inner.start_send_unpin(CapStreamMsg::Clone(cap_msg_type, tx))?;
 
         Ok(Box::pin(async move { rx.await.map_err(RecvClonedStreamFailed) }))
     }
+}
 
+impl<S> SharedStream<S> {
     fn mask_msg_id(&self, msg: Bytes) -> Bytes {
         let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0] + self.cap.offset();
-        masked_bytes.put_slice(&msg[1..]);
+        masked_bytes[0] = msg[0] + self.cap.offset_rel_caps_suffix();
+        masked_bytes[1..].copy_from_slice(&msg[1..]);
 
         masked_bytes.freeze()
     }
@@ -250,6 +253,7 @@ sink_impl!(
     Bytes,
     CapStreamMsg,
     fn start_send(mut self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
+        println!("{:?}", item);
         let item = self.mask_msg_id(item);
         self.inner.start_send_unpin(CapStreamMsg::EgressBytes(item))?;
         Ok(())
@@ -258,8 +262,8 @@ sink_impl!(
 
 impl<S> SharedStream<CapStream<S>> {
     /// Returns a shared stream if capability is shared
-    pub fn try_new(caps_stream: CapStream<S>, cap: Capability) -> Result<Self, CapStreamError> {
-        caps_stream.into_conn_for(cap)
+    pub fn try_new<T: 'static>(caps_stream: CapStream<S>) -> Result<Self, CapStreamError> {
+        caps_stream.into_shared::<T>()
     }
 }
 
@@ -287,22 +291,35 @@ impl<S> CapStream<S> {
         Self { inner, mux, mux_tx, demux, shared_capabilities }
     }
 
-    pub fn into_conn_for(mut self, cap: Capability) -> Result<SharedStream<Self>, CapStreamError> {
-        let cap = self.shared_capabilities.try_shared_from(cap)?;
+    pub fn into_shared<T: 'static>(mut self) -> Result<SharedStream<Self>, CapStreamError> {
+        let cap_msg_type = TypeId::of::<T>();
+        let cap = self.try_shared_for(cap_msg_type)?;
         let ingress = self.reg_new_ingress_buffer_for(&cap)?;
 
         Ok(SharedStream { inner: self, ingress, cap })
     }
 
-    fn clone_conn_for(
+    fn clone_stream_for(
         &mut self,
-        cap: Capability,
+        cap: TypeId,
     ) -> Result<SharedStream<WeakCapStreamClone>, CapStreamError> {
-        let cap = self.shared_capabilities.try_shared_from(cap)?;
+        let cap = self.try_shared_for(cap)?;
         let ingress = self.reg_new_ingress_buffer_for(&cap)?;
         let mux_tx = self.mux_tx.clone();
 
         Ok(SharedStream { inner: WeakCapStreamClone(mux_tx), ingress, cap })
+    }
+
+    fn try_shared_for(&self, cap_msg_type: TypeId) -> Result<SharedCapability, P2PStreamError> {
+        for shared_cap in self.shared_capabilities.iter_caps() {
+            if let SharedCapability::Eth { .. } = shared_cap {
+                if cap_msg_type == TypeId::of::<EthMessage>() {
+                    return Ok(shared_cap.clone())
+                }
+            }
+        }
+
+        Err(P2PStreamError::CapabilityNotShared)
     }
 
     fn reg_new_ingress_buffer_for(
@@ -326,7 +343,7 @@ impl<S> CapStream<S> {
     {
         match msg {
             CapStreamMsg::Clone(cap, signal_tx) => {
-                let conn_clone = self.clone_conn_for(cap)?;
+                let conn_clone = self.clone_stream_for(cap)?;
                 signal_tx.send(conn_clone).map_err(|_| SendClonedStreamFailed)
             }
             CapStreamMsg::EgressBytes(bytes) => {
@@ -339,10 +356,11 @@ impl<S> CapStream<S> {
         use SharedCapability::*;
 
         let id = msg[0];
-        let mut offset = 0;
+
         for cap in self.shared_capabilities.iter_caps() {
-            offset += cap.num_messages()?;
-            if id < offset {
+            let offset = cap.offset_rel_caps_suffix();
+            let next_offset = offset + cap.num_messages()?;
+            if id < next_offset {
                 msg[0] = id - offset;
 
                 return match cap {
@@ -351,6 +369,7 @@ impl<S> CapStream<S> {
                 }
             }
         }
+
         Err(UnknownCapabilityMessageId(id))
     }
 }
@@ -422,5 +441,54 @@ impl Sink<CapStreamMsg> for WeakCapStreamClone {
 
     fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use reth_primitives::bytes::{BufMut, BytesMut};
+
+    use crate::{capability::Capability, p2pstream::SharedCapabilities, EthMessage, EthVersion};
+
+    use super::CapStream;
+
+    fn shared_caps_eth68() -> SharedCapabilities {
+        let local_capabilities: Vec<Capability> = vec![EthVersion::Eth68.into()];
+        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth68.into()];
+        SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap()
+    }
+
+    #[test]
+    fn test_unmask_msg_id() {
+        let mut msg = BytesMut::with_capacity(1);
+        msg.put_u8(0x07); // eth msg id
+
+        let cap_stream = CapStream::new((), shared_caps_eth68());
+        let ingress_bytes: BytesMut = cap_stream.unmask_msg_id(msg.clone()).unwrap().into();
+
+        assert_eq!(ingress_bytes.as_ref(), &[0x07]);
+    }
+
+    #[test]
+    fn test_mask_msg_id() {
+        let mut msg = BytesMut::with_capacity(2);
+        msg.put_u8(0x10); // eth msg id
+        msg.put_u8(0x20); // some msg data
+
+        let cap_stream = CapStream::new((), shared_caps_eth68());
+        let shared_stream = cap_stream.into_shared::<EthMessage>().unwrap();
+        let egress_bytes = shared_stream.mask_msg_id(msg.freeze());
+
+        assert_eq!(egress_bytes.as_ref(), &[0x10, 0x20]);
+    }
+
+    #[test]
+    fn test_unmask_msg_id_cap_not_in_shared_range() {
+        let mut msg = BytesMut::with_capacity(1);
+        msg.put_u8(0x11);
+
+        let cap_stream = CapStream::new((), shared_caps_eth68());
+
+        assert!(cap_stream.unmask_msg_id(msg).is_err());
     }
 }

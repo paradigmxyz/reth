@@ -1,6 +1,8 @@
 //! All capability related types
 
-use crate::{version::ParseVersionError, EthMessage, EthVersion};
+use crate::{
+    p2pstream::MAX_RESERVED_MESSAGE_ID, version::ParseVersionError, EthMessage, EthVersion,
+};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::add_arbitrary_tests;
 use reth_primitives::bytes::{BufMut, Bytes};
@@ -222,6 +224,12 @@ impl SharedCapability {
             SharedCapability::Eth { offset, .. } => *offset,
             SharedCapability::UnknownCapability { offset, .. } => *offset,
         }
+    }
+
+    /// Returns the message ID offset of the current capability relative to the start of the
+    /// capability message ID suffix.
+    pub fn offset_rel_caps_suffix(&self) -> u8 {
+        self.offset() - MAX_RESERVED_MESSAGE_ID - 1
     }
 
     /// Returns the number of protocol messages supported by this capability.
