@@ -11,7 +11,7 @@ use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PrunePart, TransactionSignedNoHash, TxNumber,
+    Address, PruneSegment, TransactionSignedNoHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
@@ -211,7 +211,7 @@ fn stage_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
 ) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
-        .get_prune_checkpoint(PrunePart::SenderRecovery)?
+        .get_prune_checkpoint(PruneSegment::SenderRecovery)?
         .and_then(|checkpoint| checkpoint.tx_number)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
@@ -403,7 +403,7 @@ mod tests {
         let provider = tx.inner_rw();
         provider
             .save_prune_checkpoint(
-                PrunePart::SenderRecovery,
+                PruneSegment::SenderRecovery,
                 PruneCheckpoint {
                     block_number: Some(max_pruned_block),
                     tx_number: Some(

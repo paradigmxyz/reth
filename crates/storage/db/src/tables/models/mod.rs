@@ -6,7 +6,7 @@ use crate::{
 use reth_codecs::Compact;
 use reth_primitives::{
     trie::{StoredNibbles, StoredNibblesSubKey},
-    Address, PrunePart, B256,
+    Address, PruneSegment, B256,
 };
 
 pub mod accounts;
@@ -136,7 +136,7 @@ impl Decode for StoredNibblesSubKey {
     }
 }
 
-impl Encode for PrunePart {
+impl Encode for PruneSegment {
     type Encoded = [u8; 1];
 
     fn encode(self) -> Self::Encoded {
@@ -146,7 +146,7 @@ impl Encode for PrunePart {
     }
 }
 
-impl Decode for PrunePart {
+impl Decode for PruneSegment {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let buf = value.as_ref();
         Ok(Self::from_compact(buf, buf.len()).0)

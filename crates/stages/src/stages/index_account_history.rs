@@ -2,7 +2,7 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput}
 use reth_db::database::Database;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    PruneCheckpoint, PruneModes, PrunePart,
+    PruneCheckpoint, PruneModes, PruneSegment,
 };
 use reth_provider::{
     AccountExtReader, DatabaseProviderRW, HistoryWriter, PruneCheckpointReader,
@@ -56,9 +56,9 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
                 // Save prune checkpoint only if we don't have one already.
                 // Otherwise, pruner may skip the unpruned range of blocks.
-                if provider.get_prune_checkpoint(PrunePart::AccountHistory)?.is_none() {
+                if provider.get_prune_checkpoint(PruneSegment::AccountHistory)?.is_none() {
                     provider.save_prune_checkpoint(
-                        PrunePart::AccountHistory,
+                        PruneSegment::AccountHistory,
                         PruneCheckpoint {
                             block_number: Some(target_prunable_block),
                             tx_number: None,

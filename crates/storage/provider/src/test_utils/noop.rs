@@ -11,9 +11,9 @@ use reth_interfaces::RethResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
-    ChainInfo, ChainSpec, Header, PruneCheckpoint, PrunePart, Receipt, SealedBlock, SealedHeader,
-    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
-    TxNumber, B256, KECCAK_EMPTY, MAINNET, U256,
+    ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
+    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, B256, KECCAK_EMPTY, MAINNET, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -388,7 +388,7 @@ impl WithdrawalsProvider for NoopProvider {
 }
 
 impl PruneCheckpointReader for NoopProvider {
-    fn get_prune_checkpoint(&self, _part: PrunePart) -> RethResult<Option<PruneCheckpoint>> {
+    fn get_prune_checkpoint(&self, _segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
         Ok(None)
     }
 }

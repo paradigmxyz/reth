@@ -57,10 +57,10 @@ You can track the growth of Reth archive node size with our
 
 ### Pruned Node
 
-Different parts take up different amounts of disk space.
-If pruned fully, this is the total freed space you'll get, per part:
+Different segments take up different amounts of disk space.
+If pruned fully, this is the total freed space you'll get, per segment:
 
-| Part               | Size  |
+| Segment              | Size  |
 |--------------------|-------|
 | Sender Recovery    | 70GB  |
 | Transaction Lookup | 140GB |
@@ -96,7 +96,7 @@ Meaning, it prunes:
 is completed, so the disk space is reclaimed slowly.
 - Receipts up to the last 128 blocks, preserving all receipts with the logs from Beacon Deposit Contract
 
-Given the aforementioned part sizes, we get the following full node size:
+Given the aforementioned segment sizes, we get the following full node size:
 ```text
 Archive Node - Receipts - AccountHistory - StorageHistory = Full Node
 ```
@@ -106,15 +106,15 @@ Archive Node - Receipts - AccountHistory - StorageHistory = Full Node
 
 ## RPC support
 
-As it was mentioned in the [pruning configuration chapter](./config.md#the-prune-section), there are several parts
-which can be pruned independently of each other:
+As it was mentioned in the [pruning configuration chapter](./config.md#the-prune-section), there are several segments which can be pruned
+independently of each other:
 - Sender Recovery
 - Transaction Lookup
 - Receipts
 - Account History
 - Storage History
 
-Pruning of each of these parts disables different RPC methods, because the historical data or lookup indexes
+Pruning of each of these segments disables different RPC methods, because the historical data or lookup indexes
 become unavailable.
 
 ### Full Node
@@ -140,7 +140,7 @@ The following tables describe RPC methods available in the full node.
 
 #### `eth` namespace
 
-| RPC / Part                                | Note                                                     |
+| RPC / Segment                             | Note                                                     |
 |-------------------------------------------|----------------------------------------------------------|
 | `eth_accounts`                            |                                                          |
 | `eth_blockNumber`                         |                                                          |
@@ -188,7 +188,7 @@ The following tables describe RPC methods available in the full node.
 
 #### `net` namespace
 
-| RPC / Part      |
+| RPC / Segment   |
 |-----------------|
 | `net_listening` |
 | `net_peerCount` |
@@ -196,7 +196,7 @@ The following tables describe RPC methods available in the full node.
 
 #### `trace` namespace
 
-| RPC / Part                      | Note                         |
+| RPC / Segment                   | Note                         |
 |---------------------------------|------------------------------|
 | `trace_block`                   | Only for the last 128 blocks |
 | `trace_call`                    | Only for the last 128 blocks |
@@ -209,7 +209,7 @@ The following tables describe RPC methods available in the full node.
 
 #### `txpool` namespace
 
-| RPC / Part           |
+| RPC / Segment        |
 |----------------------|
 | `txpool_content`     |
 | `txpool_contentFrom` |
@@ -219,13 +219,13 @@ The following tables describe RPC methods available in the full node.
 
 ### Pruned Node
 
-The following tables describe the requirements for prune parts, per RPC method:
-- ✅ – if the part is pruned, the RPC method still works
-- ❌ - if the part is pruned, the RPC method doesn't work anymore
+The following tables describe the requirements for prune segments, per RPC method:
+- ✅ – if the segment is pruned, the RPC method still works
+- ❌ - if the segment is pruned, the RPC method doesn't work anymore
 
 #### `debug` namespace
 
-| RPC / Part                 | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| RPC / Segment              | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 |----------------------------|-----------------|--------------------|----------|-----------------|-----------------|
 | `debug_getRawBlock`        | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `debug_getRawHeader`       | ✅               | ✅                  | ✅        | ✅               | ✅               |
@@ -241,7 +241,7 @@ The following tables describe the requirements for prune parts, per RPC method:
 
 #### `eth` namespace
 
-| RPC / Part                                | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| RPC / Segment                             | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 |-------------------------------------------|-----------------|--------------------|----------|-----------------|-----------------|
 | `eth_accounts`                            | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `eth_blockNumber`                         | ✅               | ✅                  | ✅        | ✅               | ✅               |
@@ -289,7 +289,7 @@ The following tables describe the requirements for prune parts, per RPC method:
 
 #### `net` namespace
 
-| RPC / Part      | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| RPC / Segment   | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 |-----------------|-----------------|--------------------|----------|-----------------|-----------------|
 | `net_listening` | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `net_peerCount` | ✅               | ✅                  | ✅        | ✅               | ✅               |
@@ -297,7 +297,7 @@ The following tables describe the requirements for prune parts, per RPC method:
 
 #### `trace` namespace
 
-| RPC / Part                      | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| RPC / Segment                   | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 |---------------------------------|-----------------|--------------------|----------|-----------------|-----------------|
 | `trace_block`                   | ✅               | ✅                  | ✅        | ❌               | ❌               |
 | `trace_call`                    | ✅               | ✅                  | ✅        | ❌               | ❌               |
@@ -310,7 +310,7 @@ The following tables describe the requirements for prune parts, per RPC method:
 
 #### `txpool` namespace
 
-| RPC / Part           | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| RPC / Segment        | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 |----------------------|-----------------|--------------------|----------|-----------------|-----------------|
 | `txpool_content`     | ✅               | ✅                  | ✅        | ✅               | ✅               |
 | `txpool_contentFrom` | ✅               | ✅                  | ✅        | ✅               | ✅               |

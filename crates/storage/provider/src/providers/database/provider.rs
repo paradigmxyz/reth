@@ -31,8 +31,8 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PrunePart, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
+    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PruneSegment,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, B256, U256,
 };
@@ -2130,17 +2130,17 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
 }
 
 impl<'this, TX: DbTx<'this>> PruneCheckpointReader for DatabaseProvider<'this, TX> {
-    fn get_prune_checkpoint(&self, part: PrunePart) -> RethResult<Option<PruneCheckpoint>> {
-        Ok(self.tx.get::<tables::PruneCheckpoints>(part)?)
+    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+        Ok(self.tx.get::<tables::PruneCheckpoints>(segment)?)
     }
 }
 
 impl<'this, TX: DbTxMut<'this>> PruneCheckpointWriter for DatabaseProvider<'this, TX> {
     fn save_prune_checkpoint(
         &self,
-        part: PrunePart,
+        segment: PruneSegment,
         checkpoint: PruneCheckpoint,
     ) -> RethResult<()> {
-        Ok(self.tx.put::<tables::PruneCheckpoints>(part, checkpoint)?)
+        Ok(self.tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?)
     }
 }

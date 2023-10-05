@@ -23,7 +23,7 @@ impl PruningArgs {
         Ok(if self.full {
             Some(PruneConfig {
                 block_interval: 5,
-                parts: PruneModes {
+                segments: PruneModes {
                     sender_recovery: Some(PruneMode::Full),
                     transaction_lookup: None,
                     receipts: chain_spec
