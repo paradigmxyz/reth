@@ -242,6 +242,21 @@ impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
     }
 }
 
+impl BlobsBundleV1 {
+    /// Take `len` blob data from the bundle.
+    ///
+    /// # Panics
+    ///
+    /// If len is more than the blobs bundle len.
+    pub fn take(&mut self, len: usize) -> (Vec<Bytes48>, Vec<Bytes48>, Vec<Blob>) {
+        (
+            self.commitments.drain(0..len).collect(),
+            self.proofs.drain(0..len).collect(),
+            self.blobs.drain(0..len).collect(),
+        )
+    }
+}
+
 /// An execution payload, which can be either [ExecutionPayloadV1], [ExecutionPayloadV2], or
 /// [ExecutionPayloadV3].
 #[derive(Clone, Debug, PartialEq, Eq)]
