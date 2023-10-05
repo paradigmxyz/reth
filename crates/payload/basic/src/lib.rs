@@ -747,7 +747,7 @@ where
         // commit changes
         db.commit(state);
 
-        // add to the blob gas if we're going to execute the transaction
+        // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_tx) = tx.transaction.as_eip4844() {
             let tx_blob_gas = blob_tx.blob_gas();
             sum_blob_gas_used += tx_blob_gas;
