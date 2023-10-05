@@ -18,8 +18,7 @@
 use std::{
     any::TypeId,
     collections::HashMap,
-    mem,
-    mem::Discriminant,
+    mem::{self, Discriminant, ManuallyDrop},
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -65,18 +64,56 @@ pub enum CapStreamError {
     WeakCloneSendEgressFailed(mpsc::error::SendError<CapStreamMsg>),
     #[error("shared stream already cloned for capability")]
     SharedStreamExists,
+    #[error("shared stream in use by clone")]
+    SharedStreamInUse,
 }
+
+impl TryFrom<Capability> for CapKey {
+    type Error = CapStreamError;
+    fn try_from(value: Capability) -> Result<Self, Self::Error> {
+        if value.is_eth_v66() || value.is_eth_v67() || value.is_eth_v68() {
+            return Ok(IngressCapBytes::eth_key())
+        }
+
+        Err(CapabilityNotRecognized)
+    }
+}
+
+macro_rules! try_from_shared_cap_impl {
+    ($cap:ty) => {
+        impl TryFrom<$cap> for CapKey {
+            type Error = CapStreamError;
+            fn try_from(value: $cap) -> Result<Self, Self::Error> {
+                use SharedCapability::*;
+
+                match value {
+                    Eth { .. } => Ok(IngressCapBytes::eth_key()),
+                    UnknownCapability { .. } => Err(CapabilityNotRecognized),
+                }
+            }
+        }
+    };
+}
+
+try_from_shared_cap_impl!(SharedCapability);
+try_from_shared_cap_impl!(&SharedCapability);
 
 /// Wrapper around ingress message with unmasked message ID.
 #[derive(Debug)]
 pub enum IngressCapBytes {
-    EthMessage(BytesMut),
+    Eth(BytesMut),
+}
+
+impl IngressCapBytes {
+    fn eth_key() -> CapKey {
+        mem::discriminant(&IngressCapBytes::Eth(BytesMut::default()))
+    }
 }
 
 impl From<IngressCapBytes> for BytesMut {
     fn from(value: IngressCapBytes) -> Self {
         match value {
-            IngressCapBytes::EthMessage(b) => b,
+            IngressCapBytes::Eth(b) => b,
         }
     }
 }
@@ -90,41 +127,7 @@ pub enum CapStreamMsg {
     EgressBytes(Bytes),
 }
 
-impl TryFrom<Capability> for CapKey {
-    type Error = CapStreamError;
-    fn try_from(value: Capability) -> Result<Self, Self::Error> {
-        let cap_msg_type = if value.is_eth_v66() || value.is_eth_v67() || value.is_eth_v68() {
-            IngressCapBytes::EthMessage(BytesMut::default())
-        } else {
-            return Err(CapabilityNotRecognized)
-        };
-
-        Ok(mem::discriminant(&cap_msg_type))
-    }
-}
-
-macro_rules! try_from_shared_cap_impl {
-    ($cap:ty) => {
-        impl TryFrom<$cap> for CapKey {
-            type Error = CapStreamError;
-            fn try_from(value: $cap) -> Result<Self, Self::Error> {
-                use SharedCapability::*;
-
-                let cap_msg_type = match value {
-                    Eth { .. } => IngressCapBytes::EthMessage(BytesMut::default()),
-                    UnknownCapability { .. } => return Err(CapabilityNotRecognized),
-                };
-                Ok(mem::discriminant(&cap_msg_type))
-            }
-        }
-    };
-}
-
-try_from_shared_cap_impl!(SharedCapability);
-try_from_shared_cap_impl!(&SharedCapability);
-
-/// Template implementation of [`Sink`] for crate types wrapping a type that is [`Sink`] and
-/// [`Stream`].
+/// Template implementation of [`Sink`] for crate [`Stream`] + [`Sink`] types.
 #[macro_export]
 macro_rules! sink_impl {
     ($stream:ty, $sink_in:ty, $sink_out:ty, $start_send:item) => {
@@ -161,8 +164,7 @@ macro_rules! sink_impl {
     };
 }
 
-/// Template implementation of [`CanDisconnect`] for crate types wrapping a type that is [`Sink`]
-/// and [`Stream`].
+/// Template implementation of [`CanDisconnect`] for crate [`Stream`] + [`Sink`] types.
 macro_rules! can_disconnect_impl {
     ($stream:ty, $sink_in:ty, $sink_out:ty) => {
         #[async_trait::async_trait]
@@ -211,9 +213,9 @@ where
         >,
         CapStreamError,
     > {
-        let cap_msg_type = TypeId::of::<T>();
+        let cap_type = TypeId::of::<T>();
         let (tx, rx) = oneshot::channel();
-        self.inner.start_send_unpin(CapStreamMsg::Clone(cap_msg_type, tx))?;
+        self.inner.start_send_unpin(CapStreamMsg::Clone(cap_type, tx))?;
 
         Ok(Box::pin(async move { rx.await.map_err(RecvClonedStreamFailed) }))
     }
@@ -254,17 +256,31 @@ sink_impl!(
     Bytes,
     CapStreamMsg,
     fn start_send(mut self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        println!("{:?}", item);
         let item = self.mask_msg_id(item);
         self.inner.start_send_unpin(CapStreamMsg::EgressBytes(item))?;
         Ok(())
     }
 );
 
-impl<S> SharedStream<CapStream<S>> {
-    /// Returns a shared stream if capability is shared
+impl<S> SharedStream<ManuallyDrop<CapStream<S>>> {
+    /// Returns a shared stream if capability is shared.
     pub fn try_new<T: 'static>(caps_stream: CapStream<S>) -> Result<Self, CapStreamError> {
-        caps_stream.into_shared::<T>()
+        caps_stream.try_into_shared::<T>()
+    }
+
+    /// Checks if all clones of this shared stream have been dropped.
+    pub fn can_drop(&self) -> bool {
+        self.inner.can_drop()
+    }
+
+    /// Checks if all clones of this shared stream have been dropped, if true then returns function
+    /// to drop [`SharedStream`]
+    pub fn try_drop(&self) -> Result<impl FnOnce(Self), CapStreamError> {
+        if self.inner.can_drop() {
+            return Ok(|x: Self| _ = ManuallyDrop::into_inner(x.inner))
+        }
+
+        Err(SharedStreamInUse)
     }
 }
 
@@ -285,7 +301,7 @@ pub struct CapStream<S> {
 }
 
 impl<S> CapStream<S> {
-    /// Creates a new [`CapStream`] to demux incoming and mux outgoing capability messages. 
+    /// Creates a new [`CapStream`] to demux incoming and mux outgoing capability messages.
     pub fn new(inner: S, shared_capabilities: SharedCapabilities) -> Self {
         let demux = HashMap::new();
         let (mux_tx, mux) = mpsc::unbounded_channel();
@@ -293,36 +309,39 @@ impl<S> CapStream<S> {
         Self { inner, mux, mux_tx, demux, shared_capabilities }
     }
 
-    /// Wraps [`CapStream`] in a [`SharedStream`] that can be used to send and receive capability specific messages.
-    pub fn into_shared<T: 'static>(mut self) -> Result<SharedStream<Self>, CapStreamError> {
-        let cap_msg_type = TypeId::of::<T>();
-        let cap = self.try_shared_for(cap_msg_type)?;
+    /// Wraps [`CapStream`] in a [`SharedStream`] that can be used to send and receive capability
+    /// specific messages.
+    pub fn try_into_shared<T: 'static>(
+        mut self,
+    ) -> Result<SharedStream<ManuallyDrop<Self>>, CapStreamError> {
+        let cap_type = TypeId::of::<T>();
+        let cap = self.shared_cap_for(cap_type)?;
         let ingress = self.reg_new_ingress_buffer_for(&cap)?;
 
-        Ok(SharedStream { inner: self, ingress, cap })
+        Ok(SharedStream { inner: ManuallyDrop::new(self), ingress, cap })
     }
 
     fn clone_stream_for(
         &mut self,
         cap: TypeId,
     ) -> Result<SharedStream<WeakCapStreamClone>, CapStreamError> {
-        let cap = self.try_shared_for(cap)?;
+        let cap = self.shared_cap_for(cap)?;
         let ingress = self.reg_new_ingress_buffer_for(&cap)?;
         let mux_tx = self.mux_tx.clone();
 
         Ok(SharedStream { inner: WeakCapStreamClone(mux_tx), ingress, cap })
     }
 
-    fn try_shared_for(&self, cap_msg_type: TypeId) -> Result<SharedCapability, P2PStreamError> {
+    fn shared_cap_for(&self, cap_type: TypeId) -> Result<SharedCapability, CapStreamError> {
         for shared_cap in self.shared_capabilities.iter_caps() {
             if let SharedCapability::Eth { .. } = shared_cap {
-                if cap_msg_type == TypeId::of::<EthMessage>() {
+                if cap_type == TypeId::of::<EthMessage>() {
                     return Ok(shared_cap.clone())
                 }
             }
         }
 
-        Err(P2PStreamError::CapabilityNotShared)
+        Err(P2PStreamError::CapabilityNotShared.into())
     }
 
     fn reg_new_ingress_buffer_for(
@@ -330,8 +349,10 @@ impl<S> CapStream<S> {
         cap: &SharedCapability,
     ) -> Result<mpsc::UnboundedReceiver<BytesMut>, CapStreamError> {
         let cap_key = cap.try_into()?;
-        if self.demux.contains_key(&cap_key) {
-            return Err(SharedStreamExists)
+        if let Some(tx) = self.demux.get(&cap_key) {
+            if !tx.is_closed() {
+                return Err(SharedStreamExists)
+            }
         }
         let (ingress_tx, ingress) = mpsc::unbounded_channel();
         self.demux.insert(cap_key, ingress_tx);
@@ -367,13 +388,23 @@ impl<S> CapStream<S> {
                 msg[0] = id - offset;
 
                 return match cap {
-                    Eth { .. } => Ok(IngressCapBytes::EthMessage(msg)),
+                    Eth { .. } => Ok(IngressCapBytes::Eth(msg)),
                     UnknownCapability { .. } => Err(CapabilityNotRecognized),
                 }
             }
         }
 
         Err(UnknownCapabilityMessageId(id))
+    }
+
+    fn can_drop(&self) -> bool {
+        for tx in self.demux.values() {
+            if !tx.is_closed() {
+                return false
+            }
+        }
+
+        true
     }
 }
 
@@ -479,7 +510,7 @@ mod test {
         msg.put_u8(0x20); // some msg data
 
         let cap_stream = CapStream::new((), shared_caps_eth68());
-        let shared_stream = cap_stream.into_shared::<EthMessage>().unwrap();
+        let shared_stream = cap_stream.try_into_shared::<EthMessage>().unwrap();
         let egress_bytes = shared_stream.mask_msg_id(msg.freeze());
 
         assert_eq!(egress_bytes.as_ref(), &[0x10, 0x20]);
@@ -494,4 +525,8 @@ mod test {
 
         assert!(cap_stream.unmask_msg_id(msg).is_err());
     }
+
+    #[test]
+    #[ignore = "more subprotocols than eth have to be implemented"]
+    fn test_try_drop_stream_owner() {}
 }
