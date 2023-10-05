@@ -1,5 +1,6 @@
 use crate::{
-    payload::PayloadOrAttributes, EngineApiError, EngineApiMessageVersion, EngineApiResult,
+    metrics::EngineApiMetrics, payload::PayloadOrAttributes, EngineApiError,
+    EngineApiMessageVersion, EngineApiResult,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
@@ -19,7 +20,7 @@ use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
 };
 use reth_tasks::TaskSpawner;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 use tracing::trace;
 
@@ -33,6 +34,7 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 /// functions in the Execution layer that are crucial for the consensus process.
 pub struct EngineApi<Provider> {
     inner: Arc<EngineApiInner<Provider>>,
+    metrics: EngineApiMetrics,
 }
 
 struct EngineApiInner<Provider> {
@@ -67,7 +69,7 @@ where
             payload_store,
             task_spawner,
         });
-        Self { inner }
+        Self { inner, metrics: EngineApiMetrics::default() }
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -591,14 +593,20 @@ where
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
-        Ok(EngineApi::new_payload_v1(self, payload).await?)
+        let start = Instant::now();
+        let res = EngineApi::new_payload_v1(self, payload).await;
+        self.metrics.new_payload_v1.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_newPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
-        Ok(EngineApi::new_payload_v2(self, payload).await?)
+        let start = Instant::now();
+        let res = EngineApi::new_payload_v2(self, payload).await;
+        self.metrics.new_payload_v2.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_newPayloadV3`
@@ -610,8 +618,12 @@ where
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
-        Ok(EngineApi::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
-            .await?)
+        let start = Instant::now();
+        let res =
+            EngineApi::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
+                .await;
+        self.metrics.new_payload_v3.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -624,7 +636,11 @@ where
         payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
-        Ok(EngineApi::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await?)
+        let start = Instant::now();
+        let res =
+            EngineApi::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
+        self.metrics.fork_choice_updated_v1.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV2`
@@ -635,7 +651,11 @@ where
         payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
-        Ok(EngineApi::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await?)
+        let start = Instant::now();
+        let res =
+            EngineApi::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
+        self.metrics.fork_choice_updated_v2.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV2`
@@ -647,7 +667,11 @@ where
         payload_attributes: Option<PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
-        Ok(EngineApi::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await?)
+        let start = Instant::now();
+        let res =
+            EngineApi::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
+        self.metrics.fork_choice_updated_v3.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -663,7 +687,10 @@ where
     /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
-        Ok(EngineApi::get_payload_v1(self, payload_id).await?)
+        let start = Instant::now();
+        let res = EngineApi::get_payload_v1(self, payload_id).await;
+        self.metrics.get_payload_v1.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_getPayloadV2`
@@ -677,7 +704,10 @@ where
     /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
-        Ok(EngineApi::get_payload_v2(self, payload_id).await?)
+        let start = Instant::now();
+        let res = EngineApi::get_payload_v2(self, payload_id).await;
+        self.metrics.get_payload_v2.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_getPayloadV3`
@@ -691,7 +721,10 @@ where
     /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV3> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
-        Ok(EngineApi::get_payload_v3(self, payload_id).await?)
+        let start = Instant::now();
+        let res = EngineApi::get_payload_v3(self, payload_id).await;
+        self.metrics.get_payload_v3.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
@@ -701,7 +734,10 @@ where
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
-        Ok(EngineApi::get_payload_bodies_by_hash(self, block_hashes)?)
+        let start = Instant::now();
+        let res = EngineApi::get_payload_bodies_by_hash(self, block_hashes);
+        self.metrics.get_payload_bodies_by_hash_v1.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_getPayloadBodiesByRangeV1`
@@ -726,7 +762,10 @@ where
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
-        Ok(EngineApi::get_payload_bodies_by_range(self, start.to(), count.to()).await?)
+        let start_time = Instant::now();
+        let res = EngineApi::get_payload_bodies_by_range(self, start.to(), count.to()).await;
+        self.metrics.get_payload_bodies_by_range_v1.record(start_time.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_exchangeTransitionConfigurationV1`
@@ -736,13 +775,21 @@ where
         config: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration> {
         trace!(target: "rpc::engine", "Serving engine_exchangeTransitionConfigurationV1");
-        Ok(EngineApi::exchange_transition_configuration(self, config).await?)
+        let start = Instant::now();
+        // TODO: might not be worth including this
+        let res = EngineApi::exchange_transition_configuration(self, config).await;
+        self.metrics.exchange_transition_configuration.record(start.elapsed());
+        Ok(res?)
     }
 
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(CAPABILITIES.into_iter().map(str::to_owned).collect())
+        let start = Instant::now();
+        // TODO: might not be worth including this
+        let res = CAPABILITIES.into_iter().map(str::to_owned).collect();
+        self.metrics.exchange_capabilities.record(start.elapsed());
+        Ok(res)
     }
 }
 
