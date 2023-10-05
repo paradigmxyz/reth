@@ -581,11 +581,13 @@ impl SharedCapabilities {
         self.0.iter()
     }
 
-    pub fn first(&self) -> Result<&SharedCapability, P2PStreamError> {
-        let Some(cap) = self.iter_caps().next() else {
-            return Err(P2PStreamError::CapabilityNotShared)
-        };
-        Ok(cap)
+    pub fn eth(&self) -> Result<&SharedCapability, P2PStreamError> {
+        for cap in self.iter_caps() {
+            if cap.name() == "eth" {
+                return Ok(cap)
+            }
+        }
+        Err(P2PStreamError::CapabilityNotShared)
     }
 }
 

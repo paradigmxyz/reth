@@ -895,7 +895,7 @@ async fn authenticate_eth_stream(
     // Before trying status handshake, set up the version to shared_capability
 
     let status =
-        Status { version: p2p_stream.shared_capabilities().first().unwrap().version(), ..status };
+        Status { version: p2p_stream.shared_capabilities().eth().unwrap().version(), ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,
