@@ -1,13 +1,12 @@
 //! Support for integrating customizations into the CLI.
 
 use crate::cli::{
-    components::RethNodeComponents,
+    components::{RethNodeComponents, RethRpcComponents},
     config::{PayloadBuilderConfig, RethRpcConfig},
 };
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
 use reth_tasks::TaskSpawner;
 use std::fmt;
 
@@ -49,21 +48,13 @@ pub trait RethNodeCommandConfig: fmt::Debug {
 
     /// Allows for registering additional RPC modules for the transports.
     ///
-    /// This is expected to call the merge functions of [TransportRpcModules], for example
-    /// [TransportRpcModules::merge_configured]
-    #[allow(clippy::type_complexity)]
+    /// This is expected to call the merge functions of [reth_rpc_builder::TransportRpcModules], for
+    /// example [reth_rpc_builder::TransportRpcModules::merge_configured]
     fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         config: &Conf,
         components: &Reth,
-        registry: &mut RethModuleRegistry<
-            Reth::Provider,
-            Reth::Pool,
-            Reth::Network,
-            Reth::Tasks,
-            Reth::Events,
-        >,
-        modules: &mut TransportRpcModules,
+        rpc_components: RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
@@ -71,8 +62,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     {
         let _ = config;
         let _ = components;
-        let _ = registry;
-        let _ = modules;
+        let _ = rpc_components;
         Ok(())
     }
 
@@ -196,21 +186,14 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         &mut self,
         config: &Conf,
         components: &Reth,
-        registry: &mut RethModuleRegistry<
-            Reth::Provider,
-            Reth::Pool,
-            Reth::Network,
-            Reth::Tasks,
-            Reth::Events,
-        >,
-        modules: &mut TransportRpcModules,
+        rpc_components: RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
         Reth: RethNodeComponents,
     {
         if let Some(conf) = self.inner_mut() {
-            conf.extend_rpc_modules(config, components, registry, modules)
+            conf.extend_rpc_modules(config, components, rpc_components)
         } else {
             Ok(())
         }
