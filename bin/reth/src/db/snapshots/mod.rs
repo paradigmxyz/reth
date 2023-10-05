@@ -19,30 +19,36 @@ mod bench;
 mod headers;
 
 #[derive(Parser, Debug)]
-/// The arguments for the `reth db snapshot` command
+/// Arguments for the `reth db snapshot` command.
 pub struct Command {
-    /// Which snapshot categories to create
+    /// Snapshot categories to generate.
     modes: Vec<Snapshots>,
-    /// From which block to snapshot from
+
+    /// Starting block for the snapshot.
     #[arg(long, short, default_value = "0")]
     from: usize,
-    /// How many blocks to snapshot
+
+    /// Number of blocks in the snapshot.
     #[arg(long, short, default_value = "500000")]
     block_interval: usize,
-    /// Print out a quick benchmark between the database and the created snapshots
+
+    /// Flag to enable database-to-snapshot benchmarking.
     #[arg(long, default_value = "false")]
     bench: bool,
-    /// Does not create a snapshot, and prints out a quick benchmark between the database and
-    /// previous snapshots
+
+    /// Flag to skip snapshot creation and only run benchmarks on existing snapshots.
     #[arg(long, default_value = "false")]
     only_bench: bool,
-    /// Compression schemes to use
+
+    /// Compression algorithms to use.
     #[arg(long, short, value_delimiter = ',', default_value = "lz4")]
     compression: Vec<Compression>,
-    /// Whether to use inclusion list filters and PHF
+
+    /// Flag to enable inclusion list filters and PHFs.
     #[arg(long, default_value = "true")]
     with_filters: bool,
-    /// Which perfect hashing function to use
+
+    /// Specifies the perfect hashing function to use.
     #[arg(long, value_delimiter = ',', default_value = "mphf")]
     phf: Vec<PerfectHashingFunction>,
 }
