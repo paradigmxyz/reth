@@ -49,12 +49,12 @@ pub struct Command {
     with_filters: bool,
 
     /// Specifies the perfect hashing function to use.
-    #[arg(long, value_delimiter = ',', default_value = "mphf")]
+    #[arg(long, value_delimiter = ',', default_value_if("with_filters", "true", "mphf"))]
     phf: Vec<PerfectHashingFunction>,
 }
 
 impl Command {
-    /// Execute `db list` command
+    /// Execute `db snapshot` command
     pub fn execute(
         self,
         db_path: &Path,
@@ -103,6 +103,8 @@ impl Command {
         Ok(())
     }
 
+    /// Returns a [`SnapshotProvider`] of the provided [`NippyJar`], alongside a list of
+    /// [`DecoderDictionary`] and [`Decompressor`] if necessary.
     fn prepare_jar_provider<'a>(
         &self,
         jar: &'a mut NippyJar,
@@ -112,15 +114,15 @@ impl Command {
         if let Some(reth_nippy_jar::compression::Compressors::Zstd(zstd)) = jar.compressor_mut() {
             if zstd.use_dict {
                 *dictionaries = zstd.generate_decompress_dictionaries();
-                decompressors =
-                    zstd.generate_decompressors(dictionaries.as_ref().unwrap()).unwrap();
+                decompressors = zstd.generate_decompressors(dictionaries.as_ref().expect("qed"))?;
             }
         }
 
         Ok((SnapshotProvider { jar: &*jar, jar_start_block: self.from as u64 }, decompressors))
     }
 
-    fn prepare_jar<F: Fn() -> eyre::Result<Option<Vec<Vec<Vec<u8>>>>>>(
+    /// Returns a [`NippyJar`] according to the desired configuration.
+    fn prepare_jar<F: Fn() -> eyre::Result<Option<Rows>>>(
         &self,
         num_columns: usize,
         tool: &DbTool<'_, DatabaseEnvRO>,
@@ -169,16 +171,16 @@ impl Command {
 
         if self.with_filters {
             nippy_jar = nippy_jar.with_cuckoo_filter(self.block_interval);
+            nippy_jar = match phf {
+                PerfectHashingFunction::Mphf => nippy_jar.with_mphf(),
+                PerfectHashingFunction::GoMphf => nippy_jar.with_gomphf(),
+            };
         }
-
-        nippy_jar = match phf {
-            PerfectHashingFunction::Mphf => nippy_jar.with_mphf(),
-            PerfectHashingFunction::GoMphf => nippy_jar.with_gomphf(),
-        };
 
         Ok(nippy_jar)
     }
 
+    /// Generates a filename according to the desired configuration.
     fn get_file_path(
         &self,
         mode: Snapshots,
@@ -193,6 +195,9 @@ impl Command {
         .into()
     }
 }
+
+pub(crate) type Rows = Vec<Vec<Vec<u8>>>;
+pub(crate) type JarConfig = (Snapshots, Compression, PerfectHashingFunction);
 
 #[derive(Debug, Copy, Clone, ValueEnum)]
 pub(crate) enum Snapshots {
