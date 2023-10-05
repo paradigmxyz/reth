@@ -22,6 +22,27 @@ pub type PrunerResult = Result<PruneProgress, PrunerError>;
 /// The pruner type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
+type RunnableSegmentGetPruneTargetBlockResult =
+    Result<Option<(BlockNumber, PruneMode)>, PruneSegmentError>;
+
+struct PrunableSegment<DB: Database>(
+    Box<dyn Segment<DB>>,
+    #[allow(clippy::type_complexity)]
+    Box<dyn Fn(&PruneModes, BlockNumber) -> RunnableSegmentGetPruneTargetBlockResult>,
+);
+
+impl<DB: Database> PrunableSegment<DB> {
+    fn new<
+        S: Segment<DB> + 'static,
+        F: Fn(&PruneModes, BlockNumber) -> RunnableSegmentGetPruneTargetBlockResult + 'static,
+    >(
+        segment: S,
+        f: F,
+    ) -> Self {
+        Self(Box::new(segment), Box::new(f))
+    }
+}
+
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
 #[derive(Debug)]
 pub struct Pruner<DB> {
@@ -99,40 +120,30 @@ impl<DB: Database> Pruner<DB> {
                 as usize;
 
         // TODO(alexey): this is cursed, refactor
-        #[allow(clippy::type_complexity)]
-        let segments: [(
-            Box<dyn Segment<DB>>,
-            Box<
-                dyn Fn(
-                    &PruneModes,
-                    BlockNumber,
-                )
-                    -> Result<Option<(BlockNumber, PruneMode)>, PruneSegmentError>,
-            >,
-        ); 5] = [
-            (
-                Box::<segments::Receipts>::default(),
-                Box::new(PruneModes::prune_target_block_receipts),
+        let segments: [PrunableSegment<DB>; 5] = [
+            PrunableSegment::new(
+                segments::Receipts::default(),
+                PruneModes::prune_target_block_receipts,
             ),
-            (
-                Box::<segments::TransactionLookup>::default(),
-                Box::new(PruneModes::prune_target_block_transaction_lookup),
+            PrunableSegment::new(
+                segments::TransactionLookup::default(),
+                PruneModes::prune_target_block_transaction_lookup,
             ),
-            (
-                Box::<segments::SenderRecovery>::default(),
-                Box::new(PruneModes::prune_target_block_sender_recovery),
+            PrunableSegment::new(
+                segments::SenderRecovery::default(),
+                PruneModes::prune_target_block_sender_recovery,
             ),
-            (
-                Box::<segments::AccountHistory>::default(),
-                Box::new(PruneModes::prune_target_block_account_history),
+            PrunableSegment::new(
+                segments::AccountHistory::default(),
+                PruneModes::prune_target_block_account_history,
             ),
-            (
-                Box::<segments::StorageHistory>::default(),
-                Box::new(PruneModes::prune_target_block_storage_history),
+            PrunableSegment::new(
+                segments::StorageHistory::default(),
+                PruneModes::prune_target_block_storage_history,
             ),
         ];
 
-        for (segment, get_prune_target_block) in segments {
+        for PrunableSegment(segment, get_prune_target_block) in segments {
             if delete_limit == 0 {
                 break
             }
