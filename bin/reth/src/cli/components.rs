@@ -6,6 +6,7 @@ use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, StateProviderFactory,
 };
+use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
@@ -69,6 +70,17 @@ pub trait RethNodeComponents {
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.provider().chain_spec()
     }
+}
+
+pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
+    pub registry: RethModuleRegistry<
+        Reth::Provider,
+        Reth::Pool,
+        Reth::Network,
+        Reth::Tasks,
+        Reth::Events,
+    >,
+    pub modules: &'a mut TransportRpcModules,
 }
 
 /// A Generic implementation of the RethNodeComponents trait.
