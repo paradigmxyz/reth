@@ -141,6 +141,11 @@ impl AuthServerConfig {
         AuthServerConfigBuilder::new(secret)
     }
 
+    /// Returns the address the server will listen on.
+    pub fn address(&self) -> SocketAddr {
+        self.socket_addr
+    }
+
     /// Convenience function to start a server in one step.
     pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
         let Self { socket_addr, secret, server_config } = self;

@@ -1,7 +1,7 @@
 use clap::Args;
 
 /// Parameters to configure Gas Price Oracle
-#[derive(Debug, Args, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Gas Price Oracle")]
 pub struct GasPriceOracleArgs {
     /// Number of recent blocks to check for gas price

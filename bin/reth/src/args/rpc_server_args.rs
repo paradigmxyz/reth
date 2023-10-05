@@ -2,7 +2,11 @@
 
 use crate::{
     args::GasPriceOracleArgs,
-    cli::{components::RethRpcComponents, config::RethRpcConfig, ext::RethNodeCommandConfig},
+    cli::{
+        components::{RethNodeComponents, RethRpcComponents},
+        config::RethRpcConfig,
+        ext::RethNodeCommandConfig,
+    },
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -24,8 +28,6 @@ use reth_rpc::{
     },
     JwtError, JwtSecret,
 };
-
-use crate::cli::components::RethNodeComponents;
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
@@ -55,7 +57,7 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 115;
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 #[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
@@ -307,6 +309,10 @@ impl RethRpcConfig for RpcServerArgs {
     fn is_ipc_enabled(&self) -> bool {
         // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
+    }
+
+    fn ipc_path(&self) -> &str {
+        self.ipcpath.as_str()
     }
 
     fn eth_config(&self) -> EthConfig {
