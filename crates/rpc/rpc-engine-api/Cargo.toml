@@ -22,6 +22,10 @@ reth-rpc-types-compat.workspace = true
 # async
 tokio = { workspace = true, features = ["sync"] }
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 # misc
 async-trait.workspace = true
 thiserror.workspace = true

@@ -22,6 +22,9 @@ mod payload;
 /// Engine API error.
 mod error;
 
+/// Engine API metrics.
+mod metrics;
+
 pub use engine_api::{EngineApi, EngineApiSender};
 pub use error::*;
 pub use message::EngineApiMessageVersion;
