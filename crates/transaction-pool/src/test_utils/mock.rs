@@ -210,8 +210,8 @@ impl MockTransaction {
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn set_priority_fee(&mut self, val: u128) -> &mut Self {
-        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. }
-        | MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
+        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
+        MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
         {
             *max_priority_fee_per_gas = val;
         }
@@ -224,8 +224,8 @@ impl MockTransaction {
     }
 
     pub fn get_priority_fee(&self) -> Option<u128> {
-        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. }
-        | MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
+        if let (MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } |
+        MockTransaction::Eip4844 { max_priority_fee_per_gas, .. }) = self
         {
             Some(*max_priority_fee_per_gas)
         } else {
@@ -234,8 +234,8 @@ impl MockTransaction {
     }
 
     pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
-        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. }
-        | MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
+        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. } |
+        MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
         {
             *max_fee_per_gas = val;
         }
@@ -248,8 +248,8 @@ impl MockTransaction {
     }
 
     pub fn get_max_fee(&self) -> Option<u128> {
-        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. }
-        | MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
+        if let (MockTransaction::Eip1559 { max_fee_per_gas, .. } |
+        MockTransaction::Eip4844 { max_fee_per_gas, .. }) = self
         {
             Some(*max_fee_per_gas)
         } else {
@@ -266,7 +266,9 @@ impl MockTransaction {
             MockTransaction::Eip4844 { accesslist, .. } => {
                 *accesslist = list;
             }
-            MockTransaction::Eip2930 { .. } => {}
+            MockTransaction::Eip2930 { accesslist, .. } => {
+                *accesslist = list;
+            }
         }
         self
     }
@@ -413,6 +415,10 @@ impl MockTransaction {
     pub fn is_eip4844(&self) -> bool {
         matches!(self, MockTransaction::Eip4844 { .. })
     }
+
+    pub fn is_eip2930(&self) -> bool {
+        matches!(self, MockTransaction::Eip2930 { .. })
+    }
 }
 
 impl PoolTransaction for MockTransaction {
@@ -506,12 +512,12 @@ impl PoolTransaction for MockTransaction {
         let base_fee = base_fee as u128;
         let max_fee_per_gas = self.max_fee_per_gas();
         if max_fee_per_gas < base_fee {
-            return None;
+            return None
         }
 
         let fee = max_fee_per_gas - base_fee;
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee));
+            return Some(fee.min(priority_fee))
         }
 
         Some(fee)
@@ -637,9 +643,26 @@ impl FromRecoveredTransaction for MockTransaction {
                 input,
                 accesslist: access_list,
             },
-            Transaction::Eip2930 { .. } => {
-                unimplemented!()
-            }
+            Transaction::Eip2930(TxEip2930 {
+                chain_id: _,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+                access_list,
+            }) => MockTransaction::Eip2930 {
+                hash,
+                sender,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value: value.into(),
+                input,
+                accesslist: access_list,
+            },
         }
     }
 }
@@ -690,8 +713,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     value,
                     input,
                     ..
-                })
-                | Transaction::Eip2930(TxEip2930 {
+                }) |
+                Transaction::Eip2930(TxEip2930 {
                     nonce,
                     gas_price,
                     gas_limit,
