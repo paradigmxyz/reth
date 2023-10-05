@@ -743,7 +743,6 @@ where
             }
         };
 
-        let gas_used = result.gas_used();
         // commit changes
         db.commit(state);
 
@@ -757,6 +756,8 @@ where
                 best_txs.skip_blobs();
             }
         }
+
+        let gas_used = result.gas_used();
 
         // add gas used by the transaction to cumulative gas used, before creating the receipt
         cumulative_gas_used += gas_used;
