@@ -25,7 +25,7 @@ secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recov
 
 # misc
 confy.workspace = true
-tempfile = "3.4"
+tempfile.workspace = true
 
 [dev-dependencies]
 toml.workspace = true

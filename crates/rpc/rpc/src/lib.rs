@@ -54,4 +54,4 @@ pub use tracing_call::{TracingCallGuard, TracingCallPool};
 pub use txpool::TxPoolApi;
 pub use web3::Web3Api;
 
-pub(crate) mod result;
+pub mod result;

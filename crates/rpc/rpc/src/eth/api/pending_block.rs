@@ -115,14 +115,6 @@ impl PendingBlockEnv {
                     // for regular transactions above.
                     best_txs.mark_invalid(&pool_tx);
                     continue
-                } else {
-                    // add to the data gas if we're going to execute the transaction
-                    sum_blob_gas_used += tx_blob_gas;
-
-                    // if we've reached the max data gas per block, we can skip blob txs entirely
-                    if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
-                        best_txs.skip_blobs();
-                    }
                 }
             }
 
@@ -155,9 +147,21 @@ impl PendingBlockEnv {
                 }
             };
 
-            let gas_used = result.gas_used();
             // commit changes
             db.commit(state);
+
+            // add to the total blob gas used if the transaction successfully executed
+            if let Some(blob_tx) = tx.transaction.as_eip4844() {
+                let tx_blob_gas = blob_tx.blob_gas();
+                sum_blob_gas_used += tx_blob_gas;
+
+                // if we've reached the max data gas per block, we can skip blob txs entirely
+                if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+                    best_txs.skip_blobs();
+                }
+            }
+
+            let gas_used = result.gas_used();
 
             // add gas used by the transaction to cumulative gas used, before creating the receipt
             cumulative_gas_used += gas_used;

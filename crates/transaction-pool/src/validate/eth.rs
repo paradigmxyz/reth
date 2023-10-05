@@ -18,6 +18,7 @@ use reth_primitives::{
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
+use reth_revm_primitives::calculate_intrinsic_gas_after_merge;
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -198,6 +199,25 @@ where
                     InvalidTransactionError::ChainIdMismatch.into(),
                 )
             }
+        }
+
+        // intrinsic gas checks
+        let access_list =
+            transaction.access_list().map(|list| list.flattened()).unwrap_or_default();
+        let is_shanghai = self.fork_tracker.is_shanghai_activated();
+
+        if transaction.gas_limit() <
+            calculate_intrinsic_gas_after_merge(
+                transaction.input(),
+                transaction.kind(),
+                &access_list,
+                is_shanghai,
+            )
+        {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::IntrinsicGasTooLow,
+            )
         }
 
         let mut maybe_blob_sidecar = None;
@@ -482,6 +502,15 @@ impl EthTransactionValidatorBuilder {
     /// Sets the number of additional tasks to spawn.
     pub fn with_additional_tasks(mut self, additional_tasks: usize) -> Self {
         self.additional_tasks = additional_tasks;
+        self
+    }
+
+    /// Configures validation rules based on the head block's timestamp.
+    ///
+    /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
+    pub fn with_head_timestamp(mut self, timestamp: u64) -> Self {
+        self.cancun = self.chain_spec.is_cancun_active_at_timestamp(timestamp);
+        self.shanghai = self.chain_spec.is_shanghai_active_at_timestamp(timestamp);
         self
     }
 

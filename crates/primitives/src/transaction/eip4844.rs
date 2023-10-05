@@ -7,7 +7,7 @@ use crate::{
         BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
     },
     kzg_to_versioned_hash, Bytes, ChainId, Signature, Transaction, TransactionKind,
-    TransactionSigned, TxHash, TxType, B256, EIP4844_TX_TYPE_ID,
+    TransactionSigned, TxHash, TxType, TxValue, B256, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Error as RlpError, Header};
 use bytes::BytesMut;
@@ -58,11 +58,7 @@ pub struct TxEip4844 {
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub value: u128,
+    pub value: TxValue,
     /// The accessList specifies a list of addresses and storage keys;
     /// these addresses and storage keys are added into the `accessed_addresses`
     /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
@@ -247,7 +243,7 @@ impl TxEip4844 {
         mem::size_of::<u128>() + // max_fee_per_gas
         mem::size_of::<u128>() + // max_priority_fee_per_gas
         self.to.size() + // to
-        mem::size_of::<u128>() + // value
+        mem::size_of::<TxValue>() + // value
         self.access_list.size() + // access_list
         self.input.len() +  // input
         self.blob_versioned_hashes.capacity() * mem::size_of::<B256>() + // blob hashes size

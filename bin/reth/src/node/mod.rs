@@ -9,6 +9,7 @@ use crate::{
         RpcServerArgs, TxPoolArgs,
     },
     cli::{
+        components::RethNodeComponentsImpl,
         config::RethRpcConfig,
         ext::{RethCliExt, RethNodeCommandConfig},
     },
@@ -276,7 +277,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            db.clone(),
+            Arc::clone(&db),
             Arc::clone(&consensus),
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
@@ -301,6 +302,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
+            .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
             .with_additional_tasks(1)
             .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
@@ -333,7 +335,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         let default_peers_path = data_dir.known_peers_path();
-        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
@@ -354,17 +355,19 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
         let network_client = network.fetch_client().await?;
 
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        let components = RethNodeComponentsImpl {
+            provider: blockchain_db.clone(),
+            pool: transaction_pool.clone(),
+            network: network.clone(),
+            task_executor: ctx.task_executor.clone(),
+            events: blockchain_db.clone(),
+        };
+        self.ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
-        let payload_builder = self.ext.spawn_payload_builder_service(
-            &self.builder,
-            blockchain_db.clone(),
-            transaction_pool.clone(),
-            ctx.task_executor.clone(),
-            Arc::clone(&self.chain),
-        )?;
+        let payload_builder = self.ext.spawn_payload_builder_service(&self.builder, &components)?;
 
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
@@ -532,19 +535,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         self.adjust_instance_ports();
 
         // Start RPC servers
-        let (_rpc_server, _auth_server) = self
-            .rpc
-            .start_servers(
-                blockchain_db.clone(),
-                transaction_pool.clone(),
-                network.clone(),
-                ctx.task_executor.clone(),
-                blockchain_tree,
-                engine_api,
-                jwt_secret,
-                &mut self.ext,
-            )
-            .await?;
+        let (_rpc_server, _auth_server) =
+            self.rpc.start_servers(&components, engine_api, jwt_secret, &mut self.ext).await?;
 
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
@@ -553,6 +545,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             let res = beacon_consensus_engine.await;
             let _ = tx.send(res);
         });
+
+        self.ext.on_node_started(&components)?;
 
         rx.await??;
 
@@ -680,6 +674,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(handle)
     }
 
+    /// Fetches the head block from the database.
+    ///
+    /// If the database is empty, returns the genesis block.
     fn lookup_head(&self, db: Arc<DatabaseEnv>) -> RethResult<Head> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;

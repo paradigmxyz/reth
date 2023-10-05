@@ -576,6 +576,9 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::ExceedsMaxInitCodeSize(_, _) => {
                 RpcPoolError::ExceedsMaxInitCodeSize
             }
+            InvalidPoolTransactionError::IntrinsicGasTooLow => {
+                RpcPoolError::Invalid(RpcInvalidTransactionError::GasTooLow)
+            }
             InvalidPoolTransactionError::OversizedData(_, _) => RpcPoolError::OversizedData,
             InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
             InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),

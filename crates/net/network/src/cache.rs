@@ -52,6 +52,11 @@ impl<T: Hash + Eq> LruCache<T> {
     {
         self.inner.contains(value)
     }
+
+    /// Returns an iterator over all cached entries
+    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
+        self.inner.iter()
+    }
 }
 
 impl<T> Extend<T> for LruCache<T>

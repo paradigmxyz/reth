@@ -349,10 +349,11 @@ impl<'a> EVMProcessor<'a> {
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
+            let receipts = Receipts::from_block_receipt(receipts);
             return Err(BlockValidationError::BlockGasUsed {
                 got: cumulative_gas_used,
                 expected: block.gas_used,
-                gas_spent_by_tx: self.receipts.gas_spent_by_tx()?,
+                gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
             .into())
         }

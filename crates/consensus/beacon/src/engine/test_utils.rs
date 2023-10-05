@@ -506,10 +506,8 @@ where
             self.base_config.chain_spec.clone(),
         );
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, canon_state_notification_sender, config, None)
-                .expect("failed to create tree"),
+            BlockchainTree::new(externals, config, None).expect("failed to create tree"),
         );
         let shareable_db = ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();

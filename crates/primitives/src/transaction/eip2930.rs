@@ -1,5 +1,5 @@
 use super::access_list::AccessList;
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, TxValue, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
@@ -34,11 +34,7 @@ pub struct TxEip2930 {
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub value: u128,
+    pub value: TxValue,
     /// The accessList specifies a list of addresses and storage keys;
     /// these addresses and storage keys are added into the `accessed_addresses`
     /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
@@ -62,7 +58,7 @@ impl TxEip2930 {
         mem::size_of::<u128>() + // gas_price
         mem::size_of::<u64>() + // gas_limit
         self.to.size() + // to
-        mem::size_of::<u128>() + // value
+        mem::size_of::<TxValue>() + // value
         self.access_list.size() + // access_list
         self.input.len() // input
     }
@@ -197,7 +193,7 @@ mod tests {
             gas_price: 1,
             gas_limit: 2,
             to: TransactionKind::Create,
-            value: 3,
+            value: 3_u64.into(),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
         });
@@ -220,7 +216,7 @@ mod tests {
             gas_price: 1,
             gas_limit: 2,
             to: TransactionKind::Call(Address::default()),
-            value: 3,
+            value: 3_u64.into(),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
         });

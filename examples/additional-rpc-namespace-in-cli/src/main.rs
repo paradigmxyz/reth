@@ -15,17 +15,12 @@ use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::{
     cli::{
+        components::RethNodeComponents,
         config::RethRpcConfig,
         ext::{RethCliExt, RethNodeCommandConfig},
         Cli,
     },
-    network::{NetworkInfo, Peers},
-    providers::{
-        BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-        EvmEnvProvider, StateProviderFactory,
-    },
     rpc::builder::{RethModuleRegistry, TransportRpcModules},
-    tasks::TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
 
@@ -51,26 +46,22 @@ struct RethCliTxpoolExt {
 
 impl RethNodeCommandConfig for RethCliTxpoolExt {
     // This is the entrypoint for the CLI to extend the RPC server with custom rpc namespaces.
-    fn extend_rpc_modules<Conf, Provider, Pool, Network, Tasks, Events>(
+    fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         _config: &Conf,
-        registry: &mut RethModuleRegistry<Provider, Pool, Network, Tasks, Events>,
+        _components: &Reth,
+        registry: &mut RethModuleRegistry<
+            Reth::Provider,
+            Reth::Pool,
+            Reth::Network,
+            Reth::Tasks,
+            Reth::Events,
+        >,
         modules: &mut TransportRpcModules,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
-        Provider: BlockReaderIdExt
-            + StateProviderFactory
-            + EvmEnvProvider
-            + ChainSpecProvider
-            + ChangeSetReader
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions + Clone + 'static,
+        Reth: RethNodeComponents,
     {
         if !self.enable_ext {
             return Ok(())
@@ -91,7 +82,8 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
 /// trait interface for a custom rpc namespace: `txpool`
 ///
 /// This defines an additional namespace where all methods are configured as trait functions.
-#[rpc(server, namespace = "txpoolExt")]
+#[cfg_attr(not(test), rpc(server, namespace = "txpoolExt"))]
+#[cfg_attr(test, rpc(server, client, namespace = "txpoolExt"))]
 pub trait TxpoolExtApi {
     /// Returns the number of transactions in the pool.
     #[method(name = "transactionCount")]
@@ -109,5 +101,33 @@ where
 {
     fn transaction_count(&self) -> RpcResult<usize> {
         Ok(self.pool.pool_size().total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonrpsee::{http_client::HttpClientBuilder, server::ServerBuilder};
+    use reth_transaction_pool::noop::NoopTransactionPool;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_call_transaction_count_http() {
+        let server_addr = start_server().await;
+        let uri = format!("http://{}", server_addr);
+        let client = HttpClientBuilder::default().build(&uri).unwrap();
+        let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    async fn start_server() -> std::net::SocketAddr {
+        let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr().unwrap();
+        let pool = NoopTransactionPool::default();
+        let api = TxpoolExt { pool };
+        let server_handle = server.start(api.into_rpc());
+
+        tokio::spawn(server_handle.stopped());
+
+        addr
     }
 }
