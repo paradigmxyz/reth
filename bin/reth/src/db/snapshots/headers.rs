@@ -79,10 +79,11 @@ impl Command {
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
         let mode = Snapshots::Headers;
+        let jar_config = (mode, compression, phf);
         let mut row_indexes = (self.from..(self.from + self.block_interval)).collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
         let mut dictionaries = None;
-        let mut jar = NippyJar::load_without_header(&self.get_file_path(mode, compression, phf))?;
+        let mut jar = NippyJar::load_without_header(&self.get_file_path(jar_config))?;
 
         let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
         let mut cursor = if !decompressors.is_empty() {
@@ -95,7 +96,7 @@ impl Command {
             bench(
                 bench_kind,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                (mode, compression, phf),
+                jar_config,
                 || {
                     for num in row_indexes.iter() {
                         Header::decompress(
@@ -129,7 +130,7 @@ impl Command {
             bench(
                 BenchKind::RandomOne,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                (mode, compression, phf),
+                jar_config,
                 || {
                     Header::decompress(
                         cursor
@@ -159,7 +160,7 @@ impl Command {
             bench(
                 BenchKind::RandomHash,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                (mode, compression, phf),
+                jar_config,
                 || {
                     let header = Header::decompress(
                         cursor
