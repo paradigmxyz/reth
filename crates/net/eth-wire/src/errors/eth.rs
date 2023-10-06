@@ -1,6 +1,8 @@
 //! Error handling for (`EthStream`)[crate::EthStream]
 use crate::{
-    errors::P2PStreamError, version::ParseVersionError, DisconnectReason, EthMessageID, EthVersion,
+    errors::{P2PStreamError, SharedStreamError},
+    version::ParseVersionError,
+    DisconnectReason, EthMessageID, EthVersion,
 };
 use reth_primitives::{Chain, ValidationError, B256};
 use std::io;
@@ -11,6 +13,8 @@ use std::io;
 pub enum EthStreamError {
     #[error(transparent)]
     P2PStreamError(#[from] P2PStreamError),
+    #[error(transparent)]
+    SharedStreamError(#[from] SharedStreamError),
     #[error(transparent)]
     ParseVersionError(#[from] ParseVersionError),
     #[error(transparent)]

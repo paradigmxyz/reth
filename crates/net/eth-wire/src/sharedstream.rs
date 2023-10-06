@@ -24,52 +24,24 @@ use std::{
 };
 
 use futures::{Sink, SinkExt, StreamExt};
+use pin_project::pin_project;
 use reth_primitives::bytes::{Bytes, BytesMut};
-use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::Stream;
 
 use crate::{
-    capability::{Capability, SharedCapability, SharedCapabilityError},
-    errors::P2PStreamError,
+    capability::{Capability, SharedCapability},
+    errors::{P2PStreamError, SharedStreamError},
     p2pstream::SharedCapabilities,
-    CanDisconnect, EthMessage,
+    CanDisconnect, DisconnectReason, EthMessage,
 };
 
-use CapStreamError::*;
+use SharedStreamError::*;
 
 type CapKey = Discriminant<IngressCapBytes>;
 
-#[derive(Debug, Error)]
-pub enum CapStreamError {
-    #[error(transparent)]
-    P2P(#[from] P2PStreamError),
-    #[error("capability not recognized")]
-    CapabilityNotRecognized,
-    #[error("capability not configured in app")]
-    CapabilityNotConfigured,
-    #[error("unknown capability message id: {0}")]
-    UnknownCapabilityMessageId(u8),
-    #[error(transparent)]
-    ParseSharedCapabilityFailed(#[from] SharedCapabilityError),
-    #[error("failed to clone shared stream, {0}")]
-    RecvClonedStreamFailed(#[from] oneshot::error::RecvError),
-    #[error("failed to return shared stream clone")]
-    SendClonedStreamFailed,
-    #[error("failed to receive ingress bytes, channel closed")]
-    RecvIngressBytesFailed,
-    #[error("failed to stream ingress bytes, {0}")]
-    SendIngressBytesFailed(mpsc::error::SendError<BytesMut>),
-    #[error("weak cap stream clone failed to sink message to cap stream, {0}")]
-    WeakCloneSendEgressFailed(mpsc::error::SendError<CapStreamMsg>),
-    #[error("shared stream already cloned for capability")]
-    SharedStreamExists,
-    #[error("shared stream in use by clone")]
-    SharedStreamInUse,
-}
-
 impl TryFrom<Capability> for CapKey {
-    type Error = CapStreamError;
+    type Error = SharedStreamError;
     fn try_from(value: Capability) -> Result<Self, Self::Error> {
         if value.is_eth_v66() || value.is_eth_v67() || value.is_eth_v68() {
             return Ok(IngressCapBytes::eth_key())
@@ -82,7 +54,7 @@ impl TryFrom<Capability> for CapKey {
 macro_rules! try_from_shared_cap_impl {
     ($cap:ty) => {
         impl TryFrom<$cap> for CapKey {
-            type Error = CapStreamError;
+            type Error = SharedStreamError;
             fn try_from(value: $cap) -> Result<Self, Self::Error> {
                 use SharedCapability::*;
 
@@ -127,16 +99,84 @@ pub enum CapStreamMsg {
     EgressBytes(Bytes),
 }
 
-/// Template implementation of [`Sink`] for crate [`Stream`] + [`Sink`] types.
+/// Stream sharing underlying stream. First instant owns the stream and following instants cloned
+/// from first own a weak clone of stream. Only the first instant can poll the underlying stream,
+/// but doing so triggers poll to immediately repeat once for every weak clone. At most one stream
+/// share per message type, e.g. [`EthMessage`], can be open. This is ensured by the underlying
+/// [`CapStream`].
+#[derive(Debug)]
+pub struct SharedStream<S> {
+    inner: S,
+    ingress: mpsc::UnboundedReceiver<BytesMut>,
+    cap: SharedCapability,
+}
+
+impl<S> SharedStream<S>
+where
+    S: Sink<CapStreamMsg> + Unpin,
+    SharedStreamError: From<<S as Sink<CapStreamMsg>>::Error>,
+{
+    #[allow(clippy::type_complexity)]
+    fn _clone_for<T: 'static>(
+        &mut self,
+    ) -> Result<
+        Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<SharedStream<WeakCapStreamClone>, SharedStreamError>,
+                    > + Send,
+            >,
+        >,
+        SharedStreamError,
+    > {
+        let cap_type = TypeId::of::<T>();
+        let (tx, rx) = oneshot::channel();
+        self.inner.start_send_unpin(CapStreamMsg::Clone(cap_type, tx))?;
+
+        Ok(Box::pin(async move { rx.await.map_err(RecvClonedStreamFailed) }))
+    }
+}
+
+impl<S> SharedStream<S> {
+    fn mask_msg_id(&self, msg: Bytes) -> Bytes {
+        let mut masked_bytes = BytesMut::zeroed(msg.len());
+        masked_bytes[0] = msg[0] + self.cap.offset_rel_caps_suffix();
+        masked_bytes[1..].copy_from_slice(&msg[1..]);
+
+        masked_bytes.freeze()
+    }
+}
+
+impl<S, E> Stream for SharedStream<S>
+where
+    S: Stream<Item = Result<(), E>> + Unpin,
+    SharedStreamError: From<E>,
+{
+    type Item = Result<BytesMut, SharedStreamError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        _ = self.inner.poll_next_unpin(cx)?;
+
+        let res = ready!(self.ingress.poll_recv(cx));
+
+        match res {
+            Some(b) => Poll::Ready(Some(Ok(b))),
+            None => Poll::Ready(Some(Err(RecvIngressBytesFailed))),
+        }
+    }
+}
+
+/// Template implementation of [`Sink`], [`CanDisconnect`] and [`CanDisconnectExt`] for crate
+/// [`Stream`] + [`Sink`] wrapper types.
 #[macro_export]
 macro_rules! sink_impl {
-    ($stream:ty, $sink_in:ty, $sink_out:ty, $start_send:item) => {
+    ($stream:ty, $sink_in:ty, $sink_out:ty, $start_send:item, $disconnect: item) => {
         impl<S> Sink<$sink_in> for $stream
         where
             S: CanDisconnect<$sink_out> + Unpin,
-            CapStreamError: From<<S as Sink<$sink_out>>::Error>,
+            SharedStreamError: From<<S as Sink<$sink_out>>::Error>,
         {
-            type Error = CapStreamError;
+            type Error = SharedStreamError;
 
             fn poll_ready(
                 mut self: Pin<&mut Self>,
@@ -161,96 +201,18 @@ macro_rules! sink_impl {
                 self.inner.poll_close_unpin(cx).map_err(Into::into)
             }
         }
-    };
-}
 
-/// Template implementation of [`CanDisconnect`] for crate [`Stream`] + [`Sink`] types.
-macro_rules! can_disconnect_impl {
-    ($stream:ty, $sink_in:ty, $sink_out:ty) => {
         #[async_trait::async_trait]
         impl<S> CanDisconnect<$sink_in> for $stream
         where
             S: CanDisconnect<$sink_out> + Send,
-            CapStreamError: From<<S as Sink<$sink_out>>::Error>,
+            SharedStreamError: From<<S as Sink<$sink_out>>::Error>,
         {
-            async fn disconnect(
-                &mut self,
-                reason: $crate::DisconnectReason,
-            ) -> Result<(), CapStreamError> {
-                self.inner.disconnect(reason).await.map_err(Into::into)
-            }
+            $disconnect
         }
     };
 }
 
-/// Stream sharing underlying stream. First instant owns the stream and following instants cloned
-/// from first own a weak clone of stream. Only the first instant can poll the underlying stream,
-/// but doing so triggers poll to immediately repeat once for every weak clone. At most one stream
-/// share per message type, e.g. [`EthMessage`], can be open. This is ensured by the underlying
-/// [`CapStream`].
-#[derive(Debug)]
-pub struct SharedStream<S> {
-    inner: S,
-    ingress: mpsc::UnboundedReceiver<BytesMut>,
-    cap: SharedCapability,
-}
-
-impl<S> SharedStream<S>
-where
-    S: Sink<CapStreamMsg> + Unpin,
-    CapStreamError: From<<S as Sink<CapStreamMsg>>::Error>,
-{
-    #[allow(clippy::type_complexity)]
-    fn _clone_for<T: 'static>(
-        &mut self,
-    ) -> Result<
-        Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<SharedStream<WeakCapStreamClone>, CapStreamError>,
-                    > + Send,
-            >,
-        >,
-        CapStreamError,
-    > {
-        let cap_type = TypeId::of::<T>();
-        let (tx, rx) = oneshot::channel();
-        self.inner.start_send_unpin(CapStreamMsg::Clone(cap_type, tx))?;
-
-        Ok(Box::pin(async move { rx.await.map_err(RecvClonedStreamFailed) }))
-    }
-}
-
-impl<S> SharedStream<S> {
-    fn mask_msg_id(&self, msg: Bytes) -> Bytes {
-        let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0] + self.cap.offset_rel_caps_suffix();
-        masked_bytes[1..].copy_from_slice(&msg[1..]);
-
-        masked_bytes.freeze()
-    }
-}
-
-impl<S, E> Stream for SharedStream<S>
-where
-    S: Stream<Item = Result<BytesMut, E>> + Unpin,
-    CapStreamError: From<E>,
-{
-    type Item = Result<BytesMut, CapStreamError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        _ = self.inner.poll_next_unpin(cx)?;
-
-        let res = ready!(self.ingress.poll_recv(cx));
-
-        match res {
-            Some(b) => Poll::Ready(Some(Ok(b))),
-            None => Poll::Ready(Some(Err(RecvIngressBytesFailed))),
-        }
-    }
-}
-
-can_disconnect_impl!(SharedStream<S>, Bytes, CapStreamMsg);
 sink_impl!(
     SharedStream<S>,
     Bytes,
@@ -259,23 +221,21 @@ sink_impl!(
         let item = self.mask_msg_id(item);
         self.inner.start_send_unpin(CapStreamMsg::EgressBytes(item))?;
         Ok(())
+    },
+    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), SharedStreamError> {
+        self.inner.disconnect(reason).await.map_err(Into::into)
     }
 );
 
 impl<S> SharedStream<ManuallyDrop<CapStream<S>>> {
     /// Returns a shared stream if capability is shared.
-    pub fn try_new<T: 'static>(caps_stream: CapStream<S>) -> Result<Self, CapStreamError> {
+    pub fn try_new<T: 'static>(caps_stream: CapStream<S>) -> Result<Self, SharedStreamError> {
         caps_stream.try_into_shared::<T>()
     }
 
-    /// Checks if all clones of this shared stream have been dropped.
-    pub fn can_drop(&self) -> bool {
-        self.inner.can_drop()
-    }
-
     /// Checks if all clones of this shared stream have been dropped, if true then returns function
-    /// to drop [`SharedStream`]
-    pub fn try_drop(&self) -> Result<impl FnOnce(Self), CapStreamError> {
+    /// to drop [`SharedStream`].
+    pub fn try_drop(&mut self) -> Result<impl FnOnce(Self), SharedStreamError> {
         if self.inner.can_drop() {
             return Ok(|x: Self| _ = ManuallyDrop::into_inner(x.inner))
         }
@@ -313,7 +273,7 @@ impl<S> CapStream<S> {
     /// specific messages.
     pub fn try_into_shared<T: 'static>(
         mut self,
-    ) -> Result<SharedStream<ManuallyDrop<Self>>, CapStreamError> {
+    ) -> Result<SharedStream<ManuallyDrop<Self>>, SharedStreamError> {
         let cap_type = TypeId::of::<T>();
         let cap = self.shared_cap_for(cap_type)?;
         let ingress = self.reg_new_ingress_buffer_for(&cap)?;
@@ -324,7 +284,7 @@ impl<S> CapStream<S> {
     fn clone_stream_for(
         &mut self,
         cap: TypeId,
-    ) -> Result<SharedStream<WeakCapStreamClone>, CapStreamError> {
+    ) -> Result<SharedStream<WeakCapStreamClone>, SharedStreamError> {
         let cap = self.shared_cap_for(cap)?;
         let ingress = self.reg_new_ingress_buffer_for(&cap)?;
         let mux_tx = self.mux_tx.clone();
@@ -332,7 +292,7 @@ impl<S> CapStream<S> {
         Ok(SharedStream { inner: WeakCapStreamClone(mux_tx), ingress, cap })
     }
 
-    fn shared_cap_for(&self, cap_type: TypeId) -> Result<SharedCapability, CapStreamError> {
+    fn shared_cap_for(&self, cap_type: TypeId) -> Result<SharedCapability, SharedStreamError> {
         for shared_cap in self.shared_capabilities.iter_caps() {
             if let SharedCapability::Eth { .. } = shared_cap {
                 if cap_type == TypeId::of::<EthMessage>() {
@@ -341,13 +301,13 @@ impl<S> CapStream<S> {
             }
         }
 
-        Err(P2PStreamError::CapabilityNotShared.into())
+        Err(CapabilityNotConfigurable)
     }
 
     fn reg_new_ingress_buffer_for(
         &mut self,
         cap: &SharedCapability,
-    ) -> Result<mpsc::UnboundedReceiver<BytesMut>, CapStreamError> {
+    ) -> Result<mpsc::UnboundedReceiver<BytesMut>, SharedStreamError> {
         let cap_key = cap.try_into()?;
         if let Some(tx) = self.demux.get(&cap_key) {
             if !tx.is_closed() {
@@ -360,10 +320,10 @@ impl<S> CapStream<S> {
         Ok(ingress)
     }
 
-    fn interpret_msg(&mut self, msg: CapStreamMsg) -> Result<(), CapStreamError>
+    fn interpret_msg(&mut self, msg: CapStreamMsg) -> Result<(), SharedStreamError>
     where
         S: CanDisconnect<Bytes> + Unpin,
-        CapStreamError: From<<S as Sink<Bytes>>::Error>,
+        SharedStreamError: From<<S as Sink<Bytes>>::Error>,
     {
         match msg {
             CapStreamMsg::Clone(cap, signal_tx) => {
@@ -376,7 +336,7 @@ impl<S> CapStream<S> {
         }
     }
 
-    fn unmask_msg_id(&self, mut msg: BytesMut) -> Result<IngressCapBytes, CapStreamError> {
+    fn unmask_msg_id(&self, mut msg: BytesMut) -> Result<IngressCapBytes, SharedStreamError> {
         use SharedCapability::*;
 
         let id = msg[0];
@@ -397,7 +357,7 @@ impl<S> CapStream<S> {
         Err(UnknownCapabilityMessageId(id))
     }
 
-    fn can_drop(&self) -> bool {
+    fn can_drop(&mut self) -> bool {
         for tx in self.demux.values() {
             if !tx.is_closed() {
                 return false
@@ -411,9 +371,9 @@ impl<S> CapStream<S> {
 impl<S, E> Stream for CapStream<S>
 where
     S: Stream<Item = Result<BytesMut, E>> + Unpin,
-    CapStreamError: From<E>,
+    SharedStreamError: From<E>,
 {
-    type Item = Result<(), CapStreamError>;
+    type Item = Result<(), SharedStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // poll once for each shared stream since weak shared stream clones cannot poll `CapStream`
@@ -436,7 +396,6 @@ where
     }
 }
 
-can_disconnect_impl!(CapStream<S>, CapStreamMsg, Bytes);
 sink_impl!(
     CapStream<S>,
     CapStreamMsg,
@@ -451,6 +410,12 @@ sink_impl!(
         }
 
         Ok(())
+    },
+    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), SharedStreamError> {
+        if self.can_drop() {
+            return self.inner.disconnect(reason).await.map_err(Into::into)
+        }
+        Err(SharedStreamInUse)
     }
 );
 
@@ -458,8 +423,16 @@ sink_impl!(
 #[derive(Debug)]
 pub struct WeakCapStreamClone(mpsc::UnboundedSender<CapStreamMsg>);
 
+impl Stream for WeakCapStreamClone {
+    type Item = Result<(), SharedStreamError>;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(Some(Ok(())))
+    }
+}
+
 impl Sink<CapStreamMsg> for WeakCapStreamClone {
-    type Error = CapStreamError;
+    type Error = SharedStreamError;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -475,6 +448,95 @@ impl Sink<CapStreamMsg> for WeakCapStreamClone {
 
     fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
+    }
+}
+
+#[async_trait::async_trait]
+impl CanDisconnect<CapStreamMsg> for WeakCapStreamClone {
+    async fn disconnect(&mut self, _reason: DisconnectReason) -> Result<(), SharedStreamError> {
+        Err(NoDisconnectByClone)
+    }
+}
+
+#[derive(Debug)]
+#[pin_project(project = EnumProj)]
+pub enum SharedByteStream<S> {
+    Owner(#[pin] SharedStream<ManuallyDrop<CapStream<S>>>),
+    Clone(#[pin] SharedStream<WeakCapStreamClone>),
+}
+
+impl<S, E> Stream for SharedByteStream<S>
+where
+    S: Stream<Item = Result<BytesMut, E>> + Unpin,
+    SharedStream<ManuallyDrop<CapStream<S>>>: Stream<Item = Result<BytesMut, SharedStreamError>>,
+    SharedStreamError: From<E>,
+{
+    type Item = Result<BytesMut, SharedStreamError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        match this {
+            EnumProj::Owner(owner) => owner.poll_next(cx),
+            EnumProj::Clone(clone) => clone.poll_next(cx),
+        }
+    }
+}
+
+impl<S> Sink<Bytes> for SharedByteStream<S>
+where
+    S: CanDisconnect<Bytes> + Unpin,
+    SharedStream<ManuallyDrop<CapStream<S>>>: Sink<Bytes>,
+    SharedStreamError: From<<S as Sink<Bytes>>::Error>,
+    SharedStreamError: From<<SharedStream<ManuallyDrop<CapStream<S>>> as Sink<Bytes>>::Error>,
+{
+    type Error = SharedStreamError;
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = self.project();
+        match this {
+            EnumProj::Owner(owner) => owner.poll_ready(cx).map_err(Into::into),
+            EnumProj::Clone(clone) => clone.poll_ready(cx),
+        }
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
+        let this = self.project();
+        match this {
+            EnumProj::Owner(owner) => owner.start_send(item).map_err(Into::into),
+            EnumProj::Clone(clone) => clone.start_send(item.into()).map_err(Into::into),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = self.project();
+        match this {
+            EnumProj::Owner(owner) => owner.poll_flush(cx).map_err(Into::into),
+            EnumProj::Clone(clone) => clone.poll_flush(cx),
+        }
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = self.project();
+        match this {
+            EnumProj::Owner(owner) => owner.poll_close(cx).map_err(Into::into),
+            EnumProj::Clone(clone) => clone.poll_close(cx),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<S> CanDisconnect<Bytes> for SharedByteStream<S>
+where
+    S: CanDisconnect<Bytes> + Send,
+    SharedStream<ManuallyDrop<CapStream<S>>>: CanDisconnect<Bytes>,
+    SharedStreamError: From<<S as Sink<Bytes>>::Error>,
+    SharedStreamError: From<<SharedStream<ManuallyDrop<CapStream<S>>> as Sink<Bytes>>::Error>,
+{
+    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), SharedStreamError> {
+        match self {
+            SharedByteStream::Owner(owner) => owner.disconnect(reason).await.map_err(Into::into),
+            SharedByteStream::Clone(clone) => clone.disconnect(reason).await,
+        }
     }
 }
 

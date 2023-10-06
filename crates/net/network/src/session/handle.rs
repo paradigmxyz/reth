@@ -7,7 +7,7 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthStream, EthVersion, P2PStream, Status,
+    DisconnectReason, EthStream, EthVersion, P2PStream, SharedByteStream, Status,
 };
 use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_network_api::PeerInfo;
@@ -215,6 +215,12 @@ pub enum PendingSessionEvent {
         /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
     },
+}
+
+#[derive(Debug)]
+pub enum ByteStream {
+    Single(P2PStream<ECIESStream<MeteredStream<TcpStream>>>),
+    Shared(SharedByteStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>),
 }
 
 /// Commands that can be sent to the spawned session.
