@@ -39,7 +39,7 @@ macro_rules! generate_snapshot_func {
                 (
                     tx: &impl DbTx<'tx>,
                     range: RangeInclusive<K>,
-                    additional: Vec<Box<dyn Iterator<Item = Result<Vec<u8>, Box<dyn StdError + Send + Sync>>>>>,
+                    additional: Option<Vec<Box<dyn Iterator<Item = Result<Vec<u8>, Box<dyn StdError + Send + Sync>>>>>>,
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
                     keys: Option<impl Iterator<Item = ColumnResult<impl PHFKey>>>,
                     row_count: usize,
@@ -47,6 +47,7 @@ macro_rules! generate_snapshot_func {
                 ) -> RethResult<()>
                     where K: Key + Copy
                 {
+                    let additional = additional.unwrap_or_default();
                     debug!(target: "reth::snapshot", ?range, "Creating snapshot {:?} and {} more columns.", vec![$($tbl::NAME,)+], additional.len());
 
                     let range: RangeInclusive<RawKey<K>> = RawKey::new(*range.start())..=RawKey::new(*range.end());

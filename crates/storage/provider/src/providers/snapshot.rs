@@ -183,7 +183,7 @@ mod test {
             create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber>(
                 &tx,
                 range,
-                vec![],
+                None,
                 none_vec,
                 Some(hashes),
                 row_count as usize,

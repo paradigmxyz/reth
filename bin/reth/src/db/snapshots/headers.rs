@@ -65,7 +65,7 @@ impl Command {
             create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber>(
                 tx,
                 self.from as u64..=(self.from as u64 + self.block_interval as u64),
-                vec![],
+                None,
                 // We already prepared the dictionary beforehand
                 none_vec,
                 hashes,
