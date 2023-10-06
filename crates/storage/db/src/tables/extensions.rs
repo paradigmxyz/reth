@@ -44,7 +44,7 @@ impl Transactions {
         }
         let mut tx_list = Vec::with_capacity(transaction_count);
 
-        // Iterate over channels and append the tx hashes to be sorted out later
+        // Iterate over channels and append the tx hashes unsorted
         for channel in channels {
             while let Ok(tx) = channel.recv() {
                 let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
