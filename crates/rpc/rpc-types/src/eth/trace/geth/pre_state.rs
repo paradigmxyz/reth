@@ -78,7 +78,7 @@ impl AccountState {
     /// If code is empty, it will be omitted.
     pub fn from_account_info(nonce: u64, balance: U256, code: Option<Bytes>) -> Self {
         Self {
-            balance: (balance != U256::ZERO).then_some(balance),
+            balance: Some(balance),
             code: code.filter(|code| !code.is_empty()),
             nonce: (nonce != 0).then_some(nonce),
             storage: Default::default(),
