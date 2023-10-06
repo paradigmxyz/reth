@@ -241,8 +241,9 @@ impl TracingInspector {
         created_address: Option<Address>,
     ) {
         let trace_idx = self.pop_trace_idx();
-        let trace = &mut self.traces.arena[trace_idx].trace;
 
+        let trace = &mut self.traces.arena[trace_idx].trace;
+        // check if this is the root call
         if trace_idx == 0 {
             // this is the root call which should get the gas used of the transaction
             // refunds are applied after execution, which is when the root call ends
@@ -260,6 +261,15 @@ impl TracingInspector {
         if let Some(address) = created_address {
             // A new contract was created via CREATE
             trace.address = address;
+        }
+
+        if self.config.record_state_diff {
+            // check if the `address` account of a call was created
+            if !trace.kind.is_any_create() && trace.success {
+                if let Some(acc) = data.journaled_state.state.get(&trace.address) {
+                    trace.is_callee_account_created = Some(acc.is_created());
+                }
+            }
         }
     }
 

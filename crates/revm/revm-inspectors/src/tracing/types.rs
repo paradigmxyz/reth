@@ -126,6 +126,13 @@ pub(crate) struct CallTrace {
     /// In other words, this is the callee if the [CallKind::Call] or the address of the created
     /// contract if [CallKind::Create].
     pub(crate) address: Address,
+    /// If this is a Call, this tracks whether the callee address was created in this transaction.
+    ///
+    /// This is only required for state diff related tracing, such as parity tracing with
+    /// `stateDiff`.
+    ///
+    /// Note: this will always be None for [CallKind::Create] [CallKind::Create2] calls.
+    pub(crate) is_callee_account_created: Option<bool>,
     /// Whether this is a call to a precompile
     ///
     /// Note: This is an Option because not all tracers make use of this
@@ -198,6 +205,7 @@ impl Default for CallTrace {
             success: Default::default(),
             caller: Default::default(),
             address: Default::default(),
+            is_callee_account_created: None,
             selfdestruct_refund_target: None,
             kind: Default::default(),
             value: Default::default(),
