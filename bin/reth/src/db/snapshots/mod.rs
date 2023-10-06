@@ -122,7 +122,7 @@ impl Command {
     }
 
     /// Returns a [`NippyJar`] according to the desired configuration.
-    fn prepare_jar<F: Fn() -> eyre::Result<Option<Rows>>>(
+    fn prepare_jar<F: Fn() -> eyre::Result<Rows>>(
         &self,
         num_columns: usize,
         jar_config: JarConfig,
@@ -159,10 +159,9 @@ impl Command {
             Compression::Zstd => nippy_jar.with_zstd(false, 0),
             Compression::ZstdWithDictionary => {
                 let dataset = prepare_compression()?;
-                assert!(dataset.is_some(), "Expected a dataset for the dictionary");
 
                 nippy_jar = nippy_jar.with_zstd(true, 5_000_000);
-                nippy_jar.prepare_compression(dataset.expect("qed"))?;
+                nippy_jar.prepare_compression(dataset)?;
                 nippy_jar
             }
             Compression::Uncompressed => nippy_jar,

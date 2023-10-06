@@ -40,7 +40,7 @@ impl Command {
                     .collect::<Vec<_>>();
                 Ok::<Rows, eyre::Error>(vec![v1, v2])
             })??;
-            Ok(Some(dataset))
+            Ok(dataset)
         })?;
 
         tool.db.view(|tx| {
