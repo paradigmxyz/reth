@@ -3,25 +3,36 @@ use reth_db::{
     table::{Decompress, Table},
     HeaderTD,
 };
-use reth_interfaces::RethResult;
-use reth_nippy_jar::{NippyJar, NippyJarCursor};
+use reth_interfaces::{provider::ProviderError, RethResult};
+use reth_nippy_jar::{compression::Decompressor, NippyJar, NippyJarCursor};
 use reth_primitives::{BlockHash, BlockNumber, Header, SealedHeader, U256};
 use std::ops::RangeBounds;
 
 /// SnapshotProvider
 ///
-///  WIP Rudimentary impl just for testes
+///  WIP Rudimentary impl just for tests
 /// TODO: should be able to walk through snapshot files/block_ranges
 /// TODO: Arc over NippyJars and/or NippyJarCursors (LRU)
 #[derive(Debug)]
 pub struct SnapshotProvider<'a> {
     /// NippyJar
     pub jar: &'a NippyJar,
+    /// Starting snapshot block
+    pub jar_start_block: u64,
 }
 
 impl<'a> SnapshotProvider<'a> {
-    fn cursor(&self) -> NippyJarCursor<'a> {
+    /// Creates cursor
+    pub fn cursor(&self) -> NippyJarCursor<'a> {
         NippyJarCursor::new(self.jar, None).unwrap()
+    }
+
+    /// Creates cursor with zstd decompressors
+    pub fn cursor_with_decompressors(
+        &self,
+        decompressors: Vec<Decompressor<'a>>,
+    ) -> NippyJarCursor<'a> {
+        NippyJarCursor::new(self.jar, Some(decompressors)).unwrap()
     }
 }
 
@@ -31,7 +42,7 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
         let mut cursor = self.cursor();
 
         let header = Header::decompress(
-            &cursor.row_by_key_with_cols::<0b01, 2>(&block_hash.0).unwrap().unwrap()[0],
+            cursor.row_by_key_with_cols::<0b01, 2>(&block_hash.0).unwrap().unwrap()[0],
         )
         .unwrap();
 
@@ -43,8 +54,14 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
         Ok(None)
     }
 
-    fn header_by_number(&self, _num: BlockNumber) -> RethResult<Option<Header>> {
-        unimplemented!();
+    fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
+        Header::decompress(
+            self.cursor()
+                .row_by_number_with_cols::<0b01, 2>((num - self.jar_start_block) as usize)?
+                .ok_or(ProviderError::HeaderNotFound(num.into()))?[0],
+        )
+        .map(Some)
+        .map_err(Into::into)
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
@@ -53,8 +70,8 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
 
         let row = cursor.row_by_key_with_cols::<0b11, 2>(&block_hash.0).unwrap().unwrap();
 
-        let header = Header::decompress(&row[0]).unwrap();
-        let td = <HeaderTD as Table>::Value::decompress(&row[1]).unwrap();
+        let header = Header::decompress(row[0]).unwrap();
+        let td = <HeaderTD as Table>::Value::decompress(row[1]).unwrap();
 
         if &header.hash_slow() == block_hash {
             return Ok(Some(td.0))
@@ -166,6 +183,7 @@ mod test {
             create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber>(
                 &tx,
                 range,
+                None,
                 none_vec,
                 Some(hashes),
                 row_count as usize,
@@ -179,7 +197,7 @@ mod test {
             let jar = NippyJar::load_without_header(snap_file.path()).unwrap();
 
             let db_provider = factory.provider().unwrap();
-            let snap_provider = SnapshotProvider { jar: &jar };
+            let snap_provider = SnapshotProvider { jar: &jar, jar_start_block: 0 };
 
             assert!(!headers.is_empty());
 

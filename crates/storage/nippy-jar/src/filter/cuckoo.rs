@@ -17,6 +17,10 @@ pub struct Cuckoo {
 
 impl Cuckoo {
     pub fn new(max_capacity: usize) -> Self {
+        // CuckooFilter might return `NotEnoughSpace` even if they are remaining elements, if it's
+        // close to capacity. Therefore, we increase it.
+        let max_capacity = max_capacity + 100 + max_capacity / 3;
+
         Cuckoo { remaining: max_capacity, filter: CuckooFilter::with_capacity(max_capacity) }
     }
 }

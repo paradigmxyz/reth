@@ -60,7 +60,6 @@ impl PartialEq for GoFmph {
 impl std::fmt::Debug for GoFmph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GoFmph")
-            .field("level_sizes", &self.function.as_ref().map(|f| f.level_sizes()))
             .field("bytes_size", &self.function.as_ref().map(|f| f.write_bytes()))
             .finish_non_exhaustive()
     }
