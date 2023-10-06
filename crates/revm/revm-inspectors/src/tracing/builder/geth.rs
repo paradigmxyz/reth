@@ -223,6 +223,10 @@ impl GethTraceBuilder {
             }
             self.update_storage_from_trace(&mut state_diff.pre, false);
             self.update_storage_from_trace(&mut state_diff.post, true);
+
+            // ensure we're only keeping changed entries
+            state_diff.retain_changed();
+
             Ok(PreStateFrame::Diff(state_diff))
         }
     }
