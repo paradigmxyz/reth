@@ -1,5 +1,8 @@
 mod receipts;
+mod transactions;
+
 pub(crate) use receipts::Receipts;
+pub(crate) use transactions::Transactions;
 
 use crate::PrunerError;
 use reth_db::database::Database;
@@ -91,7 +94,7 @@ impl PruneInput {
 }
 
 /// Segment pruning output, see [Segment::prune].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct PruneOutput {
     /// `true` if pruning has been completed up to the target block, and `false` if there's more
     /// data to prune in further runs.
@@ -108,9 +111,15 @@ impl PruneOutput {
     pub(crate) fn done() -> Self {
         Self { done: true, pruned: 0, checkpoint: None }
     }
+
+    /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.
+    /// Use when pruning is needed but cannot be done.
+    pub(crate) fn not_done() -> Self {
+        Self { done: false, pruned: 0, checkpoint: None }
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct PruneOutputCheckpoint {
     /// Highest pruned block number. If it's [None], the pruning for block `0` is not finished yet.
     pub(crate) block_number: Option<BlockNumber>,
