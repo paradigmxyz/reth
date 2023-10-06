@@ -38,33 +38,28 @@ impl Segment for Headers {
             return Ok(PruneOutput::not_done())
         }
 
-        let (canonical_headers_last_pruned_block, canonical_headers_pruned, canonical_headers_done) =
+        let results = [
             self.prune_table::<DB, tables::CanonicalHeaders>(
                 provider,
                 block_range.clone(),
                 delete_limit,
-            )?;
-        let (headers_last_pruned_block, headers_pruned, headers_done) =
-            self.prune_table::<DB, tables::Headers>(provider, block_range.clone(), delete_limit)?;
-        let (header_td_last_pruned_block, header_td_pruned, header_td_done) =
-            self.prune_table::<DB, tables::HeaderTD>(provider, block_range, delete_limit)?;
+            )?,
+            self.prune_table::<DB, tables::Headers>(provider, block_range.clone(), delete_limit)?,
+            self.prune_table::<DB, tables::HeaderTD>(provider, block_range, delete_limit)?,
+        ];
 
-        if ![
-            canonical_headers_last_pruned_block,
-            headers_last_pruned_block,
-            header_td_last_pruned_block,
-        ]
-        .iter()
-        .all_equal()
-        {
+        if !results.iter().map(|(_, _, last_pruned_block)| last_pruned_block).all_equal() {
             return Err(PrunerError::InconsistentData(
                 "All headers-related tables should be pruned up to the same height",
             ))
         }
 
-        let done = canonical_headers_done && headers_done && header_td_done;
-        let pruned = canonical_headers_pruned + headers_pruned + header_td_pruned;
-        let last_pruned_block = canonical_headers_last_pruned_block;
+        let (done, pruned, last_pruned_block) = results.into_iter().fold(
+            (true, 0, 0),
+            |(total_done, total_pruned, _), (done, pruned, last_pruned_block)| {
+                (total_done && done, total_pruned + pruned, last_pruned_block)
+            },
+        );
 
         Ok(PruneOutput {
             done,
@@ -78,12 +73,15 @@ impl Segment for Headers {
 }
 
 impl Headers {
+    /// Prune one headers-related table.
+    ///
+    /// Returns `done`, number of pruned rows and last pruned block number.
     fn prune_table<DB: Database, T: Table<Key = BlockNumber>>(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         range: RangeInclusive<BlockNumber>,
         delete_limit: usize,
-    ) -> RethResult<(BlockNumber, usize, bool)> {
+    ) -> RethResult<(bool, usize, BlockNumber)> {
         let mut last_pruned_block = *range.end();
         let (pruned, done) = provider.prune_table_with_range::<T>(
             range,
@@ -93,7 +91,7 @@ impl Headers {
         )?;
         trace!(target: "pruner", %pruned, %done, table = %T::NAME, "Pruned headers");
 
-        Ok((last_pruned_block, pruned, done))
+        Ok((done, pruned, last_pruned_block))
     }
 }
 
