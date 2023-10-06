@@ -193,7 +193,6 @@ impl Command {
     }
 }
 
-
 #[derive(Debug, Copy, Clone, ValueEnum)]
 pub(crate) enum Snapshots {
     Headers,
