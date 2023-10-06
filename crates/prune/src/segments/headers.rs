@@ -49,7 +49,6 @@ impl Segment for Headers {
         let (header_td_last_pruned_block, header_td_pruned, header_td_done) =
             self.prune_table::<DB, tables::HeaderTD>(provider, block_range, delete_limit)?;
 
-        // All headers-related tables should be pruned up to the same height
         if ![
             canonical_headers_last_pruned_block,
             headers_last_pruned_block,
@@ -58,7 +57,9 @@ impl Segment for Headers {
         .iter()
         .all_equal()
         {
-            return Err(PrunerError::InconsistentData(""))
+            return Err(PrunerError::InconsistentData(
+                "All headers-related tables should be pruned up to the same height",
+            ))
         }
 
         let done = canonical_headers_done && headers_done && header_td_done;
