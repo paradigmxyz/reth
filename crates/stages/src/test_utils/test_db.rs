@@ -219,7 +219,7 @@ impl TestTransaction {
     /// Inserts total difficulty of headers into the corresponding tables.
     ///
     /// Superset functionality of [TestTransaction::insert_headers].
-    pub(crate) fn insert_headers_with_td<'a, I>(&self, headers: I) -> Result<(), DbError>
+    pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
