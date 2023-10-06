@@ -50,10 +50,17 @@ impl Command {
 
             // Generate list of hashes for filters & PHF
             let mut cursor = tx.cursor_read::<RawTable<CanonicalHeaders>>()?;
-            let hashes = cursor
-                .walk(Some(RawKey::from(self.from as u64)))?
-                .take(self.block_interval)
-                .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into()));
+            let mut hashes = None;
+            if self.with_filters {
+                hashes = Some(
+                    cursor
+                        .walk(Some(RawKey::from(self.from as u64)))?
+                        .take(self.block_interval)
+                        .map(|row| {
+                            row.map(|(_key, value)| value.into_value()).map_err(|e| e.into())
+                        }),
+                );
+            }
 
             create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber>(
                 tx,
@@ -61,7 +68,7 @@ impl Command {
                 vec![],
                 // We already prepared the dictionary beforehand
                 none_vec,
-                Some(hashes),
+                hashes,
                 self.block_interval,
                 &mut jar,
             )
