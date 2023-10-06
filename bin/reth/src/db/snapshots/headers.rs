@@ -28,13 +28,13 @@ impl Command {
             let dataset = tool.db.view(|tx| {
                 let mut cursor = tx.cursor_read::<reth_db::RawTable<reth_db::Headers>>()?;
                 let v1 = cursor
-                    .walk_back(None)?
+                    .walk_back(Some(RawKey::from((self.from + self.block_interval - 1) as u64)))?
                     .take(self.block_interval.min(1000))
                     .map(|row| row.map(|(_key, value)| value.into_value()).expect("should exist"))
                     .collect::<Vec<_>>();
                 let mut cursor = tx.cursor_read::<reth_db::RawTable<reth_db::HeaderTD>>()?;
                 let v2 = cursor
-                    .walk_back(None)?
+                    .walk_back(Some(RawKey::from((self.from + self.block_interval - 1) as u64)))?
                     .take(self.block_interval.min(1000))
                     .map(|row| row.map(|(_key, value)| value.into_value()).expect("should exist"))
                     .collect::<Vec<_>>();
