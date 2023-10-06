@@ -48,6 +48,7 @@ members = [
     "crates/rpc/rpc-types-compat",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
+    "examples/cli-extension-event-hooks",
     "examples/rpc-db",
     "examples/manual-p2p",
 ]
