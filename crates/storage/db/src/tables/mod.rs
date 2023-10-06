@@ -13,6 +13,7 @@
 //! TODO(onbjerg): Find appropriate format for this...
 
 pub mod codecs;
+mod extensions;
 pub mod models;
 mod raw;
 pub(crate) mod utils;
