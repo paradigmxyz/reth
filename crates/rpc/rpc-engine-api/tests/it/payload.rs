@@ -13,7 +13,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
 use reth_rpc_types_compat::engine::payload::{
-    convert_standalonewithdraw_to_withdrawal, convert_to_payload_body_v1, try_block_to_payload,
+    convert_standalone_withdraw_to_withdrawal, convert_to_payload_body_v1, try_block_to_payload,
     try_block_to_payload_v1, try_into_sealed_block, try_payload_v1_to_block,
 };
 
@@ -49,7 +49,7 @@ fn payload_body_roundtrip() {
         let withdraw = payload_body.withdrawals.map(|withdrawals| {
             withdrawals
                 .into_iter()
-                .map(convert_standalonewithdraw_to_withdrawal)
+                .map(convert_standalone_withdraw_to_withdrawal)
                 .collect::<Vec<_>>()
         });
         assert_eq!(block.withdrawals, withdraw);

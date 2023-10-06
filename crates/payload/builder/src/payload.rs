@@ -10,8 +10,8 @@ use reth_rpc_types::engine::{
     PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
-    convert_block_to_payload_field_v2, convert_standalonewithdraw_to_withdrawal,
-    try_block_to_payload_v1, try_block_to_payload_v3,
+    block_to_payload_v3, convert_block_to_payload_field_v2,
+    convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
 };
 use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId};
 /// Contains the built payload.
@@ -100,7 +100,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let BuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelopeV3 {
-            execution_payload: try_block_to_payload_v3(block),
+            execution_payload: block_to_payload_v3(block),
             block_value: fees,
             // From the engine API spec:
             //
@@ -148,7 +148,7 @@ impl PayloadBuilderAttributes {
             |withdrawals: Vec<reth_rpc_types::engine::payload::Withdrawal>| {
                 withdrawals
                     .into_iter()
-                    .map(convert_standalonewithdraw_to_withdrawal) // Removed the parentheses here
+                    .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
                     .collect::<Vec<_>>()
             },
         );
