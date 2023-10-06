@@ -167,10 +167,11 @@ pub enum Commands<Ext: RethCliExt = ()> {
 
 impl<Ext: RethCliExt> Commands<Ext> {
     /// Sets the node extension if it is the [NodeCommand](node::NodeCommand).
+    ///
+    /// This is a noop if the command is not the [NodeCommand](node::NodeCommand).
     pub fn set_node_extension(&mut self, ext: Ext::Node) {
-        match self {
-            Commands::Node(command) => command.ext = ext,
-            _ => {}
+        if let Commands::Node(command) = self {
+            command.ext = ext
         }
     }
 }
