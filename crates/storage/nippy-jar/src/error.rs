@@ -7,6 +7,8 @@ pub enum NippyJarError {
     Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error(transparent)]
     Disconnect(#[from] std::io::Error),
+    #[error("{0}")]
+    Custom(String),
     #[error(transparent)]
     Bincode(#[from] Box<bincode::ErrorKind>),
     #[error(transparent)]
@@ -33,4 +35,6 @@ pub enum NippyJarError {
     PHFMissing,
     #[error("NippyJar was built without an index.")]
     UnsupportedFilterQuery,
+    #[error("Compression or decompression requires a bigger destination output.")]
+    OutputTooSmall,
 }

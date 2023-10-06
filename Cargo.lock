@@ -824,17 +824,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bloomfilter"
-version = "1.0.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b92db7965d438b8b4b1c1d0aedd188440a1084593c9eb7f6657e3df7e906d934"
-dependencies = [
- "bit-vec",
- "getrandom 0.2.10",
- "siphasher 1.0.0",
-]
-
-[[package]]
 name = "blst"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4034,6 +4023,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lz4_flex"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ea9b256699eda7b0387ffbc776dd625e28bde3918446381781245b7a50349d8"
+
+[[package]]
 name = "mach2"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4779,7 +4774,7 @@ version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90fcb95eef784c2ac79119d1dd819e162b5da872ce6f3c3abe1e8ca1c082f72b"
 dependencies = [
- "siphasher 0.3.11",
+ "siphasher",
 ]
 
 [[package]]
@@ -5421,6 +5416,7 @@ dependencies = [
  "human_bytes",
  "humantime",
  "hyper",
+ "itertools 0.11.0",
  "jemalloc-ctl",
  "jemallocator",
  "metrics",
@@ -5430,6 +5426,7 @@ dependencies = [
  "pin-project",
  "pretty_assertions",
  "proptest",
+ "rand 0.8.5",
  "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
@@ -5444,6 +5441,7 @@ dependencies = [
  "reth-net-nat",
  "reth-network",
  "reth-network-api",
+ "reth-nippy-jar",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -5639,6 +5637,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-tracing",
  "secp256k1",
  "serde",
  "serde_json",
@@ -5978,9 +5977,10 @@ version = "0.1.0-alpha.10"
 dependencies = [
  "anyhow",
  "bincode",
- "bloomfilter",
  "bytes",
  "cuckoofilter",
+ "hex",
+ "lz4_flex",
  "memmap2 0.7.1",
  "ph",
  "rand 0.8.5",
@@ -5988,6 +5988,8 @@ dependencies = [
  "sucds 0.8.0",
  "tempfile",
  "thiserror",
+ "tracing",
+ "tracing-appender",
  "zstd",
 ]
 
@@ -7215,12 +7217,6 @@ name = "siphasher"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
-
-[[package]]
-name = "siphasher"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54ac45299ccbd390721be55b412d41931911f654fa99e2cb8bfb57184b2061fe"
 
 [[package]]
 name = "sketches-ddsketch"
