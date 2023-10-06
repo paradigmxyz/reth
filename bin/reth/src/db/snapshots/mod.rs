@@ -18,6 +18,9 @@ use std::{
 mod bench;
 mod headers;
 
+pub(crate) type Rows = Vec<Vec<Vec<u8>>>;
+pub(crate) type JarConfig = (Snapshots, Compression, PerfectHashingFunction);
+
 #[derive(Parser, Debug)]
 /// Arguments for the `reth db snapshot` command.
 pub struct Command {
@@ -190,8 +193,6 @@ impl Command {
     }
 }
 
-pub(crate) type Rows = Vec<Vec<Vec<u8>>>;
-pub(crate) type JarConfig = (Snapshots, Compression, PerfectHashingFunction);
 
 #[derive(Debug, Copy, Clone, ValueEnum)]
 pub(crate) enum Snapshots {
