@@ -202,6 +202,7 @@ impl RpcServerArgs {
             .with_events(components.events())
             .with_executor(components.task_executor())
             .build_with_auth_server(module_config, engine_api);
+
         let node_modules = RethRpcComponents { registry: &mut registry, modules: &mut modules };
         // apply configured customization
         conf.extend_rpc_modules(self, components, node_modules)?;
@@ -227,7 +228,9 @@ impl RpcServerArgs {
         });
 
         // launch servers concurrently
-        Ok(futures::future::try_join(launch_rpc, launch_auth).await?)
+        let handles = Ok(futures::future::try_join(launch_rpc, launch_auth).await?);
+
+        conf.on_rpc_server_started(self, components, node_modules, handles)
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.

@@ -10,6 +10,8 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
+use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
+
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
 /// This is intended as a way to allow to _extend_ the node command. For example, to register
@@ -44,6 +46,24 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     fn on_node_started<Reth: RethNodeComponents>(&mut self, components: &Reth) -> eyre::Result<()> {
         let _ = components;
         Ok(())
+    }
+
+    /// Event hook called once the rpc server has been started.
+    fn on_rpc_server_started<Conf, Reth>(
+        &mut self,
+        config: &Conf,
+        components: &Reth,
+        rpc_components: RethRpcComponents<'_, Reth>,
+        handles: eyre::Result<(RpcServerHandle, AuthServerHandle)>,
+    ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
+    where
+        Conf: RethRpcConfig,
+        Reth: RethNodeComponents,
+    {
+        let _ = config;
+        let _ = components;
+        let _ = rpc_components;
+        handles
     }
 
     /// Allows for registering additional RPC modules for the transports.
@@ -187,6 +207,24 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
             conf.on_node_started(components)
         } else {
             Ok(())
+        }
+    }
+
+    fn on_rpc_server_started<Conf, Reth>(
+        &mut self,
+        config: &Conf,
+        components: &Reth,
+        rpc_components: RethRpcComponents<'_, Reth>,
+        handles: eyre::Result<(RpcServerHandle, AuthServerHandle)>,
+    ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
+    where
+        Conf: RethRpcConfig,
+        Reth: RethNodeComponents,
+    {
+        if let Some(conf) = self.inner_mut() {
+            conf.on_rpc_server_started(config, components, rpc_components, handles)
+        } else {
+            handles
         }
     }
 
