@@ -205,7 +205,7 @@ impl RpcServerArgs {
 
         let node_modules = RethRpcComponents { registry: &mut registry, modules: &mut modules };
         // apply configured customization
-        conf.extend_rpc_modules(self, components, node_modules)?;
+        conf.extend_rpc_modules(self, components, &node_modules)?;
 
         let server_config = self.rpc_server_config();
         let launch_rpc = modules.start_server(server_config).map_ok(|handle| {
@@ -230,7 +230,7 @@ impl RpcServerArgs {
         // launch servers concurrently
         let handles = Ok(futures::future::try_join(launch_rpc, launch_auth).await?);
 
-        conf.on_rpc_server_started(self, components, node_modules, handles)
+        conf.on_rpc_server_started(self, components, &node_modules, handles)
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.

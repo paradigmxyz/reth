@@ -53,7 +53,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         &mut self,
         config: &Conf,
         components: &Reth,
-        rpc_components: RethRpcComponents<'_, Reth>,
+        rpc_components: &RethRpcComponents<'_, Reth>,
         handles: eyre::Result<(RpcServerHandle, AuthServerHandle)>,
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
@@ -74,7 +74,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         &mut self,
         config: &Conf,
         components: &Reth,
-        rpc_components: RethRpcComponents<'_, Reth>,
+        rpc_components: &RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
@@ -214,7 +214,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         &mut self,
         config: &Conf,
         components: &Reth,
-        rpc_components: RethRpcComponents<'_, Reth>,
+        rpc_components: &RethRpcComponents<'_, Reth>,
         handles: eyre::Result<(RpcServerHandle, AuthServerHandle)>,
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
@@ -232,7 +232,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         &mut self,
         config: &Conf,
         components: &Reth,
-        rpc_components: RethRpcComponents<'_, Reth>,
+        rpc_components: &RethRpcComponents<'_, Reth>,
     ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
