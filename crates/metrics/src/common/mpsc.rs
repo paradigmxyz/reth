@@ -91,9 +91,9 @@ impl<T> UnboundedMeteredReceiver<T> {
     }
 
     /// Receives the next value for this receiver.
-    pub async fn recv(&mut self) -> Option<T> {
+     pub async fn recv(&mut self) -> Option<T> {
         let msg = self.receiver.recv().await;
-        if msg.is_some() {
+        if let Some(_) = &msg {
             self.metrics.messages_received.increment(1);
         }
         msg
@@ -114,7 +114,7 @@ impl<T> UnboundedMeteredReceiver<T> {
     /// Polls to receive the next message on this channel.
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         let msg = ready!(self.receiver.poll_recv(cx));
-        if msg.is_some() {
+        if let Some(_) = &msg {
             self.metrics.messages_received.increment(1);
         }
         Poll::Ready(msg)
