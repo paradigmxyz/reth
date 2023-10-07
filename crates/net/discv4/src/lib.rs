@@ -436,7 +436,7 @@ pub struct Discv4Service {
     ///
     /// Entries here means we've proven the peer's endpoint but haven't completed our end of the
     /// endpoint proof
-    pending_lookup: HashMap<PeerId, LookupContext>,
+    pending_lookup: HashMap<PeerId, (Instant, LookupContext)>,
     /// Currently active FindNode requests
     pending_find_nodes: HashMap<PeerId, FindNodeRequest>,
     /// Currently active ENR requests
@@ -1061,7 +1061,7 @@ impl Discv4Service {
             // if node has been proven, this means we've recieved a pong and verified its endpoint
             // proof. We've also sent a pong above to verify our endpoint proof, so we can now
             // send our find_nodes request if PingReason::Lookup
-            if let Some(ctx) = self.pending_lookup.remove(&record.id) {
+            if let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
                 if self.pending_find_nodes.contains_key(&record.id) {
                     // there's already another pending request, unmark it so the next round can
                     // try to send it
@@ -1183,8 +1183,10 @@ impl Discv4Service {
             PingReason::Lookup(node, ctx) => {
                 self.update_on_pong(node, pong.enr_sq);
                 // insert node and assoc. lookup_context into the pending_lookup table to complete
-                // our side of the endpoint proof verification
-                self.pending_lookup.insert(node.id, ctx);
+                // our side of the endpoint proof verification.
+                // Start the lookup timer here - and evict accordingly. Note that this is a separate
+                // timer than the ping_request timer.
+                self.pending_lookup.insert(node.id, (Instant::now(), ctx));
             }
         }
     }
@@ -1385,6 +1387,21 @@ impl Discv4Service {
 
         // remove nodes that failed to pong
         for node_id in failed_pings {
+            self.remove_node(node_id);
+        }
+
+        let mut failed_lookups = Vec::new();
+        self.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
+            if now.duration_since(*lookup_sent_at) > self.config.ping_expiration {
+                failed_lookups.push(*node_id);
+                return false
+            }
+            true
+        });
+        debug!(target: "discv4", num=%failed_lookups.len(), "evicting nodes due to failed lookup");
+
+        // remove nodes that failed the e2e lookup process, so we can restart it
+        for node_id in failed_lookups {
             self.remove_node(node_id);
         }
 
@@ -1825,7 +1842,7 @@ impl LookupTargetRotator {
 /// Tracks lookups across multiple `FindNode` requests.
 ///
 /// If this type is dropped by all
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct LookupContext {
     inner: Rc<LookupContextInner>,
 }
@@ -1928,7 +1945,7 @@ impl LookupContext {
 // guaranteed that there's only 1 owner ([`Discv4Service`]) of all possible [`Rc`] clones of
 // [`LookupContext`].
 unsafe impl Send for LookupContext {}
-
+#[derive(Debug)]
 struct LookupContextInner {
     /// The target to lookup.
     target: discv5::Key<NodeKey>,
@@ -2295,7 +2312,8 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let config = Discv4Config::builder().build();
-        let (_discv4, mut service) = create_discv4_with_config(config).await;
+        let (_discv4, mut service) = create_discv4_with_config(config.clone()).await;
+        let (_discv4, service2) = create_discv4_with_config(config).await;
 
         let id = PeerId::random();
         let key = kad_key(id);
@@ -2319,9 +2337,65 @@ mod tests {
 
             Poll::Ready(())
         })
-        .await
+        .await;
     }
 
+    #[tokio::test]
+    async fn test_on_neighbours_recursive_lookup() {
+        reth_tracing::init_test_tracing();
+
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config.clone()).await;
+        let (_discv4, mut service2) = create_discv4_with_config(config).await;
+
+        let id = PeerId::random();
+        let key = kad_key(id);
+        let record = NodeRecord::new("0.0.0.0:0".parse().unwrap(), id);
+
+        let _ = service.kbuckets.insert_or_update(
+            &key,
+            NodeEntry::new_proven(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+        // Needed in this test to populate self.pending_find_nodes for as a prereq to a valid
+        // on_neighbours request
+        service.lookup_self();
+        assert_eq!(service.pending_find_nodes.len(), 1);
+
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+            assert_eq!(service.pending_find_nodes.len(), 1);
+
+            Poll::Ready(())
+        })
+        .await;
+
+        let expiry = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() +
+            10000000000000;
+        let msg = Neighbours { nodes: vec![service2.local_node_record], expire: expiry };
+        service.on_neighbours(msg, record.tcp_addr(), id);
+        // wait for the processed ping
+        let event = poll_fn(|cx| service2.poll(cx)).await;
+        assert_eq!(event, Discv4Event::Ping);
+        // assert that no find_node req has been added here on top of the initial one, since both
+        // sides of the endpoint proof is not completed here
+        assert_eq!(service.pending_find_nodes.len(), 1);
+        // we now wait for PONG
+        let event = poll_fn(|cx| service.poll(cx)).await;
+        assert_eq!(event, Discv4Event::Pong);
+        // Ideally we want to assert against service.pending_lookup.len() here - but because the
+        // service2 sends Pong and Ping consecutivley on_ping(), the pending_lookup table gets
+        // drained almost immediately - and no way to grab the handle to its intermediary state here
+        // :(
+        let event = poll_fn(|cx| service.poll(cx)).await;
+        assert_eq!(event, Discv4Event::Ping);
+        // assert that we've added the find_node req here after both sides of the endpoint proof is
+        // done
+        assert_eq!(service.pending_find_nodes.len(), 2);
+    }
     #[tokio::test]
     async fn test_no_local_in_closest() {
         reth_tracing::init_test_tracing();
@@ -2448,7 +2522,7 @@ mod tests {
 
         let config = Discv4Config::builder().external_ip_resolver(None).build();
         let (_discv4, mut service_1) = create_discv4_with_config(config.clone()).await;
-        let (_discv4, mut service_2) = create_discv4_with_config(config).await;
+        let (_discv4, mut service_2) = create_discv4_with_config(config.clone()).await;
 
         // send ping from 1 -> 2
         service_1.add_node(service_2.local_node_record);
@@ -2486,14 +2560,12 @@ mod tests {
         // we now wait for PONG
         let event = poll_fn(|cx| service_2.poll(cx)).await;
 
-        // Since the endpoint was already proven from 1 POV it can already send a FindNode so the
-        // next event is either the PONG or Find Node
         match event {
-            Discv4Event::FindNode | Discv4Event::EnrRequest => {
+            Discv4Event::EnrRequest => {
                 // since we support enr in the ping it may also request the enr
                 let event = poll_fn(|cx| service_2.poll(cx)).await;
                 match event {
-                    Discv4Event::FindNode | Discv4Event::EnrRequest => {
+                    Discv4Event::EnrRequest => {
                         let event = poll_fn(|cx| service_2.poll(cx)).await;
                         assert_eq!(event, Discv4Event::Pong);
                     }
