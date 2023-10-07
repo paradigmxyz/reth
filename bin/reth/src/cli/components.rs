@@ -6,12 +6,10 @@ use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, StateProviderFactory,
 };
-use reth_rpc_builder::{error::RpcError, RethModuleRegistry, TransportRpcModules};
+use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
-
-use reth_rpc_builder::{RpcServerConfig, RpcServerHandle};
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider:
