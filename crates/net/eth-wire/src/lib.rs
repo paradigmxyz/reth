@@ -37,6 +37,8 @@ pub use crate::{
     ethstream::{EthStream, UnauthedEthStream},
     hello::HelloMessage,
     p2pstream::{P2PMessage, P2PMessageID, P2PStream, ProtocolVersion, UnauthedP2PStream},
-    sharedstream::{CapStream, SharedByteStream, SharedStream, WeakCapStreamClone},
+    sharedstream::{
+        CapStream, ManuallyDropCapStream, SharedByteStream, SharedStream, WeakCapStreamClone,
+    },
     types::message::MAX_MESSAGE_SIZE,
 };

@@ -19,6 +19,7 @@ use std::{
     any::TypeId,
     collections::HashMap,
     mem::{self, Discriminant, ManuallyDrop},
+    ops::{Deref, DerefMut},
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -227,7 +228,7 @@ sink_impl!(
     }
 );
 
-impl<S> SharedStream<ManuallyDrop<CapStream<S>>> {
+impl<S> SharedStream<ManuallyDropCapStream<S>> {
     /// Returns a shared stream if capability is shared.
     pub fn try_new<T: 'static>(caps_stream: CapStream<S>) -> Result<Self, SharedStreamError> {
         caps_stream.try_into_shared::<T>()
@@ -237,7 +238,10 @@ impl<S> SharedStream<ManuallyDrop<CapStream<S>>> {
     /// to drop [`SharedStream`].
     pub fn try_drop(&mut self) -> Result<impl FnOnce(Self), SharedStreamError> {
         if self.inner.can_drop() {
-            return Ok(|x: Self| _ = ManuallyDrop::into_inner(x.inner))
+            return Ok(|x: Self| {
+                let Self { inner, .. } = x;
+                _ = ManuallyDrop::into_inner(inner.inner)
+            })
         }
 
         Err(SharedStreamInUse)
@@ -273,12 +277,12 @@ impl<S> CapStream<S> {
     /// specific messages.
     pub fn try_into_shared<T: 'static>(
         mut self,
-    ) -> Result<SharedStream<ManuallyDrop<Self>>, SharedStreamError> {
+    ) -> Result<SharedStream<ManuallyDropCapStream<S>>, SharedStreamError> {
         let cap_type = TypeId::of::<T>();
         let cap = self.shared_cap_for(cap_type)?;
         let ingress = self.reg_new_ingress_buffer_for(&cap)?;
 
-        Ok(SharedStream { inner: ManuallyDrop::new(self), ingress, cap })
+        Ok(SharedStream { inner: ManuallyDrop::new(self).into(), ingress, cap })
     }
 
     fn clone_stream_for(
@@ -419,6 +423,55 @@ sink_impl!(
     }
 );
 
+#[derive(Debug)]
+pub struct ManuallyDropCapStream<S> {
+    inner: ManuallyDrop<CapStream<S>>,
+}
+
+impl<S> From<ManuallyDrop<CapStream<S>>> for ManuallyDropCapStream<S> {
+    fn from(value: ManuallyDrop<CapStream<S>>) -> Self {
+        ManuallyDropCapStream { inner: value }
+    }
+}
+
+impl<S> Deref for ManuallyDropCapStream<S> {
+    type Target = CapStream<S>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<S> DerefMut for ManuallyDropCapStream<S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<S, E> Stream for ManuallyDropCapStream<S>
+where
+    S: Stream<Item = Result<BytesMut, E>> + Unpin,
+    SharedStreamError: From<E>,
+{
+    type Item = Result<(), SharedStreamError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.poll_next_unpin(cx)
+    }
+}
+
+sink_impl!(
+    ManuallyDropCapStream<S>,
+    CapStreamMsg,
+    Bytes,
+    fn start_send(mut self: Pin<&mut Self>, item: CapStreamMsg) -> Result<(), Self::Error> {
+        self.inner.start_send_unpin(item)
+    },
+    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), SharedStreamError> {
+        self.inner.disconnect(reason).await
+    }
+);
+
 /// Weak clone of [`CapStream`] accesses underlying [`CapStream`] by callback.
 #[derive(Debug)]
 pub struct WeakCapStreamClone(mpsc::UnboundedSender<CapStreamMsg>);
@@ -461,14 +514,14 @@ impl CanDisconnect<CapStreamMsg> for WeakCapStreamClone {
 #[derive(Debug)]
 #[pin_project(project = EnumProj)]
 pub enum SharedByteStream<S> {
-    Owner(#[pin] SharedStream<ManuallyDrop<CapStream<S>>>),
+    Owner(#[pin] SharedStream<ManuallyDropCapStream<S>>),
     Clone(#[pin] SharedStream<WeakCapStreamClone>),
 }
 
 impl<S, E> Stream for SharedByteStream<S>
 where
     S: Stream<Item = Result<BytesMut, E>> + Unpin,
-    SharedStream<ManuallyDrop<CapStream<S>>>: Stream<Item = Result<BytesMut, SharedStreamError>>,
+    SharedStream<ManuallyDropCapStream<S>>: Stream<Item = Result<BytesMut, SharedStreamError>>,
     SharedStreamError: From<E>,
 {
     type Item = Result<BytesMut, SharedStreamError>;
@@ -485,9 +538,9 @@ where
 impl<S> Sink<Bytes> for SharedByteStream<S>
 where
     S: CanDisconnect<Bytes> + Unpin,
-    SharedStream<ManuallyDrop<CapStream<S>>>: Sink<Bytes>,
+    SharedStream<ManuallyDropCapStream<S>>: Sink<Bytes>,
     SharedStreamError: From<<S as Sink<Bytes>>::Error>,
-    SharedStreamError: From<<SharedStream<ManuallyDrop<CapStream<S>>> as Sink<Bytes>>::Error>,
+    SharedStreamError: From<<SharedStream<ManuallyDropCapStream<S>> as Sink<Bytes>>::Error>,
 {
     type Error = SharedStreamError;
 
@@ -528,9 +581,9 @@ where
 impl<S> CanDisconnect<Bytes> for SharedByteStream<S>
 where
     S: CanDisconnect<Bytes> + Send,
-    SharedStream<ManuallyDrop<CapStream<S>>>: CanDisconnect<Bytes>,
+    SharedStream<ManuallyDropCapStream<S>>: CanDisconnect<Bytes>,
     SharedStreamError: From<<S as Sink<Bytes>>::Error>,
-    SharedStreamError: From<<SharedStream<ManuallyDrop<CapStream<S>>> as Sink<Bytes>>::Error>,
+    SharedStreamError: From<<SharedStream<ManuallyDropCapStream<S>> as Sink<Bytes>>::Error>,
 {
     async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), SharedStreamError> {
         match self {

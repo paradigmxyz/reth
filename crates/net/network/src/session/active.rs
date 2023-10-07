@@ -14,9 +14,9 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::Capabilities,
-    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
+    errors::{EthHandshakeError, EthStreamError, P2PStreamError, SharedStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    DisconnectReason, EthMessage, EthStream, P2PStream,
+    DisconnectReason, EthMessage, EthStream, ManuallyDropCapStream, P2PStream, SharedByteStream,
 };
 use reth_interfaces::p2p::error::RequestError;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -36,7 +36,7 @@ use tokio::{
     sync::{mpsc::error::TrySendError, oneshot},
     time::Interval,
 };
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
 
@@ -65,7 +65,7 @@ pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.
-    pub(crate) conn: EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>,
+    pub(crate) conn: EthStream<SharedByteStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>>,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -469,7 +469,13 @@ impl ActiveSession {
     }
 }
 
-impl Future for ActiveSession {
+impl Future for ActiveSession
+where
+    EthStream<SharedByteStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>>:
+        Stream<Item = Result<EthMessage, EthStreamError>>,
+    ManuallyDropCapStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>:
+        Stream<Item = Result<(), SharedStreamError>>,
+{
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
