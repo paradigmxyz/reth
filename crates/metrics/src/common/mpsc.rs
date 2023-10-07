@@ -91,7 +91,7 @@ impl<T> UnboundedMeteredReceiver<T> {
     }
 
     /// Receives the next value for this receiver.
-     pub async fn recv(&mut self) -> Option<T> {
+    pub async fn recv(&mut self) -> Option<T> {
         let msg = self.receiver.recv().await;
         if let Some(_) = &msg {
             self.metrics.messages_received.increment(1);
