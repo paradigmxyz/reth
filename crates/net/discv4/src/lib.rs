@@ -2313,7 +2313,6 @@ mod tests {
 
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config.clone()).await;
-        let (_discv4, service2) = create_discv4_with_config(config).await;
 
         let id = PeerId::random();
         let key = kad_key(id);
@@ -2522,7 +2521,7 @@ mod tests {
 
         let config = Discv4Config::builder().external_ip_resolver(None).build();
         let (_discv4, mut service_1) = create_discv4_with_config(config.clone()).await;
-        let (_discv4, mut service_2) = create_discv4_with_config(config.clone()).await;
+        let (_discv4, mut service_2) = create_discv4_with_config(config).await;
 
         // send ping from 1 -> 2
         service_1.add_node(service_2.local_node_record);
