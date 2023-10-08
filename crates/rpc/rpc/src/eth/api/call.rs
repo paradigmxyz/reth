@@ -12,9 +12,10 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{AccessListWithGasUsed, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_revm::{
     access_list::AccessListInspector,
@@ -168,7 +169,7 @@ where
     /// Estimates the gas usage of the `request` with the state.
     ///
     /// This will execute the [CallRequest] and find the best gas limit via binary search
-    fn estimate_gas_with<S>(
+    pub fn estimate_gas_with<S>(
         &self,
         mut cfg: CfgEnv,
         block: BlockEnv,
@@ -337,11 +338,15 @@ where
         Ok(U256::from(highest_gas_limit))
     }
 
-    pub(crate) async fn create_access_list_at(
+    pub(crate) async fn create_access_list_at<F>(
         &self,
         mut request: CallRequest,
         at: Option<BlockId>,
-    ) -> EthResult<AccessList> {
+        f: F,
+    ) -> EthResult<AccessListWithGasUsed>
+    where
+        F: FnOnce(Env, &CacheDB<StateProviderDatabase<StateProviderBox<'_>>>) -> EthResult<U256>,
+    {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
@@ -372,6 +377,7 @@ where
             from.create(nonce)
         };
 
+        let gas_used = f(env.clone(), &db)?;
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
@@ -389,7 +395,8 @@ where
             }
             ExecutionResult::Success { .. } => Ok(()),
         }?;
-        Ok(inspector.into_access_list())
+
+        Ok(AccessListWithGasUsed { access_list: inspector.into_access_list(), gas_used })
     }
 }
 

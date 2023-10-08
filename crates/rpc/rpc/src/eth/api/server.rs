@@ -254,16 +254,31 @@ where
     /// Handler for: `eth_createAccessList`
     async fn create_access_list(
         &self,
-        mut request: CallRequest,
+        request: CallRequest,
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let access_list = self.create_access_list_at(request.clone(), block_number).await?;
-        request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_at(request, block_id).await?;
-        Ok(AccessListWithGasUsed { access_list, gas_used })
+        // let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        // let access_list = self.create_access_list_at(request.clone(), block_number).await?;
+        // request.access_list = Some(access_list.clone());
+        // let gas_used = self.estimate_gas_at(request, block_id).await?;
+
+        let access_list_with_gas_used = self
+            .create_access_list_at(request.clone(), block_number, |env, db| {
+                self.estimate_gas_with(env.cfg, env.block, request, db.db.state())
+            })
+            .await?;
+
+        Ok(access_list_with_gas_used)
     }
+
+    /// Handler for: `eth_createAccessList`
+    /// Implement this as callback and estimate_gas_at to avoid double block lookup
+    // async fn create_access_list_callback(
+    //     &self,
+    //     mut request: CallRequest,
+    //     block_number: Option<BlockId>,
+    // )
 
     /// Handler for: `eth_estimateGas`
     async fn estimate_gas(
