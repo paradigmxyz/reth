@@ -51,6 +51,20 @@ pub struct CallConfig {
     pub with_log: Option<bool>,
 }
 
+impl CallConfig {
+    /// Sets the only top call flag
+    pub fn only_top_call(mut self) -> Self {
+        self.only_top_call = Some(true);
+        self
+    }
+
+    /// Sets the with log flag
+    pub fn with_log(mut self) -> Self {
+        self.with_log = Some(true);
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
