@@ -394,8 +394,14 @@ where
 
     /// Handle revm metric records.
     #[cfg(feature = "open_revm_metrics_record")]
-    fn get_revm_metric_record(&self) -> (RevmMetricRecord, usize) {
-        (self.revm_metric_record.clone(), self.evm.db.as_ref().expect("db is empty").size())
+    fn get_revm_metric_record(&self) -> RevmMetricRecord {
+        self.revm_metric_record.clone()
+    }
+
+    /// Handle revm metric records.
+    #[cfg(feature = "open_revm_metrics_record")]
+    fn get_revm_metric_cachedb_size(&self) -> usize {
+        self.evm.db.as_ref().expect("db is empty").size()
     }
 }
 
