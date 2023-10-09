@@ -313,6 +313,7 @@ pub struct GethDefaultTracingOptions {
 }
 
 impl GethDefaultTracingOptions {
+    
     /// Enables memory capture.
     pub fn enable_memory(self) -> Self {
         self.with_enable_memory(true)
