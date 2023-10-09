@@ -18,7 +18,7 @@ pub enum PruneSegment {
     AccountHistory,
     /// Prune segment responsible for the `StorageChangeSet` and `StorageHistory` tables.
     StorageHistory,
-    /// Prune segment responsible for the `Transactions` and `TxSenders` tables.
+    /// Prune segment responsible for the `Transactions` table.
     Transactions,
 }
 

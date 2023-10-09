@@ -111,12 +111,6 @@ impl PruneOutput {
     pub(crate) fn done() -> Self {
         Self { done: true, pruned: 0, checkpoint: None }
     }
-
-    /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.
-    /// Use when pruning is needed but cannot be done.
-    pub(crate) fn not_done() -> Self {
-        Self { done: false, pruned: 0, checkpoint: None }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
