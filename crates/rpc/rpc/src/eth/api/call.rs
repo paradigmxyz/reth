@@ -14,8 +14,7 @@ use crate::{
 use reth_network_api::NetworkInfo;
 use reth_primitives::{AccessListWithGasUsed, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_revm::{
     access_list::AccessListInspector,
@@ -338,15 +337,23 @@ where
         Ok(U256::from(highest_gas_limit))
     }
 
-    pub(crate) async fn create_access_list_at<F>(
+    /// Creates the AccessList for the `request` at the [BlockId] or latest.
+    pub(crate) async fn create_access_list_at(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+    ) -> EthResult<AccessListWithGasUsed> {
+        self.on_blocking_task(|this| async move {
+            this.create_access_list_with(request, block_number).await
+        })
+        .await
+    }
+
+    async fn create_access_list_with(
         &self,
         mut request: CallRequest,
         at: Option<BlockId>,
-        f: F,
-    ) -> EthResult<AccessListWithGasUsed>
-    where
-        F: FnOnce(Env, &CacheDB<StateProviderDatabase<StateProviderBox<'_>>>) -> EthResult<U256>,
-    {
+    ) -> EthResult<AccessListWithGasUsed> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
@@ -377,13 +384,12 @@ where
             from.create(nonce)
         };
 
-        let gas_used = f(env.clone(), &db)?;
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
         let precompiles = get_precompiles(env.cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
-        let (result, _env) = inspect(&mut db, env, &mut inspector)?;
+        let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
             ExecutionResult::Halt { reason, .. } => Err(match reason {
@@ -396,7 +402,13 @@ where
             ExecutionResult::Success { .. } => Ok(()),
         }?;
 
-        Ok(AccessListWithGasUsed { access_list: inspector.into_access_list(), gas_used })
+        let access_list = inspector.into_access_list();
+
+        // calculate the gas used using the access list
+        request.access_list = Some(access_list.clone());
+        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state())?;
+
+        Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 }
 
