@@ -4,7 +4,9 @@ use crate::tracing::{config::TraceStyle, utils::convert_memory};
 use alloy_sol_types::decode_revert_reason;
 use reth_primitives::{Address, Bytes, B256, U256, U64};
 use reth_rpc_types::trace::{
-    geth::{AccountState, CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
+    geth::{
+        AccountState, CallFrame, CallLogFrame, DiffStateKind, GethDefaultTracingOptions, StructLog,
+    },
     parity::{
         Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
         CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TransactionTrace,
@@ -251,6 +253,16 @@ impl CallTraceNode {
         stack.extend(self.call_step_stack().into_iter().rev());
     }
 
+    /// Returns all changed slots and the recorded changes
+    fn changed_storage_slots(&self) -> BTreeMap<U256, Vec<StorageChange>> {
+        let mut changed_slots: BTreeMap<U256, Vec<StorageChange>> = BTreeMap::new();
+        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
+            changed_slots.entry(change.key).or_default().push(change);
+        }
+
+        changed_slots
+    }
+
     /// Returns a list of all steps in this trace in the order they were executed
     ///
     /// If the step is a call, the id of the child trace is set.
@@ -310,7 +322,7 @@ impl CallTraceNode {
 
         // iterate over all storage diffs
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value } = change;
+            let StorageChange { key, value, had_value, .. } = change;
             let b256_value = B256::from(value);
             match acc.storage.entry(key.into()) {
                 Entry::Vacant(entry) => {
@@ -507,18 +519,18 @@ impl CallTraceNode {
     /// [CallTrace] execution.
     ///
     /// * `account_states` - the account map updated in place.
-    /// * `post_value` - if true, it adds storage values after trace transaction execution, if
-    ///   false, returns the storage values before trace execution.
+    /// * `kind` - if [DiffStateKind::Post], it adds storage values after trace transaction
+    ///   execution, if [DiffStateKind::Pre], returns the storage values before trace execution.
     pub(crate) fn geth_update_account_storage(
         &self,
         account_states: &mut BTreeMap<Address, AccountState>,
-        post_value: bool,
+        kind: DiffStateKind,
     ) {
         let addr = self.trace.address;
         let acc_state = account_states.entry(addr).or_default();
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value } = change;
-            let value_to_insert = if post_value {
+            let StorageChange { key, value, had_value, .. } = change;
+            let value_to_insert = if kind.is_post() {
                 B256::from(value)
             } else {
                 match had_value {
@@ -530,35 +542,29 @@ impl CallTraceNode {
         }
     }
 
+    /// Updates the account storage for all accounts that were touched in the trace.
+    ///
+    /// Depending on the [DiffStateKind] this will either insert the initial value
+    /// [DiffStateKind::Pre] or the final value [DiffStateKind::Post] of the storage slot.
     pub(crate) fn geth_update_account_storage_diff_mode(
         &self,
         account_states: &mut BTreeMap<Address, AccountState>,
-        post_value: bool,
+        kind: DiffStateKind,
     ) {
-        let changes = self.trace.steps.iter().filter_map(|s| s.storage_change);
-
-        let mut changed_slots: BTreeMap<U256, Vec<StorageChange>> = BTreeMap::new();
-        for change in changes {
-            changed_slots.entry(change.key).or_default().push(change);
-        }
-
         let addr = self.execution_address();
+        let changed_slots = self.changed_storage_slots();
+
+        // loop over all changed slots and track the storage changes of that slot
         for (slot, changes) in changed_slots {
-            let mut initial_value: Option<U256> = account_states
-                .entry(addr)
-                .or_default()
-                .storage
-                .clone()
-                .unwrap_or_else(BTreeMap::new)
-                .get(&H256::from(slot))
-                .map(|v| {
-                    let conv: U256 = v.clone().into();
-                    conv
-                });
-            let mut final_value: Option<U256> = None;
+            let account = account_states.entry(addr).or_default();
+
+            let mut initial_value = account.storage.get(&B256::from(slot)).copied().map(Into::into);
+            let mut final_value = None;
 
             for change in changes {
                 if initial_value.is_none() {
+                    // set the initial value for the first storage change depending on the change
+                    // reason
                     initial_value = match change.reason {
                         StorageChangeReason::SSTORE => Some(change.had_value.unwrap_or_default()),
                         StorageChangeReason::SLOAD => Some(change.value),
@@ -566,6 +572,7 @@ impl CallTraceNode {
                 }
 
                 if change.reason == StorageChangeReason::SSTORE {
+                    // keep track of the actual state value that's updated on sstore
                     final_value = Some(change.value);
                 }
             }
@@ -575,18 +582,14 @@ impl CallTraceNode {
             }
 
             if initial_value == final_value {
+                // unchanged
                 continue
             }
 
             let value_to_write =
-                if post_value { final_value.unwrap() } else { initial_value.unwrap() };
+                if kind.is_post() { final_value } else { initial_value }.expect("exists; qed");
 
-            account_states
-                .entry(addr)
-                .or_default()
-                .storage
-                .get_or_insert_with(BTreeMap::new)
-                .insert(H256::from(slot), H256::from(value_to_write));
+            account.storage.insert(B256::from(slot), B256::from(value_to_write));
         }
     }
 }
@@ -728,6 +731,7 @@ impl CallTraceStep {
 
 /// Represents the source of a storage change - e.g., whether it came
 /// from an SSTORE or SLOAD instruction.
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StorageChangeReason {
     SLOAD,
