@@ -113,6 +113,15 @@ impl<Ext: RethCliExt> Cli<Ext> {
         reth_tracing::init(layers);
         Ok(guard.flatten())
     }
+
+    /// Configures the given node extension.
+    pub fn with_node_extension<C>(mut self, conf: C) -> Self
+    where
+        C: Into<Ext::Node>,
+    {
+        self.command.set_node_extension(conf.into());
+        self
+    }
 }
 
 /// Convenience function for parsing CLI options, set up logging and run the chosen command.
@@ -154,6 +163,17 @@ pub enum Commands<Ext: RethCliExt = ()> {
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command),
+}
+
+impl<Ext: RethCliExt> Commands<Ext> {
+    /// Sets the node extension if it is the [NodeCommand](node::NodeCommand).
+    ///
+    /// This is a noop if the command is not the [NodeCommand](node::NodeCommand).
+    pub fn set_node_extension(&mut self, ext: Ext::Node) {
+        if let Commands::Node(command) = self {
+            command.ext = ext
+        }
+    }
 }
 
 /// The log configuration.

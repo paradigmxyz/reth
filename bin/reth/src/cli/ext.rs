@@ -8,7 +8,7 @@ use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
-use std::fmt;
+use std::{fmt, marker::PhantomData};
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
@@ -119,6 +119,14 @@ impl RethNodeCommandConfig for DefaultRethNodeCommandConfig {}
 
 impl RethNodeCommandConfig for () {}
 
+/// A helper type for [RethCliExt] extension that don't require any additional clap Arguments.
+#[derive(Debug, Clone, Copy)]
+pub struct NoArgsCliExt<Conf>(PhantomData<Conf>);
+
+impl<Conf: RethNodeCommandConfig> RethCliExt for NoArgsCliExt<Conf> {
+    type Node = NoArgs<Conf>;
+}
+
 /// A helper struct that allows for wrapping a [RethNodeCommandConfig] value without providing
 /// additional CLI arguments.
 ///
@@ -211,6 +219,12 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
             .spawn_payload_builder_service(conf, components)
+    }
+}
+
+impl<T> From<T> for NoArgs<T> {
+    fn from(value: T) -> Self {
+        Self::with(value)
     }
 }
 
