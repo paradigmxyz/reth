@@ -10,14 +10,16 @@ pub enum PruneSegment {
     SenderRecovery,
     /// Prune segment responsible for the `TxHashNumber` table.
     TransactionLookup,
-    /// Prune segment responsible for all `Receipts`.
+    /// Prune segment responsible for all rows in `Receipts` table.
     Receipts,
-    /// Prune segment responsible for some `Receipts` filtered by logs.
+    /// Prune segment responsible for some rows in `Receipts` table filtered by logs.
     ContractLogs,
     /// Prune segment responsible for the `AccountChangeSet` and `AccountHistory` tables.
     AccountHistory,
     /// Prune segment responsible for the `StorageChangeSet` and `StorageHistory` tables.
     StorageHistory,
+    /// Prune segment responsible for the `CanonicalHeaders`, `Headers` and `HeaderTD` tables.
+    Headers,
 }
 
 /// PruneSegment error type.
