@@ -759,7 +759,12 @@ async fn start_pending_outbound_session(
     bandwidth_meter: BandwidthMeter,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
-        Ok(stream) => MeteredStream::new_with_meter(stream, bandwidth_meter),
+        Ok(stream) => {
+            if let Err(err) = stream.set_nodelay(true) {
+                tracing::warn!(target : "net::session", "set nodelay failed: {:?}", err);
+            }
+            MeteredStream::new_with_meter(stream, bandwidth_meter)
+        }
         Err(error) => {
             let _ = events
                 .send(PendingSessionEvent::OutgoingConnectionError {
