@@ -6,6 +6,7 @@ mod receipts_by_logs;
 mod sender_recovery;
 mod storage_history;
 mod transaction_lookup;
+mod transactions;
 
 pub(crate) use account_history::AccountHistory;
 pub(crate) use headers::Headers;
@@ -14,6 +15,7 @@ pub(crate) use receipts_by_logs::ReceiptsByLogs;
 pub(crate) use sender_recovery::SenderRecovery;
 pub(crate) use storage_history::StorageHistory;
 pub(crate) use transaction_lookup::TransactionLookup;
+pub(crate) use transactions::Transactions;
 
 use crate::PrunerError;
 use reth_db::database::Database;
