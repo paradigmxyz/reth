@@ -53,7 +53,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         &mut self,
         config: &Conf,
         components: &Reth,
-        rpc_components: &RethRpcComponents<'_, Reth>,
+        rpc_components: RethRpcComponents<'_, Reth>,
         handles: eyre::Result<(RpcServerHandle, AuthServerHandle)>,
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
