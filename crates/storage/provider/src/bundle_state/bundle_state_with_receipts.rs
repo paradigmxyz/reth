@@ -111,10 +111,12 @@ impl BundleStateWithReceipts {
     /// # Example
     ///
     /// ```
-    /// use reth_primitives::{Account, U256, Receipts};
+    /// use reth_primitives::{Account, U256, Receipts, revm_primitives::HashMap};
     /// use reth_provider::BundleStateWithReceipts;
     /// use reth_db::{test_utils::create_test_rw_db, database::Database};
-    /// use reth_revm_primitives::{db::states::bundle_state::BundleBuilder, into_revm_acc, primitives::HashMap};
+    /// use reth_revm_primitives::into_revm_acc;
+    /// use revm::db::states::BundleBuilder;
+    ///
     ///
     /// // Initialize the database
     /// let db = create_test_rw_db();
@@ -133,7 +135,7 @@ impl BundleStateWithReceipts {
     ///
     /// let bundle = BundleStateWithReceipts::new(
     ///     bundle_builder.build(),
-    ///     vec![],
+    ///     Receipts::default(),
     ///     0,
     /// );
     ///
