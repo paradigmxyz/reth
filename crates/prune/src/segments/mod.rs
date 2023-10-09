@@ -1,4 +1,7 @@
+mod headers;
 mod receipts;
+
+pub(crate) use headers::Headers;
 pub(crate) use receipts::Receipts;
 
 use crate::PrunerError;
@@ -88,10 +91,39 @@ impl PruneInput {
 
         Ok(Some(range))
     }
+
+    /// Get next inclusive block range to prune according to the checkpoint, `to_block` block
+    /// number and `limit`.
+    ///
+    /// To get the range start (`from_block`):
+    /// 1. If checkpoint exists, use next block.
+    /// 2. If checkpoint doesn't exist, use block 0.
+    ///
+    /// To get the range end: use block `to_block`.
+    pub(crate) fn get_next_block_range<DB: Database>(
+        &self,
+        provider: &DatabaseProviderRW<'_, DB>,
+        segment: PruneSegment,
+    ) -> RethResult<Option<RangeInclusive<BlockNumber>>> {
+        let from_block = provider
+            .get_prune_checkpoint(segment)?
+            .and_then(|checkpoint| checkpoint.block_number)
+            // Checkpoint exists, prune from the next block after the highest pruned one
+            .map(|block_number| block_number + 1)
+            // No checkpoint exists, prune from genesis
+            .unwrap_or(0);
+
+        let range = from_block..=self.to_block;
+        if range.is_empty() {
+            return Ok(None)
+        }
+
+        Ok(Some(range))
+    }
 }
 
 /// Segment pruning output, see [Segment::prune].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct PruneOutput {
     /// `true` if pruning has been completed up to the target block, and `false` if there's more
     /// data to prune in further runs.
@@ -105,12 +137,18 @@ pub(crate) struct PruneOutput {
 impl PruneOutput {
     /// Returns a [PruneOutput] with `done = true`, `pruned = 0` and `checkpoint = None`.
     /// Use when no pruning is needed.
-    pub(crate) fn done() -> Self {
+    pub(crate) const fn done() -> Self {
         Self { done: true, pruned: 0, checkpoint: None }
+    }
+
+    /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.
+    /// Use when pruning is needed but cannot be done.
+    pub(crate) const fn not_done() -> Self {
+        Self { done: false, pruned: 0, checkpoint: None }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct PruneOutputCheckpoint {
     /// Highest pruned block number. If it's [None], the pruning for block `0` is not finished yet.
     pub(crate) block_number: Option<BlockNumber>,

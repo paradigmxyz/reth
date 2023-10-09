@@ -103,7 +103,7 @@ impl<DB: Database> Pruner<DB> {
         let mut segments = BTreeMap::new();
 
         // TODO(alexey): prune snapshotted segments of data (headers, transactions)
-        // let highest_snapshots = *self.highest_snapshots_tracker.borrow();
+        let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
         // Multiply `delete_limit` (number of row to delete per block) by number of blocks since
         // last pruner run. `previous_tip_block_number` is close to `tip_block_number`, usually
@@ -280,6 +280,38 @@ impl<DB: Database> Pruner<DB> {
                 prune_segment = ?PruneSegment::StorageHistory,
                 "No target block to prune"
             );
+        }
+
+        if let Some(snapshots) = highest_snapshots {
+            if let (Some(to_block), true) = (snapshots.headers, delete_limit > 0) {
+                let prune_mode = PruneMode::Before(to_block + 1);
+                trace!(
+                    target: "pruner",
+                    prune_segment = ?PruneSegment::Headers,
+                    %to_block,
+                    ?prune_mode,
+                    "Got target block to prune"
+                );
+
+                let segment_start = Instant::now();
+                let segment = segments::Headers::default();
+                let output = segment.prune(&provider, PruneInput { to_block, delete_limit })?;
+                if let Some(checkpoint) = output.checkpoint {
+                    segment
+                        .save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;
+                }
+                self.metrics
+                    .get_prune_segment_metrics(PruneSegment::Headers)
+                    .duration_seconds
+                    .record(segment_start.elapsed());
+
+                done = done && output.done;
+                delete_limit = delete_limit.saturating_sub(output.pruned);
+                segments.insert(
+                    PruneSegment::Headers,
+                    (PruneProgress::from_done(output.done), output.pruned),
+                );
+            }
         }
 
         provider.commit()?;
