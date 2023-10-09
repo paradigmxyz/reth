@@ -47,7 +47,13 @@ pub trait BlockExecutor<SP: StateProvider> {
 
     /// Handle revm metric records.
     #[cfg(feature = "open_revm_metrics_record")]
-    fn get_revm_metric_record(&self) -> (RevmMetricRecord, usize) {
-        (RevmMetricRecord::default(), 0)
+    fn get_revm_metric_record(&self) -> RevmMetricRecord {
+        RevmMetricRecord::default()
+    }
+
+    /// Handle revm metric records.
+    #[cfg(feature = "open_revm_metrics_record")]
+    fn get_revm_metric_cachedb_size(&self) -> usize {
+        0
     }
 }

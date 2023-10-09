@@ -216,8 +216,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                         let record = executor.get_revm_metric_record();
                         println!("");
                         println!("block_number = {:?}", block_number);
-                        println!("revm_record = {:?}", record.0);
-                        println!("cachedb_size = {:?}", record.1);
+                        println!("revm_record = {:?}", record);
+                        let cachedb_size = executor.get_revm_metric_cachedb_size();
+                        println!("cachedb_size = {:?}", cachedb_size);
                         println!("");
                     }
                     cnt1 += 1;
