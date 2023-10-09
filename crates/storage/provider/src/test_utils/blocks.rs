@@ -109,10 +109,8 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
         account1,
         into_revm_acc(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
     );
-    bundle_builder = bundle_builder.state_storage(
-        account1,
-        HashMap::from([(U256::from_be_bytes(slot.0), (U256::from(0), U256::from(10)))]),
-    );
+    bundle_builder = bundle_builder
+        .state_storage(account1, HashMap::from([(slot.into(), (U256::from(0), U256::from(10)))]));
 
     // add account2
     bundle_builder = bundle_builder.state_present_account_info(
@@ -177,10 +175,8 @@ fn block2(
         account,
         into_revm_acc(Account { nonce: 3, balance: U256::from(20), bytecode_hash: None }),
     );
-    bundle_builder = bundle_builder.state_storage(
-        account,
-        HashMap::from([(U256::from_be_bytes(slot.0), (U256::from(0), U256::from(15)))]),
-    );
+    bundle_builder = bundle_builder
+        .state_storage(account, HashMap::from([(slot.into(), (U256::from(0), U256::from(15)))]));
 
     // add reverts for account1
     bundle_builder = bundle_builder.revert_account_info(
@@ -192,11 +188,8 @@ fn block2(
             bytecode_hash: None,
         }))),
     );
-    bundle_builder = bundle_builder.revert_storage(
-        number,
-        account,
-        vec![(U256::from_be_bytes(slot.0), U256::from(10))],
-    );
+    bundle_builder =
+        bundle_builder.revert_storage(number, account, vec![(slot.into(), U256::from(10))]);
 
     let bundle = BundleStateWithReceipts::new(
         bundle_builder.build(),
