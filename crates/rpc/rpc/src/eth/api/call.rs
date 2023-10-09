@@ -12,7 +12,7 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{AccessListWithGasUsed, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
@@ -168,7 +168,7 @@ where
     /// Estimates the gas usage of the `request` with the state.
     ///
     /// This will execute the [CallRequest] and find the best gas limit via binary search
-    fn estimate_gas_with<S>(
+    pub fn estimate_gas_with<S>(
         &self,
         mut cfg: CfgEnv,
         block: BlockEnv,
@@ -337,11 +337,23 @@ where
         Ok(U256::from(highest_gas_limit))
     }
 
+    /// Creates the AccessList for the `request` at the [BlockId] or latest.
     pub(crate) async fn create_access_list_at(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+    ) -> EthResult<AccessListWithGasUsed> {
+        self.on_blocking_task(|this| async move {
+            this.create_access_list_with(request, block_number).await
+        })
+        .await
+    }
+
+    async fn create_access_list_with(
         &self,
         mut request: CallRequest,
         at: Option<BlockId>,
-    ) -> EthResult<AccessList> {
+    ) -> EthResult<AccessListWithGasUsed> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
@@ -377,7 +389,7 @@ where
 
         let precompiles = get_precompiles(env.cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
-        let (result, _env) = inspect(&mut db, env, &mut inspector)?;
+        let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
             ExecutionResult::Halt { reason, .. } => Err(match reason {
@@ -389,7 +401,14 @@ where
             }
             ExecutionResult::Success { .. } => Ok(()),
         }?;
-        Ok(inspector.into_access_list())
+
+        let access_list = inspector.into_access_list();
+
+        // calculate the gas used using the access list
+        request.access_list = Some(access_list.clone());
+        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state())?;
+
+        Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 }
 
