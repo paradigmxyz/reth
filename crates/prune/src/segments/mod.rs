@@ -1,8 +1,10 @@
 mod headers;
 mod receipts;
+mod transactions;
 
 pub(crate) use headers::Headers;
 pub(crate) use receipts::Receipts;
+pub(crate) use transactions::Transactions;
 
 use crate::PrunerError;
 use reth_db::database::Database;

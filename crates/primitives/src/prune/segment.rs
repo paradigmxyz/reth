@@ -20,6 +20,8 @@ pub enum PruneSegment {
     StorageHistory,
     /// Prune segment responsible for the `CanonicalHeaders`, `Headers` and `HeaderTD` tables.
     Headers,
+    /// Prune segment responsible for the `Transactions` table.
+    Transactions,
 }
 
 /// PruneSegment error type.
