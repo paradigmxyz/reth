@@ -313,6 +313,41 @@ pub struct GethDefaultTracingOptions {
 }
 
 impl GethDefaultTracingOptions {
+    /// Enables memory capture.
+    pub fn enable_memory(self) -> Self {
+        self.with_enable_memory(true)
+    }
+
+    /// Disables memory capture.
+    pub fn disable_memory(self) -> Self {
+        self.with_disable_memory(true)
+    }
+
+    /// Disables stack capture.
+    pub fn disable_stack(self) -> Self {
+        self.with_disable_stack(true)
+    }
+
+    /// Disables storage capture.
+    pub fn disable_storage(self) -> Self {
+        self.with_disable_storage(true)
+    }
+
+    /// Enables return data capture.
+    pub fn enable_return_data(self) -> Self {
+        self.with_enable_return_data(true)
+    }
+
+    /// Disables return data capture.
+    pub fn disable_return_data(self) -> Self {
+        self.with_disable_return_data(true)
+    }
+
+    /// Enables debug mode.
+    pub fn debug(self) -> Self {
+        self.with_debug(true)
+    }
+
     /// Sets the enable_memory field.
     pub fn with_enable_memory(mut self, enable: bool) -> Self {
         self.enable_memory = Some(enable);
