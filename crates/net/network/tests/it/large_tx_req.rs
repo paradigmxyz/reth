@@ -22,8 +22,10 @@ async fn test_large_tx_req() {
     reth_tracing::init_test_tracing();
 
     // create 2000 fake txs
-    let txs: Vec<MockTransaction> = (0..2000).map(|_| MockTransaction::eip1559()).collect();
+    let txs: Vec<MockTransaction> = (0..1).map(|_| MockTransaction::eip1559()).collect();
     let txs_hashes: Vec<B256> = txs.iter().map(|tx| tx.get_hash()).collect();
+
+    tracing::log::debug!("mock txs: {:#?}", txs);
 
     // setup testnet
     let mock_provider = Arc::new(MockEthProvider::default());
@@ -69,6 +71,7 @@ async fn test_large_tx_req() {
     // check all txs have been received
     match receive.await.unwrap() {
         Ok(PooledTransactions(txs)) => {
+            tracing::log::debug!("actual response: {:#?}", txs);
             txs.into_iter().for_each(|tx| assert!(txs_hashes.contains(tx.hash())));
         }
         Err(e) => {

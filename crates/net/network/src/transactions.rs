@@ -246,6 +246,7 @@ where
             peer.transactions.extend(transactions.iter().map(|tx| *tx.hash()));
 
             let resp = PooledTransactions(transactions);
+            tracing::log::debug!("expected response: {:#?}", resp);
             let _ = response.send(Ok(resp));
         }
     }
