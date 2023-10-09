@@ -114,7 +114,7 @@ pub fn insert_genesis_state<DB: Database>(
                 m.iter()
                     .map(|(key, value)| {
                         let value = U256::from_be_bytes(value.0);
-                        (U256::from_be_bytes(key.0), (U256::ZERO, value))
+                        ((*key).into(), (U256::ZERO, value))
                     })
                     .collect::<HashMap<_, _>>()
             })
@@ -137,7 +137,7 @@ pub fn insert_genesis_state<DB: Database>(
         bundle_builder = bundle_builder.state_storage(*address, storage);
     }
 
-    let bundle = BundleStateWithReceipts::new(bundle_builder.build(), vec![], 0);
+    let bundle = BundleStateWithReceipts::new(bundle_builder.build(), Receipts::default(), 0);
 
     bundle.write_to_db(tx, OriginalValuesKnown::Yes)?;
 

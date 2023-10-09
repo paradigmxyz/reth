@@ -28,23 +28,25 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     keccak256,
+    revm_primitives::HashMap as HashMapRevm,
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PruneSegment,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, B256, U256,
+    Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
+    TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
-    db::states::{bundle_state::BundleBuilder, PlainStorageChangeset},
     env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
     into_reth_acc, into_revm_acc,
-    primitives::{BlockEnv, CfgEnv, HashMap as HashMapRevm, SpecId},
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
-use revm::primitives::{BlockEnv, CfgEnv, SpecId};
+use revm::{
+    db::states::{BundleBuilder, PlainStorageChangeset},
+    primitives::{BlockEnv, CfgEnv, SpecId},
+};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
@@ -301,7 +303,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             bundle_builder = bundle_builder.state_storage(
                 address,
                 HashMapRevm::from([(
-                    U256::from_be_bytes(new_storage.key.0),
+                    new_storage.key.into(),
                     (old_storage.value, new_storage.value),
                 )]),
             );
@@ -309,7 +311,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             bundle_builder = bundle_builder.revert_storage(
                 block_number,
                 address,
-                vec![(U256::from_be_bytes(old_storage.key.0), old_storage.value)],
+                vec![(old_storage.key.into(), old_storage.value)],
             );
         }
 
@@ -337,7 +339,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
                     // TODO: This does not use dupsort features
                     if plain_storage_cursor
                         .seek_by_key_subkey(address, key.into())?
-                        .filter(|s| s.key == key.into())
+                        .filter(|s| s.key == key.to_le_bytes())
                         .is_some()
                     {
                         plain_storage_cursor.delete_current()?
@@ -369,7 +371,11 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             receipts.push(block_receipts);
         }
 
-        Ok(BundleStateWithReceipts::new(bundle_state, receipts, start_block_number))
+        Ok(BundleStateWithReceipts::new(
+            bundle_state,
+            Receipts::from_vec(receipts),
+            start_block_number,
+        ))
     }
 
     /// Return list of entries from table

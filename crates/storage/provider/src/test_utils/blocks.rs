@@ -4,10 +4,11 @@ use crate::{BundleStateWithReceipts, DatabaseProviderRW};
 use alloy_rlp::Decodable;
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
-    b256, hex_literal::hex, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, Receipts,
-    SealedBlock, SealedBlockWithSenders, StorageEntry, TxType, Withdrawal, B256, U256,
+    b256, hex_literal::hex, revm_primitives::HashMap, Account, Address, BlockNumber, Bytes, Header,
+    Log, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, TxType, Withdrawal, B256, U256,
 };
-use std::collections::HashMap;
+use reth_revm_primitives::into_revm_acc;
+use revm::db::states::BundleBuilder;
 
 /// Assert genesis block
 pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<'_, DB>, g: SealedBlock) {
@@ -134,7 +135,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
 
     let bundle = BundleStateWithReceipts::new(
         bundle_builder.build(),
-        vec![vec![Some(Receipt {
+        Receipts::from_vec(vec![vec![Some(Receipt {
             tx_type: TxType::EIP2930,
             success: true,
             cumulative_gas_used: 300,
@@ -199,7 +200,7 @@ fn block2(
 
     let bundle = BundleStateWithReceipts::new(
         bundle_builder.build(),
-        vec![vec![Some(Receipt {
+        Receipts::from_vec(vec![vec![Some(Receipt {
             tx_type: TxType::EIP1559,
             success: false,
             cumulative_gas_used: 400,

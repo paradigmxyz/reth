@@ -7,17 +7,15 @@ use reth_db::{
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
     keccak256, logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts,
-    StorageEntry, B256, U256,
+    B256, U256,
 };
-use reth_revm_primitives::{into_reth_acc, into_revm_acc};
+use reth_revm_primitives::into_reth_acc;
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
 };
-use revm::{db::states::BundleState, primitives::AccountInfo};
-use std::collections::HashMap;
-
 pub use revm::db::states::OriginalValuesKnown;
+use revm::{db::states::BundleState, primitives::AccountInfo};
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
