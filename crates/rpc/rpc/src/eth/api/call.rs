@@ -17,9 +17,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_revm::{
-    access_list::AccessListInspector,
-    database::{StateProviderDatabase, SubState},
-    env::tx_env_with_recovered,
+    access_list::AccessListInspector, database::StateProviderDatabase, env::tx_env_with_recovered,
 };
 use reth_rpc_types::{
     state::StateOverride, BlockError, Bundle, CallRequest, EthCallResponse, StateContext,
@@ -109,7 +107,7 @@ where
 
         self.spawn_with_state_at_block(at.into(), move |state| {
             let mut results = Vec::with_capacity(transactions.len());
-            let mut db = SubState::new(StateProviderDatabase::new(state));
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
             if replay_block_txs {
                 // only need to replay the transactions in the block if not all transactions are
@@ -198,7 +196,7 @@ where
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
-        let mut db = SubState::new(StateProviderDatabase::new(state));
+        let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
@@ -369,7 +367,7 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         env.cfg.disable_base_fee = true;
 
-        let mut db = SubState::new(StateProviderDatabase::new(state));
+        let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
             // no gas limit was provided in the request, so we need to cap the request's gas limit
