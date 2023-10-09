@@ -410,6 +410,14 @@ impl Filter {
         self
     }
 
+    /// Sets topic0 (the event name for non-anonymous events)
+    #[must_use]
+    #[deprecated(note = "use `event_signature` instead")]
+    pub fn topic0<T: Into<Topic>>(mut self, topic: T) -> Self {
+        self.topics[0] = topic.into();
+        self
+    }
+
     /// Sets the 1st indexed topic
     #[must_use]
     pub fn topic1<T: Into<Topic>>(mut self, topic: T) -> Self {
