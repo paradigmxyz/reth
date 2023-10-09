@@ -393,18 +393,26 @@ impl Filter {
     #[must_use]
     pub fn event(self, event_name: &str) -> Self {
         let hash = keccak256(event_name.as_bytes());
-        self.topic0(hash)
+        self.event_signature(hash)
     }
 
-    /// Hashes all event signatures and sets them as array to topic0
+    /// Hashes all event signatures and sets them as array to event_signature(topic0)
     #[must_use]
     pub fn events(self, events: impl IntoIterator<Item = impl AsRef<[u8]>>) -> Self {
         let events = events.into_iter().map(|e| keccak256(e.as_ref())).collect::<Vec<_>>();
-        self.topic0(events)
+        self.event_signature(events)
+    }
+
+    /// Sets event_signature(topic0) (the event name for non-anonymous events)
+    #[must_use]
+    pub fn event_signature<T: Into<Topic>>(mut self, topic: T) -> Self {
+        self.topics[0] = topic.into();
+        self
     }
 
     /// Sets topic0 (the event name for non-anonymous events)
     #[must_use]
+    #[deprecated(note = "use `event_signature` instead")]
     pub fn topic0<T: Into<Topic>>(mut self, topic: T) -> Self {
         self.topics[0] = topic.into();
         self
