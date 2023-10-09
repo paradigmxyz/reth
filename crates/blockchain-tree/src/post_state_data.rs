@@ -1,14 +1,14 @@
 //! Substate for blockchain trees
 
 use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
-use reth_provider::{post_state::PostState, PostStateDataProvider};
+use reth_provider::{BundleStateDataProvider, BundleStateWithReceipts};
 use std::collections::BTreeMap;
 
-/// Structure that bundles references of data needs to implement [`PostStateDataProvider`]
+/// Structure that bundles references of data needs to implement [`BundleStateDataProvider`]
 #[derive(Clone, Debug)]
-pub struct PostStateDataRef<'a> {
+pub struct BundleStateDataRef<'a> {
     /// The wrapped state after execution of one or more transactions and/or blocks.
-    pub state: &'a PostState,
+    pub state: &'a BundleStateWithReceipts,
     /// The blocks in the sidechain.
     pub sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
     /// The blocks in the canonical chain.
@@ -17,8 +17,8 @@ pub struct PostStateDataRef<'a> {
     pub canonical_fork: ForkBlock,
 }
 
-impl<'a> PostStateDataProvider for PostStateDataRef<'a> {
-    fn state(&self) -> &PostState {
+impl<'a> BundleStateDataProvider for BundleStateDataRef<'a> {
+    fn state(&self) -> &BundleStateWithReceipts {
         self.state
     }
 
@@ -36,11 +36,11 @@ impl<'a> PostStateDataProvider for PostStateDataRef<'a> {
     }
 }
 
-/// Structure that contains data needs to implement [`PostStateDataProvider`]
+/// Structure that contains data needs to implement [`BundleStateDataProvider`]
 #[derive(Clone, Debug)]
-pub struct PostStateData {
+pub struct BundleStateData {
     /// Post state with changes
-    pub state: PostState,
+    pub state: BundleStateWithReceipts,
     /// Parent block hashes needs for evm BLOCKHASH opcode.
     /// NOTE: it does not mean that all hashes are there but all until finalized are there.
     /// Other hashes can be obtained from provider
@@ -49,8 +49,8 @@ pub struct PostStateData {
     pub canonical_fork: ForkBlock,
 }
 
-impl PostStateDataProvider for PostStateData {
-    fn state(&self) -> &PostState {
+impl BundleStateDataProvider for BundleStateData {
+    fn state(&self) -> &BundleStateWithReceipts {
         &self.state
     }
 

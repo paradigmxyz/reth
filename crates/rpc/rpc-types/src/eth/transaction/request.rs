@@ -2,7 +2,7 @@ use crate::eth::transaction::typed::{
     EIP1559TransactionRequest, EIP2930TransactionRequest, LegacyTransactionRequest,
     TransactionKind, TypedTransactionRequest,
 };
-use reth_primitives::{AccessList, Address, Bytes, U128, U256, U8};
+use reth_primitives::{AccessList, Address, Bytes, U128, U256, U64, U8};
 use serde::{Deserialize, Serialize};
 
 /// Represents _all_ transaction requests received from RPC
@@ -31,7 +31,7 @@ pub struct TransactionRequest {
     #[serde(alias = "input")]
     pub data: Option<Bytes>,
     /// Transaction nonce
-    pub nonce: Option<U256>,
+    pub nonce: Option<U64>,
     /// warm storage access pre-payment
     #[serde(default)]
     pub access_list: Option<AccessList>,
@@ -64,10 +64,10 @@ impl TransactionRequest {
             // legacy transaction
             (Some(_), None, None) => {
                 Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
-                    nonce: nonce.unwrap_or(U256::ZERO),
+                    nonce: nonce.unwrap_or_default(),
                     gas_price: gas_price.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
-                    value: value.unwrap_or(U256::ZERO),
+                    value: value.unwrap_or_default(),
                     input: data.unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),
@@ -79,10 +79,10 @@ impl TransactionRequest {
             // EIP2930
             (_, None, Some(access_list)) => {
                 Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
-                    nonce: nonce.unwrap_or(U256::ZERO),
+                    nonce: nonce.unwrap_or_default(),
                     gas_price: gas_price.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
-                    value: value.unwrap_or(U256::ZERO),
+                    value: value.unwrap_or_default(),
                     input: data.unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),
@@ -96,11 +96,11 @@ impl TransactionRequest {
             (None, Some(_), access_list) | (None, None, access_list @ None) => {
                 // Empty fields fall back to the canonical transaction schema.
                 Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
-                    nonce: nonce.unwrap_or(U256::ZERO),
+                    nonce: nonce.unwrap_or_default(),
                     max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
-                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or(U128::ZERO),
+                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
-                    value: value.unwrap_or(U256::ZERO),
+                    value: value.unwrap_or_default(),
                     input: data.unwrap_or_default(),
                     kind: match to {
                         Some(to) => TransactionKind::Call(to),

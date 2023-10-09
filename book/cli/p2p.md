@@ -8,12 +8,9 @@ $ reth p2p --help
 Usage: reth p2p [OPTIONS] <COMMAND>
 
 Commands:
-  header
-          Download block header
-  body
-          Download block body
-  help
-          Print this message or the help of the given subcommand(s)
+  header  Download block header
+  body    Download block body
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --config <FILE>
@@ -28,6 +25,7 @@ Options:
           - mainnet
           - goerli
           - sepolia
+          - holesky
           
           [default: mainnet]
 
@@ -70,6 +68,17 @@ Options:
           
           [default: 5]
 
+      --instance <INSTANCE>
+          Add a new instance of a node.
+          
+          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
+          
+          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
+          
+          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+          
+          [default: 1]
+
       --nat <NAT>
           [default: any]
 
@@ -91,13 +100,20 @@ Database:
           - extra:   Enables logging for extra debug-level messages
 
 Logging:
-      --log.persistent
-          The flag to enable persistent logs
-
       --log.directory <PATH>
           The path to put log files in
           
           [default: /reth/logs]
+
+      --log.max-size <SIZE>
+          The maximum size (in MB) of log files
+          
+          [default: 200]
+
+      --log.max-files <COUNT>
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          
+          [default: 5]
 
       --log.journald
           Log events to journald
@@ -106,6 +122,16 @@ Logging:
           The filter to use for logs written to the log file
           
           [default: error]
+
+      --color <COLOR>
+          Sets whether or not the formatter emits ANSI terminal escape codes for colors and other text formatting
+          
+          [default: always]
+
+          Possible values:
+          - always: Colors on
+          - auto:   Colors on
+          - never:  Colors off
 
 Display:
   -v, --verbosity...
@@ -133,40 +159,6 @@ Usage: reth p2p body [OPTIONS] <ID>
 Arguments:
   <ID>
           The block number or hash
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-
-Logging:
-      --log.persistent
-          The flag to enable persistent logs
-
-      --log.directory <PATH>
-          The path to put log files in
-          
-          [default: /reth/logs]
-
-      --log.journald
-          Log events to journald
-
-      --log.filter <FILTER>
-          The filter to use for logs written to the log file
-          
-          [default: error]
-
-Display:
-  -v, --verbosity...
-          Set the minimum log level.
-          
-          -v      Errors
-          -vv     Warnings
-          -vvv    Info
-          -vvvv   Debug
-          -vvvvv  Traces (warning: very verbose!)
-
-  -q, --quiet
-          Silence all log output
 ```
 
 ## `reth p2p header`
@@ -181,38 +173,4 @@ Usage: reth p2p header [OPTIONS] <ID>
 Arguments:
   <ID>
           The header number or hash
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-
-Logging:
-      --log.persistent
-          The flag to enable persistent logs
-
-      --log.directory <PATH>
-          The path to put log files in
-          
-          [default: /reth/logs]
-
-      --log.journald
-          Log events to journald
-
-      --log.filter <FILTER>
-          The filter to use for logs written to the log file
-          
-          [default: error]
-
-Display:
-  -v, --verbosity...
-          Set the minimum log level.
-          
-          -v      Errors
-          -vv     Warnings
-          -vvv    Info
-          -vvvv   Debug
-          -vvvvv  Traces (warning: very verbose!)
-
-  -q, --quiet
-          Silence all log output
 ```

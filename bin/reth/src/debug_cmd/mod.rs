@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 use crate::runner::CliContext;
 
+mod build_block;
 mod execution;
 mod in_memory_merkle;
 mod merkle;
@@ -23,6 +24,8 @@ pub enum Subcommands {
     Merkle(merkle::Command),
     /// Debug in-memory state root calculation.
     InMemoryMerkle(in_memory_merkle::Command),
+    /// Debug block building.
+    BuildBlock(build_block::Command),
 }
 
 impl Command {
@@ -32,6 +35,7 @@ impl Command {
             Subcommands::Execution(command) => command.execute(ctx).await,
             Subcommands::Merkle(command) => command.execute(ctx).await,
             Subcommands::InMemoryMerkle(command) => command.execute(ctx).await,
+            Subcommands::BuildBlock(command) => command.execute(ctx).await,
         }
     }
 }

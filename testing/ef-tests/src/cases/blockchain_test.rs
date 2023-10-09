@@ -4,10 +4,10 @@ use crate::{
     models::{BlockchainTest, ForkSpec, RootOrState},
     Case, Error, Suite,
 };
+use alloy_rlp::Decodable;
 use reth_db::test_utils::create_test_rw_db;
 use reth_primitives::{BlockBody, SealedBlock};
 use reth_provider::{BlockWriter, ProviderFactory};
-use reth_rlp::Decodable;
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 

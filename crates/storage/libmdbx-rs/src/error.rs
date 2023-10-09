@@ -140,7 +140,7 @@ impl From<Error> for i32 {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
             Self::DecodeErrorLenDiff => "Mismatched data length",
             _ => unsafe {

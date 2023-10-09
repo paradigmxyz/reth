@@ -1,7 +1,7 @@
 use crate::eth::error::{EthApiError, EthResult};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_interfaces::Result;
+use reth_interfaces::RethResult;
 use reth_primitives::{Address, BlockId, U256};
 use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;
@@ -70,7 +70,7 @@ where
         let accounts_before = self.provider().account_block_changeset(block_number)?;
         let hash_map = accounts_before.iter().try_fold(
             HashMap::new(),
-            |mut hash_map, account_before| -> Result<_> {
+            |mut hash_map, account_before| -> RethResult<_> {
                 let current_balance = state.account_balance(account_before.address)?;
                 let prev_balance = account_before.info.map(|info| info.balance);
                 if current_balance != prev_balance {

@@ -41,7 +41,7 @@ macro_rules! decode {
     };
 }
 
-/// Some types don't support compression (eg. H256), and we don't want to be copying them to the
+/// Some types don't support compression (eg. B256), and we don't want to be copying them to the
 /// allocated buffer when we can just use their reference.
 macro_rules! compress_or_ref {
     ($self:expr, $value:expr) => {

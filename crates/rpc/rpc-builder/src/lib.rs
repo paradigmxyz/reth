@@ -1,17 +1,4 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs, unreachable_pub)]
-#![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
-//! Configure reth RPC
+//! Configure reth RPC.
 //!
 //! This crate contains several builder and config types that allow to configure the selection of
 //! [RethRpcModule] specific to transports (ws, http, ipc).
@@ -31,13 +18,13 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
+//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Provider, Pool, Network, Events>(provider: Provider, pool: Pool, network: Network, events: Events)
 //! where
-//!     Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -64,7 +51,7 @@
 //! ```
 //! use tokio::try_join;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
+//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
 //! use reth_rpc::JwtSecret;
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
@@ -73,7 +60,7 @@
 //! use reth_rpc_builder::auth::AuthServerConfig;
 //! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(provider: Provider, pool: Pool, network: Network, events: Events, engine_api: EngineApi)
 //! where
-//!     Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -103,6 +90,15 @@
 //! }
 //! ```
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics};
 use constants::*;
 use error::{RpcError, ServerKind};
@@ -113,8 +109,8 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, StateProviderFactory,
+    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -177,6 +173,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events>(
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
+        + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
@@ -322,6 +319,7 @@ impl<Provider, Pool, Network, Tasks, Events>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events>
 where
     Provider: BlockReaderIdExt
+        + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
@@ -434,7 +432,7 @@ impl RpcModuleConfig {
 }
 
 /// Configures [RpcModuleConfig]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct RpcModuleConfigBuilder {
     eth: Option<EthConfig>,
 }
@@ -504,7 +502,11 @@ impl RpcModuleSelection {
         Self::all_modules()
     }
 
-    /// Creates a new [RpcModuleSelection::Selection] from the given items.
+    /// Creates a new _unique_ [RpcModuleSelection::Selection] from the given items.
+    ///
+    /// # Note
+    ///
+    /// This will dedupe the selection and remove duplicates while preserving the order.
     ///
     /// # Example
     ///
@@ -516,14 +518,30 @@ impl RpcModuleSelection {
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
     /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
     /// ```
+    ///
+    /// Create a unique selection from the [RethRpcModule] string identifiers
+    ///
+    /// ```
+    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// let selection = vec!["eth", "admin", "eth", "admin"];
+    /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
+    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// ```
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
         I: IntoIterator<Item = T>,
         T: TryInto<RethRpcModule>,
     {
-        let selection =
-            selection.into_iter().map(TryInto::try_into).collect::<Result<Vec<_>, _>>()?;
-        Ok(RpcModuleSelection::Selection(selection))
+        let mut unique = HashSet::new();
+
+        let mut s = Vec::new();
+        for item in selection.into_iter() {
+            let item = item.try_into()?;
+            if unique.insert(item) {
+                s.push(item);
+            }
+        }
+        Ok(RpcModuleSelection::Selection(s))
     }
 
     /// Returns true if no selection is configured
@@ -550,6 +568,7 @@ impl RpcModuleSelection {
     ) -> RpcModule<()>
     where
         Provider: BlockReaderIdExt
+            + AccountReader
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
@@ -688,6 +707,7 @@ impl Serialize for RethRpcModule {
 }
 
 /// A Helper type the holds instances of the configured modules.
+#[derive(Debug)]
 pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
     provider: Provider,
     pool: Pool,
@@ -790,6 +810,7 @@ impl<Provider, Pool, Network, Tasks, Events>
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events>
 where
     Provider: BlockReaderIdExt
+        + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
@@ -1832,6 +1853,19 @@ mod tests {
     fn parse_rpc_module_selection() {
         let selection = "all".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(selection, RpcModuleSelection::All);
+    }
+
+    #[test]
+    fn parse_rpc_unique_module_selection() {
+        let selection = "eth,admin,eth,net".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(
+            selection,
+            RpcModuleSelection::Selection(vec![
+                RethRpcModule::Eth,
+                RethRpcModule::Admin,
+                RethRpcModule::Net,
+            ])
+        );
     }
 
     #[test]

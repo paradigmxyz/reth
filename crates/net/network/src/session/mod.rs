@@ -12,7 +12,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, EthVersion, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_metrics::common::mpsc::MeteredSender;
+use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::{
     bandwidth_meter::{BandwidthMeter, MeteredStream},
     stream::HasRemoteAddr,
@@ -34,6 +34,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::PollSender;
 use tracing::{instrument, trace};
 
 mod active;
@@ -95,7 +96,7 @@ pub struct SessionManager {
     ///
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
-    active_session_tx: MeteredSender<ActiveSessionMessage>,
+    active_session_tx: MeteredPollSender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Used to measure inbound & outbound bandwidth across all managed streams
@@ -119,6 +120,7 @@ impl SessionManager {
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
+        let active_session_tx = PollSender::new(active_session_tx);
 
         Self {
             next_id: 0,
@@ -135,7 +137,7 @@ impl SessionManager {
             active_sessions: Default::default(),
             pending_sessions_tx,
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
-            active_session_tx: MeteredSender::new(active_session_tx, "network_active_session"),
+            active_session_tx: MeteredPollSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
             bandwidth_meter,
             metrics: Default::default(),
@@ -176,12 +178,14 @@ impl SessionManager {
 
     /// Invoked on a received status update.
     ///
-    /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
-    /// active [`ForkId`](ForkId). See also [`ForkFilter::set_head`].
+    /// If the updated activated another fork, this will return a [ForkTransition] and updates the
+    /// active [ForkId]. See also [ForkFilter::set_head].
     pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
         self.status.blockhash = head.hash;
         self.status.total_difficulty = head.total_difficulty;
-        self.fork_filter.set_head(head)
+        let transition = self.fork_filter.set_head(head);
+        self.status.forkid = self.fork_filter.current();
+        transition
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this
@@ -456,6 +460,7 @@ impl SessionManager {
                     ),
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
+                    terminate_message: None,
                 };
 
                 self.spawn(session);

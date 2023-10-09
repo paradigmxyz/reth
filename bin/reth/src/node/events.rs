@@ -10,6 +10,7 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     BlockNumber,
 };
+use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     future::Future,
@@ -21,7 +22,7 @@ use tokio::time::Interval;
 use tracing::{info, warn};
 
 /// Interval of reporting node state.
-const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(30);
+const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
 /// The current high-level state of the node.
 struct NodeState {
@@ -33,18 +34,18 @@ struct NodeState {
     eta: Eta,
     /// The current checkpoint of the executing stage.
     current_checkpoint: StageCheckpoint,
-    /// The latest canonical block added in the consensus engine.
-    latest_canonical_engine_block: Option<BlockNumber>,
+    /// The latest block reached by either pipeline or consensus engine.
+    latest_block: Option<BlockNumber>,
 }
 
 impl NodeState {
-    fn new(network: Option<NetworkHandle>, latest_block_number: Option<BlockNumber>) -> Self {
+    fn new(network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
         Self {
             network,
             current_stage: None,
             eta: Eta::default(),
             current_checkpoint: StageCheckpoint::new(0),
-            latest_canonical_engine_block: latest_block_number,
+            latest_block,
         }
     }
 
@@ -78,6 +79,9 @@ impl NodeState {
                 result: ExecOutput { checkpoint, done },
             } => {
                 self.current_checkpoint = checkpoint;
+                if stage_id.is_finish() {
+                    self.latest_block = Some(checkpoint.block_number);
+                }
                 self.eta.update(self.current_checkpoint);
 
                 info!(
@@ -123,9 +127,12 @@ impl NodeState {
                 );
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block) => {
-                self.latest_canonical_engine_block = Some(block.number);
-
                 info!(number=block.number, hash=?block.hash, "Block added to canonical chain");
+            }
+            BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
+                self.latest_block = Some(head.number);
+
+                info!(number=head.number, hash=?head.hash, ?elapsed, "Canonical chain committed");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
                 info!(number=block.number, hash=?block.hash, "Block added to fork chain");
@@ -134,18 +141,30 @@ impl NodeState {
     }
 
     fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {
+        // If pipeline is running, it's fine to not receive any messages from the CL.
+        // So we need to report about CL health only when pipeline is idle.
+        if self.current_stage.is_none() {
+            match event {
+                ConsensusLayerHealthEvent::NeverSeen => {
+                    warn!("Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
+                }
+                ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
+                    warn!(?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
+                }
+                ConsensusLayerHealthEvent::NeverReceivedUpdates => {
+                    warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
+                }
+                ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
+                    warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+                }
+            }
+        }
+    }
+
+    fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
-            ConsensusLayerHealthEvent::NeverSeen => {
-                warn!("Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
-            }
-            ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
-                warn!(?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
-            }
-            ConsensusLayerHealthEvent::NeverReceivedUpdates => {
-                warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
-            }
-            ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+            PrunerEvent::Finished { tip_block_number, elapsed, segments } => {
+                info!(tip_block_number, ?elapsed, ?segments, "Pruner finished");
             }
         }
     }
@@ -162,6 +181,8 @@ pub enum NodeEvent {
     ConsensusEngine(BeaconConsensusEngineEvent),
     /// A Consensus Layer health event.
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
+    /// A pruner event
+    Pruner(PrunerEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -188,6 +209,12 @@ impl From<ConsensusLayerHealthEvent> for NodeEvent {
     }
 }
 
+impl From<PrunerEvent> for NodeEvent {
+    fn from(event: PrunerEvent) -> Self {
+        NodeEvent::Pruner(event)
+    }
+}
+
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
 pub async fn handle_events<E>(
@@ -199,7 +226,8 @@ pub async fn handle_events<E>(
 {
     let state = NodeState::new(network, latest_block_number);
 
-    let mut info_interval = tokio::time::interval(INFO_MESSAGE_INTERVAL);
+    let start = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);
     info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     let handler = EventHandler { state, events, info_interval };
@@ -239,7 +267,7 @@ where
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    latest_block = this.state.latest_canonical_engine_block.unwrap_or(this.state.current_checkpoint.block_number),
+                    latest_block = this.state.latest_block.unwrap_or(this.state.current_checkpoint.block_number),
                     "Status"
                 );
             }
@@ -258,6 +286,9 @@ where
                 }
                 NodeEvent::ConsensusLayerHealth(event) => {
                     this.state.handle_consensus_layer_health_event(event)
+                }
+                NodeEvent::Pruner(event) => {
+                    this.state.handle_pruner_event(event);
                 }
             }
         }

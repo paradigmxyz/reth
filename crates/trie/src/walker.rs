@@ -6,12 +6,13 @@ use crate::{
 use reth_db::{table::Key, DatabaseError};
 use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles},
-    H256,
+    B256,
 };
 use std::marker::PhantomData;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches if the .
+#[derive(Debug)]
 pub struct TrieWalker<'a, K, C> {
     /// A mutable reference to a trie cursor instance used for navigating the trie.
     pub cursor: &'a mut C,
@@ -215,7 +216,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     }
 
     /// Returns the current hash in the trie if any.
-    pub fn hash(&self) -> Option<H256> {
+    pub fn hash(&self) -> Option<B256> {
         self.stack.last().and_then(|n| n.hash())
     }
 
@@ -225,7 +226,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     }
 
     /// Returns the next unprocessed key in the trie.
-    pub fn next_unprocessed_key(&self) -> Option<H256> {
+    pub fn next_unprocessed_key(&self) -> Option<B256> {
         self.key()
             .as_ref()
             .and_then(|key| {
@@ -237,7 +238,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
             })
             .map(|mut key| {
                 key.resize(32, 0);
-                H256::from_slice(key.as_slice())
+                B256::from_slice(key.as_slice())
             })
     }
 
@@ -301,7 +302,7 @@ mod tests {
         let account_trie = AccountTrieCursor::new(account_cursor);
         test_cursor(account_trie, &expected);
 
-        let hashed_address = H256::random();
+        let hashed_address = B256::random();
         let mut storage_cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
         for (k, v) in &inputs {
             storage_cursor
@@ -350,7 +351,7 @@ mod tests {
                     0b00100,
                     0,
                     vec![],
-                    Some(H256::random()),
+                    Some(B256::random()),
                 ),
             ),
             (
@@ -360,13 +361,13 @@ mod tests {
                     0b00010,
                     0,
                     0b00010,
-                    vec![H256::random()],
+                    vec![B256::random()],
                     None,
                 ),
             ),
         ];
 
-        let hashed_address = H256::random();
+        let hashed_address = B256::random();
         for (k, v) in nodes {
             cursor.upsert(hashed_address, StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
         }

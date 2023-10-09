@@ -1,7 +1,7 @@
 use super::headers::client::HeadersRequest;
 use crate::{consensus, db};
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{BlockHashOrNumber, BlockNumber, Header, WithPeerId, H256};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, Header, WithPeerId, B256};
 use std::ops::RangeInclusive;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -70,7 +70,7 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
 }
 
 /// Error variants that can happen when sending requests to a session.
-#[derive(Debug, Error, Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum RequestError {
     #[error("Closed channel to the peer.")]
@@ -122,7 +122,7 @@ pub enum DownloadError {
     #[error("Failed to validate header {hash}. Details: {error}.")]
     HeaderValidation {
         /// Hash of header failing validation
-        hash: H256,
+        hash: B256,
         /// The details of validation failure
         #[source]
         error: consensus::ConsensusError,
@@ -131,9 +131,9 @@ pub enum DownloadError {
     #[error("Received invalid tip: {received:?}. Expected {expected:?}.")]
     InvalidTip {
         /// The hash of the received tip
-        received: H256,
+        received: B256,
         /// The hash of the expected tip
-        expected: H256,
+        expected: B256,
     },
     /// Received a tip with an invalid tip number
     #[error("Received invalid tip number: {received:?}. Expected {expected:?}.")]
@@ -164,7 +164,7 @@ pub enum DownloadError {
     #[error("Failed to validate body for header {hash}. Details: {error}.")]
     BodyValidation {
         /// Hash of header failing validation
-        hash: H256,
+        hash: B256,
         /// The details of validation failure
         #[source]
         error: consensus::ConsensusError,

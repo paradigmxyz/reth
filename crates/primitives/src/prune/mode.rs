@@ -1,4 +1,4 @@
-use crate::{BlockNumber, PrunePart, PrunePartError};
+use crate::{BlockNumber, PruneSegment, PruneSegmentError};
 use reth_codecs::{main_codec, Compact};
 
 /// Prune mode.
@@ -21,8 +21,8 @@ impl PruneMode {
         &self,
         tip: BlockNumber,
         min_blocks: u64,
-        prune_part: PrunePart,
-    ) -> Result<Option<(BlockNumber, PruneMode)>, PrunePartError> {
+        segment: PruneSegment,
+    ) -> Result<Option<(BlockNumber, PruneMode)>, PruneSegmentError> {
         let result = match self {
             PruneMode::Full if min_blocks == 0 => Some((tip, *self)),
             PruneMode::Distance(distance) if *distance > tip => None, // Nothing to prune yet
@@ -31,7 +31,7 @@ impl PruneMode {
             }
             PruneMode::Before(n) if *n > tip => None, // Nothing to prune yet
             PruneMode::Before(n) if tip - n >= min_blocks => Some((n - 1, *self)),
-            _ => return Err(PrunePartError::Configuration(prune_part)),
+            _ => return Err(PruneSegmentError::Configuration(segment)),
         };
         Ok(result)
     }
@@ -65,19 +65,19 @@ impl Default for PruneMode {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prune::PruneMode, PrunePart, PrunePartError, MINIMUM_PRUNING_DISTANCE};
+    use crate::{prune::PruneMode, PruneSegment, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
     use assert_matches::assert_matches;
     use serde::Deserialize;
 
     #[test]
     fn test_prune_target_block() {
-        let tip = 1000;
+        let tip = 20000;
         let min_blocks = MINIMUM_PRUNING_DISTANCE;
-        let prune_part = PrunePart::Receipts;
+        let segment = PruneSegment::Receipts;
 
         let tests = vec![
             // MINIMUM_PRUNING_DISTANCE makes this impossible
-            (PruneMode::Full, Err(PrunePartError::Configuration(prune_part))),
+            (PruneMode::Full, Err(PruneSegmentError::Configuration(segment))),
             // Nothing to prune
             (PruneMode::Distance(tip + 1), Ok(None)),
             (PruneMode::Distance(min_blocks + 1), Ok(Some(tip - (min_blocks + 1)))),
@@ -91,13 +91,12 @@ mod tests {
                 PruneMode::Before(tip - MINIMUM_PRUNING_DISTANCE - 1),
                 Ok(Some(tip - MINIMUM_PRUNING_DISTANCE - 2)),
             ),
-            // MINIMUM_PRUNING_DISTANCE is 128
-            (PruneMode::Before(tip - 1), Err(PrunePartError::Configuration(prune_part))),
+            (PruneMode::Before(tip - 1), Err(PruneSegmentError::Configuration(segment))),
         ];
 
         for (index, (mode, expected_result)) in tests.into_iter().enumerate() {
             assert_eq!(
-                mode.prune_target_block(tip, min_blocks, prune_part),
+                mode.prune_target_block(tip, min_blocks, segment),
                 expected_result.map(|r| r.map(|b| (b, mode))),
                 "Test {} failed",
                 index + 1,
@@ -106,14 +105,14 @@ mod tests {
 
         // Test for a scenario where there are no minimum blocks and Full can be used
         assert_eq!(
-            PruneMode::Full.prune_target_block(tip, 0, prune_part),
+            PruneMode::Full.prune_target_block(tip, 0, segment),
             Ok(Some((tip, PruneMode::Full))),
         );
     }
 
     #[test]
     fn test_should_prune() {
-        let tip = 1000;
+        let tip = 20000;
         let should_prune = true;
 
         let tests = vec![

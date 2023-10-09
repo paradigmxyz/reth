@@ -9,7 +9,7 @@ repository.workspace = true
 description = "reth specific revm utilities"
 
 [dependencies]
-# reth 
+# reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
@@ -22,7 +22,3 @@ revm.workspace = true
 
 # common
 tracing.workspace = true
-
-[dev-dependencies]
-reth-rlp.workspace = true
-once_cell = "1.17.0"

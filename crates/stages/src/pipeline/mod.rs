@@ -7,7 +7,7 @@ use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
-    BlockNumber, ChainSpec, H256,
+    BlockNumber, ChainSpec, B256,
 };
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use std::{pin::Pin, sync::Arc};
@@ -105,7 +105,7 @@ pub struct Pipeline<DB: Database> {
     /// Keeps track of the progress of the pipeline.
     progress: PipelineProgress,
     /// A receiver for the current chain tip to sync to.
-    tip_tx: Option<watch::Sender<H256>>,
+    tip_tx: Option<watch::Sender<B256>>,
     metrics_tx: Option<MetricEventsSender>,
 }
 
@@ -126,7 +126,7 @@ where
 
     /// Set tip for reverse sync.
     #[track_caller]
-    pub fn set_tip(&self, tip: H256) {
+    pub fn set_tip(&self, tip: B256) {
         let _ = self.tip_tx.as_ref().expect("tip sender is set").send(tip).map_err(|_| {
             warn!(target: "sync::pipeline", "Chain tip channel closed");
         });
@@ -157,7 +157,7 @@ where
     /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
     /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, tip: Option<H256>) -> PipelineFut<DB> {
+    pub fn run_as_fut(mut self, tip: Option<B256>) -> PipelineFut<DB> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         let _ = self.register_metrics(); // ignore error
@@ -424,7 +424,7 @@ where
                             .max(1);
                         Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
                     } else if let StageError::Validation { block, error } = err {
-                        warn!(
+                        error!(
                             target: "sync::pipeline",
                             stage = %stage_id,
                             bad_block = %block.number,
@@ -456,7 +456,7 @@ where
                         error: BlockExecutionError::Validation(error),
                     } = err
                     {
-                        warn!(
+                        error!(
                             target: "sync::pipeline",
                             stage = %stage_id,
                             bad_block = %block.number,

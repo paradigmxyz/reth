@@ -6,6 +6,7 @@ use crate::{
     walker::TrieWalker,
     ProofError, StorageRoot,
 };
+use alloy_rlp::Encodable;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_primitives::{
     keccak256,
@@ -13,9 +14,8 @@ use reth_primitives::{
         nodes::{rlp_hash, BranchNode, LeafNode, CHILD_INDEX_RANGE},
         BranchNodeCompact, HashBuilder, Nibbles,
     },
-    Address, Bytes, H256,
+    Address, Bytes, B256,
 };
-use reth_rlp::Encodable;
 
 /// A struct for generating merkle proofs.
 ///
@@ -34,6 +34,7 @@ use reth_rlp::Encodable;
 ///
 /// After traversing the path, the proof generator continues to restore the root node of the trie
 /// until completion. The root node is then inserted at the start of the proof.
+#[derive(Debug)]
 pub struct Proof<'a, 'b, TX, H> {
     /// A reference to the database transaction.
     tx: &'a TX,
@@ -101,7 +102,7 @@ where
         &self,
         trie_cursor: &mut AccountTrieCursor<T>,
         proof_restorer: &mut ProofRestorer<'a, 'b, TX, H>,
-        hashed_address: H256,
+        hashed_address: B256,
     ) -> Result<Vec<Bytes>, ProofError> {
         let mut intermediate_proofs = Vec::new();
 
@@ -201,19 +202,19 @@ where
                 child_key_to_seek.resize(32, 0);
 
                 let leaf_node_rlp =
-                    self.restore_leaf_node(H256::from_slice(&child_key_to_seek), child_key.len())?;
+                    self.restore_leaf_node(B256::from_slice(&child_key_to_seek), child_key.len())?;
                 branch_node_stack.push(leaf_node_rlp.to_vec());
             }
         }
 
         self.node_rlp_buf.clear();
         BranchNode::new(&branch_node_stack).rlp(node.state_mask, &mut self.node_rlp_buf);
-        Ok(Bytes::from(self.node_rlp_buf.as_slice()))
+        Ok(Bytes::copy_from_slice(self.node_rlp_buf.as_slice()))
     }
 
     /// Restore leaf node.
     /// The leaf nodes are always encoded as `RLP(node) or RLP(keccak(RLP(node)))`.
-    fn restore_leaf_node(&mut self, seek_key: H256, slice_at: usize) -> Result<Bytes, ProofError> {
+    fn restore_leaf_node(&mut self, seek_key: B256, slice_at: usize) -> Result<Bytes, ProofError> {
         let (hashed_address, account) = self
             .hashed_account_cursor
             .seek(seek_key)?
@@ -239,7 +240,7 @@ where
     /// The target node might be missing from the trie.
     fn restore_target_leaf_node(
         &mut self,
-        seek_key: H256,
+        seek_key: B256,
         slice_at: usize,
     ) -> Result<Option<Bytes>, ProofError> {
         let (hashed_address, account) = match self.hashed_account_cursor.seek(seek_key)? {
@@ -260,7 +261,7 @@ where
 
         self.node_rlp_buf.clear();
         leaf_node.rlp(&mut self.node_rlp_buf);
-        Ok(Some(Bytes::from(self.node_rlp_buf.as_slice())))
+        Ok(Some(Bytes::copy_from_slice(self.node_rlp_buf.as_slice())))
     }
 }
 
@@ -269,14 +270,12 @@ mod tests {
     use super::*;
     use crate::StateRoot;
     use reth_db::{database::Database, test_utils::create_test_rw_db};
+    use reth_interfaces::RethResult;
     use reth_primitives::{ChainSpec, StorageEntry, MAINNET};
     use reth_provider::{HashingWriter, ProviderFactory};
     use std::{str::FromStr, sync::Arc};
 
-    fn insert_genesis<DB: Database>(
-        db: DB,
-        chain_spec: Arc<ChainSpec>,
-    ) -> reth_interfaces::Result<()> {
+    fn insert_genesis<DB: Database>(db: DB, chain_spec: Arc<ChainSpec>) -> RethResult<()> {
         let provider_factory = ProviderFactory::new(db, chain_spec.clone());
         let mut provider = provider_factory.provider_rw()?;
 

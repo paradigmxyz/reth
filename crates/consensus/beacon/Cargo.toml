@@ -13,13 +13,14 @@ reth-consensus-common = { path = "../common" }
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-stages = { path = "../../stages" }
-reth-db = { path = "../../storage/db" }
+reth-db.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
 reth-prune = { path = "../../prune" }
-
+reth-snapshot = { path = "../../snapshot" }
+reth-rpc-types-compat.workspace = true
 # async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
@@ -40,7 +41,7 @@ reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-stages = { path = "../../stages", features = ["test-utils"] }
 reth-blockchain-tree = { path = "../../blockchain-tree", features = ["test-utils"] }
-reth-db = { path = "../../storage/db", features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 reth-revm = { path = "../../revm" }

@@ -1,13 +1,8 @@
 //! Types for representing call trace items.
 
-use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
-
-use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
-};
-use serde::{Deserialize, Serialize};
-
-use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
+use crate::tracing::{config::TraceStyle, utils::convert_memory};
+use alloy_sol_types::decode_revert_reason;
+use reth_primitives::{Address, Bytes, B256, U256, U64};
 use reth_rpc_types::trace::{
     geth::{AccountState, CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
@@ -15,8 +10,11 @@ use reth_rpc_types::trace::{
         CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TransactionTrace,
     },
 };
-
-use crate::tracing::{config::TraceStyle, utils::convert_memory};
+use revm::interpreter::{
+    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -306,25 +304,25 @@ impl CallTraceNode {
         if self.kind().is_any_create() {
             let code = self.trace.output.clone();
             if acc.code == Delta::Unchanged {
-                acc.code = Delta::Added(code.into())
+                acc.code = Delta::Added(code)
             }
         }
 
         // iterate over all storage diffs
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value, reason: _ } = change;
-            let h256_value = H256::from(value);
+            let StorageChange { key, value, had_value } = change;
+            let b256_value = B256::from(value);
             match acc.storage.entry(key.into()) {
                 Entry::Vacant(entry) => {
                     if let Some(had_value) = had_value {
                         if value != had_value {
                             entry.insert(Delta::Changed(ChangedType {
                                 from: had_value.into(),
-                                to: h256_value,
+                                to: b256_value,
                             }));
                         }
                     } else {
-                        entry.insert(Delta::Added(h256_value));
+                        entry.insert(Delta::Added(b256_value));
                     }
                 }
                 Entry::Occupied(mut entry) => {
@@ -334,29 +332,29 @@ impl CallTraceNode {
                                 if value != had_value {
                                     Delta::Changed(ChangedType {
                                         from: had_value.into(),
-                                        to: h256_value,
+                                        to: b256_value,
                                     })
                                 } else {
                                     Delta::Unchanged
                                 }
                             } else {
-                                Delta::Added(h256_value)
+                                Delta::Added(b256_value)
                             }
                         }
                         Delta::Added(added) => {
-                            if added == &h256_value {
+                            if added == &b256_value {
                                 Delta::Added(*added)
                             } else {
-                                Delta::Changed(ChangedType { from: *added, to: h256_value })
+                                Delta::Changed(ChangedType { from: *added, to: b256_value })
                             }
                         }
-                        Delta::Removed(_) => Delta::Added(h256_value),
+                        Delta::Removed(_) => Delta::Added(b256_value),
                         Delta::Changed(c) => {
-                            if c.from == h256_value {
+                            if c.from == b256_value {
                                 // remains unchanged if the value is the same
                                 Delta::Unchanged
                             } else {
-                                Delta::Changed(ChangedType { from: c.from, to: h256_value })
+                                Delta::Changed(ChangedType { from: c.from, to: b256_value })
                             }
                         }
                     };
@@ -384,13 +382,13 @@ impl CallTraceNode {
         match self.kind() {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
                 TraceOutput::Call(CallOutput {
-                    gas_used: self.trace.gas_used.into(),
-                    output: self.trace.output.clone().into(),
+                    gas_used: U64::from(self.trace.gas_used),
+                    output: self.trace.output.clone(),
                 })
             }
             CallKind::Create | CallKind::Create2 => TraceOutput::Create(CreateOutput {
-                gas_used: self.trace.gas_used.into(),
-                code: self.trace.output.clone().into(),
+                gas_used: U64::from(self.trace.gas_used),
+                code: self.trace.output.clone(),
                 address: self.trace.address,
             }),
         }
@@ -450,16 +448,16 @@ impl CallTraceNode {
                     from: self.trace.caller,
                     to: self.trace.address,
                     value: self.trace.value,
-                    gas: self.trace.gas_limit.into(),
-                    input: self.trace.data.clone().into(),
+                    gas: U64::from(self.trace.gas_limit),
+                    input: self.trace.data.clone(),
                     call_type: self.kind().into(),
                 })
             }
             CallKind::Create | CallKind::Create2 => Action::Create(CreateAction {
                 from: self.trace.caller,
                 value: self.trace.value,
-                gas: self.trace.gas_limit.into(),
-                init: self.trace.data.clone().into(),
+                gas: U64::from(self.trace.gas_limit),
+                init: self.trace.data.clone(),
             }),
         }
     }
@@ -475,8 +473,8 @@ impl CallTraceNode {
             value: Some(self.trace.value),
             gas: U256::from(self.trace.gas_limit),
             gas_used: U256::from(self.trace.gas_used),
-            input: self.trace.data.clone().into(),
-            output: (!self.trace.output.is_empty()).then(|| self.trace.output.clone().into()),
+            input: self.trace.data.clone(),
+            output: (!self.trace.output.is_empty()).then(|| self.trace.output.clone()),
             error: None,
             revert_reason: None,
             calls: Default::default(),
@@ -485,7 +483,7 @@ impl CallTraceNode {
 
         // we need to populate error and revert reason
         if !self.trace.success {
-            call_frame.revert_reason = decode_revert_reason(self.trace.output.clone());
+            call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref());
             // Note: the call tracer mimics parity's trace transaction and geth maps errors to parity style error messages, <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
             call_frame.error = self.trace.as_error(TraceStyle::Parity);
         }
@@ -497,7 +495,7 @@ impl CallTraceNode {
                 .map(|log| CallLogFrame {
                     address: Some(self.execution_address()),
                     topics: Some(log.topics.clone()),
-                    data: Some(log.data.clone().into()),
+                    data: Some(log.data.clone()),
                 })
                 .collect();
         }
@@ -519,17 +517,16 @@ impl CallTraceNode {
         let addr = self.trace.address;
         let acc_state = account_states.entry(addr).or_default();
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value, reason: _ } = change;
-            let storage_map = acc_state.storage.get_or_insert_with(BTreeMap::new);
+            let StorageChange { key, value, had_value } = change;
             let value_to_insert = if post_value {
-                H256::from(value)
+                B256::from(value)
             } else {
                 match had_value {
-                    Some(had_value) => H256::from(had_value),
+                    Some(had_value) => B256::from(had_value),
                     None => continue,
                 }
             };
-            storage_map.insert(key.into(), value_to_insert);
+            acc_state.storage.insert(key.into(), value_to_insert);
         }
     }
 
@@ -617,7 +614,7 @@ pub(crate) enum LogCallOrder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RawLog {
     /// Indexed event params are represented as log topics.
-    pub(crate) topics: Vec<H256>,
+    pub(crate) topics: Vec<B256>,
     /// Others are just plain data.
     pub(crate) data: Bytes,
 }
@@ -700,7 +697,7 @@ impl CallTraceStep {
     /// Returns true if the step is a STOP opcode
     #[inline]
     pub(crate) fn is_stop(&self) -> bool {
-        matches!(self.op.u8(), opcode::STOP)
+        matches!(self.op.get(), opcode::STOP)
     }
 
     /// Returns true if the step is a call operation, any of
@@ -708,7 +705,7 @@ impl CallTraceStep {
     #[inline]
     pub(crate) fn is_calllike_op(&self) -> bool {
         matches!(
-            self.op.u8(),
+            self.op.get(),
             opcode::CALL |
                 opcode::DELEGATECALL |
                 opcode::STATICCALL |

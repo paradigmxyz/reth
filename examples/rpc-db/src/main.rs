@@ -20,23 +20,14 @@ use reth::{
 use reth::rpc::builder::{
     RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig,
 };
-
-// Code which we'd ideally like to not need to import if you're only spinning up
-// read-only parts of the API and do not require access to pending state or to
-// EVM sims
-use reth::{
-    beacon_consensus::BeaconConsensus,
-    blockchain_tree::{
-        BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
-    },
-    revm::Factory as ExecutionFactory,
-};
-
 // Configuring the network parts, ideally also wouldn't ned to think about this.
-use reth::{providers::test_utils::TestCanonStateSubscriptions, tasks::TokioTaskExecutor};
+use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
+use reth::{
+    blockchain_tree::noop::NoopBlockchainTree, providers::test_utils::TestCanonStateSubscriptions,
+    tasks::TokioTaskExecutor,
+};
 use std::{path::Path, sync::Arc};
 
-use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 // Custom rpc extension
 pub mod myrpc_ext;
 
@@ -47,26 +38,10 @@ async fn main() -> eyre::Result<()> {
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
     let factory = ProviderFactory::new(db.clone(), spec.clone());
 
-    // 2. Setup blcokchain tree to be able to receive live notifs
-    // TODO: Make this easier to configure
-    let provider = {
-        let consensus = Arc::new(BeaconConsensus::new(spec.clone()));
-        let exec_factory = ExecutionFactory::new(spec.clone());
-
-        let externals = TreeExternals::new(db.clone(), consensus, exec_factory, spec.clone());
-        let tree_config = BlockchainTreeConfig::default();
-        let (canon_state_notification_sender, _receiver) =
-            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
-
-        let tree = ShareableBlockchainTree::new(BlockchainTree::new(
-            externals,
-            canon_state_notification_sender,
-            tree_config,
-            None,
-        )?);
-
-        BlockchainProvider::new(factory, tree)?
-    };
+    // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
+    //    satisfy trait bounds. Tree is not used in this example since we are only operating on the
+    //    disk and don't handle new blocks/live sync etc, which is done by the blockchain tree.
+    let provider = BlockchainProvider::new(factory, NoopBlockchainTree::default())?;
 
     let rpc_builder = RpcModuleBuilder::default()
         .with_provider(provider.clone())

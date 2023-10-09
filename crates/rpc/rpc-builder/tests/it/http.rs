@@ -9,7 +9,7 @@ use jsonrpsee::{
     types::error::ErrorCode,
 };
 use reth_primitives::{
-    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, H256, H64,
+    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, B256, B64,
     U256,
 };
 use reth_rpc_api::{
@@ -65,7 +65,7 @@ where
 {
     let address = Address::default();
     let index = Index::default();
-    let hash = H256::default();
+    let hash = B256::default();
     let tx_hash = TxHash::default();
     let block_number = BlockNumberOrTag::default();
     let call_request = CallRequest::default();
@@ -111,7 +111,7 @@ where
     EthApiClient::syncing(client).await.unwrap();
     EthApiClient::send_transaction(client, transaction_request).await.unwrap_err();
     EthApiClient::hashrate(client).await.unwrap();
-    EthApiClient::submit_hashrate(client, U256::default(), H256::default()).await.unwrap();
+    EthApiClient::submit_hashrate(client, U256::default(), B256::default()).await.unwrap();
     EthApiClient::gas_price(client).await.unwrap_err();
     EthApiClient::max_priority_fee_per_gas(client).await.unwrap_err();
 
@@ -123,7 +123,7 @@ where
     assert!(is_unimplemented(EthApiClient::is_mining(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::get_work(client).await.err().unwrap()));
     assert!(is_unimplemented(
-        EthApiClient::submit_work(client, H64::default(), H256::default(), H256::default())
+        EthApiClient::submit_work(client, B64::default(), B256::default(), B256::default())
             .await
             .err()
             .unwrap()
@@ -141,7 +141,7 @@ where
 
     DebugApiClient::raw_header(client, block_id).await.unwrap();
     DebugApiClient::raw_block(client, block_id).await.unwrap();
-    DebugApiClient::raw_transaction(client, H256::default()).await.unwrap();
+    DebugApiClient::raw_transaction(client, B256::default()).await.unwrap();
     DebugApiClient::raw_receipts(client, block_id).await.unwrap();
     assert!(is_unimplemented(DebugApiClient::bad_blocks(client).await.err().unwrap()));
 }
@@ -161,10 +161,11 @@ where
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
     let trace_filter = TraceFilter {
-        from_block: None,
-        to_block: None,
-        from_address: None,
-        to_address: None,
+        from_block: Default::default(),
+        to_block: Default::default(),
+        from_address: Default::default(),
+        to_address: Default::default(),
+        mode: Default::default(),
         after: None,
         count: None,
     };
@@ -175,16 +176,14 @@ where
     TraceApiClient::trace_call_many(client, vec![], Some(BlockNumberOrTag::Latest.into()))
         .await
         .unwrap();
-    TraceApiClient::replay_transaction(client, H256::default(), HashSet::default())
+    TraceApiClient::replay_transaction(client, B256::default(), HashSet::default())
         .await
         .err()
         .unwrap();
     TraceApiClient::trace_block(client, block_id).await.unwrap();
     TraceApiClient::replay_block_transactions(client, block_id, HashSet::default()).await.unwrap();
 
-    assert!(is_unimplemented(
-        TraceApiClient::trace_filter(client, trace_filter).await.err().unwrap()
-    ));
+    TraceApiClient::trace_filter(client, trace_filter).await.unwrap();
 }
 
 async fn test_basic_web3_calls<C>(client: &C)
@@ -206,7 +205,7 @@ where
     let page_number = 1;
     let page_size = 10;
     let nonce = 1;
-    let block_hash = H256::default();
+    let block_hash = B256::default();
 
     OtterscanClient::has_code(client, address, None).await.unwrap();
 

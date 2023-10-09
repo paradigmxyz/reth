@@ -8,15 +8,15 @@ use reth_interfaces::{
         InsertPayloadOk,
     },
     consensus::Consensus,
-    Error,
+    RethResult,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, ExecutorFactory,
-    PostStateDataProvider,
+    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateSubscriptions,
+    ExecutorFactory,
 };
 use std::{
     collections::{BTreeMap, HashSet},
@@ -25,14 +25,14 @@ use std::{
 use tracing::trace;
 
 /// Shareable blockchain tree that is behind tokio::RwLock
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ShareableBlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// BlockchainTree
     pub tree: Arc<RwLock<BlockchainTree<DB, C, EF>>>,
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB, C, EF> {
-    /// Create a new sharable database.
+    /// Create a new shareable database.
     pub fn new(tree: BlockchainTree<DB, C, EF>) -> Self {
         Self { tree: Arc::new(RwLock::new(tree)) }
     }
@@ -66,26 +66,27 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         tree.update_chains_metrics();
     }
 
-    fn restore_canonical_hashes_and_finalize(
+    fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
-    ) -> Result<(), Error> {
-        trace!(target: "blockchain_tree", ?last_finalized_block, "Restoring canonical hashes for last finalized block");
+    ) -> RethResult<()> {
+        trace!(target: "blockchain_tree", ?last_finalized_block, "Connecting buffered blocks to canonical hashes and finalizing the tree");
         let mut tree = self.tree.write();
-        let res = tree.restore_canonical_hashes_and_finalize(last_finalized_block);
+        let res =
+            tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block);
         tree.update_chains_metrics();
         res
     }
 
-    fn restore_canonical_hashes(&self) -> Result<(), Error> {
-        trace!(target: "blockchain_tree", "Restoring canonical hashes");
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
+        trace!(target: "blockchain_tree", "Connecting buffered blocks to canonical hashes");
         let mut tree = self.tree.write();
-        let res = tree.restore_canonical_hashes();
+        let res = tree.connect_buffered_blocks_to_canonical_hashes();
         tree.update_chains_metrics();
         res
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, Error> {
+    fn make_canonical(&self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
         trace!(target: "blockchain_tree", ?block_hash, "Making block canonical");
         let mut tree = self.tree.write();
         let res = tree.make_canonical(block_hash);
@@ -93,7 +94,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
         res
     }
 
-    fn unwind(&self, unwind_to: BlockNumber) -> Result<(), Error> {
+    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()> {
         trace!(target: "blockchain_tree", ?unwind_to, "Unwinding to block number");
         let mut tree = self.tree.write();
         let res = tree.unwind(unwind_to);
@@ -148,6 +149,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         None
     }
 
+    fn is_canonical(&self, hash: BlockHash) -> RethResult<bool> {
+        trace!(target: "blockchain_tree", ?hash, "Checking if block is canonical");
+        self.tree.read().is_block_hash_canonical(&hash)
+    }
+
     fn lowest_buffered_ancestor(&self, hash: BlockHash) -> Option<SealedBlockWithSenders> {
         trace!(target: "blockchain_tree", ?hash, "Returning lowest buffered ancestor");
         self.tree.read().lowest_buffered_ancestor(&hash).cloned()
@@ -156,11 +162,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     fn canonical_tip(&self) -> BlockNumHash {
         trace!(target: "blockchain_tree", "Returning canonical tip");
         self.tree.read().block_indices().canonical_tip()
-    }
-
-    fn is_canonical(&self, hash: BlockHash) -> Result<bool, Error> {
-        trace!(target: "blockchain_tree", ?hash, "Checking if block is canonical");
-        self.tree.read().is_block_hash_canonical(&hash)
     }
 
     fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
@@ -181,13 +182,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)> {
         let tree = self.tree.read();
         let pending_block = tree.pending_block()?.clone();
-        let receipts = tree.receipts_by_block_hash(pending_block.hash)?.to_vec();
+        let receipts =
+            tree.receipts_by_block_hash(pending_block.hash)?.into_iter().cloned().collect();
         Some((pending_block, receipts))
     }
 
     fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>> {
         let tree = self.tree.read();
-        Some(tree.receipts_by_block_hash(block_hash)?.to_vec())
+        Some(tree.receipts_by_block_hash(block_hash)?.into_iter().cloned().collect())
     }
 }
 
@@ -197,7 +199,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingState
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn PostStateDataProvider>> {
+    ) -> Option<Box<dyn BundleStateDataProvider>> {
         trace!(target: "blockchain_tree", ?block_hash, "Finding pending state provider");
         let provider = self.tree.read().post_state_data(block_hash)?;
         Some(Box::new(provider))

@@ -2,7 +2,7 @@
 mod signature;
 use reth_primitives::{
     AccessListItem, BlockNumber, Transaction as PrimitiveTransaction,
-    TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, H256, U128,
+    TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, B256, U128,
     U256, U64,
 };
 use reth_rpc_types::Transaction;
@@ -14,7 +14,7 @@ use signature::from_primitive_signature;
 /// transaction was mined.
 pub fn from_recovered_with_block_context(
     tx: TransactionSignedEcRecovered,
-    block_hash: H256,
+    block_hash: B256,
     block_number: BlockNumber,
     base_fee: Option<u64>,
     tx_index: U256,
@@ -32,7 +32,7 @@ pub fn from_recovered(tx: TransactionSignedEcRecovered) -> Transaction {
 /// environment related fields to `None`.
 fn fill(
     tx: TransactionSignedEcRecovered,
-    block_hash: Option<H256>,
+    block_hash: Option<B256>,
     block_number: Option<BlockNumber>,
     base_fee: Option<u64>,
     transaction_index: Option<U256>,
@@ -108,10 +108,10 @@ fn fill(
 
     Transaction {
         hash: signed_tx.hash(),
-        nonce: U256::from(signed_tx.nonce()),
+        nonce: U64::from(signed_tx.nonce()),
         from: signer,
         to,
-        value: U256::from(signed_tx.value()),
+        value: signed_tx.value().into(),
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U128::from),

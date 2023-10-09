@@ -9,6 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
+use reth_interfaces::RethError;
 use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
@@ -71,13 +72,20 @@ where
         let info = self.inner.provider.chain_info()?;
         let best_number = info.best_number;
 
+        // start_block is the block from which we should start fetching changes, the next block from
+        // the last time changes were polled, in other words the best block at last poll + 1
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
             let filter = filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id))?;
 
+            if filter.block > best_number {
+                // no new blocks since the last poll
+                return Ok(FilterChanges::Empty)
+            }
+
             // update filter
             // we fetch all changes from [filter.block..best_block], so we advance the filter's
-            // block to `best_block +1`
+            // block to `best_block +1`, the next from which we should start fetching changes again
             let mut block = best_number + 1;
             std::mem::swap(&mut filter.block, &mut block);
             filter.last_poll_timestamp = Instant::now();
@@ -90,15 +98,14 @@ where
                 Err(EthApiError::Unsupported("pending transaction filter not supported").into())
             }
             FilterKind::Block => {
-                let mut block_hashes = Vec::new();
-                for block_num in start_block..best_number {
-                    let block_hash = self
-                        .inner
-                        .provider
-                        .block_hash(block_num)?
-                        .ok_or(EthApiError::UnknownBlockNumber)?;
-                    block_hashes.push(block_hash);
-                }
+                // Note: we need to fetch the block hashes from inclusive range
+                // [start_block..best_block]
+                let end_block = best_number + 1;
+                let block_hashes = self
+                    .inner
+                    .provider
+                    .canonical_hashes_range(start_block, end_block)
+                    .map_err(|_| EthApiError::UnknownBlockNumber)?;
                 Ok(FilterChanges::Hashes(block_hashes))
             }
             FilterKind::Log(filter) => {
@@ -117,6 +124,7 @@ where
                     FilterBlockOption::AtBlockHash(_) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
                         // hash blockHash
+                        // get_logs_in_block_range is inclusive
                         (start_block, best_number)
                     }
                 };
@@ -451,8 +459,8 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
     }
 }
 
-impl From<reth_interfaces::Error> for FilterError {
-    fn from(err: reth_interfaces::Error) -> Self {
+impl From<RethError> for FilterError {
+    fn from(err: RethError) -> Self {
         FilterError::EthAPIError(err.into())
     }
 }

@@ -10,6 +10,7 @@ use crate::{
 use futures_util::{future::FutureExt, StreamExt};
 use reth_rpc_types::engine::PayloadId;
 use std::{
+    fmt,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -47,6 +48,16 @@ impl PayloadStore {
         id: PayloadId,
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.inner.best_payload(id).await
+    }
+
+    /// Returns the payload attributes associated with the given identifier.
+    ///
+    /// Note: this returns the attributes of the payload and does not resolve the job.
+    pub async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+        self.inner.payload_attributes(id).await
     }
 }
 
@@ -94,6 +105,18 @@ impl PayloadBuilderHandle {
         rx.await.ok()?
     }
 
+    /// Returns the payload attributes associated with the given identifier.
+    ///
+    /// Note: this returns the attributes of the payload and does not resolve the job.
+    pub async fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+        let (tx, rx) = oneshot::channel();
+        self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
+        rx.await.ok()?
+    }
+
     /// Sends a message to the service to start building a new payload for the given payload.
     ///
     /// This is the same as [PayloadBuilderHandle::new_payload] but does not wait for the result and
@@ -128,6 +151,7 @@ impl PayloadBuilderHandle {
 ///
 /// By design, this type relies entirely on the [`PayloadJobGenerator`] to create new payloads and
 /// does know nothing about how to build them, it just drives their jobs to completion.
+#[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct PayloadBuilderService<Gen>
 where
@@ -176,6 +200,17 @@ where
         id: PayloadId,
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
         self.payload_jobs.iter().find(|(_, job_id)| *job_id == id).map(|(j, _)| j.best_payload())
+    }
+
+    /// Returns the payload attributes for the given payload.
+    fn payload_attributes(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
+        self.payload_jobs
+            .iter()
+            .find(|(_, job_id)| *job_id == id)
+            .map(|(j, _)| j.payload_attributes())
     }
 
     /// Returns the best payload for the given identifier that has been built so far and terminates
@@ -262,6 +297,9 @@ where
                     PayloadServiceCommand::BestPayload(id, tx) => {
                         let _ = tx.send(this.best_payload(id));
                     }
+                    PayloadServiceCommand::PayloadAttributes(id, tx) => {
+                        let _ = tx.send(this.payload_attributes(id));
+                    }
                     PayloadServiceCommand::Resolve(id, tx) => {
                         let _ = tx.send(this.resolve(id));
                     }
@@ -287,6 +325,28 @@ enum PayloadServiceCommand {
     ),
     /// Get the best payload so far
     BestPayload(PayloadId, oneshot::Sender<Option<Result<Arc<BuiltPayload>, PayloadBuilderError>>>),
+    /// Get the payload attributes for the given payload
+    PayloadAttributes(
+        PayloadId,
+        oneshot::Sender<Option<Result<PayloadBuilderAttributes, PayloadBuilderError>>>,
+    ),
     /// Resolve the payload and return the payload
     Resolve(PayloadId, oneshot::Sender<Option<PayloadFuture>>),
+}
+
+impl fmt::Debug for PayloadServiceCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PayloadServiceCommand::BuildNewPayload(f0, f1) => {
+                f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).finish()
+            }
+            PayloadServiceCommand::BestPayload(f0, f1) => {
+                f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
+            }
+            PayloadServiceCommand::PayloadAttributes(f0, f1) => {
+                f.debug_tuple("PayloadAttributes").field(&f0).field(&f1).finish()
+            }
+            PayloadServiceCommand::Resolve(f0, _f1) => f.debug_tuple("Resolve").field(&f0).finish(),
+        }
+    }
 }

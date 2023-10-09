@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_primitives::{
     Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock, TransactionKind,
-    TransactionSignedEcRecovered, TxHash, H256, U256,
+    TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use std::{fmt, time::Instant};
 
@@ -114,7 +114,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 
     /// Returns the hash of the transaction.
     #[inline]
-    pub(crate) fn hash(&self) -> &H256 {
+    pub(crate) fn hash(&self) -> &B256 {
         self.transaction().hash()
     }
 
@@ -294,6 +294,16 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// The heap allocated size of this transaction.
     pub(crate) fn size(&self) -> usize {
         self.transaction.size()
+    }
+
+    /// EIP-4844 blob transactions and normal transactions are treated as mutually exclusive per
+    /// account.
+    ///
+    /// Returns true if the transaction is an EIP-4844 blob transaction and the other is not, or
+    /// vice versa.
+    #[inline]
+    pub(crate) fn tx_type_conflicts_with(&self, other: &Self) -> bool {
+        self.is_eip4844() != other.is_eip4844()
     }
 }
 

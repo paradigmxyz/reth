@@ -11,10 +11,10 @@ use crate::eth::{
     signer::EthSigner,
 };
 use async_trait::async_trait;
-use reth_interfaces::Result;
+use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, H256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -48,13 +48,13 @@ pub use transactions::{EthTransactions, TransactionSource};
 #[async_trait]
 pub trait EthApiSpec: EthTransactions + Send + Sync {
     /// Returns the current ethereum protocol version.
-    async fn protocol_version(&self) -> Result<U64>;
+    async fn protocol_version(&self) -> RethResult<U64>;
 
     /// Returns the chain id
     fn chain_id(&self) -> U64;
 
     /// Returns provider chain info
-    fn chain_info(&self) -> Result<ChainInfo>;
+    fn chain_info(&self) -> RethResult<ChainInfo>;
 
     /// Returns a list of addresses owned by provider.
     fn accounts(&self) -> Vec<Address>;
@@ -63,7 +63,7 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
     fn is_syncing(&self) -> bool;
 
     /// Returns the [SyncStatus] of the network
-    fn sync_status(&self) -> Result<SyncStatus>;
+    fn sync_status(&self) -> RethResult<SyncStatus>;
 }
 
 /// `Eth` API implementation.
@@ -221,12 +221,12 @@ where
     }
 
     /// Returns the state at the given block number
-    pub fn state_at_hash(&self, block_hash: H256) -> Result<StateProviderBox<'_>> {
+    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox<'_>> {
         self.provider().history_by_block_hash(block_hash)
     }
 
     /// Returns the _latest_ state
-    pub fn latest_state(&self) -> Result<StateProviderBox<'_>> {
+    pub fn latest_state(&self) -> RethResult<StateProviderBox<'_>> {
         self.provider().latest()
     }
 }
@@ -341,7 +341,7 @@ where
     /// Returns the current ethereum protocol version.
     ///
     /// Note: This returns an `U64`, since this should return as hex string.
-    async fn protocol_version(&self) -> Result<U64> {
+    async fn protocol_version(&self) -> RethResult<U64> {
         let status = self.network().network_status().await?;
         Ok(U64::from(status.protocol_version))
     }
@@ -352,7 +352,7 @@ where
     }
 
     /// Returns the current info for the chain
-    fn chain_info(&self) -> Result<ChainInfo> {
+    fn chain_info(&self) -> RethResult<ChainInfo> {
         self.provider().chain_info()
     }
 
@@ -365,7 +365,7 @@ where
     }
 
     /// Returns the [SyncStatus] of the network
-    fn sync_status(&self) -> Result<SyncStatus> {
+    fn sync_status(&self) -> RethResult<SyncStatus> {
         let status = if self.is_syncing() {
             let current_block = U256::from(
                 self.provider().chain_info().map(|info| info.best_number).unwrap_or_default(),

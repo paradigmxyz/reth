@@ -1,15 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs, unreachable_pub)]
-#![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
 //! Implementation of a tree-like structure for blockchains.
 //!
 //! The [BlockchainTree] can validate, execute, and revert blocks in multiple competing sidechains.
@@ -22,8 +10,14 @@
 //!
 //! - `test-utils`: Export utilities for testing
 
-/// Execution result types.
-pub use reth_provider::post_state;
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod blockchain_tree;
 pub use blockchain_tree::{BlockHashes, BlockchainTree};
@@ -44,7 +38,7 @@ pub mod shareable;
 pub use shareable::ShareableBlockchainTree;
 
 pub mod post_state_data;
-pub use post_state_data::{PostStateData, PostStateDataRef};
+pub use post_state_data::{BundleStateData, BundleStateDataRef};
 
 /// Buffer of not executed blocks.
 pub mod block_buffer;
@@ -54,3 +48,6 @@ mod canonical_chain;
 pub mod metrics;
 
 pub use block_buffer::BlockBuffer;
+
+/// Implementation of Tree traits that does nothing.
+pub mod noop;

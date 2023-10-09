@@ -1,7 +1,7 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
-    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
+    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_rpc_types::{
     state::StateOverride, BlockOverrides, Bundle, CallRequest, EIP1186AccountProofResponse,
@@ -40,7 +40,7 @@ pub trait EthApi {
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
-    async fn block_by_hash(&self, hash: H256, full: bool) -> RpcResult<Option<RichBlock>>;
+    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<RichBlock>>;
 
     /// Returns information about a block by number.
     #[method(name = "getBlockByNumber")]
@@ -52,7 +52,7 @@ pub trait EthApi {
 
     /// Returns the number of transactions in a block from a block matching the given block hash.
     #[method(name = "getBlockTransactionCountByHash")]
-    async fn block_transaction_count_by_hash(&self, hash: H256) -> RpcResult<Option<U256>>;
+    async fn block_transaction_count_by_hash(&self, hash: B256) -> RpcResult<Option<U256>>;
 
     /// Returns the number of transactions in a block matching the given block number.
     #[method(name = "getBlockTransactionCountByNumber")]
@@ -63,7 +63,7 @@ pub trait EthApi {
 
     /// Returns the number of uncles in a block from a block matching the given block hash.
     #[method(name = "getUncleCountByBlockHash")]
-    async fn block_uncles_count_by_hash(&self, hash: H256) -> RpcResult<Option<U256>>;
+    async fn block_uncles_count_by_hash(&self, hash: B256) -> RpcResult<Option<U256>>;
 
     /// Returns the number of uncles in a block with given block number.
     #[method(name = "getUncleCountByBlockNumber")]
@@ -83,7 +83,7 @@ pub trait EthApi {
     #[method(name = "getUncleByBlockHashAndIndex")]
     async fn uncle_by_block_hash_and_index(
         &self,
-        hash: H256,
+        hash: B256,
         index: Index,
     ) -> RpcResult<Option<RichBlock>>;
 
@@ -97,13 +97,13 @@ pub trait EthApi {
 
     /// Returns the information about a transaction requested by transaction hash.
     #[method(name = "getTransactionByHash")]
-    async fn transaction_by_hash(&self, hash: H256) -> RpcResult<Option<Transaction>>;
+    async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>>;
 
     /// Returns information about a transaction by block hash and transaction index position.
     #[method(name = "getTransactionByBlockHashAndIndex")]
     async fn transaction_by_block_hash_and_index(
         &self,
-        hash: H256,
+        hash: B256,
         index: Index,
     ) -> RpcResult<Option<Transaction>>;
 
@@ -117,7 +117,7 @@ pub trait EthApi {
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
-    async fn transaction_receipt(&self, hash: H256) -> RpcResult<Option<TransactionReceipt>>;
+    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<TransactionReceipt>>;
 
     /// Returns the balance of the account of given address.
     #[method(name = "getBalance")]
@@ -130,7 +130,7 @@ pub trait EthApi {
         address: Address,
         index: JsonStorageKey,
         block_number: Option<BlockId>,
-    ) -> RpcResult<H256>;
+    ) -> RpcResult<B256>;
 
     /// Returns the number of transactions sent from an address at given block number.
     #[method(name = "getTransactionCount")]
@@ -236,20 +236,20 @@ pub trait EthApi {
     /// It accepts the miner hash rate and an identifier which must be unique between nodes.
     /// Returns `true` if the block was successfully submitted, `false` otherwise.
     #[method(name = "submitHashrate")]
-    async fn submit_hashrate(&self, hashrate: U256, id: H256) -> RpcResult<bool>;
+    async fn submit_hashrate(&self, hashrate: U256, id: B256) -> RpcResult<bool>;
 
     /// Used for submitting a proof-of-work solution.
     #[method(name = "submitWork")]
-    async fn submit_work(&self, nonce: H64, pow_hash: H256, mix_digest: H256) -> RpcResult<bool>;
+    async fn submit_work(&self, nonce: B64, pow_hash: B256, mix_digest: B256) -> RpcResult<bool>;
 
     /// Sends transaction; will block waiting for signer to return the
     /// transaction hash.
     #[method(name = "sendTransaction")]
-    async fn send_transaction(&self, request: TransactionRequest) -> RpcResult<H256>;
+    async fn send_transaction(&self, request: TransactionRequest) -> RpcResult<B256>;
 
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
-    async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<H256>;
+    async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<B256>;
 
     /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
     /// + len(message) + message))).

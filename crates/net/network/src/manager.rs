@@ -41,7 +41,7 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{listener::EventListeners, ForkId, NodeRecord, PeerId, H256};
+use reth_primitives::{listener::EventListeners, ForkId, NodeRecord, PeerId, B256};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
@@ -55,7 +55,7 @@ use std::{
 };
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 /// Manages the _entire_ state of the network.
 ///
@@ -85,6 +85,7 @@ use tracing::{debug, error, info, trace, warn};
 ///   ethrequest <--> |ETH request handing| NetworkManager
 ///   discovery --> |Discovered peers| NetworkManager
 /// ```
+#[derive(Debug)]
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
     /// The type that manages the actual network part, which includes connections.
@@ -300,7 +301,7 @@ where
     }
 
     /// Returns the configured genesis hash
-    pub fn genesis_hash(&self) -> H256 {
+    pub fn genesis_hash(&self) -> B256 {
         self.swarm.state().genesis_hash()
     }
 
@@ -676,15 +677,16 @@ where
                             let total_active =
                                 this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                             this.metrics.connected_peers.set(total_active as f64);
-                            info!(
-                                target : "net",
+                            debug!(
+                                target: "net",
                                 ?remote_addr,
                                 %client_version,
                                 ?peer_id,
                                 ?total_active,
+                                kind=%direction,
+                                peer_enode=%NodeRecord::new(remote_addr, peer_id),
                                 "Session established"
                             );
-                            debug!(target: "net", kind=%direction, peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
 
                             if direction.is_incoming() {
                                 this.swarm

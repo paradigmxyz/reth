@@ -1,7 +1,7 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader, Withdrawal, H256, H64, U256,
+    Address, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader, Withdrawal, B256, B64, U256,
     U64,
 };
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -12,7 +12,7 @@ use std::{collections::BTreeMap, ops::Deref};
 #[serde(untagged)]
 pub enum BlockTransactions {
     /// Only hashes
-    Hashes(Vec<H256>),
+    Hashes(Vec<B256>),
     /// Full transactions
     Full(Vec<Transaction>),
     /// Special case for uncle response.
@@ -56,7 +56,7 @@ pub enum BlockError {
     InvalidSignature,
     /// A raw block failed to decode
     #[error("failed to decode raw block {0}")]
-    RlpDecodeRawBlock(reth_rlp::DecodeError),
+    RlpDecodeRawBlock(alloy_rlp::Error),
 }
 
 /// Block representation
@@ -71,7 +71,7 @@ pub struct Block {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_difficulty: Option<U256>,
     /// Uncles' hashes
-    pub uncles: Vec<H256>,
+    pub uncles: Vec<B256>,
     /// Transactions
     #[serde(skip_serializing_if = "BlockTransactions::is_uncle")]
     pub transactions: BlockTransactions,
@@ -87,20 +87,20 @@ pub struct Block {
 #[serde(rename_all = "camelCase")]
 pub struct Header {
     /// Hash of the block
-    pub hash: Option<H256>,
+    pub hash: Option<B256>,
     /// Hash of the parent
-    pub parent_hash: H256,
+    pub parent_hash: B256,
     /// Hash of the uncles
     #[serde(rename = "sha3Uncles")]
-    pub uncles_hash: H256,
+    pub uncles_hash: B256,
     /// Alias of `author`
     pub miner: Address,
     /// State root hash
-    pub state_root: H256,
+    pub state_root: B256,
     /// Transactions root hash
-    pub transactions_root: H256,
+    pub transactions_root: B256,
     /// Transactions receipts root hash
-    pub receipts_root: H256,
+    pub receipts_root: B256,
     /// Logs bloom
     pub logs_bloom: Bloom,
     /// Difficulty
@@ -116,15 +116,15 @@ pub struct Header {
     /// Extra data
     pub extra_data: Bytes,
     /// Mix Hash
-    pub mix_hash: H256,
+    pub mix_hash: B256,
     /// Nonce
-    pub nonce: Option<H64>,
+    pub nonce: Option<B64>,
     /// Base fee per unit of gas (if past London)
     #[serde(rename = "baseFeePerGas", skip_serializing_if = "Option::is_none")]
     pub base_fee_per_gas: Option<U256>,
     /// Withdrawals root hash added by EIP-4895 and is ignored in legacy headers.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub withdrawals_root: Option<H256>,
+    pub withdrawals_root: Option<B256>,
     /// Blob gas used
     #[serde(rename = "blobGasUsed", skip_serializing_if = "Option::is_none")]
     pub blob_gas_used: Option<U64>,
@@ -133,7 +133,7 @@ pub struct Header {
     pub excess_blob_gas: Option<U64>,
     /// Parent beacon block root
     #[serde(rename = "parentBeaconBlockRoot", skip_serializing_if = "Option::is_none")]
-    pub parent_beacon_block_root: Option<H256>,
+    pub parent_beacon_block_root: Option<B256>,
 }
 
 // === impl Header ===
@@ -257,22 +257,37 @@ impl<T: Serialize> Serialize for Rich<T> {
 /// BlockOverrides is a set of header fields to override.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
-#[allow(missing_docs)]
 pub struct BlockOverrides {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Overrides the block number.
+    ///
+    /// For `eth_callMany` this will be the block number of the first simulated block. Each
+    /// following block increments its block number by 1
+    // Note: geth uses `number`, erigon uses `blockNumber`
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "blockNumber")]
     pub number: Option<U256>,
+    /// Overrides the difficulty of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub difficulty: Option<U256>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Overrides the timestamp of the block.
+    // Note: geth uses `time`, erigon uses `timestamp`
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "timestamp")]
     pub time: Option<U64>,
+    /// Overrides the gas limit of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gas_limit: Option<U64>,
+    /// Overrides the coinbase address of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coinbase: Option<Address>,
+    /// Overrides the prevrandao of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub random: Option<H256>,
+    pub random: Option<B256>,
+    /// Overrides the basefee of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_fee: Option<U256>,
+    /// A dictionary that maps blockNumber to a user-defined hash. It could be queried from the
+    /// solidity opcode BLOCKHASH.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_hash: Option<BTreeMap<u64, B256>>,
 }
 
 #[cfg(test)]
@@ -303,14 +318,14 @@ mod tests {
     fn serde_block() {
         let block = Block {
             header: Header {
-                hash: Some(H256::from_low_u64_be(1)),
-                parent_hash: H256::from_low_u64_be(2),
-                uncles_hash: H256::from_low_u64_be(3),
-                miner: Address::from_low_u64_be(4),
-                state_root: H256::from_low_u64_be(5),
-                transactions_root: H256::from_low_u64_be(6),
-                receipts_root: H256::from_low_u64_be(7),
-                withdrawals_root: Some(H256::from_low_u64_be(8)),
+                hash: Some(B256::with_last_byte(1)),
+                parent_hash: B256::with_last_byte(2),
+                uncles_hash: B256::with_last_byte(3),
+                miner: Address::with_last_byte(4),
+                state_root: B256::with_last_byte(5),
+                transactions_root: B256::with_last_byte(6),
+                receipts_root: B256::with_last_byte(7),
+                withdrawals_root: Some(B256::with_last_byte(8)),
                 number: Some(U256::from(9)),
                 gas_used: U256::from(10),
                 gas_limit: U256::from(11),
@@ -318,16 +333,16 @@ mod tests {
                 logs_bloom: Bloom::default(),
                 timestamp: U256::from(12),
                 difficulty: U256::from(13),
-                mix_hash: H256::from_low_u64_be(14),
-                nonce: Some(H64::from_low_u64_be(15)),
+                mix_hash: B256::with_last_byte(14),
+                nonce: Some(B64::with_last_byte(15)),
                 base_fee_per_gas: Some(U256::from(20)),
                 blob_gas_used: None,
                 excess_blob_gas: None,
                 parent_beacon_block_root: None,
             },
             total_difficulty: Some(U256::from(100000)),
-            uncles: vec![H256::from_low_u64_be(17)],
-            transactions: BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)]),
+            uncles: vec![B256::with_last_byte(17)],
+            transactions: BlockTransactions::Hashes(vec![B256::with_last_byte(18)]),
             size: Some(U256::from(19)),
             withdrawals: Some(vec![]),
         };
@@ -344,13 +359,13 @@ mod tests {
     fn serde_block_with_withdrawals_set_as_none() {
         let block = Block {
             header: Header {
-                hash: Some(H256::from_low_u64_be(1)),
-                parent_hash: H256::from_low_u64_be(2),
-                uncles_hash: H256::from_low_u64_be(3),
-                miner: Address::from_low_u64_be(4),
-                state_root: H256::from_low_u64_be(5),
-                transactions_root: H256::from_low_u64_be(6),
-                receipts_root: H256::from_low_u64_be(7),
+                hash: Some(B256::with_last_byte(1)),
+                parent_hash: B256::with_last_byte(2),
+                uncles_hash: B256::with_last_byte(3),
+                miner: Address::with_last_byte(4),
+                state_root: B256::with_last_byte(5),
+                transactions_root: B256::with_last_byte(6),
+                receipts_root: B256::with_last_byte(7),
                 withdrawals_root: None,
                 number: Some(U256::from(9)),
                 gas_used: U256::from(10),
@@ -359,16 +374,16 @@ mod tests {
                 logs_bloom: Bloom::default(),
                 timestamp: U256::from(12),
                 difficulty: U256::from(13),
-                mix_hash: H256::from_low_u64_be(14),
-                nonce: Some(H64::from_low_u64_be(15)),
+                mix_hash: B256::with_last_byte(14),
+                nonce: Some(B64::with_last_byte(15)),
                 base_fee_per_gas: Some(U256::from(20)),
                 blob_gas_used: None,
                 excess_blob_gas: None,
                 parent_beacon_block_root: None,
             },
             total_difficulty: Some(U256::from(100000)),
-            uncles: vec![H256::from_low_u64_be(17)],
-            transactions: BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)]),
+            uncles: vec![B256::with_last_byte(17)],
+            transactions: BlockTransactions::Hashes(vec![B256::with_last_byte(18)]),
             size: Some(U256::from(19)),
             withdrawals: None,
         };
@@ -379,5 +394,11 @@ mod tests {
         );
         let deserialized: Block = serde_json::from_str(&serialized).unwrap();
         assert_eq!(block, deserialized);
+    }
+
+    #[test]
+    fn block_overrides() {
+        let s = r#"{"blockNumber": "0xe39dd0"}"#;
+        let _overrides = serde_json::from_str::<BlockOverrides>(s).unwrap();
     }
 }

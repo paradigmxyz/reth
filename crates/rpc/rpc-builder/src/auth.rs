@@ -1,7 +1,7 @@
 use crate::{
     constants,
+    constants::DEFAULT_MAX_LOGS_PER_RESPONSE,
     error::{RpcError, ServerKind},
-    eth::DEFAULT_MAX_LOGS_PER_RESPONSE,
     EthConfig,
 };
 use hyper::header::AUTHORIZATION;
@@ -139,6 +139,11 @@ impl AuthServerConfig {
     /// Convenience function to create a new `AuthServerConfig`.
     pub fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
         AuthServerConfigBuilder::new(secret)
+    }
+
+    /// Returns the address the server will listen on.
+    pub fn address(&self) -> SocketAddr {
+        self.socket_addr
     }
 
     /// Convenience function to start a server in one step.

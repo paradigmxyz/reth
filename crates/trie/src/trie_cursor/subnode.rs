@@ -1,6 +1,6 @@
 use reth_primitives::{
     trie::{nodes::CHILD_INDEX_RANGE, BranchNodeCompact, Nibbles, StoredSubNode},
-    H256,
+    B256,
 };
 
 /// Cursor for iterating over a subtrie.
@@ -106,7 +106,7 @@ impl CursorSubNode {
     }
 
     /// Returns the root hash of the current node, if it has one.
-    pub fn hash(&self) -> Option<H256> {
+    pub fn hash(&self) -> Option<B256> {
         if self.hash_flag() {
             let node = self.node.as_ref().unwrap();
             match self.nibble {

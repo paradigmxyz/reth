@@ -1,10 +1,9 @@
-use std::mem;
-
-use crate::{Address, H256};
+use crate::{Address, B256};
+use alloy_primitives::U256;
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
+use std::mem;
 
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
@@ -18,17 +17,17 @@ pub struct AccessListItem {
     #[cfg_attr(
         any(test, feature = "arbitrary"),
         proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<H256>(), 0..=20)"
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 0..=20)"
         )
     )]
-    pub storage_keys: Vec<H256>,
+    pub storage_keys: Vec<B256>,
 }
 
 impl AccessListItem {
     /// Calculates a heuristic for the in-memory size of the [AccessListItem].
     #[inline]
     pub fn size(&self) -> usize {
-        mem::size_of::<Address>() + self.storage_keys.capacity() * mem::size_of::<H256>()
+        mem::size_of::<Address>() + self.storage_keys.capacity() * mem::size_of::<B256>()
     }
 }
 
@@ -47,16 +46,31 @@ pub struct AccessList(
 
 impl AccessList {
     /// Converts the list into a vec, expected by revm
-    pub fn flattened(self) -> Vec<(Address, Vec<U256>)> {
+    pub fn flattened(&self) -> Vec<(Address, Vec<U256>)> {
         self.flatten().collect()
     }
 
-    /// Returns an iterator over the list's addresses and storage keys.
-    pub fn flatten(self) -> impl Iterator<Item = (Address, Vec<U256>)> {
+    /// Consumes the type and converts the list into a vec, expected by revm
+    pub fn into_flattened(self) -> Vec<(Address, Vec<U256>)> {
+        self.into_flatten().collect()
+    }
+
+    /// Consumes the type and returns an iterator over the list's addresses and storage keys.
+    pub fn into_flatten(self) -> impl Iterator<Item = (Address, Vec<U256>)> {
         self.0.into_iter().map(|item| {
             (
                 item.address,
                 item.storage_keys.into_iter().map(|slot| U256::from_be_bytes(slot.0)).collect(),
+            )
+        })
+    }
+
+    /// Returns an iterator over the list's addresses and storage keys.
+    pub fn flatten(&self) -> impl Iterator<Item = (Address, Vec<U256>)> + '_ {
+        self.0.iter().map(|item| {
+            (
+                item.address,
+                item.storage_keys.iter().map(|slot| U256::from_be_bytes(slot.0)).collect(),
             )
         })
     }

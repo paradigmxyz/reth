@@ -9,18 +9,18 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
-    AccountExtReader, BlockExecutor, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, ProviderFactory, StageCheckpointReader, StorageReader,
+    AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StorageReader,
 };
 use reth_tasks::TaskExecutor;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, updates::TrieKey, StateRoot};
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
 };
@@ -50,6 +50,7 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
@@ -88,13 +89,10 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
-            )))
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.discovery.addr,
+                self.network.discovery.port,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
             .start_network()
@@ -164,17 +162,19 @@ impl Command {
             .await?;
 
         let executor_factory = reth_revm::Factory::new(self.chain.clone());
-        let mut executor = executor_factory.with_sp(LatestStateProviderRef::new(provider.tx_ref()));
+        let mut executor =
+            executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        let block_state = executor.execute_and_verify_receipt(
+        executor.execute_and_verify_receipt(
             &block.clone().unseal(),
             merkle_block_td + block.difficulty,
             None,
         )?;
+        let block_state = executor.take_output_state();
 
-        // Unpacked `PostState::state_root_slow` function
+        // Unpacked `BundleState::state_root_slow` function
         let hashed_post_state = block_state.hash_state_slow().sorted();
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let tx = provider.tx_ref();
@@ -194,7 +194,7 @@ impl Command {
 
         // Insert block, state and hashes
         provider_rw.insert_block(block.clone(), None, None)?;
-        block_state.write_to_db(provider_rw.tx_ref(), block.number)?;
+        block_state.write_to_db(provider_rw.tx_ref(), OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plainstate_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;

@@ -33,7 +33,7 @@ skip-tree = []
 
 [licenses]
 unlicensed = "deny"
-confidence-threshold = 0.9
+confidence-threshold = 0.8
 # copyleft = "deny"
 
 # List of explicitly allowed licenses
@@ -93,4 +93,12 @@ license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 unknown-registry = "warn"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
-unknown-git = "allow"
+unknown-git = "deny"
+allow-git = [
+    # TODO: remove, see ./Cargo.toml
+    "https://github.com/bluealloy/revm",
+
+    "https://github.com/ethereum/c-kzg-4844",
+    "https://github.com/sigp/discv5",
+    "https://github.com/stevefan1999-personal/rust-igd",
+]

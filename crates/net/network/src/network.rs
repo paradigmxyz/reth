@@ -11,7 +11,7 @@ use reth_network_api::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
-use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
+use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
 use std::{
     net::SocketAddr,
@@ -132,8 +132,10 @@ impl NetworkHandle {
 
     /// Announce a block over devp2p
     ///
-    /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
-    pub fn announce_block(&self, block: NewBlock, hash: H256) {
+    /// Caution: in PoS this is a noop, since new block are no longer announced over devp2p, but are
+    /// instead sent to node node by the CL. However, they can still be requested over devp2p, but
+    /// broadcasting them is a considered a protocol violation..
+    pub fn announce_block(&self, block: NewBlock, hash: B256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
@@ -155,7 +157,7 @@ impl NetworkHandle {
         })
     }
 
-    /// Provides a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
+    /// Provides a shareable reference to the [`BandwidthMeter`] stored on the `NetworkInner`.
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
     }
@@ -319,6 +321,7 @@ struct NetworkInner {
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[allow(missing_docs)]
+#[derive(Debug)]
 pub(crate) enum NetworkHandleMessage {
     /// Adds an address for a peer.
     AddPeerAddress(PeerId, PeerKind, SocketAddr),
@@ -329,7 +332,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
-    AnnounceBlock(NewBlock, H256),
+    AnnounceBlock(NewBlock, B256),
     /// Sends the list of transactions to the given peer.
     SendTransaction { peer_id: PeerId, msg: SharedTransactions },
     /// Sends the list of transactions hashes to the given peer.

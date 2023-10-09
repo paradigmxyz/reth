@@ -1,7 +1,7 @@
 pub use common::TransactionInfo;
 pub use receipt::TransactionReceipt;
 pub use request::TransactionRequest;
-use reth_primitives::{AccessListItem, Address, Bytes, H256, U128, U256, U64};
+use reth_primitives::{AccessListItem, Address, Bytes, B256, U128, U256, U64};
 use serde::{Deserialize, Serialize};
 pub use signature::{Parity, Signature};
 pub use typed::*;
@@ -17,11 +17,11 @@ mod typed;
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
     /// Hash
-    pub hash: H256,
+    pub hash: B256,
     /// Nonce
-    pub nonce: U256,
+    pub nonce: U64,
     /// Block hash
-    pub block_hash: Option<H256>,
+    pub block_hash: Option<B256>,
     /// Block number
     pub block_number: Option<U256>,
     /// Transaction Index
@@ -57,7 +57,7 @@ pub struct Transaction {
     pub chain_id: Option<U64>,
     /// Contains the blob hashes for eip-4844 transactions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub blob_versioned_hashes: Vec<H256>,
+    pub blob_versioned_hashes: Vec<B256>,
     /// EIP2930
     ///
     /// Pre-pay to warm storage access.
@@ -79,13 +79,13 @@ mod tests {
     #[test]
     fn serde_transaction() {
         let transaction = Transaction {
-            hash: H256::from_low_u64_be(1),
-            nonce: U256::from(2),
-            block_hash: Some(H256::from_low_u64_be(3)),
+            hash: B256::with_last_byte(1),
+            nonce: U64::from(2),
+            block_hash: Some(B256::with_last_byte(3)),
             block_number: Some(U256::from(4)),
             transaction_index: Some(U256::from(5)),
-            from: Address::from_low_u64_be(6),
-            to: Some(Address::from_low_u64_be(7)),
+            from: Address::with_last_byte(6),
+            to: Some(Address::with_last_byte(7)),
             value: U256::from(8),
             gas_price: Some(U128::from(9)),
             gas: U256::from(10),
@@ -116,13 +116,13 @@ mod tests {
     #[test]
     fn serde_transaction_with_parity_bit() {
         let transaction = Transaction {
-            hash: H256::from_low_u64_be(1),
-            nonce: U256::from(2),
-            block_hash: Some(H256::from_low_u64_be(3)),
+            hash: B256::with_last_byte(1),
+            nonce: U64::from(2),
+            block_hash: Some(B256::with_last_byte(3)),
             block_number: Some(U256::from(4)),
             transaction_index: Some(U256::from(5)),
-            from: Address::from_low_u64_be(6),
-            to: Some(Address::from_low_u64_be(7)),
+            from: Address::with_last_byte(6),
+            to: Some(Address::with_last_byte(7)),
             value: U256::from(8),
             gas_price: Some(U128::from(9)),
             gas: U256::from(10),

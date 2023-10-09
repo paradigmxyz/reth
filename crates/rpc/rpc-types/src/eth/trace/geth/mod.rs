@@ -2,9 +2,9 @@
 #![allow(missing_docs)]
 
 use crate::{state::StateOverride, BlockOverrides};
-use reth_primitives::{Bytes, H256, U256};
+use reth_primitives::{Bytes, B256, U256};
 use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize, Serializer};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 // re-exports
 pub use self::{
@@ -29,7 +29,7 @@ pub struct BlockTraceResult {
     /// Block number corresponding to the trace task
     pub block: U256,
     /// Block hash corresponding to the trace task
-    pub hash: H256,
+    pub hash: B256,
     /// Trace results produced by the trace task
     pub traces: Vec<TraceResult>,
 }
@@ -80,7 +80,7 @@ pub struct StructLog {
         skip_serializing_if = "Option::is_none",
         serialize_with = "serialize_string_storage_map_opt"
     )]
-    pub storage: Option<BTreeMap<H256, H256>>,
+    pub storage: Option<BTreeMap<B256, B256>>,
     /// Current call depth
     pub depth: u64,
     /// Refund counter
@@ -186,6 +186,12 @@ pub enum GethDebugTracerType {
     JsTracer(String),
 }
 
+impl From<GethDebugBuiltInTracerType> for GethDebugTracerType {
+    fn from(value: GethDebugBuiltInTracerType) -> Self {
+        GethDebugTracerType::BuiltInTracer(value)
+    }
+}
+
 /// Configuration of the tracer
 ///
 /// This is a simple wrapper around serde_json::Value.
@@ -262,6 +268,34 @@ pub struct GethDebugTracingOptions {
     /// timeout of 5 seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<String>,
+}
+
+impl GethDebugTracingOptions {
+    /// Sets the tracer to use
+    pub fn with_tracer(mut self, tracer: GethDebugTracerType) -> Self {
+        self.tracer = Some(tracer);
+        self
+    }
+
+    /// Sets the timeout to use for tracing
+    pub fn with_timeout(mut self, duration: Duration) -> Self {
+        self.timeout = Some(format!("{}ms", duration.as_millis()));
+        self
+    }
+
+    /// Configures a [CallConfig]
+    pub fn call_config(mut self, config: CallConfig) -> Self {
+        self.tracer_config =
+            GethDebugTracerConfig(serde_json::to_value(config).expect("is serializable"));
+        self
+    }
+
+    /// Configures a [PreStateConfig]
+    pub fn prestate_config(mut self, config: PreStateConfig) -> Self {
+        self.tracer_config =
+            GethDebugTracerConfig(serde_json::to_value(config).expect("is serializable"));
+        self
+    }
 }
 
 /// Default tracing options for the struct looger.
@@ -354,7 +388,7 @@ pub struct GethDebugTracingCallOptions {
 
 /// Serializes a storage map as a list of key-value pairs _without_ 0x-prefix
 fn serialize_string_storage_map_opt<S: Serializer>(
-    storage: &Option<BTreeMap<H256, H256>>,
+    storage: &Option<BTreeMap<B256, B256>>,
     s: S,
 ) -> Result<S::Ok, S::Error> {
     match storage {

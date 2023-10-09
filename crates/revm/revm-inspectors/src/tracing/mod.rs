@@ -3,7 +3,7 @@ use crate::tracing::{
     utils::get_create_address,
 };
 pub use arena::CallTraceArena;
-use reth_primitives::{bytes::Bytes, Address, H256, U256};
+use reth_primitives::{Address, Bytes, B256, U256};
 use revm::{
     inspectors::GasInspector,
     interpreter::{
@@ -82,12 +82,35 @@ impl TracingInspector {
         }
     }
 
+    /// Manually the gas used of the root trace.
+    ///
+    /// This is useful if the root trace's gasUsed should mirror the actual gas used by the
+    /// transaction.
+    ///
+    /// This allows setting it manually by consuming the execution result's gas for example.
+    #[inline]
+    pub fn set_transaction_gas_used(&mut self, gas_used: u64) {
+        if let Some(node) = self.traces.arena.first_mut() {
+            node.trace.gas_used = gas_used;
+        }
+    }
+
+    /// Convenience function for [ParityTraceBuilder::set_transaction_gas_used] that consumes the
+    /// type.
+    #[inline]
+    pub fn with_transaction_gas_used(mut self, gas_used: u64) -> Self {
+        self.set_transaction_gas_used(gas_used);
+        self
+    }
+
     /// Consumes the Inspector and returns a [ParityTraceBuilder].
+    #[inline]
     pub fn into_parity_builder(self) -> ParityTraceBuilder {
         ParityTraceBuilder::new(self.traces.arena, self.spec_id, self.config)
     }
 
     /// Consumes the Inspector and returns a [GethTraceBuilder].
+    #[inline]
     pub fn into_geth_builder(self) -> GethTraceBuilder {
         GethTraceBuilder::new(self.traces.arena, self.config)
     }
@@ -259,13 +282,13 @@ impl TracingInspector {
         let stack =
             self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
 
-        let op = OpCode::try_from_u8(interp.current_opcode())
+        let op = OpCode::new(interp.current_opcode())
             .or_else(|| {
                 // if the opcode is invalid, we'll use the invalid opcode to represent it because
                 // this is invoked before the opcode is executed, the evm will eventually return a
                 // `Halt` with invalid/unknown opcode as result
                 let invalid_opcode = 0xfe;
-                OpCode::try_from_u8(invalid_opcode)
+                OpCode::new(invalid_opcode)
             })
             .expect("is valid opcode;");
 
@@ -360,19 +383,13 @@ where
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
     ) -> InstructionResult {
-        self.gas_inspector.initialize_interp(interp, data, is_static)
+        self.gas_inspector.initialize_interp(interp, data)
     }
 
-    fn step(
-        &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        is_static: bool,
-    ) -> InstructionResult {
+    fn step(&mut self, interp: &mut Interpreter, data: &mut EVMData<'_, DB>) -> InstructionResult {
         if self.config.record_steps {
-            self.gas_inspector.step(interp, data, is_static);
+            self.gas_inspector.step(interp, data);
             self.start_step(interp, data);
         }
 
@@ -383,7 +400,7 @@ where
         &mut self,
         evm_data: &mut EVMData<'_, DB>,
         address: &Address,
-        topics: &[H256],
+        topics: &[B256],
         data: &Bytes,
     ) {
         self.gas_inspector.log(evm_data, address, topics, data);
@@ -401,11 +418,10 @@ where
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
         eval: InstructionResult,
     ) -> InstructionResult {
         if self.config.record_steps {
-            self.gas_inspector.step_end(interp, data, is_static, eval);
+            self.gas_inspector.step_end(interp, data, eval);
             self.fill_step_on_step_end(interp, data, eval);
         }
         InstructionResult::Continue
@@ -415,9 +431,8 @@ where
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        self.gas_inspector.call(data, inputs, is_static);
+        self.gas_inspector.call(data, inputs);
 
         // determine correct `from` and `to` based on the call scheme
         let (from, to) = match inputs.context.scheme {
@@ -463,9 +478,8 @@ where
         gas: Gas,
         ret: InstructionResult,
         out: Bytes,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        self.gas_inspector.call_end(data, inputs, gas, ret, out.clone(), is_static);
+        self.gas_inspector.call_end(data, inputs, gas, ret, out.clone());
 
         self.fill_trace_on_call_end(data, ret, &gas, out.clone(), None);
 
@@ -527,7 +541,7 @@ where
         (status, address, gas, retdata)
     }
 
-    fn selfdestruct(&mut self, _contract: Address, target: Address) {
+    fn selfdestruct(&mut self, _contract: Address, target: Address, _value: U256) {
         let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx].trace;
         trace.selfdestruct_refund_target = Some(target)

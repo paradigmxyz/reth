@@ -2,7 +2,7 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput}
 use reth_db::{database::Database, models::BlockNumberAddress};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    PruneCheckpoint, PruneModes, PrunePart,
+    PruneCheckpoint, PruneModes, PruneSegment,
 };
 use reth_provider::{
     DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StorageReader,
@@ -55,9 +55,9 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
                 // Save prune checkpoint only if we don't have one already.
                 // Otherwise, pruner may skip the unpruned range of blocks.
-                if provider.get_prune_checkpoint(PrunePart::StorageHistory)?.is_none() {
+                if provider.get_prune_checkpoint(PruneSegment::StorageHistory)?.is_none() {
                     provider.save_prune_checkpoint(
-                        PrunePart::StorageHistory,
+                        PruneSegment::StorageHistory,
                         PruneCheckpoint {
                             block_number: Some(target_prunable_block),
                             tx_number: None,
@@ -97,9 +97,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
 #[cfg(test)]
 mod tests {
-    use reth_provider::ProviderFactory;
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
@@ -122,14 +119,16 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{
-        hex_literal::hex, Address, BlockNumber, PruneMode, StorageEntry, H160, H256, MAINNET, U256,
+        address, b256, Address, BlockNumber, PruneMode, StorageEntry, B256, MAINNET, U256,
     };
+    use reth_provider::ProviderFactory;
+    use std::collections::BTreeMap;
 
-    const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
-    const STORAGE_KEY: H256 =
-        H256(hex!("0000000000000000000000000000000000000000000000000000000000000001"));
+    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
+    const STORAGE_KEY: B256 =
+        b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
-    fn storage(key: H256) -> StorageEntry {
+    fn storage(key: B256) -> StorageEntry {
         // Value is not used in indexing stage.
         StorageEntry { key, value: U256::ZERO }
     }
@@ -438,7 +437,7 @@ mod tests {
         .unwrap();
 
         // run
-        let input = ExecInput { target: Some(100), ..Default::default() };
+        let input = ExecInput { target: Some(20000), ..Default::default() };
         let mut stage = IndexStorageHistoryStage {
             prune_modes: PruneModes {
                 storage_history: Some(PruneMode::Before(36)),
@@ -449,7 +448,7 @@ mod tests {
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let out = stage.execute(&provider, input).await.unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(100), done: true });
+        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
         provider.commit().unwrap();
 
         // verify
@@ -457,7 +456,7 @@ mod tests {
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100]),]));
 
         // unwind
-        unwind(&tx, 100, 0).await;
+        unwind(&tx, 20000, 0).await;
 
         // verify initial state
         let table = tx.table::<tables::StorageHistory>().unwrap();
@@ -511,7 +510,7 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let blocks = random_block_range(&mut rng, start..=end, H256::zero(), 0..3);
+            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3);
 
             let (transitions, _) = random_changeset_range(
                 &mut rng,
@@ -552,7 +551,7 @@ mod tests {
                     .walk_range(BlockNumberAddress::range(start_block..=end_block))?
                     .try_fold(
                         BTreeMap::new(),
-                        |mut storages: BTreeMap<(Address, H256), Vec<u64>>,
+                        |mut storages: BTreeMap<(Address, B256), Vec<u64>>,
                          entry|
                          -> Result<_, TestRunnerError> {
                             let (index, storage) = entry?;

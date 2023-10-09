@@ -73,7 +73,7 @@ impl Compact for StoredSubNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{trie::TrieMask, H256};
+    use crate::{trie::TrieMask, B256};
 
     #[test]
     fn subnode_roundtrip() {
@@ -84,7 +84,7 @@ mod tests {
                 state_mask: TrieMask::new(1),
                 tree_mask: TrieMask::new(0),
                 hash_mask: TrieMask::new(1),
-                hashes: vec![H256::zero()],
+                hashes: vec![B256::ZERO],
                 root_hash: None,
             }),
         };

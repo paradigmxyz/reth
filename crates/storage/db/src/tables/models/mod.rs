@@ -6,7 +6,7 @@ use crate::{
 use reth_codecs::Compact;
 use reth_primitives::{
     trie::{StoredNibbles, StoredNibblesSubKey},
-    Address, PrunePart, H256,
+    Address, PruneSegment, B256,
 };
 
 pub mod accounts;
@@ -64,7 +64,7 @@ impl Decode for Vec<u8> {
 impl Encode for Address {
     type Encoded = [u8; 20];
     fn encode(self) -> Self::Encoded {
-        self.to_fixed_bytes()
+        self.0 .0
     }
 }
 
@@ -74,16 +74,16 @@ impl Decode for Address {
     }
 }
 
-impl Encode for H256 {
+impl Encode for B256 {
     type Encoded = [u8; 32];
     fn encode(self) -> Self::Encoded {
-        self.to_fixed_bytes()
+        self.0
     }
 }
 
-impl Decode for H256 {
+impl Decode for B256 {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Ok(H256::from_slice(value.as_ref()))
+        Ok(B256::from_slice(value.as_ref()))
     }
 }
 
@@ -136,7 +136,7 @@ impl Decode for StoredNibblesSubKey {
     }
 }
 
-impl Encode for PrunePart {
+impl Encode for PruneSegment {
     type Encoded = [u8; 1];
 
     fn encode(self) -> Self::Encoded {
@@ -146,7 +146,7 @@ impl Encode for PrunePart {
     }
 }
 
-impl Decode for PrunePart {
+impl Decode for PruneSegment {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let buf = value.as_ref();
         Ok(Self::from_compact(buf, buf.len()).0)

@@ -9,7 +9,7 @@ use reth_network::test_utils::{NetworkEventStream, Testnet};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{
     Block, BlockBody, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionKind,
-    TransactionSigned, TxEip2930, H256, U256,
+    TransactionSigned, TxEip2930, U256,
 };
 use reth_provider::test_utils::MockEthProvider;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
         gas_price: rng.gen(),
         gas_limit: rng.gen(),
         to: TransactionKind::Create,
-        value: rng.gen(),
+        value: rng.gen::<u128>().into(),
         input: Bytes::from(vec![1, 2]),
         access_list: Default::default(),
     });
@@ -58,7 +58,7 @@ async fn test_get_body() {
     // request some blocks
     for _ in 0..100 {
         // Set a new random block to the mock storage and request it via the network
-        let block_hash = H256::random();
+        let block_hash = rng.gen();
         let mut block = Block::default();
         block.body.push(rng_transaction(&mut rng));
 
@@ -100,12 +100,12 @@ async fn test_get_header() {
     assert_eq!(connected, *handle1.peer_id());
 
     let start: u64 = rng.gen();
-    let mut hash = H256::random();
+    let mut hash = rng.gen();
     // request some headers
     for idx in 0..100 {
         // Set a new random header to the mock storage and request it via the network
         let header = Header { number: start + idx, parent_hash: hash, ..Default::default() };
-        hash = H256::random();
+        hash = rng.gen();
 
         mock_provider.add_header(hash, header.clone());
 

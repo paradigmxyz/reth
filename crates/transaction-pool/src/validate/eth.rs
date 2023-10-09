@@ -18,6 +18,7 @@ use reth_primitives::{
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
+use reth_revm_primitives::calculate_intrinsic_gas_after_merge;
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -200,6 +201,25 @@ where
             }
         }
 
+        // intrinsic gas checks
+        let access_list =
+            transaction.access_list().map(|list| list.flattened()).unwrap_or_default();
+        let is_shanghai = self.fork_tracker.is_shanghai_activated();
+
+        if transaction.gas_limit() <
+            calculate_intrinsic_gas_after_merge(
+                transaction.input(),
+                transaction.kind(),
+                &access_list,
+                is_shanghai,
+            )
+        {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::IntrinsicGasTooLow,
+            )
+        }
+
         let mut maybe_blob_sidecar = None;
 
         // blob tx checks
@@ -338,11 +358,11 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
         // update all forks
-        if self.chain_spec.is_cancun_activated_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_shanghai_activated_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
@@ -381,7 +401,7 @@ impl EthTransactionValidatorBuilder {
     /// Creates a new builder for the given [ChainSpec]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         // If cancun is enabled at genesis, enable it
-        let cancun = chain_spec.is_cancun_activated_at_timestamp(chain_spec.genesis_timestamp());
+        let cancun = chain_spec.is_cancun_active_at_timestamp(chain_spec.genesis_timestamp());
 
         Self {
             chain_spec,
@@ -482,6 +502,15 @@ impl EthTransactionValidatorBuilder {
     /// Sets the number of additional tasks to spawn.
     pub fn with_additional_tasks(mut self, additional_tasks: usize) -> Self {
         self.additional_tasks = additional_tasks;
+        self
+    }
+
+    /// Configures validation rules based on the head block's timestamp.
+    ///
+    /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
+    pub fn with_head_timestamp(mut self, timestamp: u64) -> Self {
+        self.cancun = self.chain_spec.is_cancun_active_at_timestamp(timestamp);
+        self.shanghai = self.chain_spec.is_shanghai_active_at_timestamp(timestamp);
         self
     }
 

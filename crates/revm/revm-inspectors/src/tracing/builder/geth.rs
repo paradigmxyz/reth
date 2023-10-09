@@ -17,6 +17,13 @@ use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
     TracingInspectorConfig,
 };
+use reth_primitives::{Address, Bytes, B256, U256};
+use reth_rpc_types::trace::geth::{
+    AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode, GethDefaultTracingOptions,
+    PreStateConfig, PreStateFrame, PreStateMode, StructLog,
+};
+use revm::{db::DatabaseRef, primitives::ResultAndState};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces
 #[derive(Clone, Debug)]
@@ -39,7 +46,7 @@ impl GethTraceBuilder {
         &self,
         main_trace_node: &CallTraceNode,
         opts: &GethDefaultTracingOptions,
-        storage: &mut HashMap<Address, BTreeMap<H256, H256>>,
+        storage: &mut HashMap<Address, BTreeMap<B256, B256>>,
         struct_logs: &mut Vec<StructLog>,
     ) {
         // A stack with all the steps of the trace and all its children's steps.
@@ -68,7 +75,7 @@ impl GethTraceBuilder {
             }
 
             if opts.is_return_data_enabled() {
-                log.return_data = Some(trace_node.trace.output.clone().into());
+                log.return_data = Some(trace_node.trace.output.clone());
             }
 
             // Add step to geth trace
@@ -197,15 +204,14 @@ impl GethTraceBuilder {
             let mut prestate = PreStateMode::default();
             for (addr, _) in account_diffs {
                 let db_acc = db.basic(addr)?.unwrap_or_default();
+
                 prestate.0.insert(
                     addr,
-                    AccountState {
-                        balance: Some(db_acc.balance),
-                        nonce: Some(db_acc.nonce),
-                        code: db_acc.code.as_ref().map(|code| Bytes::from(code.original_bytes())),
-                        storage: None,
-                        change_type: ChangeType::Modify,
-                    },
+                    AccountState::from_account_info(
+                        db_acc.nonce,
+                        db_acc.balance,
+                        db_acc.code.as_ref().map(|code| code.original_bytes()),
+                    ),
                 );
             }
             self.update_storage_from_trace_prestate_mode(&mut prestate.0, false);
@@ -231,42 +237,39 @@ impl GethTraceBuilder {
                         }
                     });
 
+                let change_type =  if db_acc.is_empty() {
+                    ChangeType::Create
+                } else {
+                    ChangeType::Modify
+                };
+
                 // Contract code can come back as a zero-length byte array. This shouldn't
                 // show up in the state diff, so we filter it out below.
-                let pre_state = AccountState {
-                    balance: Some(db_acc.balance),
-                    nonce: Some(db_acc.nonce),
-                    code: pre_code.filter(|code| !code.is_empty()),
-                    storage: None,
-                    change_type: if db_acc.is_empty() {
-                        ChangeType::Create
-                    } else {
-                        ChangeType::Modify
-                    },
-                };
+                let pre_state = AccountState::from_account_info(
+                    db_acc.nonce,
+                    db_acc.balance,
+                    pre_code,
+                );
 
-                let post_state = AccountState {
-                    balance: Some(changed_acc.info.balance),
-                    nonce: Some(changed_acc.info.nonce),
-                    code: changed_acc
-                        .info
-                        .code
-                        .as_ref()
-                        .filter(|code| !code.is_empty())
-                        .map(|code| Bytes::from(code.original_bytes())),
-                    storage: None,
-                    change_type: if changed_acc.is_destroyed {
-                        ChangeType::Destroy
-                    } else {
-                        ChangeType::Modify
-                    },
+                let change_type = if changed_acc.is_destroyed {
+                    ChangeType::Destroy
+                } else {
+                    ChangeType::Modify
                 };
-
-                state_diff.post.insert(addr, post_state);
+                let post_state = AccountState::from_account_info(
+                    changed_acc.nonce,
+                    changed_acc.balance,
+                    changed_acc.code.as_ref().map(|code| code.original_bytes()),
+                );
                 state_diff.pre.insert(addr, pre_state);
+                state_diff.post.insert(addr, post_state);
             }
-            self.update_storage_from_trace_diff_mode(&mut state_diff.pre, false);
-            self.update_storage_from_trace_diff_mode(&mut state_diff.post, true);
+            self.update_storage_from_trace(&mut state_diff.pre, false);
+            self.update_storage_from_trace(&mut state_diff.post, true);
+
+            // ensure we're only keeping changed entries
+            state_diff.retain_changed();
+
             Ok(PreStateFrame::Diff(self.diff_traces(&state_diff.pre, &state_diff.post)))
         }
     }

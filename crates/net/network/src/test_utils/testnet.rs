@@ -130,13 +130,10 @@ where
         let mut net = self;
         let handle = tokio::task::spawn(async move {
             let mut tx = None;
-            loop {
-                tokio::select! {
-                    _ = &mut net => { break}
-                    inc = rx => {
-                        tx = inc.ok();
-                        break
-                    }
+            tokio::select! {
+                _ = &mut net => {}
+                inc = rx => {
+                    tx = inc.ok();
                 }
             }
             if let Some(tx) = tx {
@@ -190,6 +187,7 @@ where
 }
 
 /// A handle to a [`Testnet`] that can be shared.
+#[derive(Debug)]
 pub struct TestnetHandle<C> {
     _handle: JoinHandle<()>,
     terminate: oneshot::Sender<oneshot::Sender<Testnet<C>>>,
@@ -206,7 +204,9 @@ impl<C> TestnetHandle<C> {
     }
 }
 
+/// A peer in the [`Testnet`].
 #[pin_project]
+#[derive(Debug)]
 pub struct Peer<C> {
     #[pin]
     network: NetworkManager<C>,
@@ -265,6 +265,7 @@ where
 }
 
 /// A helper config for setting up the reth networking stack.
+#[derive(Debug)]
 pub struct PeerConfig<C = NoopProvider> {
     config: NetworkConfig<C>,
     client: C,
@@ -330,6 +331,7 @@ impl Default for PeerConfig {
 /// A helper type to await network events
 ///
 /// This makes it easier to await established connections
+#[derive(Debug)]
 pub struct NetworkEventStream {
     inner: UnboundedReceiverStream<NetworkEvent>,
 }

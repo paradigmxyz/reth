@@ -39,6 +39,9 @@ pub enum PoolError {
     /// Thrown when the transaction is considered invalid.
     #[error("[{0:?}] {1:?}")]
     InvalidTransaction(TxHash, InvalidPoolTransactionError),
+    /// Thrown if the mutual exclusivity constraint (blob vs normal transaction) is violated.
+    #[error("[{1:?}] Transaction type {2} conflicts with existing transaction for {0:?}")]
+    ExistingConflictingTransactionType(Address, TxHash, u8),
     /// Any other error that occurred while inserting/validating a transaction. e.g. IO database
     /// error
     #[error("[{0:?}] {1:?}")]
@@ -58,6 +61,7 @@ impl PoolError {
             PoolError::DiscardedOnInsert(hash) => hash,
             PoolError::InvalidTransaction(hash, _) => hash,
             PoolError::Other(hash, _) => hash,
+            PoolError::ExistingConflictingTransactionType(_, hash, _) => hash,
         }
     }
 
@@ -108,6 +112,11 @@ impl PoolError {
             }
             PoolError::Other(_, _) => {
                 // internal error unrelated to the transaction
+                false
+            }
+            PoolError::ExistingConflictingTransactionType(_, _, _) => {
+                // this is not a protocol error but an implementation error since the pool enforces
+                // exclusivity (blob vs normal tx) for all senders
                 false
             }
         }
@@ -178,6 +187,10 @@ pub enum InvalidPoolTransactionError {
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error("{0:?}")]
     Other(Box<dyn PoolTransactionError>),
+    /// The transaction is specified to use less gas than required to start the
+    /// invocation.
+    #[error("intrinsic gas too low")]
+    IntrinsicGasTooLow,
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -231,6 +244,7 @@ impl InvalidPoolTransactionError {
                 // local setting
                 false
             }
+            InvalidPoolTransactionError::IntrinsicGasTooLow => true,
             InvalidPoolTransactionError::Overdraft => false,
             InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
             InvalidPoolTransactionError::Eip4844(eip4844_err) => {

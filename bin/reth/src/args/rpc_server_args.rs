@@ -2,7 +2,11 @@
 
 use crate::{
     args::GasPriceOracleArgs,
-    cli::{config::RethRpcConfig, ext::RethNodeCommandConfig},
+    cli::{
+        components::{RethNodeComponents, RethRpcComponents},
+        config::RethRpcConfig,
+        ext::RethNodeCommandConfig,
+    },
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -11,8 +15,8 @@ use clap::{
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    HeaderProvider, StateProviderFactory,
+    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -50,12 +54,10 @@ pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 /// This is only relevant for very large trace responses.
 pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 115;
 /// Default number of incoming connections.
-pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 100;
-/// Default number of incoming connections.
-pub(crate) const RPC_DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
+pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 #[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
@@ -135,8 +137,12 @@ pub struct RpcServerArgs {
     pub rpc_max_connections: u32,
 
     /// Maximum number of concurrent tracing requests.
-    #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_TRACING_REQUESTS)]
+    #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_TRACING_REQUESTS)]
     pub rpc_max_tracing_requests: u32,
+
+    /// Maximum number of logs that can be returned in a single response.
+    #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_LOGS_PER_RESPONSE)]
+    pub rpc_max_logs_per_response: usize,
 
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     #[arg(
@@ -172,31 +178,15 @@ impl RpcServerArgs {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Provider, Pool, Network, Tasks, Events, Engine, Conf>(
+    pub async fn start_servers<Reth, Engine, Conf>(
         &self,
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        executor: Tasks,
-        events: Events,
+        components: &Reth,
         engine_api: Engine,
         jwt_secret: JwtSecret,
         conf: &mut Conf,
     ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
     where
-        Provider: BlockReaderIdExt
-            + HeaderProvider
-            + StateProviderFactory
-            + EvmEnvProvider
-            + ChainSpecProvider
-            + ChangeSetReader
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions + Clone + 'static,
+        Reth: RethNodeComponents,
         Engine: EngineApiServer,
         Conf: RethNodeCommandConfig,
     {
@@ -205,19 +195,19 @@ impl RpcServerArgs {
         let module_config = self.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (mut rpc_modules, auth_module, mut registry) = RpcModuleBuilder::default()
-            .with_provider(provider)
-            .with_pool(pool)
-            .with_network(network)
-            .with_events(events)
-            .with_executor(executor)
+        let (mut modules, auth_module, mut registry) = RpcModuleBuilder::default()
+            .with_provider(components.provider())
+            .with_pool(components.pool())
+            .with_network(components.network())
+            .with_events(components.events())
+            .with_executor(components.task_executor())
             .build_with_auth_server(module_config, engine_api);
-
+        let node_modules = RethRpcComponents { registry: &mut registry, modules: &mut modules };
         // apply configured customization
-        conf.extend_rpc_modules(self, &mut registry, &mut rpc_modules)?;
+        conf.extend_rpc_modules(self, components, node_modules)?;
 
         let server_config = self.rpc_server_config();
-        let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
+        let launch_rpc = modules.start_server(server_config).map_ok(|handle| {
             if let Some(url) = handle.ipc_endpoint() {
                 info!(target: "reth::cli", url=%url, "RPC IPC server started");
             }
@@ -251,6 +241,7 @@ impl RpcServerArgs {
     ) -> Result<RpcServerHandle, RpcError>
     where
         Provider: BlockReaderIdExt
+            + AccountReader
             + HeaderProvider
             + StateProviderFactory
             + EvmEnvProvider
@@ -320,9 +311,14 @@ impl RethRpcConfig for RpcServerArgs {
         !self.ipcdisable
     }
 
+    fn ipc_path(&self) -> &str {
+        self.ipcpath.as_str()
+    }
+
     fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
+            .max_logs_per_response(self.rpc_max_logs_per_response)
             .rpc_gas_cap(self.rpc_gas_cap)
             .gpo_config(self.gas_price_oracle_config())
     }
@@ -534,6 +530,25 @@ mod tests {
             "reth",
             "--http.api",
             " eth, admin, debug",
+            "--http",
+            "--ws",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        assert_eq!(
+            config.ws().cloned().unwrap().into_selection(),
+            RpcModuleSelection::standard_modules()
+        );
+    }
+
+    #[test]
+    fn test_unique_rpc_modules() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            " eth, admin, debug, eth,admin",
             "--http",
             "--ws",
         ])

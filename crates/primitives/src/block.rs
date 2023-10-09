@@ -1,9 +1,8 @@
 use crate::{
-    Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64,
+    Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, B256, U64,
 };
-use fixed_hash::rustc_hex::FromHexError;
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
     de::{MapAccess, Visitor},
     ser::SerializeStruct,
@@ -44,7 +43,7 @@ impl Block {
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
-    pub fn seal(self, hash: H256) -> SealedBlock {
+    pub fn seal(self, hash: B256) -> SealedBlock {
         SealedBlock {
             header: self.header.seal(hash),
             body: self.body,
@@ -58,6 +57,11 @@ impl Block {
         assert_eq!(self.body.len(), senders.len(), "Unequal number of senders");
 
         BlockWithSenders { block: self, senders }
+    }
+
+    /// Returns whether or not the block contains any blob transactions.
+    pub fn has_blob_transactions(&self) -> bool {
+        self.body.iter().any(|tx| tx.is_eip4844())
     }
 
     /// Calculates a heuristic for the in-memory size of the [Block].
@@ -140,7 +144,7 @@ impl SealedBlock {
     }
 
     /// Header hash.
-    pub fn hash(&self) -> H256 {
+    pub fn hash(&self) -> B256 {
         self.header.hash()
     }
 
@@ -202,6 +206,11 @@ impl SealedBlock {
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
             self.withdrawals.as_ref().map(|w| w.iter().map(Withdrawal::size).sum::<usize>() + w.capacity() * std::mem::size_of::<Withdrawal>()).unwrap_or(std::mem::size_of::<Option<Vec<Withdrawal>>>())
+    }
+
+    /// Calculates the total gas used by blob transactions in the sealed block.
+    pub fn blob_gas_used(&self) -> u64 {
+        self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
     }
 }
 
@@ -265,7 +274,7 @@ impl std::ops::DerefMut for SealedBlockWithSenders {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockHashOrNumber {
     /// A block hash
-    Hash(H256),
+    Hash(B256),
     /// A block number
     Number(u64),
 }
@@ -283,8 +292,8 @@ impl BlockHashOrNumber {
     }
 }
 
-impl From<H256> for BlockHashOrNumber {
-    fn from(value: H256) -> Self {
+impl From<B256> for BlockHashOrNumber {
+    fn from(value: B256) -> Self {
         BlockHashOrNumber::Hash(value)
     }
 }
@@ -313,15 +322,15 @@ impl Encodable for BlockHashOrNumber {
 
 /// Allows for RLP decoding of a block hash or block number
 impl Decodable for BlockHashOrNumber {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        let header: u8 = *buf.first().ok_or(DecodeError::InputTooShort)?;
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let header: u8 = *buf.first().ok_or(RlpError::InputTooShort)?;
         // if the byte string is exactly 32 bytes, decode it into a Hash
         // 0xa0 = 0x80 (start of string) + 0x20 (32, length of string)
         if header == 0xa0 {
             // strip the first byte, parsing the rest of the string.
             // If the rest of the string fails to decode into 32 bytes, we'll bubble up the
             // decoding error.
-            let hash = H256::decode(buf)?;
+            let hash = B256::decode(buf)?;
             Ok(Self::Hash(hash))
         } else {
             // a block number when encoded as bytes ranges from 0 to any number of bytes - we're
@@ -338,7 +347,7 @@ impl Decodable for BlockHashOrNumber {
 pub struct ParseBlockHashOrNumberError {
     input: String,
     pares_int_error: ParseIntError,
-    hex_error: FromHexError,
+    hex_error: crate::hex::FromHexError,
 }
 
 impl FromStr for BlockHashOrNumber {
@@ -347,7 +356,7 @@ impl FromStr for BlockHashOrNumber {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match u64::from_str(s) {
             Ok(val) => Ok(val.into()),
-            Err(pares_int_error) => match H256::from_str(s) {
+            Err(pares_int_error) => match B256::from_str(s) {
                 Ok(val) => Ok(val.into()),
                 Err(hex_error) => Err(ParseBlockHashOrNumberError {
                     input: s.to_string(),
@@ -373,7 +382,7 @@ pub enum BlockId {
 
 impl BlockId {
     /// Returns the block hash if it is [BlockId::Hash]
-    pub fn as_block_hash(&self) -> Option<H256> {
+    pub fn as_block_hash(&self) -> Option<B256> {
         match self {
             BlockId::Hash(hash) => Some(hash.block_hash),
             BlockId::Number(_) => None,
@@ -403,14 +412,14 @@ impl From<BlockNumberOrTag> for BlockId {
     }
 }
 
-impl From<H256> for BlockId {
-    fn from(block_hash: H256) -> Self {
+impl From<B256> for BlockId {
+    fn from(block_hash: B256) -> Self {
         BlockId::Hash(RpcBlockHash { block_hash, require_canonical: None })
     }
 }
 
-impl From<(H256, Option<bool>)> for BlockId {
-    fn from(hash_can: (H256, Option<bool>)) -> Self {
+impl From<(B256, Option<bool>)> for BlockId {
+    fn from(hash_can: (B256, Option<bool>)) -> Self {
         BlockId::Hash(RpcBlockHash { block_hash: hash_can.0, require_canonical: hash_can.1 })
     }
 }
@@ -424,7 +433,7 @@ impl From<RpcBlockHash> for BlockId {
 impl From<BlockHashOrNumber> for BlockId {
     fn from(value: BlockHashOrNumber) -> Self {
         match value {
-            BlockHashOrNumber::Hash(hash) => H256::from(hash.0).into(),
+            BlockHashOrNumber::Hash(hash) => B256::from(hash.0).into(),
             BlockHashOrNumber::Number(number) => number.into(),
         }
     }
@@ -470,7 +479,7 @@ impl<'de> Deserialize<'de> for BlockId {
                 // Since there is no way to clearly distinguish between a DATA parameter and a QUANTITY parameter. A str is therefor deserialized into a Block Number: <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md>
                 // However, since the hex string should be a QUANTITY, we can safely assume that if the len is 66 bytes, it is in fact a hash, ref <https://github.com/ethereum/go-ethereum/blob/ee530c0d5aa70d2c00ab5691a89ab431b73f8165/rpc/types.go#L184-L184>
                 if v.len() == 66 {
-                    Ok(BlockId::Hash(v.parse::<H256>().map_err(serde::de::Error::custom)?.into()))
+                    Ok(BlockId::Hash(v.parse::<B256>().map_err(serde::de::Error::custom)?.into()))
                 } else {
                     // quantity hex string or tag
                     Ok(BlockId::Number(v.parse().map_err(serde::de::Error::custom)?))
@@ -502,7 +511,7 @@ impl<'de> Deserialize<'de> for BlockId {
                                 return Err(serde::de::Error::duplicate_field("blockHash"))
                             }
 
-                            block_hash = Some(map.next_value::<H256>()?);
+                            block_hash = Some(map.next_value::<B256>()?);
                         }
                         "requireCanonical" => {
                             if number.is_some() || require_canonical.is_some() {
@@ -602,7 +611,7 @@ impl From<u64> for BlockNumberOrTag {
 
 impl From<U64> for BlockNumberOrTag {
     fn from(num: U64) -> Self {
-        num.as_u64().into()
+        num.into_limbs()[0].into()
     }
 }
 
@@ -695,31 +704,31 @@ pub struct HexStringMissingPrefixError;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RpcBlockHash {
     /// A block hash
-    pub block_hash: H256,
+    pub block_hash: B256,
     /// Whether the block must be a canonical block
     pub require_canonical: Option<bool>,
 }
 
 impl RpcBlockHash {
-    pub fn from_hash(block_hash: H256, require_canonical: Option<bool>) -> Self {
+    pub fn from_hash(block_hash: B256, require_canonical: Option<bool>) -> Self {
         RpcBlockHash { block_hash, require_canonical }
     }
 }
 
-impl From<H256> for RpcBlockHash {
-    fn from(value: H256) -> Self {
+impl From<B256> for RpcBlockHash {
+    fn from(value: B256) -> Self {
         Self::from_hash(value, None)
     }
 }
 
-impl From<RpcBlockHash> for H256 {
+impl From<RpcBlockHash> for B256 {
     fn from(value: RpcBlockHash) -> Self {
         value.block_hash
     }
 }
 
-impl AsRef<H256> for RpcBlockHash {
-    fn as_ref(&self) -> &H256 {
+impl AsRef<B256> for RpcBlockHash {
+    fn as_ref(&self) -> &B256 {
         &self.block_hash
     }
 }
@@ -810,7 +819,7 @@ pub struct BlockBody {
 }
 
 impl BlockBody {
-    /// Create a [`Block`](Block) from the body and its header.
+    /// Create a [`Block`] from the body and its header.
     pub fn create_block(&self, header: Header) -> Block {
         Block {
             header,
@@ -821,18 +830,18 @@ impl BlockBody {
     }
 
     /// Calculate the transaction root for the block body.
-    pub fn calculate_tx_root(&self) -> H256 {
+    pub fn calculate_tx_root(&self) -> B256 {
         crate::proofs::calculate_transaction_root(&self.transactions)
     }
 
     /// Calculate the ommers root for the block body.
-    pub fn calculate_ommers_root(&self) -> H256 {
+    pub fn calculate_ommers_root(&self) -> B256 {
         crate::proofs::calculate_ommers_root(&self.ommers)
     }
 
     /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
     /// withdrawals, this will return `None`.
-    pub fn calculate_withdrawals_root(&self) -> Option<H256> {
+    pub fn calculate_withdrawals_root(&self) -> Option<B256> {
         self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
     }
 
@@ -867,16 +876,17 @@ impl BlockBody {
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Hash)]
 pub struct BlockBodyRoots {
     /// The transaction root for the block body.
-    pub tx_root: H256,
+    pub tx_root: B256,
     /// The ommers hash for the block body.
-    pub ommers_hash: H256,
+    pub ommers_hash: B256,
     /// The withdrawals root for the block body, if withdrawals exist.
-    pub withdrawals_root: Option<H256>,
+    pub withdrawals_root: Option<B256>,
 }
 
 #[cfg(test)]
 mod test {
     use super::{BlockId, BlockNumberOrTag::*, *};
+    use crate::hex_literal::hex;
 
     /// Check parsing according to EIP-1898.
     #[test]
@@ -891,7 +901,7 @@ mod test {
     #[test]
     fn can_parse_block_hash() {
         let block_hash =
-            H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+            B256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
                 .unwrap();
         let block_hash_json = serde_json::json!(
             { "blockHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"}
@@ -902,7 +912,7 @@ mod test {
     #[test]
     fn can_parse_block_hash_with_canonical() {
         let block_hash =
-            H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+            B256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
                 .unwrap();
         let block_id = BlockId::Hash(RpcBlockHash::from_hash(block_hash, Some(true)));
         let block_hash_json = serde_json::json!(
@@ -950,7 +960,7 @@ mod test {
 
     #[test]
     fn serde_blockid_hash() {
-        let block_id = BlockId::from(H256::default());
+        let block_id = BlockId::from(B256::default());
         let serialized = serde_json::to_string(&block_id).unwrap();
         let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, block_id)
@@ -959,7 +969,7 @@ mod test {
     #[test]
     fn serde_blockid_hash_from_str() {
         let val = "\"0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2\"";
-        let block_hash: H256 = serde_json::from_str(val).unwrap();
+        let block_hash: B256 = serde_json::from_str(val).unwrap();
         let block_id: BlockId = serde_json::from_str(val).unwrap();
         assert_eq!(block_id, BlockId::Hash(block_hash.into()));
     }
@@ -979,7 +989,7 @@ mod test {
         let block_id_param = value.pointer("/params/1").unwrap().to_string();
         let block_id: BlockId = serde_json::from_str::<BlockId>(&block_id_param).unwrap();
         let hash =
-            H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+            B256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
                 .unwrap();
         assert_eq!(BlockId::from(hash), block_id);
         let serialized = serde_json::to_string(&BlockId::from(hash)).unwrap();
@@ -1007,7 +1017,7 @@ mod test {
         let payload = r#"{"blockHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"}"#;
         let parsed = serde_json::from_str::<BlockId>(payload).unwrap();
         let expected = BlockId::from(
-            H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+            B256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
                 .unwrap(),
         );
         assert_eq!(parsed, expected);
@@ -1015,13 +1025,12 @@ mod test {
 
     #[test]
     fn encode_decode_raw_block() {
-        let block = "0xf90288f90218a0fe21bb173f43067a9f90cfc59bbb6830a7a2929b5de4a61f372a9db28e87f9aea01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a061effbbcca94f0d3e02e5bd22e986ad57142acabf0cb3d129a6ad8d0f8752e94a0d911c25e97e27898680d242b7780b6faef30995c355a2d5de92e6b9a7212ad3aa0056b23fbba480696b65fe5a59b8f2148a1299103c4f57df839233af2cf4ca2d2b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008003834c4b408252081e80a00000000000000000000000000000000000000000000000000000000000000000880000000000000000842806be9da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421f869f86702842806be9e82520894658bdf435d810c91414ec09147daa6db624063798203e880820a95a040ce7918eeb045ebf8c8b1887ca139d076bda00fa828a07881d442a72626c42da0156576a68e456e295e4c9cf67cf9f53151f329438916e0f24fc69d6bbb7fbacfc0c0";
-        let bytes = hex::decode(&block[2..]).unwrap();
+        let bytes = hex!("f90288f90218a0fe21bb173f43067a9f90cfc59bbb6830a7a2929b5de4a61f372a9db28e87f9aea01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a061effbbcca94f0d3e02e5bd22e986ad57142acabf0cb3d129a6ad8d0f8752e94a0d911c25e97e27898680d242b7780b6faef30995c355a2d5de92e6b9a7212ad3aa0056b23fbba480696b65fe5a59b8f2148a1299103c4f57df839233af2cf4ca2d2b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008003834c4b408252081e80a00000000000000000000000000000000000000000000000000000000000000000880000000000000000842806be9da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421f869f86702842806be9e82520894658bdf435d810c91414ec09147daa6db624063798203e880820a95a040ce7918eeb045ebf8c8b1887ca139d076bda00fa828a07881d442a72626c42da0156576a68e456e295e4c9cf67cf9f53151f329438916e0f24fc69d6bbb7fbacfc0c0");
         let bytes_buf = &mut bytes.as_ref();
         let block = Block::decode(bytes_buf).unwrap();
         let mut encoded_buf = Vec::new();
         block.encode(&mut encoded_buf);
-        assert_eq!(bytes, encoded_buf);
+        assert_eq!(bytes[..], encoded_buf);
     }
 
     #[test]

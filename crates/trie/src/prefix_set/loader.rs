@@ -7,7 +7,7 @@ use reth_db::{
     transaction::DbTx,
     DatabaseError,
 };
-use reth_primitives::{keccak256, trie::Nibbles, BlockNumber, StorageEntry, H256};
+use reth_primitives::{keccak256, trie::Nibbles, BlockNumber, StorageEntry, B256};
 use std::{
     collections::{HashMap, HashSet},
     ops::RangeInclusive,
@@ -19,13 +19,13 @@ pub struct LoadedPrefixSets {
     /// The account prefix set
     pub account_prefix_set: PrefixSetMut,
     /// The mapping of hashed account key to the corresponding storage prefix set
-    pub storage_prefix_sets: HashMap<H256, PrefixSetMut>,
+    pub storage_prefix_sets: HashMap<B256, PrefixSetMut>,
     /// The account keys of destroyed accounts
-    pub destroyed_accounts: HashSet<H256>,
+    pub destroyed_accounts: HashSet<B256>,
 }
 
 /// A wrapper around a database transaction that loads prefix sets within a given block range.
-#[derive(Deref)]
+#[derive(Debug, Deref)]
 pub struct PrefixSetLoader<'a, TX>(&'a TX);
 
 impl<'a, TX> PrefixSetLoader<'a, TX> {

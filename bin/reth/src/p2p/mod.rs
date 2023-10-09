@@ -33,6 +33,7 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
@@ -84,8 +85,8 @@ pub struct Command {
     command: Subcommands,
 }
 
-#[derive(Subcommand, Debug)]
 /// `reth p2p` subcommands
+#[derive(Subcommand, Debug)]
 pub enum Subcommands {
     /// Download block header
     Header {

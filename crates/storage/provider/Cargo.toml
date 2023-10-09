@@ -13,8 +13,11 @@ description = "Reth storage provider."
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
-reth-db = { path = "../db" }
+reth-db.workspace = true
 reth-trie = { path = "../../trie" }
+reth-nippy-jar = { path = "../nippy-jar" }
+
+revm.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
@@ -27,21 +30,25 @@ tracing.workspace = true
 auto_impl = "1.0"
 itertools.workspace = true
 pin-project.workspace = true
-derive_more = "0.99"
 parking_lot.workspace = true
 
 # test-utils
-reth-rlp = { workspace = true, optional = true }
+alloy-rlp = { workspace = true, optional = true }
+
+# parallel utils
+rayon.workspace = true
 
 [dev-dependencies]
-reth-db = { path = "../db", features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
-reth-rlp.workspace = true
 reth-trie = { path = "../../trie", features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+
+alloy-rlp.workspace = true
 parking_lot.workspace = true
-tempfile = "3.3"
+tempfile.workspace = true
 assert_matches.workspace = true
+rand.workspace = true
 
 [features]
-test-utils = ["reth-rlp"]
+test-utils = ["alloy-rlp"]

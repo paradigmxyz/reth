@@ -1,7 +1,6 @@
-use reth_primitives::{AccessList, Address, BlockId, Bytes, U256, U64, U8};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 use crate::BlockOverrides;
+use reth_primitives::{AccessList, Address, BlockId, Bytes, B256, U256, U64, U8};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Bundle of transactions
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -88,7 +87,7 @@ impl<'de> Deserialize<'de> for TransactionIndex {
     }
 }
 
-/// Call request
+/// Call request for `eth_call` and adjacent methods.
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CallRequest {
@@ -110,11 +109,16 @@ pub struct CallRequest {
     #[serde(default, flatten)]
     pub input: CallInput,
     /// Nonce
-    pub nonce: Option<U256>,
+    pub nonce: Option<U64>,
     /// chain id
     pub chain_id: Option<U64>,
     /// AccessList
     pub access_list: Option<AccessList>,
+    /// Max Fee per Blob gas for EIP-4844 transactions
+    pub max_fee_per_blob_gas: Option<U256>,
+    /// Blob Versioned Hashes for EIP-4844 transactions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob_versioned_hashes: Option<Vec<B256>>,
     /// EIP-2718 type
     #[serde(rename = "type")]
     pub transaction_type: Option<U8>,
@@ -124,8 +128,15 @@ impl CallRequest {
     /// Returns the configured fee cap, if any.
     ///
     /// The returns `gas_price` (legacy) if set or `max_fee_per_gas` (EIP1559)
+    #[inline]
     pub fn fee_cap(&self) -> Option<U256> {
         self.gas_price.or(self.max_fee_per_gas)
+    }
+
+    /// Returns true if the request has a `blobVersionedHashes` field but it is empty.
+    #[inline]
+    pub fn has_empty_blob_hashes(&self) -> bool {
+        self.blob_versioned_hashes.as_ref().map(|blobs| blobs.is_empty()).unwrap_or(false)
     }
 }
 
