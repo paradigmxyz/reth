@@ -6,6 +6,7 @@ use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, StateProviderFactory,
 };
+use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
@@ -69,6 +70,31 @@ pub trait RethNodeComponents {
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.provider().chain_spec()
     }
+}
+
+/// Helper container to encapsulate [RethModuleRegistry] and [TransportRpcModules].
+///
+/// This can be used to access installed modules, or create commonly used handlers like
+/// [reth_rpc::EthApi], and ultimately merge additional rpc handler into the configured transport
+/// modules [TransportRpcModules].
+#[derive(Debug)]
+#[allow(clippy::type_complexity)]
+pub struct RethRpcComponents<'a, Reth: RethNodeComponents> {
+    /// A Helper type the holds instances of the configured modules.
+    ///
+    /// This provides easy access to rpc handlers, such as [RethModuleRegistry::eth_api].
+    pub registry: &'a mut RethModuleRegistry<
+        Reth::Provider,
+        Reth::Pool,
+        Reth::Network,
+        Reth::Tasks,
+        Reth::Events,
+    >,
+    /// Holds installed modules per transport type.
+    ///
+    /// This can be used to merge additional modules into the configured transports (http, ipc,
+    /// ws). See [TransportRpcModules::merge_configured]
+    pub modules: &'a mut TransportRpcModules,
 }
 
 /// A Generic implementation of the RethNodeComponents trait.

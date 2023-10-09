@@ -182,9 +182,9 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     let addr = Address::random();
     let topic = B256::random();
 
-    // TODO: Make it clearer how to choose between topic0 (event name) and the other 3 indexed
-    // topics. This API is a bit clunky and not obvious to use at the moemnt.
-    let filter = Filter::new().address(addr).topic0(topic);
+    // TODO: Make it clearer how to choose between event_signature(topic0) (event name) and the
+    // other 3 indexed topics. This API is a bit clunky and not obvious to use at the moemnt.
+    let filter = Filter::new().address(addr).event_signature(topic);
     let filter_params = FilteredParams::new(Some(filter));
     let address_filter = FilteredParams::address_filter(&addr.into());
     let topics_filter = FilteredParams::topics_filter(&[topic.into()]);

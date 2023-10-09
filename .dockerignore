@@ -11,6 +11,7 @@
 !Cross.toml
 !deny.toml
 !Makefile
+!/.git # include for vergen constants
 
 # include dist directory, where the reth binary is located after compilation
 !/dist

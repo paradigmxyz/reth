@@ -1,4 +1,5 @@
 mod account_history;
+mod headers;
 mod history;
 mod receipts;
 mod receipts_by_logs;
@@ -7,6 +8,7 @@ mod storage_history;
 mod transaction_lookup;
 
 pub(crate) use account_history::AccountHistory;
+pub(crate) use headers::Headers;
 pub(crate) use receipts::Receipts;
 pub(crate) use receipts_by_logs::ReceiptsByLogs;
 pub(crate) use sender_recovery::SenderRecovery;
@@ -124,7 +126,7 @@ impl PruneInput {
 }
 
 /// Segment pruning output, see [Segment::prune].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct PruneOutput {
     /// `true` if pruning has been completed up to the target block, and `false` if there's more
     /// data to prune in further runs.
@@ -138,12 +140,18 @@ pub(crate) struct PruneOutput {
 impl PruneOutput {
     /// Returns a [PruneOutput] with `done = true`, `pruned = 0` and `checkpoint = None`.
     /// Use when no pruning is needed.
-    pub(crate) fn done() -> Self {
+    pub(crate) const fn done() -> Self {
         Self { done: true, pruned: 0, checkpoint: None }
+    }
+
+    /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.
+    /// Use when pruning is needed but cannot be done.
+    pub(crate) const fn not_done() -> Self {
+        Self { done: false, pruned: 0, checkpoint: None }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct PruneOutputCheckpoint {
     /// Highest pruned block number. If it's [None], the pruning for block `0` is not finished yet.
     pub(crate) block_number: Option<BlockNumber>,

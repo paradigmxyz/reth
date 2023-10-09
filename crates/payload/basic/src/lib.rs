@@ -148,18 +148,12 @@ where
             block.seal(attributes.parent)
         };
 
-        // configure evm env based on parent block
-        let (initialized_cfg, initialized_block_env) =
-            attributes.cfg_and_block_env(&self.chain_spec, &parent_block);
-
-        let config = PayloadConfig {
-            initialized_block_env,
-            initialized_cfg,
-            parent_block: Arc::new(parent_block),
-            extra_data: self.config.extradata.clone(),
+        let config = PayloadConfig::new(
+            Arc::new(parent_block),
+            self.config.extradata.clone(),
             attributes,
-            chain_spec: Arc::clone(&self.chain_spec),
-        };
+            Arc::clone(&self.chain_spec),
+        );
 
         let until = tokio::time::Instant::now() + self.config.deadline;
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -314,7 +308,7 @@ where
 
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
-            trace!("Payload building deadline reached");
+            trace!(target: "payload_builder", "payload building deadline reached");
             return Poll::Ready(Ok(()))
         }
 
@@ -322,7 +316,7 @@ where
         while this.interval.poll_tick(cx).is_ready() {
             // start a new job if there is no pending block and we haven't reached the deadline
             if this.pending_block.is_none() {
-                trace!("spawn new payload build task");
+                trace!(target: "payload_builder", "spawn new payload build task");
                 let (tx, rx) = oneshot::channel();
                 let client = this.client.clone();
                 let pool = this.pool.clone();
@@ -360,22 +354,22 @@ where
                     match outcome {
                         BuildOutcome::Better { payload, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
-                            trace!("built better payload");
+                            trace!(target: "payload_builder", value = %payload.fees(), "built better payload");
                             let payload = Arc::new(payload);
                             this.best_payload = Some(payload);
                         }
                         BuildOutcome::Aborted { fees, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
-                            trace!(?fees, "skipped payload build of worse block");
+                            trace!(target: "payload_builder", worse_fees = %fees, "skipped payload build of worse block");
                         }
                         BuildOutcome::Cancelled => {
                             unreachable!("the cancel signal never fired")
                         }
                     }
                 }
-                Poll::Ready(Err(err)) => {
+                Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
-                    trace!(?err, "payload build attempt failed");
+                    trace!(target: "payload_builder", ?error, "payload build attempt failed");
                     this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
@@ -514,13 +508,13 @@ impl Future for PendingPayload {
 ///
 /// If dropped, it will set the `cancelled` flag to true.
 #[derive(Default, Clone, Debug)]
-struct Cancelled(Arc<AtomicBool>);
+pub struct Cancelled(Arc<AtomicBool>);
 
 // === impl Cancelled ===
 
 impl Cancelled {
     /// Returns true if the job was cancelled.
-    fn is_cancelled(&self) -> bool {
+    pub fn is_cancelled(&self) -> bool {
         self.0.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
@@ -533,7 +527,7 @@ impl Drop for Cancelled {
 
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
-struct PayloadConfig {
+pub struct PayloadConfig {
     /// Pre-configured block environment.
     initialized_block_env: BlockEnv,
     /// Configuration for the environment.
@@ -546,6 +540,29 @@ struct PayloadConfig {
     attributes: PayloadBuilderAttributes,
     /// The chain spec.
     chain_spec: Arc<ChainSpec>,
+}
+
+impl PayloadConfig {
+    /// Create new payload config.
+    pub fn new(
+        parent_block: Arc<SealedBlock>,
+        extra_data: Bytes,
+        attributes: PayloadBuilderAttributes,
+        chain_spec: Arc<ChainSpec>,
+    ) -> Self {
+        // configure evm env based on parent block
+        let (initialized_cfg, initialized_block_env) =
+            attributes.cfg_and_block_env(&chain_spec, &parent_block);
+
+        Self {
+            initialized_block_env,
+            initialized_cfg,
+            parent_block,
+            extra_data,
+            attributes,
+            chain_spec,
+        }
+    }
 }
 
 /// The possible outcomes of a payload building attempt.
@@ -582,6 +599,20 @@ pub struct BuildArguments<Pool, Client> {
     config: PayloadConfig,
     cancel: Cancelled,
     best_payload: Option<Arc<BuiltPayload>>,
+}
+
+impl<Pool, Client> BuildArguments<Pool, Client> {
+    /// Create new build arguments.
+    pub fn new(
+        client: Client,
+        pool: Pool,
+        cached_reads: CachedReads,
+        config: PayloadConfig,
+        cancel: Cancelled,
+        best_payload: Option<Arc<BuiltPayload>>,
+    ) -> Self {
+        Self { client, pool, cached_reads, config, cancel, best_payload }
+    }
 }
 
 /// A trait for building payloads that encapsulate Ethereum transactions.
@@ -631,7 +662,7 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-fn default_payload_builder<Pool, Client>(
+pub fn default_payload_builder<Pool, Client>(
     args: BuildArguments<Pool, Client>,
 ) -> Result<BuildOutcome, PayloadBuilderError>
 where
@@ -653,7 +684,7 @@ where
         chain_spec,
     } = config;
 
-    debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number, "building new payload");
+    debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
@@ -725,11 +756,11 @@ where
                     EVMError::Transaction(err) => {
                         if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
                             // if the nonce is too low, we can skip this transaction
-                            trace!(?err, ?tx, "skipping nonce too low transaction");
+                            trace!(target: "payload_builder", ?err, ?tx, "skipping nonce too low transaction");
                         } else {
                             // if the transaction is invalid, we can skip it and all of its
                             // descendants
-                            trace!(?err, ?tx, "skipping invalid transaction and its descendants");
+                            trace!(target: "payload_builder", ?err, ?tx, "skipping invalid transaction and its descendants");
                             best_txs.mark_invalid(&pool_tx);
                         }
 
@@ -858,13 +889,12 @@ where
     let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
 
     let sealed_block = block.seal_slow();
+    debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
     let mut payload = BuiltPayload::new(attributes.id, sealed_block, total_fees);
 
-    if !blob_sidecars.is_empty() {
-        // extend the payload with the blob sidecars from the executed txs
-        payload.extend_sidecars(blob_sidecars);
-    }
+    // extend the payload with the blob sidecars from the executed txs
+    payload.extend_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
@@ -886,7 +916,7 @@ where
         initialized_cfg,
     } = config;
 
-    debug!(parent_hash=?parent_block.hash, parent_number=parent_block.number,  "building empty payload");
+    debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building empty payload");
 
     let state = client.state_by_block_hash(parent_block.hash)?;
     let mut db = State::builder()

@@ -684,16 +684,19 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut deleted = 0;
 
         let mut keys = keys.into_iter();
-        for key in &mut keys {
-            if deleted == limit {
-                break
-            }
 
-            let row = cursor.seek_exact(key.clone())?;
-            if let Some(row) = row {
-                cursor.delete_current()?;
-                deleted += 1;
-                delete_callback(row);
+        if limit != 0 {
+            for key in &mut keys {
+                let row = cursor.seek_exact(key.clone())?;
+                if let Some(row) = row {
+                    cursor.delete_current()?;
+                    deleted += 1;
+                    delete_callback(row);
+                }
+
+                if deleted == limit {
+                    break
+                }
             }
         }
 
@@ -714,15 +717,17 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut walker = cursor.walk_range(keys)?;
         let mut deleted = 0;
 
-        while let Some(row) = walker.next().transpose()? {
-            if deleted == limit {
-                break
-            }
+        if limit != 0 {
+            while let Some(row) = walker.next().transpose()? {
+                if !skip_filter(&row) {
+                    walker.delete_current()?;
+                    deleted += 1;
+                    delete_callback(row);
+                }
 
-            if !skip_filter(&row) {
-                walker.delete_current()?;
-                deleted += 1;
-                delete_callback(row);
+                if deleted == limit {
+                    break
+                }
             }
         }
 

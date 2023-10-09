@@ -2,7 +2,11 @@
 
 use crate::{
     args::GasPriceOracleArgs,
-    cli::{config::RethRpcConfig, ext::RethNodeCommandConfig},
+    cli::{
+        components::{RethNodeComponents, RethRpcComponents},
+        config::RethRpcConfig,
+        ext::RethNodeCommandConfig,
+    },
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -24,8 +28,6 @@ use reth_rpc::{
     },
     JwtError, JwtSecret,
 };
-
-use crate::cli::components::RethNodeComponents;
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
@@ -55,7 +57,7 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 115;
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 #[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
@@ -193,19 +195,19 @@ impl RpcServerArgs {
         let module_config = self.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (mut rpc_modules, auth_module, mut registry) = RpcModuleBuilder::default()
+        let (mut modules, auth_module, mut registry) = RpcModuleBuilder::default()
             .with_provider(components.provider())
             .with_pool(components.pool())
             .with_network(components.network())
             .with_events(components.events())
             .with_executor(components.task_executor())
             .build_with_auth_server(module_config, engine_api);
-
+        let node_modules = RethRpcComponents { registry: &mut registry, modules: &mut modules };
         // apply configured customization
-        conf.extend_rpc_modules(self, components, &mut registry, &mut rpc_modules)?;
+        conf.extend_rpc_modules(self, components, node_modules)?;
 
         let server_config = self.rpc_server_config();
-        let launch_rpc = rpc_modules.start_server(server_config).map_ok(|handle| {
+        let launch_rpc = modules.start_server(server_config).map_ok(|handle| {
             if let Some(url) = handle.ipc_endpoint() {
                 info!(target: "reth::cli", url=%url, "RPC IPC server started");
             }
@@ -307,6 +309,10 @@ impl RethRpcConfig for RpcServerArgs {
     fn is_ipc_enabled(&self) -> bool {
         // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
+    }
+
+    fn ipc_path(&self) -> &str {
+        self.ipcpath.as_str()
     }
 
     fn eth_config(&self) -> EthConfig {

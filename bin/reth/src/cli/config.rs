@@ -17,6 +17,9 @@ pub trait RethRpcConfig {
     /// Returns whether ipc is enabled.
     fn is_ipc_enabled(&self) -> bool;
 
+    /// Returns the path to the target ipc socket if enabled.
+    fn ipc_path(&self) -> &str;
+
     /// The configured ethereum RPC settings.
     fn eth_config(&self) -> EthConfig;
 

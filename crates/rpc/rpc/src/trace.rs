@@ -168,11 +168,7 @@ where
                     // If statediffs were requested, populate them with the account balance and
                     // nonce from pre-state
                     if let Some(ref mut state_diff) = trace_res.state_diff {
-                        populate_account_balance_nonce_diffs(
-                            state_diff,
-                            &db,
-                            state.iter().map(|(addr, acc)| (*addr, acc.info.clone())),
-                        )?;
+                        populate_account_balance_nonce_diffs(state_diff, &db, state.iter())?;
                     }
 
                     results.push(trace_res);
@@ -513,11 +509,7 @@ where
                 // If statediffs were requested, populate them with the account balance and nonce
                 // from pre-state
                 if let Some(ref mut state_diff) = full_trace.state_diff {
-                    populate_account_balance_nonce_diffs(
-                        state_diff,
-                        db,
-                        state.iter().map(|(addr, acc)| (*addr, acc.info.clone())),
-                    )?;
+                    populate_account_balance_nonce_diffs(state_diff, db, state.iter())?;
                 }
 
                 let trace = TraceResultsWithTransactionHash {

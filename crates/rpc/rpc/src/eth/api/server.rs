@@ -254,15 +254,13 @@ where
     /// Handler for: `eth_createAccessList`
     async fn create_access_list(
         &self,
-        mut request: CallRequest,
+        request: CallRequest,
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let access_list = self.create_access_list_at(request.clone(), block_number).await?;
-        request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_at(request, block_id).await?;
-        Ok(AccessListWithGasUsed { access_list, gas_used })
+        let access_list_with_gas_used = self.create_access_list_at(request, block_number).await?;
+
+        Ok(access_list_with_gas_used)
     }
 
     /// Handler for: `eth_estimateGas`

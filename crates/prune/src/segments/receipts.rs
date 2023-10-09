@@ -145,20 +145,6 @@ mod tests {
                 .min(next_tx_number_to_prune as usize + input.delete_limit)
                 .sub(1);
 
-            let last_pruned_block_number = blocks
-                .iter()
-                .fold_while((0, 0), |(_, mut tx_count), block| {
-                    tx_count += block.body.len();
-
-                    if tx_count > last_pruned_tx_number {
-                        Done((block.number, tx_count))
-                    } else {
-                        Continue((block.number, tx_count))
-                    }
-                })
-                .into_inner()
-                .0;
-
             let provider = tx.inner_rw();
             let result = segment.prune(&provider, input).unwrap();
             assert_matches!(
@@ -174,8 +160,20 @@ mod tests {
                 .unwrap();
             provider.commit().expect("commit");
 
-            let last_pruned_block_number =
-                last_pruned_block_number.checked_sub(if result.done { 0 } else { 1 });
+            let last_pruned_block_number = blocks
+                .iter()
+                .fold_while((0, 0), |(_, mut tx_count), block| {
+                    tx_count += block.body.len();
+
+                    if tx_count > last_pruned_tx_number {
+                        Done((block.number, tx_count))
+                    } else {
+                        Continue((block.number, tx_count))
+                    }
+                })
+                .into_inner()
+                .0
+                .checked_sub(if result.done { 0 } else { 1 });
 
             assert_eq!(
                 tx.table::<tables::Receipts>().unwrap().len(),
