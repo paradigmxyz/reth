@@ -313,6 +313,58 @@ pub struct GethDefaultTracingOptions {
 }
 
 impl GethDefaultTracingOptions {
+    /// build a new GethDebugTracingOptions with default value
+    pub fn new() -> Self {
+        GethDefaultTracingOptions::default()
+    }
+
+    /// Sets the enable_memory field.
+    pub fn with_enable_memory(mut self, enable: bool) -> Self {
+        self.enable_memory = Some(enable);
+        self
+    }
+
+    /// Sets the disable_memory field.
+    pub fn with_disable_memory(mut self, disable: bool) -> Self {
+        self.disable_memory = Some(disable);
+        self
+    }
+
+    /// Sets the disable_stack field.
+    pub fn with_disable_stack(mut self, disable: bool) -> Self {
+        self.disable_stack = Some(disable);
+        self
+    }
+
+    /// Sets the disable_storage field.
+    pub fn with_disable_storage(mut self, disable: bool) -> Self {
+        self.disable_storage = Some(disable);
+        self
+    }
+
+    /// Sets the enable_return_data field.
+    pub fn with_enable_return_data(mut self, enable: bool) -> Self {
+        self.enable_return_data = Some(enable);
+        self
+    }
+
+    /// Sets the disable_return_data field.
+    pub fn with_disable_return_data(mut self, disable: bool) -> Self {
+        self.disable_return_data = Some(disable);
+        self
+    }
+
+    /// Sets the debug field.
+    pub fn with_debug(mut self, debug: bool) -> Self {
+        self.debug = Some(debug);
+        self
+    }
+
+    /// Sets the limit field.
+    pub fn with_limit(mut self, limit: u64) -> Self {
+        self.limit = Some(limit);
+        self
+    }
     /// Returns `true` if return data capture is enabled
     pub fn is_return_data_enabled(&self) -> bool {
         self.enable_return_data
@@ -335,7 +387,6 @@ impl GethDefaultTracingOptions {
         !self.disable_storage.unwrap_or(false)
     }
 }
-
 /// Bindings for additional `debug_traceCall` options
 ///
 /// See <https://geth.ethereum.org/docs/rpc/ns-debug#debug_tracecall>
