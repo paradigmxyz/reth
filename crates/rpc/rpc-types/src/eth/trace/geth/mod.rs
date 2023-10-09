@@ -313,11 +313,7 @@ pub struct GethDefaultTracingOptions {
 }
 
 impl GethDefaultTracingOptions {
-    /// build a new GethDebugTracingOptions with default value
-    pub fn new() -> Self {
-        GethDefaultTracingOptions::default()
-    }
-
+    
     /// Sets the enable_memory field.
     pub fn with_enable_memory(mut self, enable: bool) -> Self {
         self.enable_memory = Some(enable);
