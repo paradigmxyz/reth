@@ -236,10 +236,13 @@ where
         request: GetPooledTransactions,
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     ) {
+        dbg!(peer_id, &request);
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             let transactions = self
                 .pool
                 .get_pooled_transaction_elements(request.0, GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE);
+
+            dbg!(&transactions);
 
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
@@ -290,7 +293,7 @@ where
         to_propagate: Vec<PropagateTransaction>,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
-
+        println!("propagate txs {:?}", to_propagate);
         // send full transactions to a fraction fo the connected peers (square root of the total
         // number of connected peers)
         let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
@@ -516,6 +519,7 @@ where
 
     /// Handles dedicated transaction events related to the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
+        println!("received event {:?}", event);
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 // ensure we didn't receive any blob transactions as these are disallowed to be
@@ -822,6 +826,7 @@ where
 }
 
 /// A transaction that's about to be propagated to multiple peers.
+#[derive(Debug)]
 struct PropagateTransaction {
     size: usize,
     transaction: Arc<TransactionSigned>,

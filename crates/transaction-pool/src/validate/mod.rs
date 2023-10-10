@@ -119,9 +119,17 @@ impl<T: PoolTransaction> ValidTransaction<T> {
     }
 
     /// Returns the length of the rlp encoded object
+    ///
+    /// Caution: This is an expensive operation and should ideally be cached
     #[inline]
     pub(crate) fn encoded_length(&self) -> usize {
-        self.transaction().encoded_length()
+        match self {
+            ValidTransaction::Valid(tx) => tx.encoded_length(),
+            ValidTransaction::ValidWithSidecar { transaction, sidecar } => {
+                // TODO
+                transaction.encoded_length() + sidecar.size()
+            }
+        }
     }
 
     /// Returns the nonce of the transaction.

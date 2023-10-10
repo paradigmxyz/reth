@@ -439,7 +439,7 @@ impl BlobTransaction {
 
         let tx_length = tx_header.length() + tx_header.payload_length;
 
-        // The payload length is the length of the `tranascation_payload_body` list, plus the
+        // The payload length is the length of the `transaction_payload_body` list, plus the
         // length of the blobs, commitments, and proofs.
         let payload_length = tx_length + self.sidecar.fields_len();
 
@@ -457,7 +457,7 @@ impl BlobTransaction {
         self.sidecar.encode_inner(out);
     }
 
-    /// Ouputs the length of the RLP encoding of the blob transaction, including the tx type byte,
+    /// Outputs the length of the RLP encoding of the blob transaction, including the tx type byte,
     /// optionally including the length of a wrapping string header. If `with_header` is `false`,
     /// the length of the following will be calculated:
     /// `tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs])`

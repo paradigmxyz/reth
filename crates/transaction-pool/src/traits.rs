@@ -945,7 +945,7 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.input().as_ref()
     }
 
-    /// Returns a measurement of the heap usage of this type and all its internals.
+    /// Returns a __measurement__ of the heap usage of this type and all its internals.
     fn size(&self) -> usize {
         self.transaction.transaction.input().len()
     }
