@@ -1,6 +1,6 @@
 # Building for ARM devices
 
-Reth can be build for and run on ARM devices, but there are a few things to take into considerations before.
+Reth can be built for and run on ARM devices, but there are a few things to take into considerations before.
 
 ## CPU Architecture
 
