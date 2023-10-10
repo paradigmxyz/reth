@@ -603,7 +603,7 @@ impl BlobTransactionSidecar {
     }
 
     /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
-    pub(crate) fn fields_len(&self) -> usize {
+    pub fn fields_len(&self) -> usize {
         BlobTransactionSidecarRlp::wrap_ref(self).fields_len()
     }
 

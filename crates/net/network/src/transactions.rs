@@ -236,7 +236,6 @@ where
         request: GetPooledTransactions,
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     ) {
-        trace!(target: "net::tx", ?peer_id, ?request, "Received tx request from peer");
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             let transactions = self
                 .pool
@@ -247,7 +246,6 @@ where
             peer.transactions.extend(transactions.iter().map(|tx| *tx.hash()));
 
             let resp = PooledTransactions(transactions);
-            trace!(target: "net::tx", ?peer_id, len=?resp.0.len(), "Sending tx response to peer");
             let _ = response.send(Ok(resp));
         }
     }
@@ -376,7 +374,6 @@ where
     ) -> Option<PropagatedTransactions> {
         let peer = self.peers.get_mut(&peer_id)?;
         let mut propagated = PropagatedTransactions::default();
-        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
 
         // filter all transactions unknown to the peer
         let mut full_transactions = FullTransactionsBuilder::default();
@@ -417,8 +414,6 @@ where
     ///
     /// Note: This will only send the hashes for transactions that exist in the pool.
     fn propagate_hashes_to(&mut self, hashes: Vec<TxHash>, peer_id: PeerId) {
-        trace!(target: "net::tx", "Start propagating transactions as hashes");
-
         // This fetches a transactions from the pool, including the blob transactions, which are
         // only ever sent as hashes.
         let propagated = {
@@ -444,7 +439,6 @@ where
             let new_pooled_hashes = hashes.build();
 
             if new_pooled_hashes.is_empty() {
-                trace!(target: "net::tx", ?peer_id, "No new hashes to propagate");
                 // nothing to propagate
                 return
             }
@@ -452,8 +446,6 @@ where
             for hash in new_pooled_hashes.iter_hashes().copied() {
                 propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
             }
-
-            trace!(target: "net::tx", ?peer_id, ?new_pooled_hashes, "Propagating tx hashes to peer");
 
             // send hashes of transactions
             self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
@@ -474,11 +466,8 @@ where
         peer_id: PeerId,
         msg: NewPooledTransactionHashes,
     ) {
-        trace!(target: "net::tx", ?peer_id, ?msg, "Received tx hashes from peer");
-
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            trace!(target: "net::tx", ?peer_id, ?msg, "Network initially syncing, ignoring tx hashes");
             return
         }
 
@@ -496,7 +485,6 @@ where
             self.pool.retain_unknown(&mut hashes);
 
             if hashes.is_empty() {
-                trace!(target: "net::tx", ?peer_id, "Peer sent no new hashes");
                 // nothing to request
                 return
             }
@@ -512,7 +500,6 @@ where
                 response,
             };
 
-            trace!(target: "net::tx", ?peer_id, ?req, "Pushing tx request for peer");
             if peer.request_tx.try_send(req).is_ok() {
                 self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
             } else {
@@ -651,10 +638,8 @@ where
         transactions: impl IntoIterator<Item = PooledTransactionsElement>,
         source: TransactionSource,
     ) {
-        trace!(target: "net::tx", ?peer_id, "Start importing transactions");
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            trace!(target: "net::tx", ?peer_id, "Ignoring transactions while pipeline syncing");
             return
         }
 
@@ -785,7 +770,6 @@ where
         while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
             this.inflight_requests.poll_next_unpin(cx)
         {
-            trace!(target: "net::tx", ?peer_id, ?result, "Transaction request finished");
             match result {
                 Ok(Ok(txs)) => {
                     this.import_transactions(peer_id, txs.0, TransactionSource::Response)
@@ -805,7 +789,6 @@ where
 
         // Advance all imports
         while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
-            trace!(target: "net::tx", ?import_res, "Transaction import finished");
             match import_res {
                 Ok(hash) => {
                     this.on_good_import(hash);
