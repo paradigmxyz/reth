@@ -1,6 +1,6 @@
 //! Decoding tests for [`PooledTransactions`]
 use alloy_rlp::Decodable;
-use reth_eth_wire::PooledTransactions;
+use reth_eth_wire::{EthVersion, PooledTransactions, ProtocolMessage};
 use reth_primitives::{hex, Bytes, PooledTransactionsElement};
 use std::{fs, path::PathBuf};
 
@@ -11,6 +11,16 @@ fn decode_pooled_transactions_data() {
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
     let hex_data = hex::decode(data.trim()).unwrap();
     let _txs = PooledTransactions::decode(&mut &hex_data[..]).unwrap();
+}
+
+#[test]
+fn decode_request_pair_pooled_blob_transactions() {
+    let network_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/request_pair_pooled_blob_transactions");
+    let data = fs::read_to_string(network_data_path).expect("Unable to read file");
+    let hex_data = hex::decode(data.trim()).unwrap();
+    // let _txs = PooledTransactions::decode(&mut &hex_data[..]).unwrap();
+    let _txs = ProtocolMessage::decode_message(EthVersion::Eth68, &mut &hex_data[..]).unwrap();
 }
 
 #[test]
