@@ -20,17 +20,16 @@ impl PruneMode {
     pub fn prune_target_block(
         &self,
         tip: BlockNumber,
-        min_blocks: u64,
         segment: PruneSegment,
     ) -> Result<Option<(BlockNumber, PruneMode)>, PruneSegmentError> {
         let result = match self {
-            PruneMode::Full if min_blocks == 0 => Some((tip, *self)),
+            PruneMode::Full if segment.min_blocks() == 0 => Some((tip, *self)),
             PruneMode::Distance(distance) if *distance > tip => None, // Nothing to prune yet
-            PruneMode::Distance(distance) if *distance >= min_blocks => {
+            PruneMode::Distance(distance) if *distance >= segment.min_blocks() => {
                 Some((tip - distance, *self))
             }
             PruneMode::Before(n) if *n > tip => None, // Nothing to prune yet
-            PruneMode::Before(n) if tip - n >= min_blocks => Some((n - 1, *self)),
+            PruneMode::Before(n) if tip - n >= segment.min_blocks() => Some((n - 1, *self)),
             _ => return Err(PruneSegmentError::Configuration(segment)),
         };
         Ok(result)

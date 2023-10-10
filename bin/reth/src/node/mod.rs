@@ -60,6 +60,7 @@ use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
     HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
+use reth_prune::segments::SegmentSet;
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
@@ -455,17 +456,39 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
+            let mut segments = SegmentSet::new();
+
+            if let Some(mode) = prune_config.segments.receipts {
+                segments = segments.add_segment(reth_prune::segments::Receipts::new(mode));
+            }
+            segments = segments.add_segment(reth_prune::segments::ReceiptsByLogs::new(
+                prune_config.segments.receipts_log_filter.clone(),
+            ));
+            if let Some(mode) = prune_config.segments.transaction_lookup {
+                segments = segments.add_segment(reth_prune::segments::TransactionLookup::new(mode));
+            }
+            if let Some(mode) = prune_config.segments.sender_recovery {
+                segments = segments.add_segment(reth_prune::segments::SenderRecovery::new(mode));
+            }
+            if let Some(mode) = prune_config.segments.account_history {
+                segments = segments.add_segment(reth_prune::segments::AccountHistory::new(mode));
+            }
+            if let Some(mode) = prune_config.segments.storage_history {
+                segments = segments.add_segment(reth_prune::segments::StorageHistory::new(mode));
+            }
+
             let mut pruner = reth_prune::Pruner::new(
                 db.clone(),
                 self.chain.clone(),
+                segments.into_vec(),
                 prune_config.block_interval,
-                prune_config.segments,
                 self.chain.prune_delete_limit,
                 highest_snapshots_rx,
             );
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
+
+            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
             Either::Left(events)
         } else {
             Either::Right(stream::empty())
@@ -878,15 +901,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
                     stage_config.transaction_lookup.commit_threshold,
-                    prune_modes.clone(),
+                    prune_modes.transaction_lookup,
                 ))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
-                    prune_modes.clone(),
+                    prune_modes.account_history,
                 ))
                 .set(IndexStorageHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
-                    prune_modes,
+                    prune_modes.storage_history,
                 )),
             )
             .build(db, self.chain.clone());
