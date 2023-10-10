@@ -16,7 +16,6 @@ use std::{
     task::{Context, Poll},
 };
 use tokio_stream::Stream;
-use tracing::trace;
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
@@ -283,13 +282,9 @@ where
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
-        trace!(target: "net::tx", "sending message, before encoding: msg={item:?}");
-
         let mut bytes = BytesMut::new();
         ProtocolMessage::from(item).encode(&mut bytes);
         let bytes = bytes.freeze();
-
-        trace!(target: "net::tx", "sending message: msg={bytes:x}");
 
         self.project().inner.start_send(bytes)?;
 

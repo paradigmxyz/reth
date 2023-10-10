@@ -998,10 +998,6 @@ impl TransactionSigned {
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
-            println!("tx_type: {:?}", tx_type);
-            // print like first 100 bytes
-            println!("data: {:x?}", &original_encoding[..100]);
-            println!("header: {:?}", header);
             return Err(RlpError::Custom("typed tx fields must be encoded as a list"))
         }
 
