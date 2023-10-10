@@ -592,6 +592,11 @@ pub struct BlobTransactionSidecar {
 }
 
 impl BlobTransactionSidecar {
+    /// Creates a new [BlobTransactionSidecar] using the given blobs, commitments, and proofs.
+    pub fn new(blobs: Vec<Blob>, commitments: Vec<Bytes48>, proofs: Vec<Bytes48>) -> Self {
+        Self { blobs, commitments, proofs }
+    }
+
     /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
     ///
     /// This encodes the fields in the following order:

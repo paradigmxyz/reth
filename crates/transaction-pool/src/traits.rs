@@ -787,6 +787,10 @@ pub struct EthPooledTransaction {
     /// max_blob_fee_per_gas * blob_gas_used`.
     pub(crate) cost: U256,
 
+    /// This is the RLP length of the transaction, computed when the transaction is added to the
+    /// pool.
+    pub(crate) encoded_length: usize,
+
     /// The blob side car for this transaction
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
 }
@@ -807,7 +811,7 @@ pub enum EthBlobTransactionSidecar {
 
 impl EthPooledTransaction {
     /// Create new instance of [Self].
-    pub fn new(transaction: TransactionSignedEcRecovered) -> Self {
+    pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
         let gas_cost = match &transaction.transaction {
             Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
@@ -826,7 +830,7 @@ impl EthPooledTransaction {
             cost += U256::from(blob_tx.max_fee_per_blob_gas * blob_tx.blob_gas() as u128);
         }
 
-        Self { transaction, cost, blob_sidecar }
+        Self { transaction, cost, encoded_length, blob_sidecar }
     }
 
     /// Return the reference to the underlying transaction.
@@ -838,19 +842,20 @@ impl EthPooledTransaction {
 /// Conversion from the network transaction type to the pool transaction type.
 impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+        let encoded_length = tx.length();
         let (tx, signer) = tx.into_components();
         match tx {
             PooledTransactionsElement::BlobTransaction(tx) => {
                 // include the blob sidecar
                 let (tx, blob) = tx.into_parts();
                 let tx = TransactionSignedEcRecovered::from_signed_transaction(tx, signer);
-                let mut pooled = EthPooledTransaction::new(tx);
+                let mut pooled = EthPooledTransaction::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
                 pooled
             }
             tx => {
                 // no blob sidecar
-                EthPooledTransaction::new(tx.into_ecrecovered_transaction(signer))
+                EthPooledTransaction::new(tx.into_ecrecovered_transaction(signer), encoded_length)
             }
         }
     }
@@ -993,7 +998,10 @@ impl EthPoolTransaction for EthPooledTransaction {
 
 impl FromRecoveredTransaction for EthPooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        EthPooledTransaction::new(tx)
+        // CAUTION: this should not be done for EIP-4844 transactions, as the blob sidecar is
+        // missing.
+        let encoded_length = tx.length();
+        EthPooledTransaction::new(tx, encoded_length)
     }
 }
 
