@@ -205,22 +205,21 @@ impl RpcServerArgs {
 
         let rpc_components = RethRpcComponents { registry: &mut registry, modules: &mut modules };
         // apply configured customization
-        conf.extend_rpc_modules(self, components, &rpc_components)?;
+        conf.extend_rpc_modules(self, components, rpc_components)?;
 
         let server_config = self.rpc_server_config();
-        let launch_rpc =
-            rpc_components.modules.clone().start_server(server_config).map_ok(|handle| {
-                if let Some(url) = handle.ipc_endpoint() {
-                    info!(target: "reth::cli", url=%url, "RPC IPC server started");
-                }
-                if let Some(addr) = handle.http_local_addr() {
-                    info!(target: "reth::cli", url=%addr, "RPC HTTP server started");
-                }
-                if let Some(addr) = handle.ws_local_addr() {
-                    info!(target: "reth::cli", url=%addr, "RPC WS server started");
-                }
-                handle
-            });
+        let launch_rpc = modules.clone().start_server(server_config).map_ok(|handle| {
+            if let Some(url) = handle.ipc_endpoint() {
+                info!(target: "reth::cli", url=%url, "RPC IPC server started");
+            }
+            if let Some(addr) = handle.http_local_addr() {
+                info!(target: "reth::cli", url=%addr, "RPC HTTP server started");
+            }
+            if let Some(addr) = handle.ws_local_addr() {
+                info!(target: "reth::cli", url=%addr, "RPC WS server started");
+            }
+            handle
+        });
 
         let launch_auth = auth_module.start_server(auth_config).map_ok(|handle| {
             let addr = handle.local_addr();
@@ -233,7 +232,8 @@ impl RpcServerArgs {
         let handles = RethRpcServerHandles { rpc, auth };
 
         // call hook
-        conf.on_rpc_server_started(self, components, &rpc_components, handles.clone())?;
+        let rpc_components = RethRpcComponents { registry: &mut registry, modules: &mut modules };
+        conf.on_rpc_server_started(self, components, rpc_components, handles.clone())?;
 
         Ok(handles)
     }
