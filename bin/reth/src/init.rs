@@ -100,7 +100,7 @@ pub fn insert_genesis_state<DB: Database>(
         let bytecode_hash = if let Some(code) = &account.code {
             let bytecode = Bytecode::new_raw(code.clone());
             let hash = bytecode.hash_slow();
-            bundle_builder = bundle_builder.contract(hash, bytecode.0);
+            bundle_builder = bundle_builder.contract(hash, bytecode.into());
             Some(hash)
         } else {
             None
