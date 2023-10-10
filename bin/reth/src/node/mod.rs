@@ -461,9 +461,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             if let Some(mode) = prune_config.segments.receipts {
                 segments = segments.add_segment(reth_prune::segments::Receipts::new(mode));
             }
-            segments = segments.add_segment(reth_prune::segments::ReceiptsByLogs::new(
-                prune_config.segments.receipts_log_filter.clone(),
-            ));
+            if !prune_config.segments.receipts_log_filter.is_empty() {
+                segments = segments.add_segment(reth_prune::segments::ReceiptsByLogs::new(
+                    prune_config.segments.receipts_log_filter.clone(),
+                ));
+            }
             if let Some(mode) = prune_config.segments.transaction_lookup {
                 segments = segments.add_segment(reth_prune::segments::TransactionLookup::new(mode));
             }
