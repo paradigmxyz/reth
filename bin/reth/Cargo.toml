@@ -37,7 +37,7 @@ reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
 reth-rpc-types = { path = "../../crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "../../crates/rpc/rpc-types-compat" }
-reth-rpc-api = { path = "../../crates/rpc/rpc-api" }
+reth-rpc-api = { path = "../../crates/rpc/rpc-api", features = ["client"] }
 reth-network = { path = "../../crates/net/network", features = ["serde"] }
 reth-network-api.workspace = true
 reth-downloaders = { path = "../../crates/net/downloaders", features = ["test-utils"] }

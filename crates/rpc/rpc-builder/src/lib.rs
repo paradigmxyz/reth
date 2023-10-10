@@ -1478,7 +1478,7 @@ impl TransportRpcModuleConfig {
 }
 
 /// Holds installed modules per transport type.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TransportRpcModules<Context = ()> {
     /// The original config
     config: TransportRpcModuleConfig,

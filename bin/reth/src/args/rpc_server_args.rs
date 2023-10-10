@@ -3,7 +3,7 @@
 use crate::{
     args::GasPriceOracleArgs,
     cli::{
-        components::{RethNodeComponents, RethRpcComponents},
+        components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
         config::RethRpcConfig,
         ext::RethNodeCommandConfig,
     },
@@ -184,7 +184,7 @@ impl RpcServerArgs {
         engine_api: Engine,
         jwt_secret: JwtSecret,
         conf: &mut Conf,
-    ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
+    ) -> eyre::Result<RethRpcServerHandles>
     where
         Reth: RethNodeComponents,
         Engine: EngineApiServer,
@@ -202,12 +202,13 @@ impl RpcServerArgs {
             .with_events(components.events())
             .with_executor(components.task_executor())
             .build_with_auth_server(module_config, engine_api);
-        let node_modules = RethRpcComponents { registry: &mut registry, modules: &mut modules };
+
+        let rpc_components = RethRpcComponents { registry: &mut registry, modules: &mut modules };
         // apply configured customization
-        conf.extend_rpc_modules(self, components, node_modules)?;
+        conf.extend_rpc_modules(self, components, rpc_components)?;
 
         let server_config = self.rpc_server_config();
-        let launch_rpc = modules.start_server(server_config).map_ok(|handle| {
+        let launch_rpc = modules.clone().start_server(server_config).map_ok(|handle| {
             if let Some(url) = handle.ipc_endpoint() {
                 info!(target: "reth::cli", url=%url, "RPC IPC server started");
             }
@@ -227,7 +228,14 @@ impl RpcServerArgs {
         });
 
         // launch servers concurrently
-        Ok(futures::future::try_join(launch_rpc, launch_auth).await?)
+        let (rpc, auth) = futures::future::try_join(launch_rpc, launch_auth).await?;
+        let handles = RethRpcServerHandles { rpc, auth };
+
+        // call hook
+        let rpc_components = RethRpcComponents { registry: &mut registry, modules: &mut modules };
+        conf.on_rpc_server_started(self, components, rpc_components, handles.clone())?;
+
+        Ok(handles)
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.

@@ -533,7 +533,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         self.adjust_instance_ports();
 
         // Start RPC servers
-        let (_rpc_server, _auth_server) =
+        let _rpc_server_handles =
             self.rpc.start_servers(&components, engine_api, jwt_secret, &mut self.ext).await?;
 
         // Run consensus engine to completion
