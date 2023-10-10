@@ -69,8 +69,10 @@ pub trait EthTransactions: Send + Sync {
 
     /// Returns the revm evm env for the requested [BlockId]
     ///
-    /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
+    /// If the [BlockId] this will return the [BlockId] of the block the env was configured
     /// for.
+    /// If the [BlockId] is pending, this will return the "Pending" tag, otherwise this returns the
+    /// hash of the exact block.
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
 
     /// Returns the revm evm env for the raw block header
@@ -279,7 +281,7 @@ where
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         if at.is_pending() {
             let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
-            Ok((cfg, block_env, origin.header().hash.into()))
+            Ok((cfg, block_env, origin.state_block_id()))
         } else {
             //  Use cached values if there is no pending block
             let block_hash = self
