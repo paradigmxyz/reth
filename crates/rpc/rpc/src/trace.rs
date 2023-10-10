@@ -276,29 +276,34 @@ where
         let mut target_blocks = Vec::new();
         for block in blocks {
             let mut transaction_indices = HashSet::new();
+            let mut highest_matching_index = 0; 
             for (tx_idx, tx) in block.body.iter().enumerate() {
                 let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
                 let to = tx.to();
                 if matcher.matches(from, to) {
-                    transaction_indices.insert(tx_idx as u64);
+                    let idx = tx_idx as u64;
+                    transaction_indices.insert(idx);
+                    if idx > highest_matching_index {
+                        highest_matching_index = idx;
+                    }
                 }
             }
             if !transaction_indices.is_empty() {
-                target_blocks.push((block.number, transaction_indices));
+                target_blocks.push((block.number, transaction_indices, highest_matching_index));
             }
         }
 
-        // TODO: this could be optimized to only trace the block until the highest matching index in
-        // that block
-
         // trace all relevant blocks
         let mut block_traces = Vec::with_capacity(target_blocks.len());
-        for (num, indices) in target_blocks {
+        for (num, indices, highest_idx) in target_blocks {
             let traces = self.trace_block_with(
                 num.into(),
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, res, _, _| {
                     if let Some(idx) = tx_info.index {
+                        if idx > highest_idx {
+                            return Ok(None);
+                        }
                         if !indices.contains(&idx) {
                             // only record traces for relevant transactions
                             return Ok(None)
