@@ -453,6 +453,9 @@ impl BlobTransaction {
         tx_header.encode(out);
         self.transaction.encode_fields(out);
 
+        // Encode the signature
+        self.signature.encode(out);
+
         // Encode the blobs, commitments, and proofs
         self.sidecar.encode_inner(out);
     }
@@ -502,7 +505,20 @@ impl BlobTransaction {
 
         // The payload length is the length of the `tranascation_payload_body` list, plus the
         // length of the blobs, commitments, and proofs.
-        tx_length + self.sidecar.fields_len()
+        let payload_length = tx_length + self.sidecar.fields_len();
+
+        // We use the calculated payload len to construct the first list header, which encompasses
+        // everything in the tx - the length of the second, inner list header is part of
+        // payload_length
+        let blob_tx_header = Header { list: true, payload_length };
+
+        // The final length is the length of:
+        //  * the outer blob tx header +
+        //  * the inner tx header +
+        //  * the inner tx fields +
+        //  * the signature fields +
+        //  * the sidecar fields
+        blob_tx_header.length() + blob_tx_header.payload_length
     }
 
     /// Decodes a [BlobTransaction] from RLP. This expects the encoding to be:
@@ -587,8 +603,8 @@ impl BlobTransactionSidecar {
     }
 
     /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
-    pub(crate) fn fields_len(&self) -> usize {
-        self.blobs.len() + self.commitments.len() + self.proofs.len()
+    pub fn fields_len(&self) -> usize {
+        BlobTransactionSidecarRlp::wrap_ref(self).fields_len()
     }
 
     /// Decodes the inner [BlobTransactionSidecar] fields from RLP bytes, without a RLP header.
@@ -637,6 +653,10 @@ impl BlobTransactionSidecarRlp {
         self.blobs.encode(out);
         self.commitments.encode(out);
         self.proofs.encode(out);
+    }
+
+    fn fields_len(&self) -> usize {
+        self.blobs.length() + self.commitments.length() + self.proofs.length()
     }
 
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
