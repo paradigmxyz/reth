@@ -385,10 +385,7 @@ mod tests {
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
-        runner.set_prune_modes(PruneModes {
-            transaction_lookup: Some(PruneMode::Before(prune_target)),
-            ..Default::default()
-        });
+        runner.set_prune_mode(PruneMode::Before(prune_target));
 
         let rx = runner.execute(input);
 
@@ -486,8 +483,8 @@ mod tests {
             self.commit_threshold = threshold;
         }
 
-        fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-            self.prune_modes = prune_modes;
+        fn set_prune_mode(&mut self, prune_mode: PruneMode) {
+            self.prune_mode = Some(prune_mode);
         }
 
         /// # Panics
@@ -561,6 +558,7 @@ mod tests {
                         })
                         .transpose()
                         .expect("prune target block for transaction lookup")
+                        .flatten()
                     {
                         if target_prunable_block > input.checkpoint().block_number {
                             input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));

@@ -254,7 +254,7 @@ impl<DB: Database> Pruner<DB> {
 mod tests {
     use crate::Pruner;
     use reth_db::test_utils::create_test_rw_db;
-    use reth_primitives::{PruneModes, MAINNET};
+    use reth_primitives::MAINNET;
     use tokio::sync::watch;
 
     #[test]

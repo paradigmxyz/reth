@@ -455,7 +455,7 @@ mod tests {
     struct IndexAccountHistoryTestRunner {
         pub(crate) tx: TestTransaction,
         commit_threshold: u64,
-        prune_mode: Opiton<PruneMode>,
+        prune_mode: Option<PruneMode>,
     }
 
     impl Default for IndexAccountHistoryTestRunner {

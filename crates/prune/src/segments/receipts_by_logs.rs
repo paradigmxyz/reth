@@ -266,7 +266,7 @@ mod tests {
             let receipts_log_filter =
                 ReceiptsLogPruneConfig(BTreeMap::from([(deposit_contract_addr, prune_mode)]));
 
-            let result = ReceiptsByLogs::new(&receipts_log_filter).prune(
+            let result = ReceiptsByLogs::new(receipts_log_filter).prune(
                 &provider,
                 PruneInput {
                     previous_checkpoint: tx
