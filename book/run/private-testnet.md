@@ -93,7 +93,7 @@ b454497fbec8   el-1-reth-lighthouse                       engine-rpc: 8551/tcp -
 Great! You now have a private network with 2 full Ethereum nodes on your local machine over Docker - one that is a Reth/Lighthouse pair and another that is Reth/Teku. Check out the [Kurtosis docs](https://docs.kurtosis.com/cli) to learn about the various ways you can interact with and inspect your network. 
 
 ## Using Kurtosis on Kubernetes
-Kurtosis packages are portable and reproducible, meaning they will work the same way over Docker or Kubernetes, locally or on remote infrsatructure. For use cases that require a larger scale, Kurtosis can be deployed on Kubernetes by following these docs [here](https://docs.kurtosis.com/k8s/).
+Kurtosis packages are portable and reproducible, meaning they will work the same way over Docker or Kubernetes, locally or on remote infrastructure. For use cases that require a larger scale, Kurtosis can be deployed on Kubernetes by following these docs [here](https://docs.kurtosis.com/k8s/).
 
 ## Running the network with additional services
 The [`ethereum-package`](https://github.com/kurtosis-tech/ethereum-package) comes with many optional flags and arguments you can enable for your private network. Some include:
