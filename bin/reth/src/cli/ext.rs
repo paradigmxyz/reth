@@ -10,7 +10,7 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
-use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
+use crate::cli::components::RethRpcServerHandles;
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
@@ -48,14 +48,14 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         Ok(())
     }
 
-    /// Event hook called once the rpc server has been started.
+    /// Event hook called once the rpc servers has been started.
     fn on_rpc_server_started<Conf, Reth>(
         &mut self,
         config: &Conf,
         components: &Reth,
-        rpc_components: RethRpcComponents<'_, Reth>,
-        handles: eyre::Result<(RpcServerHandle, AuthServerHandle)>,
-    ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
+        rpc_components: &RethRpcComponents<'_, Reth>,
+        handles: RethRpcServerHandles,
+    ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
         Reth: RethNodeComponents,
@@ -63,7 +63,8 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         let _ = config;
         let _ = components;
         let _ = rpc_components;
-        handles
+        let _ = handles;
+        Ok(())
     }
 
     /// Allows for registering additional RPC modules for the transports.
@@ -215,8 +216,8 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         config: &Conf,
         components: &Reth,
         rpc_components: &RethRpcComponents<'_, Reth>,
-        handles: eyre::Result<(RpcServerHandle, AuthServerHandle)>,
-    ) -> eyre::Result<(RpcServerHandle, AuthServerHandle)>
+        handles: RethRpcServerHandles,
+    ) -> eyre::Result<()>
     where
         Conf: RethRpcConfig,
         Reth: RethNodeComponents,
@@ -224,7 +225,7 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         if let Some(conf) = self.inner_mut() {
             conf.on_rpc_server_started(config, components, rpc_components, handles)
         } else {
-            handles
+            Ok(())
         }
     }
 
