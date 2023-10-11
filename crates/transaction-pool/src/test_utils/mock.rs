@@ -750,7 +750,7 @@ impl From<MockTransaction> for Transaction {
                 max_priority_fee_per_gas,
                 to,
                 value: value.into(),
-                access_list: accesslist.into(),
+                access_list: accesslist,
                 blob_versioned_hashes: vec![hash],
                 max_fee_per_blob_gas,
                 input,
@@ -772,7 +772,7 @@ impl From<MockTransaction> for Transaction {
                 gas_limit,
                 to,
                 value: value.into(),
-                access_list: accesslist.into(),
+                access_list: accesslist,
                 input,
             }),
         }
