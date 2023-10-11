@@ -80,7 +80,7 @@ impl PayloadJob for TestPayloadJob {
 pub mod test_utils {
     use super::*;
 
-    // use reth_beacon_consensus::BeaconConsensus;
+    use reth_beacon_consensus::BeaconConsensus;
     use reth_blockchain_tree::{
         config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
         ShareableBlockchainTree,
