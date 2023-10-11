@@ -11,7 +11,7 @@ use std::{
 use jsonrpsee::core::Error as RpcError;
 use reth_rpc_types::trace::parity::LocalizedTransactionTrace;
 
-/// A result type for the `trace_block` method that also
+/// A result type for the `trace_block` method that also captures the requested block.
 pub type TraceBlockResult = Result<(Vec<LocalizedTransactionTrace>, BlockId), (RpcError, BlockId)>;
 
 /// An extension trait for the Trace API.
