@@ -9,7 +9,7 @@ use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{ChainSpec, Compression, Filters, Header, PerfectHashingFunction};
 use reth_provider::{HeaderProvider, ProviderError, ProviderFactory};
-use reth_snapshot::segments::{Headers, Segment};
+use reth_snapshot::segments::{get_snapshot_segment_file_path, Headers, Segment};
 use std::{path::Path, sync::Arc};
 
 impl Command {
@@ -47,11 +47,11 @@ impl Command {
 
         let range = self.from..=(self.from + self.block_interval - 1);
 
-        let jar_config = (segment.segment(), compression, phf);
         let mut row_indexes = range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
         let mut dictionaries = None;
-        let mut jar = NippyJar::load_without_header(&segment.get_file_path(&range))?;
+        let mut jar =
+            NippyJar::load_without_header(&get_snapshot_segment_file_path(&segment, &range))?;
 
         let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
         let mut cursor = if !decompressors.is_empty() {
@@ -64,7 +64,7 @@ impl Command {
             bench(
                 bench_kind,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                jar_config,
+                &segment,
                 || {
                     for num in row_indexes.iter() {
                         Header::decompress(
@@ -98,7 +98,7 @@ impl Command {
             bench(
                 BenchKind::RandomOne,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                jar_config,
+                &segment,
                 || {
                     Header::decompress(
                         cursor
@@ -128,7 +128,7 @@ impl Command {
             bench(
                 BenchKind::RandomHash,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                jar_config,
+                &segment,
                 || {
                     let header = Header::decompress(
                         cursor

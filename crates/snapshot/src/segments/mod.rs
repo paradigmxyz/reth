@@ -32,7 +32,7 @@ pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
     range_len: usize,
     prepare_compression: impl Fn() -> RethResult<Rows<COLUMNS>>,
 ) -> RethResult<NippyJar> {
-    let snap_file = get_file_path(segment, &range);
+    let snap_file = get_snapshot_segment_file_path(segment, &range);
 
     let total_rows = (tx.entries::<T>()? - *range.start() as usize).min(range_len);
 
@@ -61,7 +61,10 @@ pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
     Ok(nippy_jar)
 }
 
-fn get_file_path(segment: &impl Segment, range: &RangeInclusive<BlockNumber>) -> PathBuf {
+pub fn get_snapshot_segment_file_path(
+    segment: &impl Segment,
+    range: &RangeInclusive<BlockNumber>,
+) -> PathBuf {
     let segment_name = match segment.segment() {
         SnapshotSegment::Headers => "headers",
         SnapshotSegment::Transactions => "transactions",

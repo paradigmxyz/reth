@@ -1,7 +1,7 @@
 use crate::{db::genesis_value_parser, utils::DbTool};
 use clap::Parser;
 use itertools::Itertools;
-use reth_db::{open_db_read_only, table::Table};
+use reth_db::open_db_read_only;
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::{
     compression::{DecoderDictionary, Decompressor},
@@ -11,16 +11,10 @@ use reth_primitives::{
     BlockNumber, ChainSpec, Compression, PerfectHashingFunction, SnapshotSegment,
 };
 use reth_provider::providers::SnapshotProvider;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 mod bench;
 mod headers;
-
-pub(crate) type Rows = Vec<Vec<Vec<u8>>>;
-pub(crate) type JarConfig = (SnapshotSegment, Compression, PerfectHashingFunction);
 
 #[derive(Parser, Debug)]
 /// Arguments for the `reth db snapshot` command.
@@ -142,16 +136,5 @@ impl Command {
         }
 
         Ok((SnapshotProvider { jar: &*jar, jar_start_block: self.from as u64 }, decompressors))
-    }
-
-    /// Generates a filename according to the desired configuration.
-    fn get_file_path(&self, jar_config: JarConfig) -> PathBuf {
-        let (mode, compression, phf) = jar_config;
-        format!(
-            "snapshot_{mode:?}_{}_{}_{compression:?}_{phf:?}",
-            self.from,
-            self.from + self.block_interval
-        )
-        .into()
     }
 }
