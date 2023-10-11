@@ -79,7 +79,7 @@ impl Command {
                         Header::decompress(
                             cursor
                                 .row_by_number_with_cols::<0b01, 2>((num - self.from) as usize)?
-                                .ok_or(ProviderError::HeaderNotFound((*num as u64).into()))?[0],
+                                .ok_or(ProviderError::HeaderNotFound((*num).into()))?[0],
                         )?;
                         // TODO: replace with below when eventually SnapshotProvider re-uses cursor
                         // provider.header_by_number(num as

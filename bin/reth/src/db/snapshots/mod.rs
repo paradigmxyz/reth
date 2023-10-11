@@ -140,6 +140,6 @@ impl Command {
             }
         }
 
-        Ok((SnapshotProvider { jar: &*jar, jar_start_block: self.from as u64 }, decompressors))
+        Ok((SnapshotProvider { jar: &*jar, jar_start_block: self.from }, decompressors))
     }
 }
