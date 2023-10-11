@@ -272,23 +272,21 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
             if !addresses_seen.contains(&address) {
                 // save address as seen
                 addresses_seen.push(address);
-                let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                bundle_builder = bundle_builder.state_present_account_info(
-                    address,
-                    into_revm_acc(new_info.unwrap_or_default()),
-                );
+                if let Some(new_info) = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1) {
+                    bundle_builder =
+                        bundle_builder.state_present_account_info(address, into_revm_acc(new_info));
+                }
             }
-            bundle_builder = bundle_builder
-                .state_original_account_info(address, into_revm_acc(old_info.unwrap_or_default()));
+            if let Some(old_info) = old_info {
+                bundle_builder =
+                    bundle_builder.state_original_account_info(address, into_revm_acc(old_info));
+            }
+
             // insert old info into reverts.
             bundle_builder = bundle_builder.revert_account_info(
                 block_number,
                 address,
-                if let Some(old_info) = old_info {
-                    Some(Some(into_revm_acc(old_info)))
-                } else {
-                    Some(None)
-                },
+                Some(old_info.map(into_revm_acc)),
             );
         }
 
@@ -296,15 +294,14 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
             let BlockNumberAddress((block_number, address)) = block_and_address;
             if !addresses_seen.contains(&address) {
-                let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                bundle_builder = bundle_builder.state_original_account_info(
-                    address,
-                    into_revm_acc(present_info.unwrap_or_default()),
-                );
-                bundle_builder = bundle_builder.state_present_account_info(
-                    address,
-                    into_revm_acc(present_info.unwrap_or_default()),
-                );
+                if let Some(present_info) =
+                    plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1)
+                {
+                    bundle_builder = bundle_builder
+                        .state_original_account_info(address, into_revm_acc(present_info));
+                    bundle_builder = bundle_builder
+                        .state_present_account_info(address, into_revm_acc(present_info));
+                }
             }
             let new_storage = plain_storage_cursor
                 .seek_by_key_subkey(address, old_storage.key)?
