@@ -1,3 +1,5 @@
+//! Snapshot primitives.
+
 mod compression;
 mod filters;
 mod segment;

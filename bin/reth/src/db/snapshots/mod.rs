@@ -67,7 +67,7 @@ pub struct Command {
     with_filters: bool,
 
     /// Specifies the perfect hashing function to use.
-    #[arg(long, value_delimiter = ',', default_value_if("with_filters", "true", "mphf"))]
+    #[arg(long, value_delimiter = ',', default_value_if("with_filters", "true", "fmph"))]
     phf: Vec<PerfectHashingFunction>,
 }
 

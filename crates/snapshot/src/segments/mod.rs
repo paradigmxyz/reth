@@ -1,3 +1,5 @@
+//! Snapshot segment implementations and utilities.
+
 mod headers;
 
 pub use headers::Headers;
@@ -13,13 +15,18 @@ use std::{ops::RangeInclusive, path::PathBuf};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
+/// A segment represents a snapshotting of some portion of the data.
 pub trait Segment {
+    /// Returns [SnapshotSegment], denoting the part of data that needs to be snapshotted.
     fn segment(&self) -> SnapshotSegment;
 
+    /// Returns [Compression] that this [Segment] was created with.
     fn compression(&self) -> Compression;
 
+    /// Returns [Filters] that this [Segment] was created with.
     fn filters(&self) -> Filters;
 
+    /// Snapshot data for [Self::segment] using the provided range.
     fn snapshot<'tx>(
         &self,
         tx: &impl DbTx<'tx>,
@@ -57,14 +64,15 @@ pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
             InclusionFilter::Cuckoo => nippy_jar.with_cuckoo_filter(total_rows),
         };
         nippy_jar = match phf {
-            PerfectHashingFunction::Mphf => nippy_jar.with_mphf(),
-            PerfectHashingFunction::GoMphf => nippy_jar.with_gomphf(),
+            PerfectHashingFunction::Fmph => nippy_jar.with_fmph(),
+            PerfectHashingFunction::GoFmph => nippy_jar.with_gofmph(),
         };
     }
 
     Ok(nippy_jar)
 }
 
+/// Returns file name for the provided segment and range.
 pub fn get_snapshot_segment_file_name(
     segment: &impl Segment,
     range: &RangeInclusive<BlockNumber>,
@@ -80,8 +88,8 @@ pub fn get_snapshot_segment_file_name(
                 InclusionFilter::Cuckoo => "cuckoo",
             };
             let phf = match phf {
-                PerfectHashingFunction::Mphf => "mphf",
-                PerfectHashingFunction::GoMphf => "gomphf",
+                PerfectHashingFunction::Fmph => "fmph",
+                PerfectHashingFunction::GoFmph => "gofmph",
             };
             format!("{inclusion_filter}-{phf}")
         }

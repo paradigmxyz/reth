@@ -6,10 +6,11 @@ use reth_db::{
 use reth_interfaces::RethResult;
 use reth_primitives::{
     snapshot::{Compression, Filters},
-    BlockNumber,
+    BlockNumber, SnapshotSegment,
 };
 use std::ops::RangeInclusive;
 
+/// Snapshot segment responsible for [SnapshotSegment::Headers] part of data.
 #[derive(Debug)]
 pub struct Headers {
     compression: Compression,
@@ -17,10 +18,12 @@ pub struct Headers {
 }
 
 impl Headers {
+    /// Creates new instance of [Headers] snapshot segment.
     pub fn new(compression: Compression, filters: Filters) -> Self {
         Self { compression, filters }
     }
 
+    // Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
     fn dataset_for_compression<'tx, T: Table<Key = BlockNumber>>(
         &self,
         tx: &impl DbTx<'tx>,
@@ -37,8 +40,8 @@ impl Headers {
 }
 
 impl Segment for Headers {
-    fn segment(&self) -> reth_primitives::SnapshotSegment {
-        reth_primitives::SnapshotSegment::Headers
+    fn segment(&self) -> SnapshotSegment {
+        SnapshotSegment::Headers
     }
 
     fn compression(&self) -> Compression {
@@ -57,8 +60,6 @@ impl Segment for Headers {
         let range_len = range.clone().count();
         let mut jar =
             prepare_jar::<3, tables::Headers>(tx, self, range.clone(), range_len, || {
-                // Generates the dataset to train a zstd dictionary if necessary, with the most
-                // recent rows (at most 1000).
                 Ok([
                     self.dataset_for_compression::<tables::Headers>(tx, &range, range_len)?,
                     self.dataset_for_compression::<tables::HeaderTD>(tx, &range, range_len)?,
