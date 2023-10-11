@@ -962,7 +962,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize {
-        self.transaction.length()
+        self.encoded_length
     }
 
     /// Returns chain_id
