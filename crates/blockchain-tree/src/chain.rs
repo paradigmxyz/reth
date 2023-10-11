@@ -60,16 +60,15 @@ impl AppendableChain {
     /// Create a new chain that forks off the canonical.
     ///
     /// This will also verify the state root of the block extending the canonical chain.
-    pub fn new_canonical_head_fork<DB, C, EF>(
+    pub fn new_canonical_head_fork<DB, EF>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
-        externals: &TreeExternals<DB, C, EF>,
+        externals: &TreeExternals<DB, EF>,
     ) -> Result<Self, InsertBlockError>
     where
         DB: Database,
-        C: Consensus,
         EF: ExecutorFactory,
     {
         let state = BundleStateWithReceipts::default();
@@ -94,16 +93,15 @@ impl AppendableChain {
     }
 
     /// Create a new chain that forks off of the canonical chain.
-    pub fn new_canonical_fork<DB, C, EF>(
+    pub fn new_canonical_fork<DB, EF>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
-        externals: &TreeExternals<DB, C, EF>,
+        externals: &TreeExternals<DB, EF>,
     ) -> Result<Self, InsertBlockError>
     where
         DB: Database,
-        C: Consensus,
         EF: ExecutorFactory,
     {
         let state = BundleStateWithReceipts::default();
@@ -130,17 +128,16 @@ impl AppendableChain {
     /// Create a new chain that forks off of an existing sidechain.
     ///
     /// This differs from [AppendableChain::new_canonical_fork] in that this starts a new fork.
-    pub(crate) fn new_chain_fork<DB, C, EF>(
+    pub(crate) fn new_chain_fork<DB, EF>(
         &self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
-        externals: &TreeExternals<DB, C, EF>,
+        externals: &TreeExternals<DB, EF>,
     ) -> Result<Self, InsertBlockError>
     where
         DB: Database,
-        C: Consensus,
         EF: ExecutorFactory,
     {
         let parent_number = block.number - 1;
@@ -177,17 +174,16 @@ impl AppendableChain {
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
     /// state root after execution.
-    fn validate_and_execute<BSDP, DB, C, EF>(
+    fn validate_and_execute<BSDP, DB, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         post_state_data_provider: BSDP,
-        externals: &TreeExternals<DB, C, EF>,
+        externals: &TreeExternals<DB, EF>,
         block_kind: BlockKind,
     ) -> RethResult<BundleStateWithReceipts>
     where
         BSDP: BundleStateDataProvider,
         DB: Database,
-        C: Consensus,
         EF: ExecutorFactory,
     {
         // some checks are done before blocks comes here.
@@ -225,16 +221,15 @@ impl AppendableChain {
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
     /// state root after execution.
-    fn validate_and_execute_canonical_head_descendant<BSDP, DB, C, EF>(
+    fn validate_and_execute_canonical_head_descendant<BSDP, DB, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         post_state_data_provider: BSDP,
-        externals: &TreeExternals<DB, C, EF>,
+        externals: &TreeExternals<DB, EF>,
     ) -> RethResult<BundleStateWithReceipts>
     where
         BSDP: BundleStateDataProvider,
         DB: Database,
-        C: Consensus,
         EF: ExecutorFactory,
     {
         Self::validate_and_execute(
@@ -247,16 +242,15 @@ impl AppendableChain {
     }
 
     /// Validate and execute the given sidechain block, skipping state root validation.
-    fn validate_and_execute_sidechain<BSDP, DB, C, EF>(
+    fn validate_and_execute_sidechain<BSDP, DB, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         post_state_data_provider: BSDP,
-        externals: &TreeExternals<DB, C, EF>,
+        externals: &TreeExternals<DB, EF>,
     ) -> RethResult<BundleStateWithReceipts>
     where
         BSDP: BundleStateDataProvider,
         DB: Database,
-        C: Consensus,
         EF: ExecutorFactory,
     {
         Self::validate_and_execute(
@@ -280,18 +274,17 @@ impl AppendableChain {
     /// is the canonical head, or: state root check can't be performed if the given canonical is
     /// __not__ the canonical head.
     #[track_caller]
-    pub(crate) fn append_block<DB, C, EF>(
+    pub(crate) fn append_block<DB, EF>(
         &mut self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        externals: &TreeExternals<DB, C, EF>,
+        externals: &TreeExternals<DB, EF>,
         canonical_fork: ForkBlock,
         block_kind: BlockKind,
     ) -> Result<(), InsertBlockError>
     where
         DB: Database,
-        C: Consensus,
         EF: ExecutorFactory,
     {
         let (_, parent_block) = self.blocks.last_key_value().expect("Chain has at least one block");
