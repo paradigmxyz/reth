@@ -32,10 +32,6 @@ use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
-use reth_primitives::Block;
-use reth_rpc_types::trace::filter::TraceFilterMatcher;
-
-
 
 /// `trace` API implementation.
 ///
