@@ -311,9 +311,6 @@ where
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, res, _, _| {
                     if let Some(idx) = tx_info.index {
-                        if idx > highest_idx {
-                            return Ok(None);
-                        }
                         if !indices.contains(&idx) {
                             // only record traces for relevant transactions
                             return Ok(None)
@@ -325,7 +322,7 @@ where
                         .into_localized_transaction_traces(tx_info);
                     Ok(Some(traces))
                 },
-                None,
+                highest_idx,
             );
             block_traces.push(traces);
         }
