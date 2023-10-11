@@ -521,14 +521,20 @@ where
         state
     }
 
-    /// Storage provider for pending state.
+    /// Returns the state provider for pending state.
+    ///
+    /// If there's no pending block available then the latest state provider is returned:
+    /// [Self::latest]
     fn pending(&self) -> RethResult<StateProviderBox<'_>> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
 
         if let Some(block) = self.tree.pending_block_num_hash() {
-            let pending = self.tree.pending_state_provider(block.hash)?;
-            return self.pending_with_provider(pending)
+            if let Ok(pending) = self.tree.pending_state_provider(block.hash) {
+                return self.pending_with_provider(pending)
+            }
         }
+
+        // fallback to latest state if the pending block is not available
         self.latest()
     }
 
