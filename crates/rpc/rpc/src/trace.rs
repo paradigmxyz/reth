@@ -32,6 +32,11 @@ use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
+use reth_primitives::Block;
+use reth_rpc_types::trace::filter::TraceFilterMatcher;
+
+
+
 /// `trace` API implementation.
 ///
 /// This type provides the functionality for handling `trace` related requests.
@@ -244,6 +249,33 @@ where
         }
     }
 
+    /// SME
+    fn find_relevant_blocks_to_trace(
+        blocks: Vec<Block>, 
+        matcher: &TraceFilterMatcher,
+    ) -> EthResult<Vec<(u64, HashSet<u64>, u64)>> { 
+    
+        let mut target_blocks = Vec::new();
+        for block in blocks {
+            let mut transaction_indices = HashSet::new();
+            let mut highest_matching_index = 0; 
+            for (tx_idx, tx) in block.body.iter().enumerate() {
+                let from = tx.recover_signer().ok_or(EthApiError::InvalidParams("Invalid signature".to_string()))?;
+                let to = tx.to();
+                if matcher.matches(from, to) {
+                    let idx = tx_idx as u64;
+                    transaction_indices.insert(idx);
+                    highest_matching_index = idx;
+                }
+            }
+            if !transaction_indices.is_empty() {
+                target_blocks.push((block.header.number, transaction_indices, highest_matching_index));
+            }
+        }
+    
+        Ok(target_blocks)
+    }
+
     /// Returns all transaction traces that match the given filter.
     ///
     /// This is similar to [Self::trace_block] but only returns traces for transactions that match
@@ -273,25 +305,24 @@ where
         let blocks = self.provider().block_range(start..=end)?;
 
         // find relevant blocks to trace
-        let mut target_blocks = Vec::new();
-        for block in blocks {
-            let mut transaction_indices = HashSet::new();
-            let mut highest_matching_index = 0; 
-            for (tx_idx, tx) in block.body.iter().enumerate() {
-                let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
-                let to = tx.to();
-                if matcher.matches(from, to) {
-                    let idx = tx_idx as u64;
-                    transaction_indices.insert(idx);
-                    if idx > highest_matching_index {
-                        highest_matching_index = idx;
-                    }
-                }
-            }
-            if !transaction_indices.is_empty() {
-                target_blocks.push((block.number, transaction_indices, highest_matching_index));
-            }
-        }
+        let target_blocks = Self::find_relevant_blocks_to_trace(blocks, &matcher)?;
+        // let mut target_blocks = Vec::new();
+        // for block in blocks {
+        //     let mut transaction_indices = HashSet::new();
+        //     let mut highest_matching_index = 0; 
+        //     for (tx_idx, tx) in block.body.iter().enumerate() {
+        //         let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
+        //         let to = tx.to();
+        //         if matcher.matches(from, to) {
+        //             let idx = tx_idx as u64;
+        //             transaction_indices.insert(idx);
+        //             highest_matching_index = idx;
+        //         }
+        //     }
+        //     if !transaction_indices.is_empty() {
+        //         target_blocks.push((block.number, transaction_indices, highest_matching_index));
+        //     }
+        // }
 
         // trace all relevant blocks
         let mut block_traces = Vec::with_capacity(target_blocks.len());
@@ -688,6 +719,69 @@ fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransac
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use reth_primitives::Header;
+    use reth_primitives::keccak256;
+    use reth_primitives::Signature;
+    use reth_primitives::TransactionSigned;
+    use reth_rpc_types::Transaction;
+    use reth_primitives::U64;
+
+    fn mock_transaction() -> Transaction {
+        Transaction {
+            hash: B256::default(),         // Assuming B256 has a default implementation
+            nonce: U64::default(),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            from: Address::default(),      // Assuming Address has a default implementation
+            to: None,
+            value: U256::default(),
+            gas_price: None,
+            gas: U256::default(),
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            max_fee_per_blob_gas: None,
+            input: Bytes::default(),       // Assuming Bytes has a default implementation
+            signature: None,
+            chain_id: None,
+            blob_versioned_hashes: vec![],
+            access_list: None,
+            transaction_type: None,
+        }
+    }
+
+    fn mock_block() -> Block {
+ 
+        let hash = keccak256("Hello World!");
+        
+       
+        let signed_tx = TransactionSigned {
+            hash: hash,
+            signature: Signature::default(),
+            transaction: mock_transaction(),
+        };
+        
+        Block {
+            header: Header::default(), 
+            body: vec![signed_tx],  // Use vec! to create a vector
+            ommers: vec![],
+            withdrawals: None,
+        }
+    }
+    
+    #[test]
+    fn exploration() {
+        println!("Hello World!");
+        assert_eq!(2 + 2, 4);
+
+        let block = mock_block();
+
+
+
+
+    }
+
 
     #[test]
     fn test_parity_config() {
