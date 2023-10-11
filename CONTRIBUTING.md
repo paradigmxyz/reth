@@ -118,6 +118,12 @@ Types of tests include:
 
 Tests that use forking must contain "fork" in their name.
 
+To execute only the tests in an individual file, e.g. `trace.rs`, navigate to the directory of that file (`reth/crates/rpc/rpc/src`) and execute the following command. Where "`trace`" is the name of the file containing the tests you'd like to run. 
+
+```
+cargo test trace
+```
+
 #### Commits
 
 It is a recommended best practice to keep your changes as logically grouped as possible within individual commits. There is no limit to the number of commits any single pull request may have, and many contributors find it easier to review changes that are split across multiple commits.
