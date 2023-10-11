@@ -17,3 +17,5 @@ pub mod transaction;
 pub use transaction::*;
 pub mod engine;
 pub use engine::*;
+pub mod log;
+pub use log::*;

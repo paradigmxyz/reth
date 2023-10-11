@@ -10,6 +10,8 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
+use crate::cli::components::RethRpcServerHandles;
+
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
 /// This is intended as a way to allow to _extend_ the node command. For example, to register
@@ -43,6 +45,25 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     /// Event hook called once the node has been launched.
     fn on_node_started<Reth: RethNodeComponents>(&mut self, components: &Reth) -> eyre::Result<()> {
         let _ = components;
+        Ok(())
+    }
+
+    /// Event hook called once the rpc servers has been started.
+    fn on_rpc_server_started<Conf, Reth>(
+        &mut self,
+        config: &Conf,
+        components: &Reth,
+        rpc_components: RethRpcComponents<'_, Reth>,
+        handles: RethRpcServerHandles,
+    ) -> eyre::Result<()>
+    where
+        Conf: RethRpcConfig,
+        Reth: RethNodeComponents,
+    {
+        let _ = config;
+        let _ = components;
+        let _ = rpc_components;
+        let _ = handles;
         Ok(())
     }
 
@@ -185,6 +206,24 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
     fn on_node_started<Reth: RethNodeComponents>(&mut self, components: &Reth) -> eyre::Result<()> {
         if let Some(conf) = self.inner_mut() {
             conf.on_node_started(components)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn on_rpc_server_started<Conf, Reth>(
+        &mut self,
+        config: &Conf,
+        components: &Reth,
+        rpc_components: RethRpcComponents<'_, Reth>,
+        handles: RethRpcServerHandles,
+    ) -> eyre::Result<()>
+    where
+        Conf: RethRpcConfig,
+        Reth: RethNodeComponents,
+    {
+        if let Some(conf) = self.inner_mut() {
+            conf.on_rpc_server_started(config, components, rpc_components, handles)
         } else {
             Ok(())
         }

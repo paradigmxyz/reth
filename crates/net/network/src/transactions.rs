@@ -267,7 +267,7 @@ where
             return
         }
 
-        trace!(target: "net::tx", "Start propagating transactions");
+        trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
 
         // This fetches all transaction from the pool, including the blob transactions, which are
         // only ever sent as hashes.
@@ -324,8 +324,9 @@ where
             let mut new_pooled_hashes = hashes.build();
 
             if !new_pooled_hashes.is_empty() {
-                // determine whether to send full tx objects or hashes.
-                if peer_idx > max_num_full {
+                // determine whether to send full tx objects or hashes. If there are no full
+                // transactions, try to send hashes.
+                if peer_idx > max_num_full || full_transactions.is_empty() {
                     // enforce tx soft limit per message for the (unlikely) event the number of
                     // hashes exceeds it
                     new_pooled_hashes.truncate(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
@@ -333,6 +334,9 @@ where
                     for hash in new_pooled_hashes.iter_hashes().copied() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
                     }
+
+                    trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
+
                     // send hashes of transactions
                     self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
                 } else {
@@ -345,6 +349,9 @@ where
                             .or_default()
                             .push(PropagateKind::Full(*peer_id));
                     }
+
+                    trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
+
                     // send full transactions
                     self.network.send_transactions(*peer_id, new_full_transactions);
                 }
@@ -365,9 +372,10 @@ where
         txs: Vec<TxHash>,
         peer_id: PeerId,
     ) -> Option<PropagatedTransactions> {
+        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
+
         let peer = self.peers.get_mut(&peer_id)?;
         let mut propagated = PropagatedTransactions::default();
-        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
 
         // filter all transactions unknown to the peer
         let mut full_transactions = FullTransactionsBuilder::default();
@@ -442,6 +450,7 @@ where
             for hash in new_pooled_hashes.iter_hashes().copied() {
                 propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
             }
+
             // send hashes of transactions
             self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
 
@@ -862,6 +871,11 @@ impl FullTransactionsBuilder {
 
         self.total_size = new_size;
         self.transactions.push(Arc::clone(&transaction.transaction));
+    }
+
+    /// Returns whether or not any transactions are in the [FullTransactionsBuilder].
+    fn is_empty(&self) -> bool {
+        self.transactions.is_empty()
     }
 
     /// returns the list of transactions.

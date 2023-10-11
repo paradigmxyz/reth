@@ -20,13 +20,11 @@ use reth_primitives::{
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U128, U256, U64,
 };
-use reth_rpc_types_compat::from_recovered_with_block_context;
-
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{
-    database::{StateProviderDatabase, SubState},
+    database::StateProviderDatabase,
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
@@ -34,6 +32,7 @@ use reth_rpc_types::{
     CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
     TypedTransactionRequest,
 };
+use reth_rpc_types_compat::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
@@ -70,8 +69,10 @@ pub trait EthTransactions: Send + Sync {
 
     /// Returns the revm evm env for the requested [BlockId]
     ///
-    /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
+    /// If the [BlockId] this will return the [BlockId] of the block the env was configured
     /// for.
+    /// If the [BlockId] is pending, this will return the "Pending" tag, otherwise this returns the
+    /// hash of the exact block.
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
 
     /// Returns the revm evm env for the raw block header
@@ -280,7 +281,7 @@ where
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         if at.is_pending() {
             let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
-            Ok((cfg, block_env, origin.header().hash.into()))
+            Ok((cfg, block_env, origin.state_block_id()))
         } else {
             //  Use cached values if there is no pending block
             let block_hash = self
@@ -533,7 +534,7 @@ where
             .tracing_call_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
-                let mut db = SubState::new(StateProviderDatabase::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let env = prepare_call_env(
                     cfg,
@@ -584,7 +585,7 @@ where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at_block(at, |state| {
-            let db = SubState::new(StateProviderDatabase::new(state));
+            let db = CacheDB::new(StateProviderDatabase::new(state));
 
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect(db, env, &mut inspector)?;
@@ -607,7 +608,7 @@ where
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |state| {
-            let db = SubState::new(StateProviderDatabase::new(state));
+            let db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
@@ -665,7 +666,7 @@ where
         let block_txs = block.body;
 
         self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db = SubState::new(StateProviderDatabase::new(state));
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
             // replay all transactions prior to the targeted transaction
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
