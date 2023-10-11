@@ -7,7 +7,7 @@ use reth_network::{
     PeerRequest,
 };
 use reth_network_api::{NetworkInfo, Peers};
-use reth_primitives::B256;
+use reth_primitives::{Signature, TransactionSigned, B256};
 use reth_provider::test_utils::MockEthProvider;
 use reth_transaction_pool::{
     test_utils::{testing_pool, MockTransaction},
@@ -22,10 +22,21 @@ async fn test_large_tx_req() {
     reth_tracing::init_test_tracing();
 
     // create 2000 fake txs
-    let txs: Vec<MockTransaction> = (0..1).map(|_| MockTransaction::eip1559()).collect();
-    let txs_hashes: Vec<B256> = txs.iter().map(|tx| tx.get_hash()).collect();
+    let txs: Vec<MockTransaction> = (0..2000)
+        .map(|_| {
+            // replace rng txhash with real txhash
+            let mut tx = MockTransaction::eip1559();
 
-    tracing::log::debug!("mock txs: {:#?}", txs);
+            let ts = TransactionSigned {
+                hash: Default::default(),
+                signature: Signature::default(),
+                transaction: tx.clone().into(),
+            };
+            tx.set_hash(ts.recalculate_hash());
+            tx
+        })
+        .collect();
+    let txs_hashes: Vec<B256> = txs.iter().map(|tx| tx.get_hash()).collect();
 
     // setup testnet
     let mock_provider = Arc::new(MockEthProvider::default());
@@ -38,9 +49,9 @@ async fn test_large_tx_req() {
     let pool1 = testing_pool();
     pool1.add_transactions(TransactionOrigin::Private, txs).await.unwrap();
 
-    // install transactions handlers
-    net.peers_mut()[0].install_transactions_handler(testing_pool());
-    net.peers_mut()[1].install_transactions_handler(pool1);
+    // install transactions managers
+    net.peers_mut()[0].install_transactions_manager(testing_pool());
+    net.peers_mut()[1].install_transactions_manager(pool1);
 
     // connect peers together and check for connection existance
     let handle0 = net.peers()[0].handle();
@@ -71,7 +82,6 @@ async fn test_large_tx_req() {
     // check all txs have been received
     match receive.await.unwrap() {
         Ok(PooledTransactions(txs)) => {
-            tracing::log::debug!("actual response: {:#?}", txs);
             txs.into_iter().for_each(|tx| assert!(txs_hashes.contains(tx.hash())));
         }
         Err(e) => {

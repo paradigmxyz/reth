@@ -254,8 +254,8 @@ where
         self.request_handler = Some(request_handler);
     }
 
-    /// Set a new transactions handler that's connected to the peer's network
-    pub fn install_transactions_handler(&mut self, pool: TestPool) {
+    /// Set a new transactions manager that's connected to the peer's network
+    pub fn install_transactions_manager(&mut self, pool: TestPool) {
         let (tx, rx) = unbounded_channel();
         self.network.set_transactions(tx);
         let transactions_manager = TransactionsManager::new(self.handle(), pool, rx);
