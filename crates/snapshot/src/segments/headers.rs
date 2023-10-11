@@ -40,26 +40,20 @@ impl Headers {
 }
 
 impl Segment for Headers {
-    fn segment(&self) -> SnapshotSegment {
-        SnapshotSegment::Headers
-    }
-
-    fn compression(&self) -> Compression {
-        self.compression
-    }
-
-    fn filters(&self) -> Filters {
-        self.filters
-    }
-
     fn snapshot<'tx>(
         &self,
         tx: &impl DbTx<'tx>,
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()> {
         let range_len = range.clone().count();
-        let mut jar =
-            prepare_jar::<3, tables::Headers>(tx, self, range.clone(), range_len, || {
+        let mut jar = prepare_jar::<3, tables::Headers>(
+            tx,
+            SnapshotSegment::Headers,
+            self.filters,
+            self.compression,
+            range.clone(),
+            range_len,
+            || {
                 Ok([
                     self.dataset_for_compression::<tables::Headers>(tx, &range, range_len)?,
                     self.dataset_for_compression::<tables::HeaderTD>(tx, &range, range_len)?,
@@ -67,7 +61,8 @@ impl Segment for Headers {
                         tx, &range, range_len,
                     )?,
                 ])
-            })?;
+            },
+        )?;
 
         // Generate list of hashes for filters & PHF
         let mut cursor = tx.cursor_read::<RawTable<tables::CanonicalHeaders>>()?;

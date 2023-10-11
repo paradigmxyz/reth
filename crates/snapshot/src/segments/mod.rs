@@ -17,16 +17,7 @@ pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
 /// A segment represents a snapshotting of some portion of the data.
 pub trait Segment {
-    /// Returns [SnapshotSegment], denoting the part of data that needs to be snapshotted.
-    fn segment(&self) -> SnapshotSegment;
-
-    /// Returns [Compression] that this [Segment] was created with.
-    fn compression(&self) -> Compression;
-
-    /// Returns [Filters] that this [Segment] was created with.
-    fn filters(&self) -> Filters;
-
-    /// Snapshot data for [Self::segment] using the provided range.
+    /// Snapshot data using the provided range.
     fn snapshot<'tx>(
         &self,
         tx: &impl DbTx<'tx>,
@@ -37,15 +28,19 @@ pub trait Segment {
 /// Returns a [`NippyJar`] according to the desired configuration.
 pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
     tx: &impl DbTx<'tx>,
-    segment: &impl Segment,
+    segment: SnapshotSegment,
+    filters: Filters,
+    compression: Compression,
     range: RangeInclusive<BlockNumber>,
     range_len: usize,
     prepare_compression: impl Fn() -> RethResult<Rows<COLUMNS>>,
 ) -> RethResult<NippyJar> {
-    let mut nippy_jar =
-        NippyJar::new_without_header(COLUMNS, &get_snapshot_segment_file_name(segment, &range));
+    let mut nippy_jar = NippyJar::new_without_header(
+        COLUMNS,
+        &get_snapshot_segment_file_name(segment, filters, compression, &range),
+    );
 
-    nippy_jar = match segment.compression() {
+    nippy_jar = match compression {
         Compression::Lz4 => nippy_jar.with_lz4(),
         Compression::Zstd => nippy_jar.with_zstd(false, 0),
         Compression::ZstdWithDictionary => {
@@ -58,7 +53,7 @@ pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
         Compression::Uncompressed => nippy_jar,
     };
 
-    if let Filters::WithFilters(inclusion_filter, phf) = segment.filters() {
+    if let Filters::WithFilters(inclusion_filter, phf) = filters {
         let total_rows = (tx.entries::<T>()? - *range.start() as usize).min(range_len);
         nippy_jar = match inclusion_filter {
             InclusionFilter::Cuckoo => nippy_jar.with_cuckoo_filter(total_rows),
@@ -72,17 +67,19 @@ pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
     Ok(nippy_jar)
 }
 
-/// Returns file name for the provided segment and range.
+/// Returns file name for the provided segment, filters, compression and range.
 pub fn get_snapshot_segment_file_name(
-    segment: &impl Segment,
+    segment: SnapshotSegment,
+    filters: Filters,
+    compression: Compression,
     range: &RangeInclusive<BlockNumber>,
 ) -> PathBuf {
-    let segment_name = match segment.segment() {
+    let segment_name = match segment {
         SnapshotSegment::Headers => "headers",
         SnapshotSegment::Transactions => "transactions",
         SnapshotSegment::Receipts => "receipts",
     };
-    let filters_name = match segment.filters() {
+    let filters_name = match filters {
         Filters::WithFilters(inclusion_filter, phf) => {
             let inclusion_filter = match inclusion_filter {
                 InclusionFilter::Cuckoo => "cuckoo",
@@ -95,7 +92,7 @@ pub fn get_snapshot_segment_file_name(
         }
         Filters::WithoutFilters => "none".to_string(),
     };
-    let compression_name = match segment.compression() {
+    let compression_name = match compression {
         Compression::Lz4 => "lz4",
         Compression::Zstd => "zstd",
         Compression::ZstdWithDictionary => "zstd-dict",

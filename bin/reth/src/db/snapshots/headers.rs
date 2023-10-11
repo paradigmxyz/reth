@@ -9,7 +9,7 @@ use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
-    ChainSpec, Header,
+    ChainSpec, Header, SnapshotSegment,
 };
 use reth_provider::{HeaderProvider, ProviderError, ProviderFactory};
 use reth_snapshot::segments::{get_snapshot_segment_file_name, Headers, Segment};
@@ -45,22 +45,23 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let segment = Headers::new(
-            compression,
-            if self.with_filters {
-                Filters::WithFilters(inclusion_filter, phf)
-            } else {
-                Filters::WithoutFilters
-            },
-        );
+        let filters = if self.with_filters {
+            Filters::WithFilters(inclusion_filter, phf)
+        } else {
+            Filters::WithoutFilters
+        };
 
         let range = self.from..=(self.from + self.block_interval - 1);
 
         let mut row_indexes = range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
         let mut dictionaries = None;
-        let mut jar =
-            NippyJar::load_without_header(&get_snapshot_segment_file_name(&segment, &range))?;
+        let mut jar = NippyJar::load_without_header(&get_snapshot_segment_file_name(
+            SnapshotSegment::Headers,
+            filters,
+            compression,
+            &range,
+        ))?;
 
         let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
         let mut cursor = if !decompressors.is_empty() {
@@ -73,7 +74,9 @@ impl Command {
             bench(
                 bench_kind,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                &segment,
+                SnapshotSegment::Headers,
+                filters,
+                compression,
                 || {
                     for num in row_indexes.iter() {
                         Header::decompress(
@@ -107,7 +110,9 @@ impl Command {
             bench(
                 BenchKind::RandomOne,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                &segment,
+                SnapshotSegment::Headers,
+                filters,
+                compression,
                 || {
                     Header::decompress(
                         cursor
@@ -137,7 +142,9 @@ impl Command {
             bench(
                 BenchKind::RandomHash,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                &segment,
+                SnapshotSegment::Headers,
+                filters,
+                compression,
                 || {
                     let header = Header::decompress(
                         cursor
