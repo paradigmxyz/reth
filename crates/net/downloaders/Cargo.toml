@@ -40,7 +40,7 @@ itertools = { workspace = true, optional = true }
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 
 assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

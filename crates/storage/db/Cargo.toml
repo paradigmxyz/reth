@@ -15,7 +15,7 @@ reth-interfaces.workspace = true
 reth-codecs = { path = "../codecs" }
 reth-libmdbx = { path = "../libmdbx-rs", optional = true, features = ["return-borrowed"] }
 reth-nippy-jar = { path = "../nippy-jar" }
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }
