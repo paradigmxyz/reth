@@ -36,8 +36,10 @@ use tracing::error;
 ///    [Segment::save_checkpoint].
 /// 3. Subtract `pruned` of [PruneOutput] from `delete_limit` of next [PruneInput].
 pub trait Segment<DB: Database>: Debug + Send + Sync {
+    /// Segment of data that's pruned.
     fn segment(&self) -> PruneSegment;
 
+    /// Prune mode with which the segment was initialized
     fn mode(&self) -> Option<PruneMode>;
 
     /// Prune data for [Self::segment] using the provided input.
