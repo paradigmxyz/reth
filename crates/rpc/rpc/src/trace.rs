@@ -245,7 +245,7 @@ where
         }
     }
 
-    /// SME
+    /// Returns all transaction traces that match the given filter.
     fn find_relevant_blocks_to_trace(
         blocks: Vec<Block>, 
         matcher: &TraceFilterMatcher,
