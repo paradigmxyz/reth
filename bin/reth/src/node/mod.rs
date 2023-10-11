@@ -282,7 +282,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
-        let _tree_config = BlockchainTreeConfig::default();
         let tree = BlockchainTree::new(
             tree_externals,
             BlockchainTreeConfig::default(),
