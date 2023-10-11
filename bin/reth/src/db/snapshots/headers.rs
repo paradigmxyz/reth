@@ -1,19 +1,16 @@
 use super::{
     bench::{bench, BenchKind},
-    Command, Compression, PerfectHashingFunction, Rows, Snapshots,
+    Command,
 };
 use crate::utils::DbTool;
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{
-    cursor::DbCursorRO, database::Database, open_db_read_only, snapshot::create_snapshot_T1_T2,
-    table::Decompress, tables, transaction::DbTx, DatabaseEnvRO,
-};
+use reth_db::{database::Database, open_db_read_only, table::Decompress, DatabaseEnvRO};
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::NippyJar;
-use reth_primitives::{BlockNumber, ChainSpec, Header};
+use reth_primitives::{ChainSpec, Compression, Filters, Header, PerfectHashingFunction};
 use reth_provider::{HeaderProvider, ProviderError, ProviderFactory};
+use reth_snapshot::segments::{Headers, Segment};
 use std::{path::Path, sync::Arc};
-use tables::*;
 
 impl Command {
     pub(crate) fn generate_headers_snapshot(
@@ -22,57 +19,13 @@ impl Command {
         compression: Compression,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let mut jar = self.prepare_jar(2, (Snapshots::Headers, compression, phf), tool, || {
-            // Generates the dataset to train a zstd dictionary if necessary, with the most recent
-            // rows (at most 1000).
-            let dataset = tool.db.view(|tx| {
-                let mut cursor = tx.cursor_read::<reth_db::RawTable<reth_db::Headers>>()?;
-                let v1 = cursor
-                    .walk_back(Some(RawKey::from((self.from + self.block_interval - 1) as u64)))?
-                    .take(self.block_interval.min(1000))
-                    .map(|row| row.map(|(_key, value)| value.into_value()).expect("should exist"))
-                    .collect::<Vec<_>>();
-                let mut cursor = tx.cursor_read::<reth_db::RawTable<reth_db::HeaderTD>>()?;
-                let v2 = cursor
-                    .walk_back(Some(RawKey::from((self.from + self.block_interval - 1) as u64)))?
-                    .take(self.block_interval.min(1000))
-                    .map(|row| row.map(|(_key, value)| value.into_value()).expect("should exist"))
-                    .collect::<Vec<_>>();
-                Ok::<Rows, eyre::Error>(vec![v1, v2])
-            })??;
-            Ok(dataset)
-        })?;
-
-        tool.db.view(|tx| {
-            // Hacky type inference. TODO fix
-            let mut none_vec = Some(vec![vec![vec![0u8]].into_iter()]);
-            let _ = none_vec.take();
-
-            // Generate list of hashes for filters & PHF
-            let mut cursor = tx.cursor_read::<RawTable<CanonicalHeaders>>()?;
-            let mut hashes = None;
-            if self.with_filters {
-                hashes = Some(
-                    cursor
-                        .walk(Some(RawKey::from(self.from as u64)))?
-                        .take(self.block_interval)
-                        .map(|row| {
-                            row.map(|(_key, value)| value.into_value()).map_err(|e| e.into())
-                        }),
-                );
-            }
-
-            create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber>(
-                tx,
-                self.from as u64..=(self.from as u64 + self.block_interval as u64),
-                None,
-                // We already prepared the dictionary beforehand
-                none_vec,
-                hashes,
-                self.block_interval,
-                &mut jar,
-            )
-        })??;
+        let segment = Headers::new(
+            compression,
+            self.with_filters
+                .then_some(Filters::WithFilters(phf))
+                .unwrap_or(Filters::WithoutFilters),
+        );
+        segment.snapshot(&tool.db.tx()?, self.from..=(self.from + self.block_interval - 1))?;
 
         Ok(())
     }
@@ -85,12 +38,20 @@ impl Command {
         compression: Compression,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let mode = Snapshots::Headers;
-        let jar_config = (mode, compression, phf);
-        let mut row_indexes = (self.from..(self.from + self.block_interval)).collect::<Vec<_>>();
+        let segment = Headers::new(
+            compression,
+            self.with_filters
+                .then_some(Filters::WithFilters(phf))
+                .unwrap_or(Filters::WithoutFilters),
+        );
+
+        let range = self.from..=(self.from + self.block_interval - 1);
+
+        let jar_config = (segment.segment(), compression, phf);
+        let mut row_indexes = range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
         let mut dictionaries = None;
-        let mut jar = NippyJar::load_without_header(&self.get_file_path(jar_config))?;
+        let mut jar = NippyJar::load_without_header(&segment.get_file_path(&range))?;
 
         let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
         let mut cursor = if !decompressors.is_empty() {
@@ -108,7 +69,7 @@ impl Command {
                     for num in row_indexes.iter() {
                         Header::decompress(
                             cursor
-                                .row_by_number_with_cols::<0b01, 2>(num - self.from)?
+                                .row_by_number_with_cols::<0b01, 2>((num - self.from) as usize)?
                                 .ok_or(ProviderError::HeaderNotFound((*num as u64).into()))?[0],
                         )?;
                         // TODO: replace with below when eventually SnapshotProvider re-uses cursor

@@ -9,5 +9,12 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod config;
-pub use config::Config;
+mod config;
+mod prune;
+mod snapshot;
+mod stages;
+
+pub use config::*;
+pub use prune::*;
+pub use snapshot::*;
+pub use stages::*;

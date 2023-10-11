@@ -1,7 +1,7 @@
 //! Pruning and full node arguments
 
 use clap::Args;
-use reth_config::config::PruneConfig;
+use reth_config::PruneConfig;
 use reth_primitives::{
     ChainSpec, PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };

@@ -19,7 +19,7 @@ normal = [
 [dependencies]
 # reth
 reth-config = { path = "../../crates/config" }
-reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -48,7 +48,7 @@ reth-payload-builder.workspace = true
 reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
 reth-prune = { path = "../../crates/prune" }
-reth-snapshot = { path = "../../crates/snapshot" }
+reth-snapshot = { path = "../../crates/snapshot", features = ["clap"] }
 reth-trie = { path = "../../crates/trie" }
 reth-nippy-jar = { path = "../../crates/storage/nippy-jar" }
 
