@@ -4,7 +4,7 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
-use alloy_rlp::{Decodable, Encodable};
+use alloy_rlp::Decodable;
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{
@@ -216,7 +216,7 @@ impl Command {
                         BlobTransaction::try_from_signed(transaction.as_ref().clone(), sidecar)
                             .expect("should not fail to convert blob tx if it is already eip4844");
                     let pooled = PooledTransactionsElement::BlobTransaction(tx);
-                    let encoded_length = pooled.length();
+                    let encoded_length = pooled.length_without_header();
 
                     // insert the blob into the store
                     blob_store.insert(
@@ -226,7 +226,7 @@ impl Command {
 
                     encoded_length
                 }
-                tx => tx.length(),
+                _ => transaction.length_without_header(),
             };
 
             debug!(target: "reth::cli", ?transaction, "Adding transaction to the pool");

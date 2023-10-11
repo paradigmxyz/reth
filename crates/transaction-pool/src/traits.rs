@@ -4,7 +4,6 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_rlp::Encodable;
 use futures_util::{ready, Stream};
 use reth_primitives::{
     AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
@@ -842,7 +841,7 @@ impl EthPooledTransaction {
 /// Conversion from the network transaction type to the pool transaction type.
 impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-        let encoded_length = tx.length();
+        let encoded_length = tx.length_without_header();
         let (tx, signer) = tx.into_components();
         match tx {
             PooledTransactionsElement::BlobTransaction(tx) => {
@@ -1000,7 +999,7 @@ impl FromRecoveredTransaction for EthPooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         // CAUTION: this should not be done for EIP-4844 transactions, as the blob sidecar is
         // missing.
-        let encoded_length = tx.length();
+        let encoded_length = tx.length_without_header();
         EthPooledTransaction::new(tx, encoded_length)
     }
 }
