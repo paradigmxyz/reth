@@ -541,7 +541,8 @@ where
                     .0
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
-                    .filter_map(Result::ok);
+                    .filter_map(Result::ok)
+                    .collect();
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
@@ -644,13 +645,19 @@ where
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
-        transactions: impl IntoIterator<Item = PooledTransactionsElement>,
+        mut transactions: Vec<PooledTransactionsElement>,
         source: TransactionSource,
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
             return
         }
+
+        // Sort response by nonce so 4844 transactions can be inserted in nonce order.
+        //
+        // This is required because the pool does not allow nonce gaps for blob transactions, and
+        // the response is not necessarily ordered by nonce.
+        transactions.sort_by_key(|tx| tx.nonce());
 
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
