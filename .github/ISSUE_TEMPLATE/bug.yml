@@ -67,6 +67,16 @@ body:
       description: This can be obtained with `reth db version`
     validations:
       required: false
+  - type: dropdown
+    id: node
+    attributes:
+      label: What type of node are you running?
+      options:
+        - Archive (default)
+        - Full via --full flag
+        - Pruned with custom reth.toml config
+    validations:
+      required: false
   - type: input
     attributes:
       label: If you've built Reth from source, provide the full command you used
