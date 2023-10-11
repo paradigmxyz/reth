@@ -74,7 +74,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 ///   and commit it to db. If we don't have the block, pipeline syncing should start to fetch the
 ///   blocks from p2p. Do reorg in tables if canonical chain if needed.
 #[derive(Debug)]
-pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
+pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
     /// The tracked chains and their current data.
     chains: HashMap<BlockChainId, AppendableChain>,
     /// Unconnected block buffer.
@@ -84,7 +84,7 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// Indices to block and their connection to the canonical chain.
     block_indices: BlockIndices,
     /// External components (the database, consensus engine etc.)
-    externals: TreeExternals<DB, C, EF>,
+    externals: TreeExternals<DB, EF>,
     /// Tree configuration
     config: BlockchainTreeConfig,
     /// Broadcast channel for canon state changes notifications.
@@ -96,10 +96,10 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     prune_modes: Option<PruneModes>,
 }
 
-impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> {
+impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// Create a new blockchain tree.
     pub fn new(
-        externals: TreeExternals<DB, C, EF>,
+        externals: TreeExternals<DB, EF>,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
     ) -> RethResult<Self> {
@@ -1196,7 +1196,7 @@ mod tests {
 
     fn setup_externals(
         exec_res: Vec<BundleStateWithReceipts>,
-    ) -> TreeExternals<Arc<DatabaseEnv>, Arc<TestConsensus>, TestExecutorFactory> {
+    ) -> TreeExternals<Arc<DatabaseEnv>, TestExecutorFactory> {
         let db = create_test_rw_db();
         let consensus = Arc::new(TestConsensus::default());
         let chain_spec = Arc::new(
@@ -1281,10 +1281,7 @@ mod tests {
             self
         }
 
-        fn assert<DB: Database, C: Consensus, EF: ExecutorFactory>(
-            self,
-            tree: &BlockchainTree<DB, C, EF>,
-        ) {
+        fn assert<DB: Database, EF: ExecutorFactory>(self, tree: &BlockchainTree<DB, EF>) {
             if let Some(chain_num) = self.chain_num {
                 assert_eq!(tree.chains.len(), chain_num);
             }
