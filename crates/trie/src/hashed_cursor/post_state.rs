@@ -170,8 +170,10 @@ impl<'a, 'b, TX> HashedPostStateCursorFactory<'a, 'b, TX> {
 }
 
 impl<'a, 'b, 'tx, TX: DbTx<'tx>> HashedCursorFactory for HashedPostStateCursorFactory<'a, 'b, TX> {
-    type AccountCursor = HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>>;
-    type StorageCursor = HashedPostStateStorageCursor<'b, <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage>>;
+    type AccountCursor =
+        HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>>;
+    type StorageCursor =
+        HashedPostStateStorageCursor<'b, <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage>>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
         let cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
