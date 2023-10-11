@@ -3,5 +3,5 @@ mod filters;
 mod segment;
 
 pub use compression::Compression;
-pub use filters::{Filters, PerfectHashingFunction};
+pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
 pub use segment::SnapshotSegment;

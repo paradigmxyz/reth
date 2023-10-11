@@ -40,7 +40,7 @@ pub mod proofs;
 mod prune;
 mod receipt;
 pub mod serde_helper;
-mod snapshot;
+pub mod snapshot;
 pub mod stage;
 mod storage;
 /// Helpers for working with transactions
@@ -82,7 +82,7 @@ pub use prune::{
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use serde_helper::JsonU256;
-pub use snapshot::{Compression, Filters, PerfectHashingFunction, SnapshotSegment};
+pub use snapshot::SnapshotSegment;
 pub use storage::StorageEntry;
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer, sign_message},

@@ -7,7 +7,10 @@ use rand::{seq::SliceRandom, Rng};
 use reth_db::{database::Database, open_db_read_only, table::Decompress, DatabaseEnvRO};
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::NippyJar;
-use reth_primitives::{ChainSpec, Compression, Filters, Header, PerfectHashingFunction};
+use reth_primitives::{
+    snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
+    ChainSpec, Header,
+};
 use reth_provider::{HeaderProvider, ProviderError, ProviderFactory};
 use reth_snapshot::segments::{get_snapshot_segment_file_name, Headers, Segment};
 use std::{path::Path, sync::Arc};
@@ -17,13 +20,16 @@ impl Command {
         &self,
         tool: &DbTool<'_, DatabaseEnvRO>,
         compression: Compression,
+        inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
         let segment = Headers::new(
             compression,
-            self.with_filters
-                .then_some(Filters::WithFilters(phf))
-                .unwrap_or(Filters::WithoutFilters),
+            if self.with_filters {
+                Filters::WithFilters(inclusion_filter, phf)
+            } else {
+                Filters::WithoutFilters
+            },
         );
         segment.snapshot(&tool.db.tx()?, self.from..=(self.from + self.block_interval - 1))?;
 
@@ -36,13 +42,16 @@ impl Command {
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
         compression: Compression,
+        inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
         let segment = Headers::new(
             compression,
-            self.with_filters
-                .then_some(Filters::WithFilters(phf))
-                .unwrap_or(Filters::WithoutFilters),
+            if self.with_filters {
+                Filters::WithFilters(inclusion_filter, phf)
+            } else {
+                Filters::WithoutFilters
+            },
         );
 
         let range = self.from..=(self.from + self.block_interval - 1);
@@ -81,8 +90,8 @@ impl Command {
                 |provider| {
                     for num in row_indexes.iter() {
                         provider
-                            .header_by_number(*num as u64)?
-                            .ok_or(ProviderError::HeaderNotFound((*num as u64).into()))?;
+                            .header_by_number(*num)?
+                            .ok_or(ProviderError::HeaderNotFound((*num).into()))?;
                     }
                     Ok(())
                 },
@@ -137,7 +146,7 @@ impl Command {
                     )?;
 
                     // Might be a false positive, so in the real world we have to validate it
-                    assert!(header.hash_slow() == header_hash);
+                    assert_eq!(header.hash_slow(), header_hash);
                     Ok(())
                 },
                 |provider| {

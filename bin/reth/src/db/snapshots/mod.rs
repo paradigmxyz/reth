@@ -8,7 +8,8 @@ use reth_nippy_jar::{
     NippyJar,
 };
 use reth_primitives::{
-    BlockNumber, ChainSpec, Compression, PerfectHashingFunction, SnapshotSegment,
+    snapshot::{Compression, InclusionFilter, PerfectHashingFunction},
+    BlockNumber, ChainSpec, SnapshotSegment,
 };
 use reth_provider::providers::SnapshotProvider;
 use std::{path::Path, sync::Arc};
@@ -91,9 +92,12 @@ impl Command {
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
                     match mode {
-                        SnapshotSegment::Headers => {
-                            self.generate_headers_snapshot(&tool, *compression, *phf)?
-                        }
+                        SnapshotSegment::Headers => self.generate_headers_snapshot(
+                            &tool,
+                            *compression,
+                            InclusionFilter::Cuckoo,
+                            *phf,
+                        )?,
                         SnapshotSegment::Transactions => todo!(),
                         SnapshotSegment::Receipts => todo!(),
                     }
@@ -109,6 +113,7 @@ impl Command {
                         log_level,
                         chain.clone(),
                         *compression,
+                        InclusionFilter::Cuckoo,
                         *phf,
                     )?,
                     SnapshotSegment::Transactions => todo!(),

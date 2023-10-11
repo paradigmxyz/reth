@@ -4,7 +4,10 @@ use reth_db::{
     transaction::DbTx, RawKey, RawTable,
 };
 use reth_interfaces::RethResult;
-use reth_primitives::{BlockNumber, Compression, Filters};
+use reth_primitives::{
+    snapshot::{Compression, Filters},
+    BlockNumber,
+};
 use std::ops::RangeInclusive;
 
 #[derive(Debug)]
