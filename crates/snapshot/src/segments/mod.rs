@@ -32,11 +32,9 @@ pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
     range_len: usize,
     prepare_compression: impl Fn() -> RethResult<Rows<COLUMNS>>,
 ) -> RethResult<NippyJar> {
-    let snap_file = get_snapshot_segment_file_path(segment, &range);
+    let mut nippy_jar =
+        NippyJar::new_without_header(COLUMNS, &get_snapshot_segment_file_name(segment, &range));
 
-    let total_rows = (tx.entries::<T>()? - *range.start() as usize).min(range_len);
-
-    let mut nippy_jar = NippyJar::new_without_header(COLUMNS, snap_file.as_path());
     nippy_jar = match segment.compression() {
         Compression::Lz4 => nippy_jar.with_lz4(),
         Compression::Zstd => nippy_jar.with_zstd(false, 0),
@@ -51,6 +49,7 @@ pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
     };
 
     if let Filters::WithFilters(phf) = segment.filters() {
+        let total_rows = (tx.entries::<T>()? - *range.start() as usize).min(range_len);
         nippy_jar = nippy_jar.with_cuckoo_filter(total_rows);
         nippy_jar = match phf {
             PerfectHashingFunction::Mphf => nippy_jar.with_mphf(),
@@ -61,7 +60,7 @@ pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
     Ok(nippy_jar)
 }
 
-pub fn get_snapshot_segment_file_path(
+pub fn get_snapshot_segment_file_name(
     segment: &impl Segment,
     range: &RangeInclusive<BlockNumber>,
 ) -> PathBuf {

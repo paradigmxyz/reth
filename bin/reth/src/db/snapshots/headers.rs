@@ -9,7 +9,7 @@ use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{ChainSpec, Compression, Filters, Header, PerfectHashingFunction};
 use reth_provider::{HeaderProvider, ProviderError, ProviderFactory};
-use reth_snapshot::segments::{get_snapshot_segment_file_path, Headers, Segment};
+use reth_snapshot::segments::{get_snapshot_segment_file_name, Headers, Segment};
 use std::{path::Path, sync::Arc};
 
 impl Command {
@@ -51,7 +51,7 @@ impl Command {
         let mut rng = rand::thread_rng();
         let mut dictionaries = None;
         let mut jar =
-            NippyJar::load_without_header(&get_snapshot_segment_file_path(&segment, &range))?;
+            NippyJar::load_without_header(&get_snapshot_segment_file_name(&segment, &range))?;
 
         let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
         let mut cursor = if !decompressors.is_empty() {
