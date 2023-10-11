@@ -4,8 +4,8 @@ use crate::eth::error::{EthApiError, EthResult};
 use core::fmt::Debug;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
-    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts, SealedBlock,
-    SealedHeader, B256, EMPTY_OMMER_ROOT, U256,
+    proofs, Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
+    Receipts, SealedBlock, SealedHeader, B256, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -305,7 +305,18 @@ impl PendingBlockEnvOrigin {
         }
     }
 
-    /// Returns the hash of the pending block should be built on
+    /// Returns the [BlockId] that represents the state of the block.
+    ///
+    /// If this is the actual pending block, the state is the "Pending" tag, otherwise we can safely
+    /// identify the block by its hash.
+    pub(crate) fn state_block_id(&self) -> BlockId {
+        match self {
+            PendingBlockEnvOrigin::ActualPending(_) => BlockNumberOrTag::Pending.into(),
+            PendingBlockEnvOrigin::DerivedFromLatest(header) => BlockId::Hash(header.hash.into()),
+        }
+    }
+
+    /// Returns the hash of the block the pending block should be built on.
     fn build_target_hash(&self) -> B256 {
         match self {
             PendingBlockEnvOrigin::ActualPending(block) => block.parent_hash,

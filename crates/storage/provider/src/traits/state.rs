@@ -107,7 +107,8 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
 
     /// Returns a [StateProvider] indexed by the given [BlockId].
     ///
-    /// Note: if a number or hash is provided this will only look at historical(canonical) state.
+    /// Note: if a number or hash is provided this will __only__ look at historical(canonical)
+    /// state.
     fn state_by_block_id(&self, block_id: BlockId) -> RethResult<StateProviderBox<'_>> {
         match block_id {
             BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
