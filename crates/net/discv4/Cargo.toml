@@ -38,7 +38,7 @@ serde = { workspace = true, optional = true }
 [dev-dependencies]
 rand.workspace = true
 tokio = { workspace = true, features = ["macros"] }
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 
 [features]
 default = ["serde"]
