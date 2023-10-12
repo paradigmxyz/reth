@@ -1,13 +1,6 @@
-// use crate::{Address, B256};
-use alloy_primitives::bytes;
-//use alloy_primitives::B256;
-use alloy_primitives::U256;
-//use reth_primitives::Address;
-use alloy_primitives::aliases::B256;
-use alloy_primitives::Address;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-
 use reth_codecs::{main_codec, Compact};
+use reth_primitives::{bytes, Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::mem;
 /// A list of addresses and storage keys that the transaction plans to access.
