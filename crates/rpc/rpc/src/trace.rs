@@ -433,7 +433,7 @@ where
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let max_transactions =
-                    highest_index.map_or(transactions.len(), |highest| highest as usize + 1);
+                    highest_index.map_or(transactions.len(), |highest| highest as usize);
                 let transactions = transactions.into_iter().take(max_transactions).enumerate();
 
                 for (idx, tx) in transactions {
@@ -454,9 +454,13 @@ where
                     let ResultAndState { result, state } = res;
                     results.push(f(tx_info, inspector, result, &state, &db)?);
 
-                    // need to apply the state changes of this transaction before executing
-                    // the next transaction
-                    db.commit(state)
+                    // need to apply the state changes of this transaction before executing the
+-                   // next transaction
+-                   if transactions.peek().is_some() {
+                        // need to apply the state changes of this transaction before executing
+                        // the next transaction
+                        db.commit(state)
+                    }
                 }
 
                 Ok(results)
