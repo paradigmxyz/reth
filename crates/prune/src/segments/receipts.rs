@@ -4,17 +4,28 @@ use crate::{
 };
 use reth_db::{database::Database, tables};
 use reth_interfaces::RethResult;
-use reth_primitives::{PruneCheckpoint, PruneSegment};
+use reth_primitives::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
 
-#[derive(Default)]
-#[non_exhaustive]
-pub(crate) struct Receipts;
+#[derive(Debug)]
+pub struct Receipts {
+    mode: PruneMode,
+}
+
+impl Receipts {
+    pub fn new(mode: PruneMode) -> Self {
+        Self { mode }
+    }
+}
 
 impl<DB: Database> Segment<DB> for Receipts {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Receipts
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
@@ -127,7 +138,7 @@ mod tests {
                 to_block,
                 delete_limit: 10,
             };
-            let segment = Receipts::default();
+            let segment = Receipts::new(prune_mode);
 
             let next_tx_number_to_prune = tx
                 .inner()

@@ -1,3 +1,4 @@
+use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
 use reth_codecs::{main_codec, Compact};
 use thiserror::Error;
@@ -22,6 +23,20 @@ pub enum PruneSegment {
     Headers,
     /// Prune segment responsible for the `Transactions` table.
     Transactions,
+}
+
+impl PruneSegment {
+    /// Returns minimum number of blocks to left in the database for this segment.
+    pub fn min_blocks(&self) -> u64 {
+        match self {
+            Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
+                0
+            }
+            Self::Receipts | Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
+                MINIMUM_PRUNING_DISTANCE
+            }
+        }
+    }
 }
 
 /// PruneSegment error type.

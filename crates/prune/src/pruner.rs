@@ -7,8 +7,7 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_primitives::{
-    listener::EventListeners, BlockNumber, ChainSpec, PruneMode, PruneModes, PruneProgress,
-    PruneSegment, PruneSegmentError,
+    listener::EventListeners, BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment,
 };
 use reth_provider::{ProviderFactory, PruneCheckpointReader};
 use reth_snapshot::HighestSnapshotsTracker;
@@ -22,32 +21,11 @@ pub type PrunerResult = Result<PruneProgress, PrunerError>;
 /// The pruner type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
-type RunnableSegmentGetPruneTargetBlockResult =
-    Result<Option<(BlockNumber, PruneMode)>, PruneSegmentError>;
-
-struct PrunableSegment<DB: Database>(
-    Box<dyn Segment<DB>>,
-    #[allow(clippy::type_complexity)]
-    Box<dyn Fn(&PruneModes, BlockNumber) -> RunnableSegmentGetPruneTargetBlockResult>,
-);
-
-impl<DB: Database> PrunableSegment<DB> {
-    fn new<
-        S: Segment<DB> + 'static,
-        F: Fn(&PruneModes, BlockNumber) -> RunnableSegmentGetPruneTargetBlockResult + 'static,
-    >(
-        segment: S,
-        f: F,
-    ) -> Self {
-        Self(Box::new(segment), Box::new(f))
-    }
-}
-
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
 #[derive(Debug)]
 pub struct Pruner<DB> {
-    metrics: Metrics,
     provider_factory: ProviderFactory<DB>,
+    segments: Vec<Arc<dyn Segment<DB>>>,
     /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: usize,
@@ -55,12 +33,12 @@ pub struct Pruner<DB> {
     /// number is updated with the tip block number the pruner was called with. It's used in
     /// conjunction with `min_block_interval` to determine when the pruning needs to be initiated.
     previous_tip_block_number: Option<BlockNumber>,
-    modes: PruneModes,
     /// Maximum total entries to prune (delete from database) per block.
     delete_limit: usize,
-    listeners: EventListeners<PrunerEvent>,
     #[allow(dead_code)]
     highest_snapshots_tracker: HighestSnapshotsTracker,
+    metrics: Metrics,
+    listeners: EventListeners<PrunerEvent>,
 }
 
 impl<DB: Database> Pruner<DB> {
@@ -68,20 +46,20 @@ impl<DB: Database> Pruner<DB> {
     pub fn new(
         db: DB,
         chain_spec: Arc<ChainSpec>,
+        segments: Vec<Arc<dyn Segment<DB>>>,
         min_block_interval: usize,
-        modes: PruneModes,
         delete_limit: usize,
         highest_snapshots_tracker: HighestSnapshotsTracker,
     ) -> Self {
         Self {
-            metrics: Metrics::default(),
             provider_factory: ProviderFactory::new(db, chain_spec),
+            segments,
             min_block_interval,
             previous_tip_block_number: None,
-            modes,
             delete_limit,
-            listeners: Default::default(),
             highest_snapshots_tracker,
+            metrics: Metrics::default(),
+            listeners: Default::default(),
         }
     }
 
@@ -119,37 +97,16 @@ impl<DB: Database> Pruner<DB> {
                 .map_or(1, |previous_tip_block_number| tip_block_number - previous_tip_block_number)
                 as usize;
 
-        // TODO(alexey): this is cursed, refactor
-        let segments: [PrunableSegment<DB>; 5] = [
-            PrunableSegment::new(
-                segments::Receipts::default(),
-                PruneModes::prune_target_block_receipts,
-            ),
-            PrunableSegment::new(
-                segments::TransactionLookup::default(),
-                PruneModes::prune_target_block_transaction_lookup,
-            ),
-            PrunableSegment::new(
-                segments::SenderRecovery::default(),
-                PruneModes::prune_target_block_sender_recovery,
-            ),
-            PrunableSegment::new(
-                segments::AccountHistory::default(),
-                PruneModes::prune_target_block_account_history,
-            ),
-            PrunableSegment::new(
-                segments::StorageHistory::default(),
-                PruneModes::prune_target_block_storage_history,
-            ),
-        ];
-
-        for PrunableSegment(segment, get_prune_target_block) in segments {
+        for segment in &self.segments {
             if delete_limit == 0 {
                 break
             }
 
-            if let Some((to_block, prune_mode)) =
-                get_prune_target_block(&self.modes, tip_block_number)?
+            if let Some((to_block, prune_mode)) = segment
+                .mode()
+                .map(|mode| mode.prune_target_block(tip_block_number, segment.segment()))
+                .transpose()?
+                .flatten()
             {
                 trace!(
                     target: "pruner",
@@ -183,30 +140,6 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        // TODO(alexey): make it not a special case
-        if !self.modes.receipts_log_filter.is_empty() && delete_limit > 0 {
-            let segment_start = Instant::now();
-            let output = segments::ReceiptsByLogs::default().prune(
-                &provider,
-                &self.modes.receipts_log_filter,
-                tip_block_number,
-                delete_limit,
-            )?;
-            self.metrics
-                .get_prune_segment_metrics(PruneSegment::ContractLogs)
-                .duration_seconds
-                .record(segment_start.elapsed());
-
-            done = done && output.done;
-            delete_limit = delete_limit.saturating_sub(output.pruned);
-            stats.insert(
-                PruneSegment::ContractLogs,
-                (PruneProgress::from_done(output.done), output.pruned),
-            );
-        } else {
-            trace!(target: "pruner", segment = ?PruneSegment::ContractLogs, "No filter to prune");
-        }
-
         if let Some(snapshots) = highest_snapshots {
             if let (Some(to_block), true) = (snapshots.headers, delete_limit > 0) {
                 let prune_mode = PruneMode::Before(to_block + 1);
@@ -219,7 +152,7 @@ impl<DB: Database> Pruner<DB> {
                 );
 
                 let segment_start = Instant::now();
-                let segment = segments::Headers::default();
+                let segment = segments::Headers::new(prune_mode);
                 let previous_checkpoint = provider.get_prune_checkpoint(PruneSegment::Headers)?;
                 let output = segment
                     .prune(&provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
@@ -251,7 +184,7 @@ impl<DB: Database> Pruner<DB> {
                 );
 
                 let segment_start = Instant::now();
-                let segment = segments::Transactions::default();
+                let segment = segments::Transactions::new(prune_mode);
                 let previous_checkpoint = provider.get_prune_checkpoint(PruneSegment::Headers)?;
                 let output = segment
                     .prune(&provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
@@ -321,14 +254,13 @@ impl<DB: Database> Pruner<DB> {
 mod tests {
     use crate::Pruner;
     use reth_db::test_utils::create_test_rw_db;
-    use reth_primitives::{PruneModes, MAINNET};
+    use reth_primitives::MAINNET;
     use tokio::sync::watch;
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let mut pruner =
-            Pruner::new(db, MAINNET.clone(), 5, PruneModes::none(), 0, watch::channel(None).1);
+        let mut pruner = Pruner::new(db, MAINNET.clone(), vec![], 5, 0, watch::channel(None).1);
 
         // No last pruned block number was set before
         let first_block_number = 1;

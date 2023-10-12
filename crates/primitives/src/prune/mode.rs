@@ -20,17 +20,16 @@ impl PruneMode {
     pub fn prune_target_block(
         &self,
         tip: BlockNumber,
-        min_blocks: u64,
         segment: PruneSegment,
     ) -> Result<Option<(BlockNumber, PruneMode)>, PruneSegmentError> {
         let result = match self {
-            PruneMode::Full if min_blocks == 0 => Some((tip, *self)),
+            PruneMode::Full if segment.min_blocks() == 0 => Some((tip, *self)),
             PruneMode::Distance(distance) if *distance > tip => None, // Nothing to prune yet
-            PruneMode::Distance(distance) if *distance >= min_blocks => {
+            PruneMode::Distance(distance) if *distance >= segment.min_blocks() => {
                 Some((tip - distance, *self))
             }
             PruneMode::Before(n) if *n > tip => None, // Nothing to prune yet
-            PruneMode::Before(n) if tip - n >= min_blocks => Some((n - 1, *self)),
+            PruneMode::Before(n) if tip - n >= segment.min_blocks() => Some((n - 1, *self)),
             _ => return Err(PruneSegmentError::Configuration(segment)),
         };
         Ok(result)
@@ -72,7 +71,6 @@ mod tests {
     #[test]
     fn test_prune_target_block() {
         let tip = 20000;
-        let min_blocks = MINIMUM_PRUNING_DISTANCE;
         let segment = PruneSegment::Receipts;
 
         let tests = vec![
@@ -80,7 +78,10 @@ mod tests {
             (PruneMode::Full, Err(PruneSegmentError::Configuration(segment))),
             // Nothing to prune
             (PruneMode::Distance(tip + 1), Ok(None)),
-            (PruneMode::Distance(min_blocks + 1), Ok(Some(tip - (min_blocks + 1)))),
+            (
+                PruneMode::Distance(segment.min_blocks() + 1),
+                Ok(Some(tip - (segment.min_blocks() + 1))),
+            ),
             // Nothing to prune
             (PruneMode::Before(tip + 1), Ok(None)),
             (
@@ -96,7 +97,7 @@ mod tests {
 
         for (index, (mode, expected_result)) in tests.into_iter().enumerate() {
             assert_eq!(
-                mode.prune_target_block(tip, min_blocks, segment),
+                mode.prune_target_block(tip, segment),
                 expected_result.map(|r| r.map(|b| (b, mode))),
                 "Test {} failed",
                 index + 1,
@@ -105,7 +106,7 @@ mod tests {
 
         // Test for a scenario where there are no minimum blocks and Full can be used
         assert_eq!(
-            PruneMode::Full.prune_target_block(tip, 0, segment),
+            PruneMode::Full.prune_target_block(tip, PruneSegment::Transactions),
             Ok(Some((tip, PruneMode::Full))),
         );
     }

@@ -515,8 +515,8 @@ where
         let pruner = Pruner::new(
             db.clone(),
             self.base_config.chain_spec.clone(),
+            vec![],
             5,
-            PruneModes::none(),
             self.base_config.chain_spec.prune_delete_limit,
             watch::channel(None).1,
         );

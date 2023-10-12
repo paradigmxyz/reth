@@ -9,17 +9,28 @@ use reth_db::{
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
     tables,
 };
-use reth_primitives::PruneSegment;
+use reth_primitives::{PruneMode, PruneSegment};
 use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
 
-#[derive(Default)]
-#[non_exhaustive]
-pub(crate) struct StorageHistory;
+#[derive(Debug)]
+pub struct StorageHistory {
+    mode: PruneMode,
+}
+
+impl StorageHistory {
+    pub fn new(mode: PruneMode) -> Self {
+        Self { mode }
+    }
+}
 
 impl<DB: Database> Segment<DB> for StorageHistory {
     fn segment(&self) -> PruneSegment {
         PruneSegment::StorageHistory
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
@@ -133,7 +144,7 @@ mod tests {
                 to_block,
                 delete_limit: 2000,
             };
-            let segment = StorageHistory::default();
+            let segment = StorageHistory::new(prune_mode);
 
             let provider = tx.inner_rw();
             let result = segment.prune(&provider, input).unwrap();

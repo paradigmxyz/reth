@@ -12,7 +12,7 @@ use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PruneCheckpoint, PruneModes, PruneSegment, TransactionSignedNoHash, TxNumber, B256,
+    PruneCheckpoint, PruneMode, PruneSegment, TransactionSignedNoHash, TxNumber, B256,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
@@ -29,19 +29,19 @@ use tracing::*;
 pub struct TransactionLookupStage {
     /// The number of lookup entries to commit at once
     commit_threshold: u64,
-    prune_modes: PruneModes,
+    prune_mode: Option<PruneMode>,
 }
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000, prune_modes: PruneModes::none() }
+        Self { commit_threshold: 5_000_000, prune_mode: None }
     }
 }
 
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
-    pub fn new(commit_threshold: u64, prune_modes: PruneModes) -> Self {
-        Self { commit_threshold, prune_modes }
+    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
+        Self { commit_threshold, prune_mode }
     }
 }
 
@@ -58,8 +58,11 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         provider: &DatabaseProviderRW<'_, &DB>,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if let Some((target_prunable_block, prune_mode)) =
-            self.prune_modes.prune_target_block_transaction_lookup(input.target())?
+        if let Some((target_prunable_block, prune_mode)) = self
+            .prune_mode
+            .map(|mode| mode.prune_target_block(input.target(), PruneSegment::TransactionLookup))
+            .transpose()?
+            .flatten()
         {
             if target_prunable_block > input.checkpoint().block_number {
                 input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
@@ -382,10 +385,7 @@ mod tests {
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
         runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
-        runner.set_prune_modes(PruneModes {
-            transaction_lookup: Some(PruneMode::Before(prune_target)),
-            ..Default::default()
-        });
+        runner.set_prune_mode(PruneMode::Before(prune_target));
 
         let rx = runner.execute(input);
 
@@ -469,16 +469,12 @@ mod tests {
     struct TransactionLookupTestRunner {
         tx: TestTransaction,
         commit_threshold: u64,
-        prune_modes: PruneModes,
+        prune_mode: Option<PruneMode>,
     }
 
     impl Default for TransactionLookupTestRunner {
         fn default() -> Self {
-            Self {
-                tx: TestTransaction::default(),
-                commit_threshold: 1000,
-                prune_modes: PruneModes::none(),
-            }
+            Self { tx: TestTransaction::default(), commit_threshold: 1000, prune_mode: None }
         }
     }
 
@@ -487,8 +483,8 @@ mod tests {
             self.commit_threshold = threshold;
         }
 
-        fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-            self.prune_modes = prune_modes;
+        fn set_prune_mode(&mut self, prune_mode: PruneMode) {
+            self.prune_mode = Some(prune_mode);
         }
 
         /// # Panics
@@ -528,7 +524,7 @@ mod tests {
         fn stage(&self) -> Self::S {
             TransactionLookupStage {
                 commit_threshold: self.commit_threshold,
-                prune_modes: self.prune_modes.clone(),
+                prune_mode: self.prune_mode,
             }
         }
     }
@@ -556,9 +552,13 @@ mod tests {
                     let provider = self.tx.inner();
 
                     if let Some((target_prunable_block, _)) = self
-                        .prune_modes
-                        .prune_target_block_transaction_lookup(input.target())
+                        .prune_mode
+                        .map(|mode| {
+                            mode.prune_target_block(input.target(), PruneSegment::TransactionLookup)
+                        })
+                        .transpose()
                         .expect("prune target block for transaction lookup")
+                        .flatten()
                     {
                         if target_prunable_block > input.checkpoint().block_number {
                             input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));

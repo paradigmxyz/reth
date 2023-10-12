@@ -2,7 +2,7 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput}
 use reth_db::database::Database;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    PruneCheckpoint, PruneModes, PruneSegment,
+    PruneCheckpoint, PruneMode, PruneSegment,
 };
 use reth_provider::{
     AccountExtReader, DatabaseProviderRW, HistoryWriter, PruneCheckpointReader,
@@ -19,19 +19,19 @@ pub struct IndexAccountHistoryStage {
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
     /// Pruning configuration.
-    pub prune_modes: PruneModes,
+    pub prune_mode: Option<PruneMode>,
 }
 
 impl IndexAccountHistoryStage {
     /// Create new instance of [IndexAccountHistoryStage].
-    pub fn new(commit_threshold: u64, prune_modes: PruneModes) -> Self {
-        Self { commit_threshold, prune_modes }
+    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
+        Self { commit_threshold, prune_mode }
     }
 }
 
 impl Default for IndexAccountHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_modes: PruneModes::none() }
+        Self { commit_threshold: 100_000, prune_mode: None }
     }
 }
 
@@ -48,8 +48,11 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         provider: &DatabaseProviderRW<'_, &DB>,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if let Some((target_prunable_block, prune_mode)) =
-            self.prune_modes.prune_target_block_account_history(input.target())?
+        if let Some((target_prunable_block, prune_mode)) = self
+            .prune_mode
+            .map(|mode| mode.prune_target_block(input.target(), PruneSegment::AccountHistory))
+            .transpose()?
+            .flatten()
         {
             if target_prunable_block > input.checkpoint().block_number {
                 input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
@@ -396,7 +399,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_index_with_prune_modes() {
+    async fn insert_index_with_prune_mode() {
         // init
         let tx = TestTransaction::default();
 
@@ -426,10 +429,7 @@ mod tests {
         // run
         let input = ExecInput { target: Some(20000), ..Default::default() };
         let mut stage = IndexAccountHistoryStage {
-            prune_modes: PruneModes {
-                account_history: Some(PruneMode::Before(36)),
-                ..Default::default()
-            },
+            prune_mode: Some(PruneMode::Before(36)),
             ..Default::default()
         };
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
@@ -455,16 +455,12 @@ mod tests {
     struct IndexAccountHistoryTestRunner {
         pub(crate) tx: TestTransaction,
         commit_threshold: u64,
-        prune_modes: PruneModes,
+        prune_mode: Option<PruneMode>,
     }
 
     impl Default for IndexAccountHistoryTestRunner {
         fn default() -> Self {
-            Self {
-                tx: TestTransaction::default(),
-                commit_threshold: 1000,
-                prune_modes: PruneModes::none(),
-            }
+            Self { tx: TestTransaction::default(), commit_threshold: 1000, prune_mode: None }
         }
     }
 
@@ -476,10 +472,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S {
-                commit_threshold: self.commit_threshold,
-                prune_modes: self.prune_modes.clone(),
-            }
+            Self::S { commit_threshold: self.commit_threshold, prune_mode: self.prune_mode }
         }
     }
 
