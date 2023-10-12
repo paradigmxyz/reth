@@ -1,12 +1,10 @@
-use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs::{main_codec, Compact};
-use reth_primitives::{bytes, Address, B256, U256};
-use serde::{Deserialize, Serialize};
+use reth_primitives::{Address, B256, U256};
+use serde::Deserialize;
 use std::mem;
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodable, RlpEncodable)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessListItem {
     /// Account addresses that would be loaded at the start of execution
@@ -24,17 +22,9 @@ impl AccessListItem {
 }
 
 /// AccessList as defined in EIP-2930
-#[main_codec(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodableWrapper, RlpEncodableWrapper)]
-pub struct AccessList(
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<AccessListItem>(), 0..=20)"
-        )
-    )]
-    pub Vec<AccessListItem>,
-);
+
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct AccessList(pub Vec<AccessListItem>);
 
 impl AccessList {
     /// Converts the list into a vec, expected by revm
@@ -77,7 +67,7 @@ impl AccessList {
 }
 
 /// Access list with gas used appended.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessListWithGasUsed {
     /// List with accounts accessed during transaction.
