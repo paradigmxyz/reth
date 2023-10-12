@@ -28,7 +28,7 @@ use reth_rpc_types::{
     BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
 };
 use revm::{db::CacheDB, primitives::Env};
-use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState};
+use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState, State};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -38,6 +38,34 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 /// This type provides the functionality for handling `trace` related requests.
 pub struct TraceApi<Provider, Eth> {
     inner: Arc<TraceApiInner<Provider, Eth>>,
+}
+
+trait TransactionCallback<R> 
+where
+    Self: for<'a> Fn(
+        TransactionInfo,
+        TracingInspector,
+        ExecutionResult,
+        &'a State,
+        &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+    ) -> EthResult<R>
+    + Send
+    + 'static,
+{
+}
+
+impl<F, R> TransactionCallback<R> for F
+where
+    F: for<'a> Fn(
+        TransactionInfo,
+        TracingInspector,
+        ExecutionResult,
+        &'a State,
+        &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+    ) -> EthResult<R>
+    + Send
+    + 'static,
+{
 }
 
 // === impl TraceApi ===
@@ -347,16 +375,8 @@ where
             .await
     }
 
-    type TransactionCallback<'a, R> = 
-        Fn(
-            TransactionInfo,
-            TracingInspector,
-            ExecutionResult,
-            &'a revm_primitives::State,
-            &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
-        ) -> EthResult<R>
-        + Send
-        + 'static;
+
+
 
     /// Executes all transactions of a block and returns a list of callback results invoked for each
     /// transaction in the block.
@@ -368,7 +388,7 @@ where
     /// 4. calls the callback with the transaction info, the execution result, the changed state
     /// _after_ the transaction [StateProviderDatabase] and the database that points to the state
     /// right _before_ the transaction.
-    async fn trace_block_with<F, R>(
+    async fn trace_block_with<'a, F, R>(
         &self,
         block_id: BlockId,
         config: TracingInspectorConfig,
@@ -376,13 +396,13 @@ where
     ) -> EthResult<Option<Vec<R>>>
     where
         // This is the callback that's invoked for each transaction with
-        F: TransactionCallback<'a, R>,
+        F: TransactionCallback<R>,
         R: Send + 'static,
     {
         self.trace_block_until(block_id, config, f, None).await
     }
 
-    async fn trace_block_until<F, R>(
+    async fn trace_block_until<'a, F, R>(
         &self,
         block_id: BlockId,
         config: TracingInspectorConfig,
@@ -390,7 +410,7 @@ where
         highest_index: Option<u64>,
     ) -> EthResult<Option<Vec<R>>>
     where
-        F: TransactionCallback<'a, R>,
+        F: TransactionCallback<R>,
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) = futures::try_join!(
