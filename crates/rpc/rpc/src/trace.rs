@@ -279,7 +279,7 @@ where
             let mut transaction_indices = HashSet::new();
             let mut highest_matching_index = 0; 
             for (tx_idx, tx) in block.body.iter().enumerate() {
-                let from = tx.recover_signer().ok_or(EthApiError::InvalidParams("Invalid signature".to_string()))?;
+                let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
                 let to = tx.to();
                 if matcher.matches(from, to) {
                     let idx = tx_idx as u64;
@@ -288,7 +288,7 @@ where
                 }
             }
             if !transaction_indices.is_empty() {
-                target_blocks.push((block.header.number, transaction_indices, highest_matching_index));
+                target_blocks.push((block.number, transaction_indices, highest_matching_index));
             }
         }
 
@@ -347,6 +347,17 @@ where
             .await
     }
 
+    type TransactionCallback<'a, R> = 
+        Fn(
+            TransactionInfo,
+            TracingInspector,
+            ExecutionResult,
+            &'a revm_primitives::State,
+            &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+        ) -> EthResult<R>
+        + Send
+        + 'static;
+
     /// Executes all transactions of a block and returns a list of callback results invoked for each
     /// transaction in the block.
     ///
@@ -363,8 +374,12 @@ where
         config: TracingInspectorConfig,
         f: F,
     ) -> EthResult<Option<Vec<R>>>
+    where
+        // This is the callback that's invoked for each transaction with
+        F: TransactionCallback<'a, R>,
+        R: Send + 'static,
     {
-        Self::trace_block_until(block_id, config, f, None).await
+        self.trace_block_until(block_id, config, f, None).await
     }
 
     async fn trace_block_until<F, R>(
@@ -375,16 +390,7 @@ where
         highest_index: Option<u64>,
     ) -> EthResult<Option<Vec<R>>>
     where
-        // This is the callback that's invoked for each transaction with
-        F: for<'a> Fn(
-                TransactionInfo,
-                TracingInspector,
-                ExecutionResult,
-                &'a revm_primitives::State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
-            ) -> EthResult<R>
-            + Send
-            + 'static,
+        F: TransactionCallback<'a, R>,
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) = futures::try_join!(
