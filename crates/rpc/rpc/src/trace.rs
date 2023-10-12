@@ -39,33 +39,6 @@ pub struct TraceApi<Provider, Eth> {
     inner: Arc<TraceApiInner<Provider, Eth>>,
 }
 
-trait TransactionCallback<R>
-where
-    Self: for<'a> Fn(
-            TransactionInfo,
-            TracingInspector,
-            ExecutionResult,
-            &'a State,
-            &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
-        ) -> EthResult<R>
-        + Send
-        + 'static,
-{
-}
-
-impl<F, R> TransactionCallback<R> for F where
-    F: for<'a> Fn(
-            TransactionInfo,
-            TracingInspector,
-            ExecutionResult,
-            &'a State,
-            &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
-        ) -> EthResult<R>
-        + Send
-        + 'static
-{
-}
-
 // === impl TraceApi ===
 
 impl<Provider, Eth> TraceApi<Provider, Eth> {
@@ -391,7 +364,15 @@ where
     ) -> EthResult<Option<Vec<R>>>
     where
         // This is the callback that's invoked for each transaction with
-        F: TransactionCallback<R>,
+        F: for<'a> Fn(
+                TransactionInfo,
+                TracingInspector,
+                ExecutionResult,
+                &'a revm_primitives::State,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
         R: Send + 'static,
     {
         self.trace_block_until(block_id, None, config, f).await
@@ -405,7 +386,15 @@ where
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
-        F: TransactionCallback<R>,
+        F: for<'a> Fn(
+                TransactionInfo,
+                TracingInspector,
+                ExecutionResult,
+                &'a revm_primitives::State,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) = futures::try_join!(
