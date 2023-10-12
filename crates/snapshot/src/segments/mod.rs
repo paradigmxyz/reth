@@ -1,7 +1,9 @@
 //! Snapshot segment implementations and utilities.
 
-mod headers;
+mod transactions;
+pub use transactions::Transactions;
 
+mod headers;
 pub use headers::Headers;
 
 use reth_db::{database::Database, table::Table, transaction::DbTx};
@@ -11,7 +13,7 @@ use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
     BlockNumber, SnapshotSegment,
 };
-use reth_provider::{BlockReader, DatabaseProviderRO, ProviderError};
+use reth_provider::DatabaseProviderRO;
 use std::{ops::RangeInclusive, path::PathBuf};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
@@ -24,25 +26,6 @@ pub trait Segment {
         provider: &DatabaseProviderRO<'_, DB>,
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()>;
-
-    /// Finds the transaction range for the given block range.
-    fn find_transaction_range<DB: Database>(
-        &mut self,
-        provider: &DatabaseProviderRO<'_, DB>,
-        block_range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<RangeInclusive<BlockNumber>> {
-        let from = provider
-            .block_body_indices(*block_range.start())?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(*block_range.start()))?
-            .first_tx_num();
-
-        let to = provider
-            .block_body_indices(*block_range.end())?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(*block_range.end()))?
-            .last_tx_num();
-
-        Ok(from..=to)
-    }
 }
 
 /// Returns a [`NippyJar`] according to the desired configuration.

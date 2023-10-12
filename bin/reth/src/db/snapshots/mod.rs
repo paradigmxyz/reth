@@ -15,6 +15,7 @@ use std::{path::Path, sync::Arc};
 
 mod bench;
 mod headers;
+mod transactions;
 
 #[derive(Parser, Debug)]
 /// Arguments for the `reth db snapshot` command.
@@ -80,7 +81,13 @@ impl Command {
                                 InclusionFilter::Cuckoo,
                                 *phf,
                             )?,
-                        SnapshotSegment::Transactions => todo!(),
+                        SnapshotSegment::Transactions => self
+                            .generate_transactions_snapshot::<DatabaseEnvRO>(
+                                &provider,
+                                *compression,
+                                InclusionFilter::Cuckoo,
+                                *phf,
+                            )?,
                         SnapshotSegment::Receipts => todo!(),
                     }
                 }
@@ -98,7 +105,14 @@ impl Command {
                         InclusionFilter::Cuckoo,
                         *phf,
                     )?,
-                    SnapshotSegment::Transactions => todo!(),
+                    SnapshotSegment::Transactions => self.bench_transactions_snapshot(
+                        db_path,
+                        log_level,
+                        chain.clone(),
+                        *compression,
+                        InclusionFilter::Cuckoo,
+                        *phf,
+                    )?,
                     SnapshotSegment::Receipts => todo!(),
                 }
             }
@@ -113,6 +127,7 @@ impl Command {
         &self,
         jar: &'a mut NippyJar,
         dictionaries: &'a mut Option<Vec<DecoderDictionary<'_>>>,
+        tx_start: u64,
     ) -> eyre::Result<(SnapshotProvider<'a>, Vec<Decompressor<'a>>)> {
         let mut decompressors: Vec<Decompressor<'_>> = vec![];
         if let Some(reth_nippy_jar::compression::Compressors::Zstd(zstd)) = jar.compressor_mut() {
@@ -122,6 +137,13 @@ impl Command {
             }
         }
 
-        Ok((SnapshotProvider { jar: &*jar, jar_start_block: self.from }, decompressors))
+        Ok((
+            SnapshotProvider {
+                jar: &*jar,
+                jar_start_block: self.from,
+                jar_start_transaction: tx_start,
+            },
+            decompressors,
+        ))
     }
 }
