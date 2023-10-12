@@ -168,7 +168,7 @@ impl State {
             if let Some(code_hash) = code_hash {
                 tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
             }
-            account.storage.iter().try_for_each(|(k, v)| {
+            account.storage.iter().filter(|(_, v)| v.0 != U256::ZERO).try_for_each(|(k, v)| {
                 let storage_key = B256::from_slice(&k.0.to_be_bytes::<32>());
                 tx.put::<tables::PlainStorageState>(
                     address,
