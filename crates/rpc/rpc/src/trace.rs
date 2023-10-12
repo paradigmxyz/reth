@@ -378,6 +378,11 @@ where
         self.trace_block_until(block_id, None, config, f).await
     }
 
+    /// Executes all transactions of a block.
+    ///
+    /// If a `highest_index` is given, this will only execute the first `highest_index`
+    /// transactions, in other words, it will stop executing transactions after the
+    /// `highest_index`th transaction.
     async fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
