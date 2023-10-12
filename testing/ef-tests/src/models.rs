@@ -35,7 +35,7 @@ pub struct BlockchainTest {
     pub network: ForkSpec,
     #[serde(default)]
     /// Engine spec.
-    pub self_engine: SealEngine,
+    pub seal_engine: SealEngine,
 }
 
 /// A block header in an Ethereum blockchain test.
@@ -357,7 +357,6 @@ impl From<ForkSpec> for ChainSpec {
 
 /// Possible seal engines.
 #[derive(Debug, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub enum SealEngine {
     /// No consensus checks.
     #[default]
