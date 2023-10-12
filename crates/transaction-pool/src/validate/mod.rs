@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_primitives::{
-    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock, TransactionKind,
+    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock,
     TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use std::{fmt, time::Instant};
@@ -16,7 +16,7 @@ mod eth;
 mod task;
 
 /// A `TransactionValidator` implementation that validates ethereum transaction.
-pub use eth::{EthTransactionValidator, EthTransactionValidatorBuilder};
+pub use eth::*;
 
 /// A spawnable task that performs transaction validation.
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
@@ -172,24 +172,6 @@ pub trait TransactionValidator: Send + Sync {
     ///
     /// This can be used to update fork specific values (timestamp).
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {}
-
-    /// Ensure that the code size is not greater than `max_init_code_size`.
-    /// `max_init_code_size` should be configurable so this will take it as an argument.
-    fn ensure_max_init_code_size(
-        &self,
-        transaction: &Self::Transaction,
-        max_init_code_size: usize,
-    ) -> Result<(), InvalidPoolTransactionError> {
-        if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
-        {
-            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
-                transaction.size(),
-                max_init_code_size,
-            ))
-        } else {
-            Ok(())
-        }
-    }
 }
 
 /// A valid transaction in the pool.
