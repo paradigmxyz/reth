@@ -35,32 +35,32 @@ use reth_primitives::{
 /// After traversing the path, the proof generator continues to restore the root node of the trie
 /// until completion. The root node is then inserted at the start of the proof.
 #[derive(Debug)]
-pub struct Proof<'a, 'b, TX, H> {
+pub struct Proof<'a, TX, H> {
     /// A reference to the database transaction.
     tx: &'a TX,
     /// The factory for hashed cursors.
-    hashed_cursor_factory: &'b H,
+    hashed_cursor_factory: H,
 }
 
-impl<'a, TX> Proof<'a, 'a, TX, TX> {
+impl<'a, TX> Proof<'a, TX, &'a TX> {
     /// Create a new [Proof] instance.
     pub fn new(tx: &'a TX) -> Self {
         Self { tx, hashed_cursor_factory: tx }
     }
 }
 
-impl<'a, 'b, 'tx, TX, H> Proof<'a, 'b, TX, H>
+impl<'a, 'tx, TX, H> Proof<'a, TX, H>
 where
     TX: DbTx<'tx>,
-    H: HashedCursorFactory<'b>,
+    H: HashedCursorFactory + Clone,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn account_proof(&self, address: Address) -> Result<Vec<Bytes>, ProofError> {
         let hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(hashed_address);
 
-        let mut proof_restorer =
-            ProofRestorer::new(self.tx)?.with_hashed_cursor_factory(self.hashed_cursor_factory)?;
+        let mut proof_restorer = ProofRestorer::new(self.tx)?
+            .with_hashed_cursor_factory(self.hashed_cursor_factory.clone())?;
         let mut trie_cursor =
             AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
@@ -101,7 +101,7 @@ where
     fn traverse_path<T: DbCursorRO<'a, tables::AccountsTrie>>(
         &self,
         trie_cursor: &mut AccountTrieCursor<T>,
-        proof_restorer: &mut ProofRestorer<'a, 'b, TX, H>,
+        proof_restorer: &mut ProofRestorer<'a, TX, H>,
         hashed_address: B256,
     ) -> Result<Vec<Bytes>, ProofError> {
         let mut intermediate_proofs = Vec::new();
@@ -129,14 +129,14 @@ where
     }
 }
 
-struct ProofRestorer<'a, 'b, TX, H>
+struct ProofRestorer<'a, TX, H>
 where
-    H: HashedCursorFactory<'b>,
+    H: HashedCursorFactory,
 {
     /// A reference to the database transaction.
     tx: &'a TX,
     /// The factory for hashed cursors.
-    hashed_cursor_factory: &'b H,
+    hashed_cursor_factory: H,
     /// The hashed account cursor.
     hashed_account_cursor: H::AccountCursor,
     /// Pre-allocated buffer for account RLP encoding
@@ -145,7 +145,7 @@ where
     node_rlp_buf: Vec<u8>,
 }
 
-impl<'a, 'tx, TX> ProofRestorer<'a, 'a, TX, TX>
+impl<'a, 'tx, TX> ProofRestorer<'a, TX, &'a TX>
 where
     TX: DbTx<'tx>,
 {
@@ -161,18 +161,18 @@ where
     }
 }
 
-impl<'a, 'b, 'tx, TX, H> ProofRestorer<'a, 'b, TX, H>
+impl<'a, 'tx, TX, H> ProofRestorer<'a, TX, H>
 where
-    TX: DbTx<'tx> + HashedCursorFactory<'a>,
-    H: HashedCursorFactory<'b>,
+    TX: DbTx<'tx>,
+    H: HashedCursorFactory + Clone,
 {
     /// Set the hashed cursor factory.
-    fn with_hashed_cursor_factory<'c, HF>(
+    fn with_hashed_cursor_factory<HF>(
         self,
-        hashed_cursor_factory: &'c HF,
-    ) -> Result<ProofRestorer<'a, 'c, TX, HF>, ProofError>
+        hashed_cursor_factory: HF,
+    ) -> Result<ProofRestorer<'a, TX, HF>, ProofError>
     where
-        HF: HashedCursorFactory<'c>,
+        HF: HashedCursorFactory,
     {
         let hashed_account_cursor = hashed_cursor_factory.hashed_account_cursor()?;
         Ok(ProofRestorer {
@@ -222,7 +222,7 @@ where
 
         // Restore account's storage root.
         let storage_root = StorageRoot::new_hashed(self.tx, hashed_address)
-            .with_hashed_cursor_factory(self.hashed_cursor_factory)
+            .with_hashed_cursor_factory(self.hashed_cursor_factory.clone())
             .root()?;
 
         self.account_rlp_buf.clear();
@@ -250,7 +250,7 @@ where
 
         // Restore account's storage root.
         let storage_root = StorageRoot::new_hashed(self.tx, hashed_address)
-            .with_hashed_cursor_factory(self.hashed_cursor_factory)
+            .with_hashed_cursor_factory(self.hashed_cursor_factory.clone())
             .root()?;
 
         self.account_rlp_buf.clear();

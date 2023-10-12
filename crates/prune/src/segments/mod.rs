@@ -4,18 +4,21 @@ mod history;
 mod receipts;
 mod receipts_by_logs;
 mod sender_recovery;
+mod set;
 mod storage_history;
 mod transaction_lookup;
 mod transactions;
 
-pub(crate) use account_history::AccountHistory;
-pub(crate) use headers::Headers;
-pub(crate) use receipts::Receipts;
-pub(crate) use receipts_by_logs::ReceiptsByLogs;
-pub(crate) use sender_recovery::SenderRecovery;
-pub(crate) use storage_history::StorageHistory;
-pub(crate) use transaction_lookup::TransactionLookup;
-pub(crate) use transactions::Transactions;
+pub use account_history::AccountHistory;
+pub use headers::Headers;
+pub use receipts::Receipts;
+pub use receipts_by_logs::ReceiptsByLogs;
+pub use sender_recovery::SenderRecovery;
+pub use set::SegmentSet;
+use std::fmt::Debug;
+pub use storage_history::StorageHistory;
+pub use transaction_lookup::TransactionLookup;
+pub use transactions::Transactions;
 
 use crate::PrunerError;
 use reth_db::database::Database;
@@ -32,8 +35,12 @@ use tracing::error;
 /// 2. If [Segment::prune] returned a [Some] in `checkpoint` of [PruneOutput], call
 ///    [Segment::save_checkpoint].
 /// 3. Subtract `pruned` of [PruneOutput] from `delete_limit` of next [PruneInput].
-pub(crate) trait Segment<DB: Database> {
+pub trait Segment<DB: Database>: Debug + Send + Sync {
+    /// Segment of data that's pruned.
     fn segment(&self) -> PruneSegment;
+
+    /// Prune mode with which the segment was initialized
+    fn mode(&self) -> Option<PruneMode>;
 
     /// Prune data for [Self::segment] using the provided input.
     fn prune(
@@ -54,7 +61,7 @@ pub(crate) trait Segment<DB: Database> {
 
 /// Segment pruning input, see [Segment::prune].
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct PruneInput {
+pub struct PruneInput {
     pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.
     pub(crate) to_block: BlockNumber,
@@ -129,7 +136,7 @@ impl PruneInput {
 
 /// Segment pruning output, see [Segment::prune].
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct PruneOutput {
+pub struct PruneOutput {
     /// `true` if pruning has been completed up to the target block, and `false` if there's more
     /// data to prune in further runs.
     pub(crate) done: bool,
