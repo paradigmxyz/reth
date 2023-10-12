@@ -28,6 +28,7 @@ use reth_revm::{
     env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
+use reth_rpc_types::trace::parity::LocalizedTransactionTrace;
 use reth_rpc_types::{
     CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
     TypedTransactionRequest,
@@ -39,6 +40,7 @@ use revm::{
     primitives::{BlockEnv, CfgEnv},
     Inspector,
 };
+use revm_primitives::ExecutionResult;
 use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
 
 /// Helper alias type for the state's [CacheDB]
@@ -50,6 +52,30 @@ pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBo
 /// [TracingCallPool](crate::tracing_call::TracingCallPool) begin with `spawn_`
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    ///thing
+    async fn trace_block_with<F, R>(
+        &self,
+        block_id: BlockId,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        // This is the callback that's invoked for each transaction with
+        F: for<'a> Fn(
+                TransactionInfo,
+                TracingInspector,
+                ExecutionResult,
+                &'a revm_primitives::State,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static;
+    ///thing
+    async fn trace_block(
+        &self,
+        block_id: BlockId,
+    ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>>;
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     fn call_gas_limit(&self) -> u64;
 
@@ -69,10 +95,8 @@ pub trait EthTransactions: Send + Sync {
 
     /// Returns the revm evm env for the requested [BlockId]
     ///
-    /// If the [BlockId] this will return the [BlockId] of the block the env was configured
+    /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
     /// for.
-    /// If the [BlockId] is pending, this will return the "Pending" tag, otherwise this returns the
-    /// hash of the exact block.
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
 
     /// Returns the revm evm env for the raw block header
@@ -281,7 +305,7 @@ where
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         if at.is_pending() {
             let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
-            Ok((cfg, block_env, origin.state_block_id()))
+            Ok((cfg, block_env, origin.header().hash.into()))
         } else {
             //  Use cached values if there is no pending block
             let block_hash = self
@@ -725,7 +749,7 @@ where
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                }
+                };
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -753,7 +777,7 @@ where
                     block.header.number,
                     block.header.base_fee_per_gas,
                     index.into(),
-                )))
+                )));
             }
         }
 
