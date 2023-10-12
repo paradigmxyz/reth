@@ -5,7 +5,8 @@
 
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
 use reth_primitives::{
-    AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxLegacy, U128, U256, U64,
+    revm_primitives::FixedBytes, AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930,
+    TxEip4844, TxLegacy, U128, U256, U64,
 };
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,7 @@ pub enum TypedTransactionRequest {
     Legacy(LegacyTransactionRequest),
     EIP2930(EIP2930TransactionRequest),
     EIP1559(EIP1559TransactionRequest),
+    EIP4844(Eip4844TransactionRequest),
 }
 
 impl TypedTransactionRequest {
@@ -61,6 +63,19 @@ impl TypedTransactionRequest {
                 access_list: tx.access_list,
                 max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),
             }),
+            TypedTransactionRequest::EIP4844(tx) => Transaction::Eip4844(TxEip4844 {
+                chain_id: tx.chain_id,
+                nonce: tx.nonce.to(),
+                gas_limit: tx.gas_limit.to(),
+                max_fee_per_gas: tx.max_fee_per_gas.to(),
+                max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),
+                to: tx.kind.into(),
+                value: tx.value.into(),
+                access_list: tx.access_list,
+                blob_versioned_hashes: tx.blob_versioned_hashes,
+                max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+                input: tx.input,
+            }),
         })
     }
 }
@@ -95,6 +110,7 @@ pub struct EIP2930TransactionRequest {
 pub struct EIP1559TransactionRequest {
     pub chain_id: u64,
     pub nonce: U64,
+
     pub max_priority_fee_per_gas: U128,
     pub max_fee_per_gas: U128,
     pub gas_limit: U256,
@@ -103,7 +119,22 @@ pub struct EIP1559TransactionRequest {
     pub input: Bytes,
     pub access_list: AccessList,
 }
-
+/// Represents an EIP-4844 transaction request
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+pub struct Eip4844TransactionRequest {
+    pub chain_id: u64,
+    pub nonce: U64,
+    pub max_priority_fee_per_gas: U128,
+    pub max_fee_per_gas: U128,
+    pub gas_limit: U256,
+    pub kind: TransactionKind,
+    pub value: U256,
+    pub input: Bytes,
+    pub access_list: AccessList,
+    pub max_fee_per_blob_gas: u128,
+    pub blob_versioned_hashes: Vec<FixedBytes<32>>,
+    pub gas_price: U128,
+}
 /// Represents the `to` field of a transaction request
 ///
 /// This determines what kind of transaction this is
