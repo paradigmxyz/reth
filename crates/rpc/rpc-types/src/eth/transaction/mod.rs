@@ -11,7 +11,8 @@ mod receipt;
 mod request;
 mod signature;
 mod typed;
-mod access_list;
+///access list
+pub mod access_list;
 /// Transaction object used in RPC
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
