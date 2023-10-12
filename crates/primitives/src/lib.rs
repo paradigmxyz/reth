@@ -35,19 +35,18 @@ pub mod listener;
 mod log;
 mod net;
 mod peer;
+mod precaution;
 pub mod proofs;
 mod prune;
 mod receipt;
 pub mod serde_helper;
+pub mod snapshot;
 pub mod stage;
 mod storage;
-
 /// Helpers for working with transactions
 mod transaction;
 pub mod trie;
 mod withdrawal;
-
-mod precaution;
 
 pub use account::{Account, Bytecode};
 pub use block::{
@@ -83,6 +82,7 @@ pub use prune::{
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use serde_helper::JsonU256;
+pub use snapshot::SnapshotSegment;
 pub use storage::StorageEntry;
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer, sign_message},
