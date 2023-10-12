@@ -32,7 +32,6 @@ use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState, State
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
-
 /// `trace` API implementation.
 ///
 /// This type provides the functionality for handling `trace` related requests.
