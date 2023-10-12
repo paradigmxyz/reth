@@ -561,15 +561,17 @@ where
         })
     }
 
-    /// Notifies transaction listeners about changes after a block was processed.
+    /// Notifies transaction listeners about changes once a block was processed.
     fn notify_on_new_state(&self, outcome: OnNewCanonicalStateOutcome<T::Transaction>) {
         // notify about promoted pending transactions
         {
+            // emit hashes
             let mut transaction_hash_listeners = self.pending_transaction_listener.lock();
             transaction_hash_listeners.retain_mut(|listener| {
                 listener.send_all(outcome.pending_transactions(listener.kind))
             });
 
+            // emit full transactions
             let mut transaction_full_listeners = self.transaction_listener.lock();
             transaction_full_listeners.retain_mut(|listener| {
                 listener.send_all(outcome.full_pending_transactions(listener.kind))
@@ -578,6 +580,7 @@ where
 
         let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash } = outcome;
 
+        // broadcast specific transaction events
         let mut listener = self.event_listener.write();
 
         mined.iter().for_each(|tx| listener.mined(tx, block_hash));
@@ -1043,7 +1046,7 @@ pub(crate) struct OnNewCanonicalStateOutcome<T: PoolTransaction> {
     pub(crate) block_hash: B256,
     /// All mined transactions.
     pub(crate) mined: Vec<TxHash>,
-    /// Transactions promoted to the ready queue.
+    /// Transactions promoted to the pending pool.
     pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transaction that were discarded during the update
     pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
