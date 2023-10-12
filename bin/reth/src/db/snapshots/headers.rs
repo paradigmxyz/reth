@@ -30,7 +30,7 @@ impl Command {
                 Filters::WithoutFilters
             },
         );
-        segment.snapshot::<DB>(&provider, self.from..=(self.from + self.block_interval - 1))?;
+        segment.snapshot::<DB>(provider, self.from..=(self.from + self.block_interval - 1))?;
 
         Ok(())
     }
@@ -62,7 +62,8 @@ impl Command {
             &range,
         ))?;
 
-        let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
+        let (provider, decompressors) =
+            self.prepare_jar_provider(&mut jar, &mut dictionaries, 0)?;
         let mut cursor = if !decompressors.is_empty() {
             provider.cursor_with_decompressors(decompressors)
         } else {
@@ -113,18 +114,16 @@ impl Command {
                 filters,
                 compression,
                 || {
-                    Header::decompress(
+                    Ok(Header::decompress(
                         cursor
                             .row_by_number_with_cols::<0b01, 2>((num - self.from) as usize)?
                             .ok_or(ProviderError::HeaderNotFound((num as u64).into()))?[0],
-                    )?;
-                    Ok(())
+                    )?)
                 },
                 |provider| {
-                    provider
+                    Ok(provider
                         .header_by_number(num as u64)?
-                        .ok_or(ProviderError::HeaderNotFound((num as u64).into()))?;
-                    Ok(())
+                        .ok_or(ProviderError::HeaderNotFound((num as u64).into()))?)
                 },
             )?;
         }
@@ -153,13 +152,12 @@ impl Command {
 
                     // Might be a false positive, so in the real world we have to validate it
                     assert_eq!(header.hash_slow(), header_hash);
-                    Ok(())
+                    Ok(header)
                 },
                 |provider| {
-                    provider
+                    Ok(provider
                         .header(&header_hash)?
-                        .ok_or(ProviderError::HeaderNotFound(header_hash.into()))?;
-                    Ok(())
+                        .ok_or(ProviderError::HeaderNotFound(header_hash.into()))?)
                 },
             )?;
         }
