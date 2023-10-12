@@ -434,7 +434,8 @@ where
 
                 let max_transactions =
                     highest_index.map_or(transactions.len(), |highest| highest as usize);
-                let mut transactions = transactions.into_iter().take(max_transactions).enumerate().peekable();
+                let mut transactions =
+                    transactions.into_iter().take(max_transactions).enumerate().peekable();
 
                 while let Some((idx, tx)) = transactions.next() {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
