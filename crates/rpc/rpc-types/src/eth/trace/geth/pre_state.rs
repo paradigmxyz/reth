@@ -1,12 +1,20 @@
 use reth_primitives::{serde_helper::num::from_int_or_hex_opt, Address, Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 
+/// A tracer that records [AccountState]s.
+/// The prestate tracer has two modes: prestate and diff
+///
 /// <https://github.com/ethereum/go-ethereum/blob/91cb6f863a965481e51d5d9c0e5ccd54796fd967/eth/tracers/native/prestate.go#L38>
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum PreStateFrame {
+    /// The default mode returns the accounts necessary to execute a given transaction.
+    ///
+    /// It re-executes the given transaction and tracks every part of state that is touched.
     Default(PreStateMode),
+    /// Diff mode returns the differences between the transaction's pre and post-state (i.e. what
+    /// changed because the transaction happened).
     Diff(DiffMode),
 }
 
@@ -44,6 +52,11 @@ impl PreStateFrame {
 pub struct PreStateMode(pub BTreeMap<Address, AccountState>);
 
 /// Represents the account states before and after the transaction is executed.
+///
+/// This corresponds to the [DiffMode] of the [PreStateConfig].
+///
+/// This will only contain changed [AccountState]s, created accounts will not be included in the pre
+/// state and selfdestructed accounts will not be included in the post state.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiffMode {
@@ -53,8 +66,63 @@ pub struct DiffMode {
     pub pre: BTreeMap<Address, AccountState>,
 }
 
+// === impl DiffMode ===
+
+impl DiffMode {
+    /// The sets of the [DiffMode] should only contain changed [AccountState]s.
+    ///
+    /// This will remove all unchanged [AccountState]s from the sets.
+    ///
+    /// In other words it removes entries that are equal (unchanged) in both the pre and post sets.
+    pub fn retain_changed(&mut self) -> &mut Self {
+        self.pre.retain(|address, pre| {
+            if let btree_map::Entry::Occupied(entry) = self.post.entry(*address) {
+                if entry.get() == pre {
+                    // remove unchanged account state from both sets
+                    entry.remove();
+                    return false
+                }
+            }
+
+            true
+        });
+        self
+    }
+
+    /// Removes all zero values from the storage of the [AccountState]s.
+    pub fn remove_zero_storage_values(&mut self) {
+        self.pre.values_mut().for_each(|state| {
+            state.storage.retain(|_, value| *value != B256::ZERO);
+        });
+        self.post.values_mut().for_each(|state| {
+            state.storage.retain(|_, value| *value != B256::ZERO);
+        });
+    }
+}
+
+/// Helper type for [DiffMode] to represent a specific set
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffStateKind {
+    /// Corresponds to the pre state of the [DiffMode]
+    Pre,
+    /// Corresponds to the post state of the [DiffMode]
+    Post,
+}
+
+impl DiffStateKind {
+    /// Returns true if this is the pre state of the [DiffMode]
+    pub fn is_pre(&self) -> bool {
+        matches!(self, DiffStateKind::Pre)
+    }
+
+    /// Returns true if this is the post state of the [DiffMode]
+    pub fn is_post(&self) -> bool {
+        matches!(self, DiffStateKind::Post)
+    }
+}
+
 /// Represents the state of an account
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AccountState {
     #[serde(
         default,
@@ -83,6 +151,47 @@ impl AccountState {
             nonce: (nonce != 0).then_some(nonce),
             storage: Default::default(),
         }
+    }
+
+    /// Removes balance,nonce or code if they match the given account info.
+    ///
+    /// This is useful for comparing pre vs post state and only keep changed values in post state.
+    pub fn remove_matching_account_info(&mut self, other: &AccountState) {
+        if self.balance == other.balance {
+            self.balance = None;
+        }
+        if self.nonce == other.nonce {
+            self.nonce = None;
+        }
+        if self.code == other.code {
+            self.code = None;
+        }
+    }
+}
+
+/// Helper type to track the kind of change of an [AccountState].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AccountChangeKind {
+    #[default]
+    Modify,
+    Create,
+    SelfDestruct,
+}
+
+impl AccountChangeKind {
+    /// Returns true if the account was created
+    pub fn is_created(&self) -> bool {
+        matches!(self, AccountChangeKind::Create)
+    }
+
+    /// Returns true the account was modified
+    pub fn is_modified(&self) -> bool {
+        matches!(self, AccountChangeKind::Modify)
+    }
+
+    /// Returns true the account was modified
+    pub fn is_selfdestruct(&self) -> bool {
+        matches!(self, AccountChangeKind::SelfDestruct)
     }
 }
 
@@ -193,5 +302,33 @@ mod tests {
 "#;
         let pre_state: PreStateFrame = serde_json::from_str(s).unwrap();
         assert!(pre_state.is_diff());
+    }
+
+    #[test]
+    fn test_retain_changed_accounts() {
+        let s = r#"{
+  "post": {
+    "0x35a9f94af726f07b5162df7e828cc9dc8439e7d0": {
+      "nonce": 1135
+    }
+  },
+  "pre": {
+    "0x35a9f94af726f07b5162df7e828cc9dc8439e7d0": {
+      "balance": "0x7a48429e177130a",
+      "nonce": 1134
+    }
+  }
+}
+"#;
+        let diff: DiffMode = serde_json::from_str(s).unwrap();
+        let mut diff_changed = diff.clone();
+        diff_changed.retain_changed();
+        // different entries
+        assert_eq!(diff_changed, diff);
+
+        diff_changed.pre = diff_changed.post.clone();
+        diff_changed.retain_changed();
+        assert!(diff_changed.post.is_empty());
+        assert!(diff_changed.pre.is_empty());
     }
 }

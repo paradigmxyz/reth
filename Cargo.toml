@@ -48,6 +48,7 @@ members = [
     "crates/rpc/rpc-types-compat",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
+    "examples/cli-extension-event-hooks",
     "examples/rpc-db",
     "examples/manual-p2p",
 ]
@@ -105,6 +106,7 @@ reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 reth-discv4 = { path = "./crates/net/discv4" }
 reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
+reth-tracing = {path = "./crates/tracing"}
 
 # revm
 revm = "3.5.0"

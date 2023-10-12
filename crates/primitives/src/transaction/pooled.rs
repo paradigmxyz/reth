@@ -109,12 +109,28 @@ impl PooledTransactionsElement {
 
     /// Decodes the "raw" format of transaction (e.g. `eth_sendRawTransaction`).
     ///
-    /// The raw transaction is either a legacy transaction or EIP-2718 typed transaction
-    /// For legacy transactions, the format is encoded as: `rlp(tx)`
-    /// For EIP-2718 typed transaction, the format is encoded as the type of the transaction
-    /// followed by the rlp of the transaction: `type` + `rlp(tx)`
+    /// This should be used for `eth_sendRawTransaction`, for any transaction type. Blob
+    /// transactions **must** include the blob sidecar as part of the raw encoding.
     ///
-    /// For encoded EIP-4844 transactions, the blob sidecar _must_ be included.
+    /// This method can not be used for decoding the `transactions` field of `engine_newPayload`,
+    /// because EIP-4844 transactions for that method do not include the blob sidecar. The blobs
+    /// are supplied in an argument separate from the payload.
+    ///
+    /// A raw transaction is either a legacy transaction or EIP-2718 typed transaction, with a
+    /// special case for EIP-4844 transactions.
+    ///
+    /// For legacy transactions, the format is encoded as: `rlp(tx)`. This format will start with a
+    /// RLP list header.
+    ///
+    /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
+    /// followed by the rlp of the transaction: `type || rlp(tx)`.
+    ///
+    /// For EIP-4844 transactions, the format includes a blob sidecar (the blobs, commitments, and
+    /// proofs) after the transaction:
+    /// `type || rlp([tx_payload_body, blobs, commitments, proofs])`
+    ///
+    /// Where `tx_payload_body` is encoded as a RLP list:
+    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
     pub fn decode_enveloped(tx: Bytes) -> alloy_rlp::Result<Self> {
         let mut data = tx.as_ref();
 

@@ -8,7 +8,9 @@ use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
-use std::fmt;
+use std::{fmt, marker::PhantomData};
+
+use crate::cli::components::RethRpcServerHandles;
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
@@ -43,6 +45,25 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     /// Event hook called once the node has been launched.
     fn on_node_started<Reth: RethNodeComponents>(&mut self, components: &Reth) -> eyre::Result<()> {
         let _ = components;
+        Ok(())
+    }
+
+    /// Event hook called once the rpc servers has been started.
+    fn on_rpc_server_started<Conf, Reth>(
+        &mut self,
+        config: &Conf,
+        components: &Reth,
+        rpc_components: RethRpcComponents<'_, Reth>,
+        handles: RethRpcServerHandles,
+    ) -> eyre::Result<()>
+    where
+        Conf: RethRpcConfig,
+        Reth: RethNodeComponents,
+    {
+        let _ = config;
+        let _ = components;
+        let _ = rpc_components;
+        let _ = handles;
         Ok(())
     }
 
@@ -119,6 +140,14 @@ impl RethNodeCommandConfig for DefaultRethNodeCommandConfig {}
 
 impl RethNodeCommandConfig for () {}
 
+/// A helper type for [RethCliExt] extension that don't require any additional clap Arguments.
+#[derive(Debug, Clone, Copy)]
+pub struct NoArgsCliExt<Conf>(PhantomData<Conf>);
+
+impl<Conf: RethNodeCommandConfig> RethCliExt for NoArgsCliExt<Conf> {
+    type Node = NoArgs<Conf>;
+}
+
 /// A helper struct that allows for wrapping a [RethNodeCommandConfig] value without providing
 /// additional CLI arguments.
 ///
@@ -182,6 +211,24 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         }
     }
 
+    fn on_rpc_server_started<Conf, Reth>(
+        &mut self,
+        config: &Conf,
+        components: &Reth,
+        rpc_components: RethRpcComponents<'_, Reth>,
+        handles: RethRpcServerHandles,
+    ) -> eyre::Result<()>
+    where
+        Conf: RethRpcConfig,
+        Reth: RethNodeComponents,
+    {
+        if let Some(conf) = self.inner_mut() {
+            conf.on_rpc_server_started(config, components, rpc_components, handles)
+        } else {
+            Ok(())
+        }
+    }
+
     fn extend_rpc_modules<Conf, Reth>(
         &mut self,
         config: &Conf,
@@ -211,6 +258,12 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
             .spawn_payload_builder_service(conf, components)
+    }
+}
+
+impl<T> From<T> for NoArgs<T> {
+    fn from(value: T) -> Self {
+        Self::with(value)
     }
 }
 

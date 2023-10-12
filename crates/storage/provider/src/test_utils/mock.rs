@@ -566,30 +566,30 @@ impl StateProviderFactory for MockEthProvider {
     }
 
     fn history_by_block_number(&self, _block: BlockNumber) -> RethResult<StateProviderBox<'_>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_hash(&self, _block: BlockHash) -> RethResult<StateProviderBox<'_>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn state_by_block_hash(&self, _block: BlockHash) -> RethResult<StateProviderBox<'_>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn pending(&self) -> RethResult<StateProviderBox<'_>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn pending_state_by_hash(&self, _block_hash: B256) -> RethResult<Option<StateProviderBox<'_>>> {
-        todo!()
+        Ok(Some(Box::new(self.clone())))
     }
 
     fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn BundleStateDataProvider + 'a>,
     ) -> RethResult<StateProviderBox<'a>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 }
 
@@ -599,30 +599,30 @@ impl StateProviderFactory for Arc<MockEthProvider> {
     }
 
     fn history_by_block_number(&self, _block: BlockNumber) -> RethResult<StateProviderBox<'_>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_hash(&self, _block: BlockHash) -> RethResult<StateProviderBox<'_>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn state_by_block_hash(&self, _block: BlockHash) -> RethResult<StateProviderBox<'_>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn pending(&self) -> RethResult<StateProviderBox<'_>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn pending_state_by_hash(&self, _block_hash: B256) -> RethResult<Option<StateProviderBox<'_>>> {
-        todo!()
+        Ok(Some(Box::new(self.clone())))
     }
 
     fn pending_with_provider<'a>(
         &'a self,
         _post_state_data: Box<dyn BundleStateDataProvider + 'a>,
     ) -> RethResult<StateProviderBox<'a>> {
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 }
 

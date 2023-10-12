@@ -43,7 +43,6 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
         Arc<DatabaseEnv>,
         ShareableBlockchainTree<
             Arc<DatabaseEnv>,
-            Arc<dyn Consensus>,
             EitherExecutorFactory<TestExecutorFactory, Factory>,
         >,
     >,
@@ -484,7 +483,7 @@ where
 
                 Pipeline::builder().add_stages(DefaultStages::new(
                     HeaderSyncMode::Tip(tip_rx.clone()),
-                    Arc::clone(&consensus) as Arc<dyn Consensus>,
+                    Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
                     executor_factory.clone(),
@@ -516,8 +515,8 @@ where
         let pruner = Pruner::new(
             db.clone(),
             self.base_config.chain_spec.clone(),
+            vec![],
             5,
-            PruneModes::none(),
             self.base_config.chain_spec.prune_delete_limit,
             watch::channel(None).1,
         );

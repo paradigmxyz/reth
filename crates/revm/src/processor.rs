@@ -363,8 +363,14 @@ impl<'a> EVMProcessor<'a> {
 
         let time = Instant::now();
         let retention = if self.tip.map_or(true, |tip| {
-            !self.prune_modes.should_prune_account_history(block.number, tip) &&
-                !self.prune_modes.should_prune_storage_history(block.number, tip)
+            !self
+                .prune_modes
+                .account_history
+                .map_or(false, |mode| mode.should_prune(block.number, tip)) &&
+                !self
+                    .prune_modes
+                    .storage_history
+                    .map_or(false, |mode| mode.should_prune(block.number, tip))
         }) {
             BundleRetention::Reverts
         } else {
@@ -405,7 +411,7 @@ impl<'a> EVMProcessor<'a> {
         // Block receipts should not be retained
         if self.prune_modes.receipts == Some(PruneMode::Full) ||
                 // [`PruneSegment::Receipts`] takes priority over [`PruneSegment::ContractLogs`]
-                self.prune_modes.should_prune_receipts(block_number, tip)
+            self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
         {
             receipts.clear();
             return Ok(())
