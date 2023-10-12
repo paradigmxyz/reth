@@ -394,7 +394,11 @@ impl Decodable for Ping {
             return Err(RlpError::UnexpectedString)
         }
         let started_len = b.len();
+
+        // > Implementations should ignore any mismatches in version:
+        // <https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01>
         let _version = u32::decode(b)?;
+
         let mut this = Self {
             from: Decodable::decode(b)?,
             to: Decodable::decode(b)?,
