@@ -156,6 +156,12 @@ pub struct HashedPostStateCursorFactory<'a, 'b, TX> {
     post_state: &'b HashedPostState,
 }
 
+impl<'a, 'b, TX> Clone for HashedPostStateCursorFactory<'a, 'b, TX> {
+    fn clone(&self) -> Self {
+        Self { tx: self.tx, post_state: self.post_state }
+    }
+}
+
 impl<'a, 'b, TX> HashedPostStateCursorFactory<'a, 'b, TX> {
     /// Create a new factory.
     pub fn new(tx: &'a TX, post_state: &'b HashedPostState) -> Self {
@@ -163,20 +169,18 @@ impl<'a, 'b, TX> HashedPostStateCursorFactory<'a, 'b, TX> {
     }
 }
 
-impl<'a, 'b, 'tx, TX: DbTx<'tx>> HashedCursorFactory<'a>
-    for HashedPostStateCursorFactory<'a, 'b, TX>
-where
-    'a: 'b,
-{
-    type AccountCursor = HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>> where Self: 'a;
-    type StorageCursor = HashedPostStateStorageCursor<'b, <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage>> where Self: 'a;
+impl<'a, 'b, 'tx, TX: DbTx<'tx>> HashedCursorFactory for HashedPostStateCursorFactory<'a, 'b, TX> {
+    type AccountCursor =
+        HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>>;
+    type StorageCursor =
+        HashedPostStateStorageCursor<'b, <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage>>;
 
-    fn hashed_account_cursor(&'a self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
         let cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
         Ok(HashedPostStateAccountCursor::new(cursor, self.post_state))
     }
 
-    fn hashed_storage_cursor(&'a self) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
+    fn hashed_storage_cursor(&self) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
         let cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
         Ok(HashedPostStateStorageCursor::new(cursor, self.post_state))
     }
@@ -544,12 +548,10 @@ mod tests {
     use reth_db::{database::Database, test_utils::create_test_rw_db, transaction::DbTxMut};
     use std::collections::BTreeMap;
 
-    fn assert_account_cursor_order<'a, 'b>(
-        factory: &'a impl HashedCursorFactory<'b>,
+    fn assert_account_cursor_order(
+        factory: &impl HashedCursorFactory,
         mut expected: impl Iterator<Item = (B256, Account)>,
-    ) where
-        'a: 'b,
-    {
+    ) {
         let mut cursor = factory.hashed_account_cursor().unwrap();
 
         let first_account = cursor.seek(B256::default()).unwrap();
@@ -563,12 +565,10 @@ mod tests {
         assert!(cursor.next().unwrap().is_none());
     }
 
-    fn assert_storage_cursor_order<'a, 'b>(
-        factory: &'a impl HashedCursorFactory<'b>,
+    fn assert_storage_cursor_order(
+        factory: &impl HashedCursorFactory,
         expected: impl Iterator<Item = (B256, BTreeMap<B256, U256>)>,
-    ) where
-        'a: 'b,
-    {
+    ) {
         let mut cursor = factory.hashed_storage_cursor().unwrap();
 
         for (account, storage) in expected {
