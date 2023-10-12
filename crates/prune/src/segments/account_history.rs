@@ -5,17 +5,28 @@ use crate::{
     PrunerError,
 };
 use reth_db::{database::Database, models::ShardedKey, tables};
-use reth_primitives::PruneSegment;
+use reth_primitives::{PruneMode, PruneSegment};
 use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
 
-#[derive(Default)]
-#[non_exhaustive]
-pub(crate) struct AccountHistory;
+#[derive(Debug)]
+pub struct AccountHistory {
+    mode: PruneMode,
+}
+
+impl AccountHistory {
+    pub fn new(mode: PruneMode) -> Self {
+        Self { mode }
+    }
+}
 
 impl<DB: Database> Segment<DB> for AccountHistory {
     fn segment(&self) -> PruneSegment {
         PruneSegment::AccountHistory
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
@@ -129,7 +140,7 @@ mod tests {
                 to_block,
                 delete_limit: 2000,
             };
-            let segment = AccountHistory::default();
+            let segment = AccountHistory::new(prune_mode);
 
             let provider = tx.inner_rw();
             let result = segment.prune(&provider, input).unwrap();

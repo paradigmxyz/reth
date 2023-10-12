@@ -3,17 +3,28 @@ use crate::{
     PrunerError,
 };
 use reth_db::{database::Database, tables};
-use reth_primitives::PruneSegment;
+use reth_primitives::{PruneMode, PruneSegment};
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
 use tracing::{instrument, trace};
 
-#[derive(Default)]
-#[non_exhaustive]
-pub(crate) struct SenderRecovery;
+#[derive(Debug)]
+pub struct SenderRecovery {
+    mode: PruneMode,
+}
+
+impl SenderRecovery {
+    pub fn new(mode: PruneMode) -> Self {
+        Self { mode }
+    }
+}
 
 impl<DB: Database> Segment<DB> for SenderRecovery {
     fn segment(&self) -> PruneSegment {
         PruneSegment::SenderRecovery
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
@@ -112,7 +123,7 @@ mod tests {
                 to_block,
                 delete_limit: 10,
             };
-            let segment = SenderRecovery::default();
+            let segment = SenderRecovery::new(prune_mode);
 
             let next_tx_number_to_prune = tx
                 .inner()
