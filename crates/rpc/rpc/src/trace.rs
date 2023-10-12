@@ -28,7 +28,7 @@ use reth_rpc_types::{
     BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
 };
 use revm::{db::CacheDB, primitives::Env};
-use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState};
+use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState, State};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -276,26 +276,27 @@ where
         let mut target_blocks = Vec::new();
         for block in blocks {
             let mut transaction_indices = HashSet::new();
+            let mut highest_matching_index = 0;
             for (tx_idx, tx) in block.body.iter().enumerate() {
                 let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
                 let to = tx.to();
                 if matcher.matches(from, to) {
-                    transaction_indices.insert(tx_idx as u64);
+                    let idx = tx_idx as u64;
+                    transaction_indices.insert(idx);
+                    highest_matching_index = idx;
                 }
             }
             if !transaction_indices.is_empty() {
-                target_blocks.push((block.number, transaction_indices));
+                target_blocks.push((block.number, transaction_indices, highest_matching_index));
             }
         }
 
-        // TODO: this could be optimized to only trace the block until the highest matching index in
-        // that block
-
         // trace all relevant blocks
         let mut block_traces = Vec::with_capacity(target_blocks.len());
-        for (num, indices) in target_blocks {
-            let traces = self.trace_block_with(
+        for (num, indices, highest_idx) in target_blocks {
+            let traces = self.trace_block_until(
                 num.into(),
+                Some(highest_idx),
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, res, _, _| {
                     if let Some(idx) = tx_info.index {
@@ -367,7 +368,34 @@ where
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
-                &'a revm_primitives::State,
+                &'a State,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        self.trace_block_until(block_id, None, config, f).await
+    }
+
+    /// Executes all transactions of a block.
+    ///
+    /// If a `highest_index` is given, this will only execute the first `highest_index`
+    /// transactions, in other words, it will stop executing transactions after the
+    /// `highest_index`th transaction.
+    async fn trace_block_until<F, R>(
+        &self,
+        block_id: BlockId,
+        highest_index: Option<u64>,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        F: for<'a> Fn(
+                TransactionInfo,
+                TracingInspector,
+                ExecutionResult,
+                &'a State,
                 &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
             ) -> EthResult<R>
             + Send
@@ -398,7 +426,10 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-                let mut transactions = transactions.into_iter().enumerate().peekable();
+                let max_transactions =
+                    highest_index.map_or(transactions.len(), |highest| highest as usize);
+                let mut transactions =
+                    transactions.into_iter().take(max_transactions).enumerate().peekable();
 
                 while let Some((idx, tx)) = transactions.next() {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
