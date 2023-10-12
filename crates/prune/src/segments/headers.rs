@@ -5,18 +5,29 @@ use crate::{
 use itertools::Itertools;
 use reth_db::{database::Database, table::Table, tables};
 use reth_interfaces::RethResult;
-use reth_primitives::{BlockNumber, PruneSegment};
+use reth_primitives::{BlockNumber, PruneMode, PruneSegment};
 use reth_provider::DatabaseProviderRW;
 use std::ops::RangeInclusive;
 use tracing::{instrument, trace};
 
-#[derive(Default)]
-#[non_exhaustive]
-pub(crate) struct Headers;
+#[derive(Debug)]
+pub struct Headers {
+    mode: PruneMode,
+}
+
+impl Headers {
+    pub fn new(mode: PruneMode) -> Self {
+        Self { mode }
+    }
+}
 
 impl<DB: Database> Segment<DB> for Headers {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Headers
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
@@ -129,7 +140,7 @@ mod tests {
                 to_block,
                 delete_limit: 10,
             };
-            let segment = Headers::default();
+            let segment = Headers::new(prune_mode);
 
             let next_block_number_to_prune = tx
                 .inner()
@@ -193,7 +204,7 @@ mod tests {
             // Less than total number of tables for `Headers` segment
             delete_limit: 2,
         };
-        let segment = Headers::default();
+        let segment = Headers::new(PruneMode::Full);
 
         let provider = tx.inner_rw();
         let result = segment.prune(&provider, input).unwrap();
