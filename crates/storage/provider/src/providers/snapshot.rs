@@ -1,11 +1,14 @@
-use crate::HeaderProvider;
+use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
 use reth_db::{
     table::{Decompress, Table},
     HeaderTD,
 };
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_nippy_jar::{compression::Decompressor, NippyJar, NippyJarCursor};
-use reth_primitives::{BlockHash, BlockNumber, Header, SealedHeader, U256};
+use reth_primitives::{
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, SealedHeader,
+    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+};
 use std::ops::RangeBounds;
 
 /// SnapshotProvider
@@ -17,8 +20,10 @@ use std::ops::RangeBounds;
 pub struct SnapshotProvider<'a> {
     /// NippyJar
     pub jar: &'a NippyJar,
-    /// Starting snapshot block
+    /// Starting snapshot block if applied.
     pub jar_start_block: u64,
+    /// Starting snapshot transaction if applied.
+    pub jar_start_transaction: u64,
 }
 
 impl<'a> SnapshotProvider<'a> {
@@ -98,6 +103,106 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
 
     fn sealed_header(&self, _number: BlockNumber) -> RethResult<Option<SealedHeader>> {
         unimplemented!();
+    }
+}
+
+impl<'a> BlockHashReader for SnapshotProvider<'a> {
+    fn block_hash(&self, _number: u64) -> RethResult<Option<B256>> {
+        todo!()
+    }
+
+    fn canonical_hashes_range(
+        &self,
+        _start: BlockNumber,
+        _end: BlockNumber,
+    ) -> RethResult<Vec<B256>> {
+        todo!()
+    }
+}
+
+impl<'a> BlockNumReader for SnapshotProvider<'a> {
+    fn chain_info(&self) -> RethResult<ChainInfo> {
+        todo!()
+    }
+
+    fn best_block_number(&self) -> RethResult<BlockNumber> {
+        todo!()
+    }
+
+    fn last_block_number(&self) -> RethResult<BlockNumber> {
+        todo!()
+    }
+
+    fn block_number(&self, _hash: B256) -> RethResult<Option<BlockNumber>> {
+        todo!()
+    }
+}
+
+impl<'a> TransactionsProvider for SnapshotProvider<'a> {
+    fn transaction_id(&self, _tx_hash: TxHash) -> RethResult<Option<TxNumber>> {
+        todo!()
+    }
+
+    fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
+        TransactionSignedNoHash::decompress(
+            self.cursor()
+                .row_by_number_with_cols::<0b1, 1>((num - self.jar_start_transaction) as usize)?
+                .ok_or(ProviderError::TransactionNotFound(num.into()))?[0],
+        )
+        .map(Into::into)
+        .map(Some)
+        .map_err(Into::into)
+    }
+
+    fn transaction_by_id_no_hash(
+        &self,
+        _id: TxNumber,
+    ) -> RethResult<Option<TransactionSignedNoHash>> {
+        todo!()
+    }
+
+    fn transaction_by_hash(&self, _hash: TxHash) -> RethResult<Option<TransactionSigned>> {
+        todo!()
+    }
+
+    fn transaction_by_hash_with_meta(
+        &self,
+        _hash: TxHash,
+    ) -> RethResult<Option<(TransactionSigned, TransactionMeta)>> {
+        todo!()
+    }
+
+    fn transaction_block(&self, _id: TxNumber) -> RethResult<Option<BlockNumber>> {
+        todo!()
+    }
+
+    fn transactions_by_block(
+        &self,
+        _block_id: BlockHashOrNumber,
+    ) -> RethResult<Option<Vec<TransactionSigned>>> {
+        todo!()
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> RethResult<Vec<Vec<TransactionSigned>>> {
+        todo!()
+    }
+
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+        todo!()
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> RethResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+        todo!()
+    }
+
+    fn transaction_sender(&self, _id: TxNumber) -> RethResult<Option<Address>> {
+        todo!()
     }
 }
 
@@ -197,7 +302,8 @@ mod test {
             let jar = NippyJar::load_without_header(snap_file.path()).unwrap();
 
             let db_provider = factory.provider().unwrap();
-            let snap_provider = SnapshotProvider { jar: &jar, jar_start_block: 0 };
+            let snap_provider =
+                SnapshotProvider { jar: &jar, jar_start_block: 0, jar_start_transaction: 0 };
 
             assert!(!headers.is_empty());
 
