@@ -368,7 +368,7 @@ where
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
-                &'a revm_primitives::State,
+                &'a State,
                 &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
             ) -> EthResult<R>
             + Send
@@ -390,7 +390,7 @@ where
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
-                &'a revm_primitives::State,
+                &'a State,
                 &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
             ) -> EthResult<R>
             + Send
