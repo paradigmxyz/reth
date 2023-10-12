@@ -24,6 +24,25 @@ pub trait Segment {
         provider: &DatabaseProviderRO<'_, DB>,
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()>;
+
+    /// Finds the transaction range for the given block range.
+    fn find_transaction_range<DB: Database>(
+        &mut self,
+        provider: &DatabaseProviderRO<'_, DB>,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> RethResult<RangeInclusive<BlockNumber>> {
+        let from = provider
+            .block_body_indices(*block_range.start())?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(*block_range.start()))?
+            .first_tx_num();
+
+        let to = provider
+            .block_body_indices(*block_range.end())?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(*block_range.end()))?
+            .last_tx_num();
+
+        Ok(from..=to)
+    }
 }
 
 /// Returns a [`NippyJar`] according to the desired configuration.
