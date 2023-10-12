@@ -201,7 +201,7 @@ impl BundleStateWithReceipts {
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
         StateRoot::new(tx)
-            .with_hashed_cursor_factory(&hashed_cursor_factory)
+            .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefix_set)
             .with_changed_storage_prefixes(storage_prefix_set)
             .root()
