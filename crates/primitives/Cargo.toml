@@ -38,6 +38,7 @@ tokio-stream.workspace = true
 # misc
 bytes.workspace = true
 byteorder = "1"
+clap = { workspace = true, features = ["derive"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 serde_with = "3.3.0"
@@ -48,7 +49,6 @@ derive_more = "0.99"
 url = "2.3"
 once_cell = "1.17.0"
 zstd = { version = "0.12", features = ["experimental"] }
-paste = "1.0"
 rayon.workspace = true
 tempfile.workspace = true
 sha2 = "0.10.7"
@@ -96,6 +96,7 @@ test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 # value-256 controls whether transaction Value fields are DB-encoded as 256 bits instead of the
 # default of 128 bits.
 value-256 = ["reth-codecs/value-256"]
+clap = ["dep:clap"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

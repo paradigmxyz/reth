@@ -16,6 +16,7 @@ reth-primitives.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
+reth-nippy-jar = { path = "../storage/nippy-jar" }
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -23,6 +24,7 @@ tokio = { workspace = true, features = ["sync"] }
 # misc
 thiserror.workspace = true
 tracing.workspace = true
+clap = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 # reth
@@ -32,3 +34,6 @@ reth-stages = { path = "../stages", features = ["test-utils"] }
 # misc
 
 assert_matches.workspace = true
+
+[features]
+clap = ["dep:clap"]
