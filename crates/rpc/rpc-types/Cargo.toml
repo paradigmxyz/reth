@@ -18,10 +18,8 @@ revm-primitives = { workspace = true, features = ["serde"] }
 
 
 # ethereum
-alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-sol-types.workspace = true
-ethers-core = { workspace = true, default-features = false, optional = true }
+
 
 
 # arbitrary utils
@@ -30,12 +28,8 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
-# crypto
-secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 
-# for eip-4844
-c-kzg = { workspace = true, features = ["serde"] }
-
+# misc
 
 thiserror.workspace = true
 itertools.workspace = true
@@ -53,7 +47,7 @@ rand.workspace = true
 similar-asserts = "1.4"
 serde_json.workspace = true
 test-fuzz = "4"
-
+#rand.workspace = true
 revm-primitives = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
