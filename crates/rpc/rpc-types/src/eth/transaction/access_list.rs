@@ -6,7 +6,6 @@ use std::mem;
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
 
-#[main_codec(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodable, RlpEncodable)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessListItem {
