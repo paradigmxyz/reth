@@ -675,17 +675,7 @@ impl FromRecoveredPooledTransaction for MockTransaction {
 
 impl IntoRecoveredTransaction for MockTransaction {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        let tx = Transaction::Legacy(TxLegacy {
-            chain_id: self.chain_id(),
-            nonce: self.get_nonce(),
-            gas_price: self.get_gas_price(),
-            gas_limit: self.get_gas_limit(),
-            to: TransactionKind::Call(Address::from_slice(
-                &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
-            )),
-            value: 693361000000000u64.into(),
-            input: Default::default(),
-        });
+        let tx = self.clone().into();
 
         let signed_tx = TransactionSigned {
             hash: *self.hash(),
@@ -694,6 +684,98 @@ impl IntoRecoveredTransaction for MockTransaction {
         };
 
         TransactionSignedEcRecovered::from_signed_transaction(signed_tx, self.sender())
+    }
+}
+
+impl From<MockTransaction> for Transaction {
+    fn from(mock: MockTransaction) -> Self {
+        match mock {
+            MockTransaction::Legacy {
+                hash,
+                sender,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+            } => Self::Legacy(TxLegacy {
+                chain_id: Some(1),
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value: value.into(),
+                input: input.clone(),
+            }),
+            MockTransaction::Eip1559 {
+                hash,
+                sender,
+                nonce,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                gas_limit,
+                to,
+                value,
+                accesslist,
+                input,
+            } => Self::Eip1559(TxEip1559 {
+                chain_id: 1,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value: value.into(),
+                access_list: accesslist.clone(),
+                input: input.clone(),
+            }),
+            MockTransaction::Eip4844 {
+                hash,
+                sender,
+                nonce,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                max_fee_per_blob_gas,
+                gas_limit,
+                to,
+                value,
+                accesslist,
+                input,
+            } => Self::Eip4844(TxEip4844 {
+                chain_id: 1,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value: value.into(),
+                access_list: accesslist,
+                blob_versioned_hashes: vec![hash],
+                max_fee_per_blob_gas,
+                input,
+            }),
+            MockTransaction::Eip2930 {
+                hash,
+                sender,
+                nonce,
+                to,
+                gas_limit,
+                input,
+                value,
+                gas_price,
+                accesslist,
+            } => Self::Eip2930(TxEip2930 {
+                chain_id: 1,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value: value.into(),
+                access_list: accesslist,
+                input,
+            }),
+        }
     }
 }
 
@@ -836,7 +918,7 @@ impl MockTransactionFactory {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 #[non_exhaustive]
 pub struct MockOrdering;
 
