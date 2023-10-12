@@ -1,18 +1,27 @@
+mod account_history;
 mod headers;
+mod history;
 mod receipts;
+mod receipts_by_logs;
+mod sender_recovery;
+mod storage_history;
+mod transaction_lookup;
 mod transactions;
 
+pub(crate) use account_history::AccountHistory;
 pub(crate) use headers::Headers;
 pub(crate) use receipts::Receipts;
+pub(crate) use receipts_by_logs::ReceiptsByLogs;
+pub(crate) use sender_recovery::SenderRecovery;
+pub(crate) use storage_history::StorageHistory;
+pub(crate) use transaction_lookup::TransactionLookup;
 pub(crate) use transactions::Transactions;
 
 use crate::PrunerError;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber};
-use reth_provider::{
-    BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
-};
+use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter};
 use std::ops::RangeInclusive;
 use tracing::error;
 
@@ -23,30 +32,30 @@ use tracing::error;
 /// 2. If [Segment::prune] returned a [Some] in `checkpoint` of [PruneOutput], call
 ///    [Segment::save_checkpoint].
 /// 3. Subtract `pruned` of [PruneOutput] from `delete_limit` of next [PruneInput].
-pub(crate) trait Segment {
-    /// Segment of the data that's pruned.
-    const SEGMENT: PruneSegment;
+pub(crate) trait Segment<DB: Database> {
+    fn segment(&self) -> PruneSegment;
 
-    /// Prune data for [Self::SEGMENT] using the provided input.
-    fn prune<DB: Database>(
+    /// Prune data for [Self::segment] using the provided input.
+    fn prune(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError>;
 
-    /// Save checkpoint for [Self::SEGMENT] to the database.
-    fn save_checkpoint<DB: Database>(
+    /// Save checkpoint for [Self::segment] to the database.
+    fn save_checkpoint(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         checkpoint: PruneCheckpoint,
     ) -> RethResult<()> {
-        provider.save_prune_checkpoint(Self::SEGMENT, checkpoint)
+        provider.save_prune_checkpoint(self.segment(), checkpoint)
     }
 }
 
 /// Segment pruning input, see [Segment::prune].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PruneInput {
+    pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.
     pub(crate) to_block: BlockNumber,
     /// Maximum entries to delete from the database.
@@ -62,18 +71,16 @@ impl PruneInput {
     /// 2. If checkpoint doesn't exist, return 0.
     ///
     /// To get the range end: get last tx number for `to_block`.
-    pub(crate) fn get_next_tx_num_range_from_checkpoint<DB: Database>(
+    pub(crate) fn get_next_tx_num_range<DB: Database>(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
-        segment: PruneSegment,
     ) -> RethResult<Option<RangeInclusive<TxNumber>>> {
-        let from_tx_number = provider
-            .get_prune_checkpoint(segment)?
+        let from_tx_number = self.previous_checkpoint
             // Checkpoint exists, prune from the next transaction after the highest pruned one
             .and_then(|checkpoint| match checkpoint.tx_number {
                 Some(tx_number) => Some(tx_number + 1),
                 _ => {
-                    error!(target: "pruner", %segment, ?checkpoint, "Expected transaction number in prune checkpoint, found None");
+                    error!(target: "pruner", ?checkpoint, "Expected transaction number in prune checkpoint, found None");
                     None
                 },
             })
@@ -102,13 +109,9 @@ impl PruneInput {
     /// 2. If checkpoint doesn't exist, use block 0.
     ///
     /// To get the range end: use block `to_block`.
-    pub(crate) fn get_next_block_range<DB: Database>(
-        &self,
-        provider: &DatabaseProviderRW<'_, DB>,
-        segment: PruneSegment,
-    ) -> RethResult<Option<RangeInclusive<BlockNumber>>> {
-        let from_block = provider
-            .get_prune_checkpoint(segment)?
+    pub(crate) fn get_next_block_range(&self) -> Option<RangeInclusive<BlockNumber>> {
+        let from_block = self
+            .previous_checkpoint
             .and_then(|checkpoint| checkpoint.block_number)
             // Checkpoint exists, prune from the next block after the highest pruned one
             .map(|block_number| block_number + 1)
@@ -117,10 +120,10 @@ impl PruneInput {
 
         let range = from_block..=self.to_block;
         if range.is_empty() {
-            return Ok(None)
+            return None
         }
 
-        Ok(Some(range))
+        Some(range)
     }
 }
 
