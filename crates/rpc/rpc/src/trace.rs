@@ -356,7 +356,7 @@ where
     /// 4. calls the callback with the transaction info, the execution result, the changed state
     /// _after_ the transaction [StateProviderDatabase] and the database that points to the state
     /// right _before_ the transaction.
-    async fn trace_block_with<'a, F, R>(
+    async fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
         config: TracingInspectorConfig,
@@ -378,7 +378,7 @@ where
         self.trace_block_until(block_id, None, config, f).await
     }
 
-    async fn trace_block_until<'a, F, R>(
+    async fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
         highest_index: Option<u64>,
