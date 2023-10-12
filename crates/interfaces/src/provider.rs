@@ -40,6 +40,9 @@ pub enum ProviderError {
     /// Thrown we were unable to find a specific block
     #[error("Block does not exist {0:?}")]
     BlockNotFound(BlockHashOrNumber),
+    /// Thrown we were unable to find a specific transaction
+    #[error("Transaction does not exist {0:?}")]
+    TransactionNotFound(BlockHashOrNumber),
     /// Thrown we were unable to find the best block
     #[error("Best block does not exist")]
     BestBlockNotFound,
