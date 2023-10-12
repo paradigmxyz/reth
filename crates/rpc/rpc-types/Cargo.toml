@@ -13,7 +13,7 @@ Reth RPC types
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-codecs = { path = "../storage/codecs" }
+reth-codecs = { path = "../../storage/codecs" }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 
