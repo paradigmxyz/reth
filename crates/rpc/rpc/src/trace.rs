@@ -246,33 +246,6 @@ where
     }
 
     /// Returns all transaction traces that match the given filter.
-    fn find_relevant_blocks_to_trace(
-        blocks: Vec<Block>, 
-        matcher: &TraceFilterMatcher,
-    ) -> EthResult<Vec<(u64, HashSet<u64>, u64)>> { 
-    
-        let mut target_blocks = Vec::new();
-        for block in blocks {
-            let mut transaction_indices = HashSet::new();
-            let mut highest_matching_index = 0; 
-            for (tx_idx, tx) in block.body.iter().enumerate() {
-                let from = tx.recover_signer().ok_or(EthApiError::InvalidParams("Invalid signature".to_string()))?;
-                let to = tx.to();
-                if matcher.matches(from, to) {
-                    let idx = tx_idx as u64;
-                    transaction_indices.insert(idx);
-                    highest_matching_index = idx;
-                }
-            }
-            if !transaction_indices.is_empty() {
-                target_blocks.push((block.header.number, transaction_indices, highest_matching_index));
-            }
-        }
-    
-        Ok(target_blocks)
-    }
-
-    /// Returns all transaction traces that match the given filter.
     ///
     /// This is similar to [Self::trace_block] but only returns traces for transactions that match
     /// the filter.
@@ -301,12 +274,28 @@ where
         let blocks = self.provider().block_range(start..=end)?;
 
         // find relevant blocks to trace
-        let target_blocks = Self::find_relevant_blocks_to_trace(blocks, &matcher)?;
+        let mut target_blocks = Vec::new();
+        for block in blocks {
+            let mut transaction_indices = HashSet::new();
+            let mut highest_matching_index = 0; 
+            for (tx_idx, tx) in block.body.iter().enumerate() {
+                let from = tx.recover_signer().ok_or(EthApiError::InvalidParams("Invalid signature".to_string()))?;
+                let to = tx.to();
+                if matcher.matches(from, to) {
+                    let idx = tx_idx as u64;
+                    transaction_indices.insert(idx);
+                    highest_matching_index = idx;
+                }
+            }
+            if !transaction_indices.is_empty() {
+                target_blocks.push((block.header.number, transaction_indices, highest_matching_index));
+            }
+        }
 
         // trace all relevant blocks
         let mut block_traces = Vec::with_capacity(target_blocks.len());
         for (num, indices, highest_idx) in target_blocks {
-            let traces = self.trace_block_with(
+            let traces = self.trace_block_until(
                 num.into(),
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, res, _, _| {
@@ -322,7 +311,7 @@ where
                         .into_localized_transaction_traces(tx_info);
                     Ok(Some(traces))
                 },
-                highest_idx,
+                Some(highest_idx),
             );
             block_traces.push(traces);
         }
@@ -369,6 +358,16 @@ where
     /// _after_ the transaction [StateProviderDatabase] and the database that points to the state
     /// right _before_ the transaction.
     async fn trace_block_with<F, R>(
+        &self,
+        block_id: BlockId,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    {
+        Self::trace_block_until(block_id, config, f, None).await
+    }
+
+    async fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
         config: TracingInspectorConfig,
@@ -468,7 +467,6 @@ where
                     .into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
-            None,
         );
 
         let block = self.inner.eth_api.block_by_id(block_id);
@@ -539,7 +537,6 @@ where
                 };
                 Ok(trace)
             },
-            None,
         )
         .await
     }
