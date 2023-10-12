@@ -110,9 +110,4 @@ impl PruneProgress {
             Self::HasMoreData
         }
     }
-
-    /// Returns `true` if pruning has been finished.
-    pub fn is_finished(&self) -> bool {
-        matches!(self, Self::Finished)
-    }
 }

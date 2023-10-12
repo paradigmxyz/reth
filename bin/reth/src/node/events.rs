@@ -163,8 +163,8 @@ impl NodeState {
 
     fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
-            PrunerEvent::Finished { tip_block_number, elapsed, segments } => {
-                info!(tip_block_number, ?elapsed, ?segments, "Pruner finished");
+            PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
+                info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
             }
         }
     }
