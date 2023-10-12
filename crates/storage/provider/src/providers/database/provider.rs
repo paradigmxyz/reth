@@ -6,7 +6,7 @@ use crate::{
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader,
-    StorageReader, TransactionsProvider, WithdrawalsProvider,
+    StorageReader, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -1144,6 +1144,8 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         Ok(blocks)
     }
 }
+
+impl<'this, TX: DbTx<'this>> TransactionsProviderExt for DatabaseProvider<'this, TX> {}
 
 impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX> {
     fn transaction_id(&self, tx_hash: TxHash) -> RethResult<Option<TxNumber>> {
