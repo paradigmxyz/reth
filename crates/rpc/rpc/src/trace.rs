@@ -324,6 +324,7 @@ where
         for (num, indices, highest_idx) in target_blocks {
             let traces = self.trace_block_until(
                 num.into(),
+                Some(highest_idx),
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, res, _, _| {
                     if let Some(idx) = tx_info.index {
@@ -338,7 +339,6 @@ where
                         .into_localized_transaction_traces(tx_info);
                     Ok(Some(traces))
                 },
-                Some(highest_idx),
             );
             block_traces.push(traces);
         }
@@ -398,15 +398,15 @@ where
         F: TransactionCallback<R>,
         R: Send + 'static,
     {
-        self.trace_block_until(block_id, config, f, None).await
+        self.trace_block_until(block_id, None, config, f).await
     }
 
     async fn trace_block_until<'a, F, R>(
         &self,
         block_id: BlockId,
+        highest_index: Option<u64>,
         config: TracingInspectorConfig,
         f: F,
-        highest_index: Option<u64>,
     ) -> EthResult<Option<Vec<R>>>
     where
         F: TransactionCallback<R>,
@@ -436,15 +436,10 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-                let mut transactions = transactions.into_iter().enumerate().peekable();
+                let max_transactions = highest_index.map_or(transactions.len(), |highest| highest as usize + 1);
+                let transactions = transactions.into_iter().take(max_transactions).enumerate();
 
-                while let Some((idx, tx)) = transactions.next() {
-                    // Check if current index exceeds the highest_index and break if it does
-                    if let Some(highest) = highest_index {
-                        if idx as u64 > highest {
-                            break;
-                        }
-                    }
+                for (idx, tx) in transactions {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx_info = TransactionInfo {
                         hash: Some(tx.hash()),
@@ -462,13 +457,9 @@ where
                     let ResultAndState { result, state } = res;
                     results.push(f(tx_info, inspector, result, &state, &db)?);
 
-                    // need to apply the state changes of this transaction before executing the
-                    // next transaction
-                    if transactions.peek().is_some() {
-                        // need to apply the state changes of this transaction before executing
-                        // the next transaction
-                        db.commit(state)
-                    }
+                    // need to apply the state changes of this transaction before executing
+                    // the next transaction
+                    db.commit(state)
                 }
 
                 Ok(results)
