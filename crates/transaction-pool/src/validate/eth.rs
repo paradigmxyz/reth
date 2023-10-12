@@ -48,6 +48,18 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one(origin, transaction)
     }
+
+    /// Validates all given transactions.
+    ///
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [Self::validate_one]
+    pub fn validate_all(
+        &self,
+        transaction: Vec<(TransactionOrigin, Tx)>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        transaction.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+    }
 }
 
 #[async_trait::async_trait]
