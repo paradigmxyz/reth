@@ -48,9 +48,12 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one(origin, transaction)
     }
-    /// Validates a list of transactions.
+
+    /// Validates all given transactions.
     ///
-    ///  Each tuple in the `transactions` vec contains a TransactionOrigin and its associated Tx.
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [Self::validate_one]
     pub fn validate_all(
         &self,
         transaction: Vec<(TransactionOrigin, Tx)>,
@@ -140,7 +143,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                    );
+                    )
                 }
             }
             EIP1559_TX_TYPE_ID => {
@@ -149,7 +152,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                    );
+                    )
                 }
             }
             EIP4844_TX_TYPE_ID => {
@@ -158,7 +161,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip4844Disabled.into(),
-                    );
+                    )
                 }
             }
 
@@ -176,13 +179,13 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::OversizedData(size, TX_MAX_SIZE),
-            );
+            )
         }
 
         // Check whether the init code size has been exceeded.
         if self.fork_tracker.is_shanghai_activated() {
             if let Err(err) = ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
-                return TransactionValidationOutcome::Invalid(transaction, err);
+                return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
 
@@ -192,7 +195,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.block_gas_limit),
-            );
+            )
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
@@ -200,19 +203,19 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TipAboveFeeCap.into(),
-            );
+            )
         }
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if !origin.is_local()
-            && transaction.is_eip1559()
-            && transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
+        if !origin.is_local() &&
+            transaction.is_eip1559() &&
+            transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::Underpriced,
-            );
+            )
         }
 
         // Checks for chainid
@@ -221,7 +224,7 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::ChainIdMismatch.into(),
-                );
+                )
             }
         }
 
@@ -230,8 +233,8 @@ where
             transaction.access_list().map(|list| list.flattened()).unwrap_or_default();
         let is_shanghai = self.fork_tracker.is_shanghai_activated();
 
-        if transaction.gas_limit()
-            < calculate_intrinsic_gas_after_merge(
+        if transaction.gas_limit() <
+            calculate_intrinsic_gas_after_merge(
                 transaction.input(),
                 transaction.kind(),
                 &access_list,
@@ -241,7 +244,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::IntrinsicGasTooLow,
-            );
+            )
         }
 
         let mut maybe_blob_sidecar = None;
@@ -253,7 +256,7 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
-                );
+                )
             }
 
             let blob_count = transaction.blob_count();
@@ -264,7 +267,7 @@ where
                     InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::NoEip4844Blobs,
                     ),
-                );
+                )
             }
 
             if blob_count > MAX_BLOBS_PER_BLOCK {
@@ -277,7 +280,7 @@ where
                             permitted: MAX_BLOBS_PER_BLOCK,
                         },
                     ),
-                );
+                )
             }
 
             // extract the blob from the transaction
@@ -287,7 +290,7 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::TxTypeNotSupported.into(),
-                    );
+                    )
                 }
                 EthBlobTransactionSidecar::Missing => {
                     if let Ok(Some(_)) = self.blob_store.get(*transaction.hash()) {
@@ -298,7 +301,7 @@ where
                             InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
                             ),
-                        );
+                        )
                     }
                 }
                 EthBlobTransactionSidecar::Present(blob) => {
@@ -310,7 +313,7 @@ where
                                 InvalidPoolTransactionError::Eip4844(
                                     Eip4844PoolTransactionError::InvalidEip4844Blob(err),
                                 ),
-                            );
+                            )
                         }
                         // store the extracted blob
                         maybe_blob_sidecar = Some(blob);
@@ -319,7 +322,7 @@ where
                         return TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidTransactionError::TxTypeNotSupported.into(),
-                        );
+                        )
                     }
                 }
             }
@@ -342,7 +345,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::SignerAccountHasBytecode.into(),
-            );
+            )
         }
 
         // Checks for nonce
@@ -350,7 +353,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::NonceNotConsistent.into(),
-            );
+            )
         }
 
         // Checks for max cost
@@ -363,7 +366,7 @@ where
                     available_funds: account.balance,
                 }
                 .into(),
-            );
+            )
         }
 
         // Return the valid transaction
