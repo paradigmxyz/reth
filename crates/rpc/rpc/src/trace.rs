@@ -39,31 +39,30 @@ pub struct TraceApi<Provider, Eth> {
     inner: Arc<TraceApiInner<Provider, Eth>>,
 }
 
-trait TransactionCallback<R> 
+trait TransactionCallback<R>
 where
     Self: for<'a> Fn(
-        TransactionInfo,
-        TracingInspector,
-        ExecutionResult,
-        &'a State,
-        &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
-    ) -> EthResult<R>
-    + Send
-    + 'static,
+            TransactionInfo,
+            TracingInspector,
+            ExecutionResult,
+            &'a State,
+            &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+        ) -> EthResult<R>
+        + Send
+        + 'static,
 {
 }
 
-impl<F, R> TransactionCallback<R> for F
-where
+impl<F, R> TransactionCallback<R> for F where
     F: for<'a> Fn(
-        TransactionInfo,
-        TracingInspector,
-        ExecutionResult,
-        &'a State,
-        &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
-    ) -> EthResult<R>
-    + Send
-    + 'static,
+            TransactionInfo,
+            TracingInspector,
+            ExecutionResult,
+            &'a State,
+            &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+        ) -> EthResult<R>
+        + Send
+        + 'static
 {
 }
 
@@ -250,7 +249,7 @@ where
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
         if indices.len() != 1 {
             // The OG impl failed if it gets more than a single index
-            return Ok(None)
+            return Ok(None);
         }
         self.trace_get_index(hash, indices[0]).await
     }
@@ -294,7 +293,7 @@ where
         if distance > 100 {
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
-            ))
+            ));
         }
 
         // fetch all blocks in that range
@@ -304,7 +303,7 @@ where
         let mut target_blocks = Vec::new();
         for block in blocks {
             let mut transaction_indices = HashSet::new();
-            let mut highest_matching_index = 0; 
+            let mut highest_matching_index = 0;
             for (tx_idx, tx) in block.body.iter().enumerate() {
                 let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
                 let to = tx.to();
@@ -330,7 +329,7 @@ where
                     if let Some(idx) = tx_info.index {
                         if !indices.contains(&idx) {
                             // only record traces for relevant transactions
-                            return Ok(None)
+                            return Ok(None);
                         }
                     }
                     let traces = inspector
@@ -433,7 +432,8 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-                let max_transactions = highest_index.map_or(transactions.len(), |highest| highest as usize + 1);
+                let max_transactions =
+                    highest_index.map_or(transactions.len(), |highest| highest as usize + 1);
                 let transactions = transactions.into_iter().take(max_transactions).enumerate();
 
                 for (idx, tx) in transactions {
@@ -512,8 +512,8 @@ where
                                 author: block.header.beneficiary,
                                 reward_type: RewardType::Uncle,
                                 value: U256::from(
-                                    block_reward(base_block_reward, block.ommers.len()) -
-                                        base_block_reward,
+                                    block_reward(base_block_reward, block.ommers.len())
+                                        - base_block_reward,
                                 ),
                             },
                         ));
