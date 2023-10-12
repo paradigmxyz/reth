@@ -4,13 +4,14 @@ mod headers;
 
 pub use headers::Headers;
 
-use reth_db::{table::Table, transaction::DbTx};
+use reth_db::{database::Database, table::Table, transaction::DbTx};
 use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
     BlockNumber, SnapshotSegment,
 };
+use reth_provider::{BlockReader, DatabaseProviderRO, ProviderError};
 use std::{ops::RangeInclusive, path::PathBuf};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
@@ -18,16 +19,16 @@ pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 /// A segment represents a snapshotting of some portion of the data.
 pub trait Segment {
     /// Snapshot data using the provided range.
-    fn snapshot<'tx>(
+    fn snapshot<DB: Database>(
         &self,
-        tx: &impl DbTx<'tx>,
+        provider: &DatabaseProviderRO<'_, DB>,
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()>;
 }
 
 /// Returns a [`NippyJar`] according to the desired configuration.
-pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
-    tx: &impl DbTx<'tx>,
+pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize, T: Table>(
+    provider: &DatabaseProviderRO<'_, DB>,
     segment: SnapshotSegment,
     filters: Filters,
     compression: Compression,
@@ -54,7 +55,8 @@ pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
     };
 
     if let Filters::WithFilters(inclusion_filter, phf) = filters {
-        let total_rows = (tx.entries::<T>()? - *range.start() as usize).min(range_len);
+        let total_rows =
+            (provider.tx_ref().entries::<T>()? - *range.start() as usize).min(range_len);
         nippy_jar = match inclusion_filter {
             InclusionFilter::Cuckoo => nippy_jar.with_cuckoo_filter(total_rows),
         };

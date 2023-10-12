@@ -9,7 +9,7 @@ use reth_db::{
 use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PruneCheckpoint, PruneModes, PruneSegment,
+    PruneCheckpoint, PruneMode, PruneSegment,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,

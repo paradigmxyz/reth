@@ -1,7 +1,6 @@
-use crate::{db::genesis_value_parser, utils::DbTool};
 use clap::Parser;
 use itertools::Itertools;
-use reth_db::open_db_read_only;
+use reth_db::{open_db_read_only, DatabaseEnvRO};
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::{
     compression::{DecoderDictionary, Decompressor},
@@ -11,7 +10,7 @@ use reth_primitives::{
     snapshot::{Compression, InclusionFilter, PerfectHashingFunction},
     BlockNumber, ChainSpec, SnapshotSegment,
 };
-use reth_provider::providers::SnapshotProvider;
+use reth_provider::{providers::SnapshotProvider, ProviderFactory};
 use std::{path::Path, sync::Arc};
 
 mod bench;
@@ -20,25 +19,6 @@ mod headers;
 #[derive(Parser, Debug)]
 /// Arguments for the `reth db snapshot` command.
 pub struct Command {
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
-        value_parser = genesis_value_parser,
-        global = true,
-    )]
-    chain: Arc<ChainSpec>,
-
     /// Snapshot segments to generate.
     segments: Vec<SnapshotSegment>,
 
@@ -87,17 +67,19 @@ impl Command {
 
         {
             let db = open_db_read_only(db_path, None)?;
-            let tool = DbTool::new(&db, chain.clone())?;
+            let factory = ProviderFactory::new(db, chain.clone());
+            let provider = factory.provider()?;
 
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
                     match mode {
-                        SnapshotSegment::Headers => self.generate_headers_snapshot(
-                            &tool,
-                            *compression,
-                            InclusionFilter::Cuckoo,
-                            *phf,
-                        )?,
+                        SnapshotSegment::Headers => self
+                            .generate_headers_snapshot::<DatabaseEnvRO>(
+                                &provider,
+                                *compression,
+                                InclusionFilter::Cuckoo,
+                                *phf,
+                            )?,
                         SnapshotSegment::Transactions => todo!(),
                         SnapshotSegment::Receipts => todo!(),
                     }

@@ -2,23 +2,22 @@ use super::{
     bench::{bench, BenchKind},
     Command,
 };
-use crate::utils::DbTool;
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{database::Database, open_db_read_only, table::Decompress, DatabaseEnvRO};
+use reth_db::{database::Database, open_db_read_only, table::Decompress};
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
     ChainSpec, Header, SnapshotSegment,
 };
-use reth_provider::{HeaderProvider, ProviderError, ProviderFactory};
+use reth_provider::{DatabaseProviderRO, HeaderProvider, ProviderError, ProviderFactory};
 use reth_snapshot::segments::{get_snapshot_segment_file_name, Headers, Segment};
 use std::{path::Path, sync::Arc};
 
 impl Command {
-    pub(crate) fn generate_headers_snapshot(
+    pub(crate) fn generate_headers_snapshot<DB: Database>(
         &self,
-        tool: &DbTool<'_, DatabaseEnvRO>,
+        provider: &DatabaseProviderRO<'_, DB>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
@@ -31,7 +30,7 @@ impl Command {
                 Filters::WithoutFilters
             },
         );
-        segment.snapshot(&tool.db.tx()?, self.from..=(self.from + self.block_interval - 1))?;
+        segment.snapshot::<DB>(&provider, self.from..=(self.from + self.block_interval - 1))?;
 
         Ok(())
     }
