@@ -6038,6 +6038,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "c-kzg",
+ "clap",
  "crc",
  "criterion",
  "derive_more",
@@ -6321,8 +6322,10 @@ name = "reth-snapshot"
 version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
+ "clap",
  "reth-db",
  "reth-interfaces",
+ "reth-nippy-jar",
  "reth-primitives",
  "reth-provider",
  "reth-stages",

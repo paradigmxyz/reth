@@ -1,6 +1,8 @@
-use super::JarConfig;
 use reth_db::DatabaseEnvRO;
-use reth_primitives::ChainSpec;
+use reth_primitives::{
+    snapshot::{Compression, Filters},
+    ChainSpec, SnapshotSegment,
+};
 use reth_provider::{DatabaseProviderRO, ProviderFactory};
 use std::{sync::Arc, time::Instant};
 
@@ -15,7 +17,9 @@ pub(crate) enum BenchKind {
 pub(crate) fn bench<F1, F2>(
     bench_kind: BenchKind,
     db: (DatabaseEnvRO, Arc<ChainSpec>),
-    jar_config: JarConfig,
+    segment: SnapshotSegment,
+    filters: Filters,
+    compression: Compression,
     mut snapshot_method: F1,
     database_method: F2,
 ) -> eyre::Result<()>
@@ -23,12 +27,11 @@ where
     F1: FnMut() -> eyre::Result<()>,
     F2: Fn(DatabaseProviderRO<'_, DatabaseEnvRO>) -> eyre::Result<()>,
 {
-    let (mode, compression, phf) = jar_config;
     let (db, chain) = db;
 
     println!();
     println!("############");
-    println!("## [{mode:?}] [{compression:?}] [{phf:?}] [{bench_kind:?}]");
+    println!("## [{segment:?}] [{compression:?}] [{filters:?}] [{bench_kind:?}]");
     {
         let start = Instant::now();
         snapshot_method()?;
