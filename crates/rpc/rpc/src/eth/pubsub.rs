@@ -88,7 +88,7 @@ where
     }
 }
 
-/// The actual handler for and accepted [`EthPubSub::subscribe`] call.
+/// The actual handler for an accepted [`EthPubSub::subscribe`] call.
 async fn handle_accepted<Provider, Pool, Events, Network>(
     pubsub: Arc<EthPubSubInner<Provider, Pool, Events, Network>>,
     accepted_sink: SubscriptionSink,
@@ -267,7 +267,7 @@ impl<Provider, Pool, Events, Network> EthPubSubInner<Provider, Pool, Events, Net
 where
     Pool: TransactionPool + 'static,
 {
-    /// Returns a stream that yields all transactions emitted by the txpool.
+    /// Returns a stream that yields all transaction hashes emitted by the txpool.
     fn pending_transaction_hashes_stream(&self) -> impl Stream<Item = TxHash> {
         ReceiverStream::new(self.pool.pending_transactions_listener())
     }
