@@ -13,12 +13,6 @@ pub struct AccessListItem {
     /// Account addresses that would be loaded at the start of execution
     pub address: Address,
     /// Keys of storage that would be loaded at the start of execution
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 0..=20)"
-        )
-    )]
     pub storage_keys: Vec<B256>,
 }
 
