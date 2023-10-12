@@ -182,13 +182,13 @@ where
     }
 
     /// Adds [`phf::Fmph`] perfect hashing function.
-    pub fn with_mphf(mut self) -> Self {
+    pub fn with_fmph(mut self) -> Self {
         self.phf = Some(Functions::Fmph(Fmph::new()));
         self
     }
 
     /// Adds [`phf::GoFmph`] perfect hashing function.
-    pub fn with_gomphf(mut self) -> Self {
+    pub fn with_gofmph(mut self) -> Self {
         self.phf = Some(Functions::GoFmph(GoFmph::new()));
         self
     }
@@ -556,12 +556,12 @@ mod tests {
             assert_eq!(indexes, collect_indexes(&loaded_nippy));
         };
 
-        // mphf bytes size for 100 values of 32 bytes: 54
-        nippy = nippy.with_mphf();
+        // fmph bytes size for 100 values of 32 bytes: 54
+        nippy = nippy.with_fmph();
         check_phf(&mut nippy);
 
-        // mphf bytes size for 100 values of 32 bytes: 46
-        nippy = nippy.with_gomphf();
+        // fmph bytes size for 100 values of 32 bytes: 46
+        nippy = nippy.with_gofmph();
         check_phf(&mut nippy);
     }
 
@@ -771,7 +771,7 @@ mod tests {
                 NippyJar::new(num_columns, file_path.path(), BlockJarHeader { block_start })
                     .with_zstd(true, 5000)
                     .with_cuckoo_filter(col1.len())
-                    .with_mphf();
+                    .with_fmph();
 
             nippy.prepare_compression(data.clone()).unwrap();
             nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
@@ -849,7 +849,7 @@ mod tests {
             let mut nippy = NippyJar::new_without_header(num_columns, file_path.path())
                 .with_zstd(true, 5000)
                 .with_cuckoo_filter(col1.len())
-                .with_mphf();
+                .with_fmph();
 
             nippy.prepare_compression(data.clone()).unwrap();
             nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
