@@ -220,6 +220,28 @@ impl PooledTransactionsElement {
             Self::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
         }
     }
+
+    /// Returns the length without an RLP header - this is used for eth/68 sizes.
+    pub fn length_without_header(&self) -> usize {
+        match self {
+            Self::Legacy { transaction, signature, .. } => {
+                // method computes the payload len with a RLP header
+                transaction.payload_len_with_signature(signature)
+            }
+            Self::Eip2930 { transaction, signature, .. } => {
+                // method computes the payload len without a RLP header
+                transaction.payload_len_with_signature_without_header(signature)
+            }
+            Self::Eip1559 { transaction, signature, .. } => {
+                // method computes the payload len without a RLP header
+                transaction.payload_len_with_signature_without_header(signature)
+            }
+            Self::BlobTransaction(blob_tx) => {
+                // the encoding does not use a header, so we set `with_header` to false
+                blob_tx.payload_len_with_type(false)
+            }
+        }
+    }
 }
 
 impl Encodable for PooledTransactionsElement {

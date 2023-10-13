@@ -22,8 +22,9 @@ use reth_primitives::{
     fs,
     revm_primitives::KzgSettings,
     stage::StageId,
-    Address, BlobTransactionSidecar, Bytes, ChainSpec, SealedBlock, SealedBlockWithSenders,
-    Transaction, TransactionSigned, TxEip4844, B256, U256, U64,
+    Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
+    SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
+    U64,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
@@ -195,24 +196,44 @@ impl Command {
                 .into_ecrecovered()
                 .ok_or(eyre::eyre!("failed to recover tx"))?;
 
-            if let Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) =
-                &transaction.transaction
-            {
-                let blobs_bundle = blobs_bundle.as_mut().ok_or(eyre::eyre!(
-                    "encountered a blob tx. `--blobs-bundle-path` must be provided"
-                ))?;
-                let (commitments, proofs, blobs) = blobs_bundle.take(blob_versioned_hashes.len());
-                blob_store.insert(
-                    transaction.hash,
-                    BlobTransactionSidecar { blobs, commitments, proofs },
-                )?;
-            }
+            let encoded_length = match &transaction.transaction {
+                Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
+                    let blobs_bundle = blobs_bundle.as_mut().ok_or(eyre::eyre!(
+                        "encountered a blob tx. `--blobs-bundle-path` must be provided"
+                    ))?;
+
+                    let (commitments, proofs, blobs) =
+                        blobs_bundle.take(blob_versioned_hashes.len());
+
+                    // first construct the tx, calculating the length of the tx with sidecar before
+                    // insertion
+                    let sidecar = BlobTransactionSidecar::new(
+                        blobs.clone(),
+                        commitments.clone(),
+                        proofs.clone(),
+                    );
+                    let tx =
+                        BlobTransaction::try_from_signed(transaction.as_ref().clone(), sidecar)
+                            .expect("should not fail to convert blob tx if it is already eip4844");
+                    let pooled = PooledTransactionsElement::BlobTransaction(tx);
+                    let encoded_length = pooled.length_without_header();
+
+                    // insert the blob into the store
+                    blob_store.insert(
+                        transaction.hash,
+                        BlobTransactionSidecar { blobs, commitments, proofs },
+                    )?;
+
+                    encoded_length
+                }
+                _ => transaction.length_without_header(),
+            };
 
             debug!(target: "reth::cli", ?transaction, "Adding transaction to the pool");
             transaction_pool
                 .add_transaction(
                     TransactionOrigin::External,
-                    EthPooledTransaction::new(transaction),
+                    EthPooledTransaction::new(transaction, encoded_length),
                 )
                 .await?;
         }
