@@ -95,7 +95,8 @@ impl Command {
                                     (num - tx_range.start()) as usize,
                                 )?
                                 .ok_or(ProviderError::TransactionNotFound((*num).into()))?[0],
-                        )?;
+                        )?
+                        .with_hash();
                         // TODO: replace with below when eventually SnapshotProvider re-uses cursor
                         // provider.transaction_by_id(num as
                         // u64)?.ok_or(ProviderError::TransactionNotFound((*num).into()))?;
