@@ -7,7 +7,7 @@ use reth_primitives::{keccak256, TransactionSignedNoHash, TxHash, TxNumber, B256
 use crate::{abstraction::cursor::DbCursorRO, transaction::DbTx, Transactions};
 
 impl Transactions {
-    /// Recovers transaction hashes by walking through [`tables::Transactions`] table and
+    /// Recovers transaction hashes by walking through [`crate::tables::Transactions`] table and
     /// calculating them in a parallel manner. Returned unsorted.
     pub fn recover_hashes<'a, 'b, TX: DbTx<'a>>(
         tx: &'b TX,
