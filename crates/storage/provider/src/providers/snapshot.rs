@@ -168,7 +168,8 @@ impl<'a> TransactionsProvider for SnapshotProvider<'a> {
         let tx = TransactionSignedNoHash::decompress(
             cursor.row_by_key_with_cols::<0b1, 1>(&hash.0).unwrap().unwrap()[0],
         )
-        .unwrap().with_hash();
+        .unwrap()
+        .with_hash();
 
         if tx.hash() == hash {
             return Ok(Some(tx))
