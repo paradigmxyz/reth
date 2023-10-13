@@ -275,10 +275,15 @@ impl TxEip4844 {
 
     /// Output the length of the RLP signed transaction encoding. This encodes with a RLP header.
     pub(crate) fn payload_len_with_signature(&self, signature: &Signature) -> usize {
+        let len = self.payload_len_with_signature_without_header(signature);
+        length_of_length(len) + len
+    }
+
+    /// Output the length of the RLP signed transaction encoding, _without_ a RLP header.
+    pub(crate) fn payload_len_with_signature_without_header(&self, signature: &Signature) -> usize {
         let payload_length = self.fields_len() + signature.payload_len();
         // 'transaction type byte length' + 'header length' + 'payload length'
-        let len = 1 + length_of_length(payload_length) + payload_length;
-        length_of_length(len) + len
+        1 + length_of_length(payload_length) + payload_length
     }
 
     /// Get transaction type
@@ -592,6 +597,11 @@ pub struct BlobTransactionSidecar {
 }
 
 impl BlobTransactionSidecar {
+    /// Creates a new [BlobTransactionSidecar] using the given blobs, commitments, and proofs.
+    pub fn new(blobs: Vec<Blob>, commitments: Vec<Bytes48>, proofs: Vec<Bytes48>) -> Self {
+        Self { blobs, commitments, proofs }
+    }
+
     /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
     ///
     /// This encodes the fields in the following order:

@@ -4,7 +4,6 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_rlp::Encodable;
 use futures_util::{ready, Stream};
 use reth_primitives::{
     AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
@@ -743,7 +742,9 @@ pub trait PoolTransaction:
         self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
-    /// Returns the length of the rlp encoded object
+    /// Returns the length of the rlp encoded transaction object
+    ///
+    /// Note: Implementations should cache this value.
     fn encoded_length(&self) -> usize;
 
     /// Returns chain_id
@@ -787,6 +788,10 @@ pub struct EthPooledTransaction {
     /// max_blob_fee_per_gas * blob_gas_used`.
     pub(crate) cost: U256,
 
+    /// This is the RLP length of the transaction, computed when the transaction is added to the
+    /// pool.
+    pub(crate) encoded_length: usize,
+
     /// The blob side car for this transaction
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
 }
@@ -807,7 +812,7 @@ pub enum EthBlobTransactionSidecar {
 
 impl EthPooledTransaction {
     /// Create new instance of [Self].
-    pub fn new(transaction: TransactionSignedEcRecovered) -> Self {
+    pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
         let gas_cost = match &transaction.transaction {
             Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
@@ -826,7 +831,7 @@ impl EthPooledTransaction {
             cost += U256::from(blob_tx.max_fee_per_blob_gas * blob_tx.blob_gas() as u128);
         }
 
-        Self { transaction, cost, blob_sidecar }
+        Self { transaction, cost, encoded_length, blob_sidecar }
     }
 
     /// Return the reference to the underlying transaction.
@@ -838,19 +843,20 @@ impl EthPooledTransaction {
 /// Conversion from the network transaction type to the pool transaction type.
 impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+        let encoded_length = tx.length_without_header();
         let (tx, signer) = tx.into_components();
         match tx {
             PooledTransactionsElement::BlobTransaction(tx) => {
                 // include the blob sidecar
                 let (tx, blob) = tx.into_parts();
                 let tx = TransactionSignedEcRecovered::from_signed_transaction(tx, signer);
-                let mut pooled = EthPooledTransaction::new(tx);
+                let mut pooled = EthPooledTransaction::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
                 pooled
             }
             tx => {
                 // no blob sidecar
-                EthPooledTransaction::new(tx.into_ecrecovered_transaction(signer))
+                EthPooledTransaction::new(tx.into_ecrecovered_transaction(signer), encoded_length)
             }
         }
     }
@@ -957,7 +963,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize {
-        self.transaction.length()
+        self.encoded_length
     }
 
     /// Returns chain_id
@@ -993,7 +999,10 @@ impl EthPoolTransaction for EthPooledTransaction {
 
 impl FromRecoveredTransaction for EthPooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        EthPooledTransaction::new(tx)
+        // CAUTION: this should not be done for EIP-4844 transactions, as the blob sidecar is
+        // missing.
+        let encoded_length = tx.length_without_header();
+        EthPooledTransaction::new(tx, encoded_length)
     }
 }
 
