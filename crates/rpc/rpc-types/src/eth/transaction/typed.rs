@@ -4,7 +4,6 @@
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
-
 use reth_primitives::{
     kzg::{Blob, Bytes48},
     AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxEip4844, TxLegacy, B256, U128,
@@ -111,7 +110,6 @@ pub struct EIP2930TransactionRequest {
 pub struct EIP1559TransactionRequest {
     pub chain_id: u64,
     pub nonce: U64,
-
     pub max_priority_fee_per_gas: U128,
     pub max_fee_per_gas: U128,
     pub gas_limit: U256,
@@ -120,6 +118,7 @@ pub struct EIP1559TransactionRequest {
     pub input: Bytes,
     pub access_list: AccessList,
 }
+
 /// Represents an EIP-4844 transaction request
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Eip4844TransactionRequest {
@@ -137,6 +136,7 @@ pub struct Eip4844TransactionRequest {
     pub gas_price: U128,
     pub sidecar: BlobTransactionSidecar,
 }
+
 /// Represents the `to` field of a transaction request
 ///
 /// This determines what kind of transaction this is
@@ -199,6 +199,8 @@ impl From<TransactionKind> for reth_primitives::TransactionKind {
         }
     }
 }
+
+/// This represents a set of blobs, and its corresponding commitments and proofs.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BlobTransactionSidecar {
     /// The blob data.
