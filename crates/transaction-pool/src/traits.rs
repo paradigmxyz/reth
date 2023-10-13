@@ -742,7 +742,9 @@ pub trait PoolTransaction:
         self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
-    /// Returns the length of the rlp encoded object
+    /// Returns the length of the rlp encoded transaction object
+    ///
+    /// Note: Implementations should cache this value.
     fn encoded_length(&self) -> usize;
 
     /// Returns chain_id

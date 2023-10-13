@@ -191,8 +191,6 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub timestamp: Instant,
     /// Where this transaction originated from.
     pub origin: TransactionOrigin,
-    /// The length of the rlp encoded transaction (cached)
-    pub encoded_length: usize,
 }
 
 // === impl ValidPoolTransaction ===
@@ -221,6 +219,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Returns the internal identifier for this transaction.
     pub(crate) fn id(&self) -> &TransactionId {
         &self.transaction_id
+    }
+
+    /// Returns the length of the rlp encoded transaction
+    #[inline]
+    pub fn encoded_length(&self) -> usize {
+        self.transaction.encoded_length()
     }
 
     /// Returns the nonce set for this transaction.
@@ -304,7 +308,6 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
             propagate: self.propagate,
             timestamp: self.timestamp,
             origin: self.origin,
-            encoded_length: self.encoded_length,
         }
     }
 }
