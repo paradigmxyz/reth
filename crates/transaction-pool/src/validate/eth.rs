@@ -56,9 +56,9 @@ where
     /// See also [Self::validate_one]
     pub fn validate_all(
         &self,
-        transaction: Vec<(TransactionOrigin, Tx)>,
+        transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transaction.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
     }
 }
 
@@ -76,6 +76,13 @@ where
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         self.validate_one(origin, transaction)
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_all(transactions)
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
