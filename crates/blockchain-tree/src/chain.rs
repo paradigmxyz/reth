@@ -22,9 +22,6 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-/// The ID of a sidechain internally in a [`BlockchainTree`][super::BlockchainTree].
-pub(crate) type BlockChainId = u64;
-
 /// A chain if the blockchain tree, that has functionality to execute blocks and append them to the
 /// it self.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

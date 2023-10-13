@@ -1,9 +1,9 @@
 //! Implementation of [`BlockchainTree`]
 use crate::{
     canonical_chain::CanonicalChain,
-    chain::{BlockChainId, BlockKind},
+    chain::BlockKind,
     metrics::TreeMetrics,
-    state::TreeState,
+    state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
@@ -458,7 +458,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         let canonical_fork = match self.canonical_fork(chain_id) {
             None => {
                 return Err(InsertBlockError::tree_error(
-                    BlockchainTreeError::BlockSideChainIdConsistency { chain_id },
+                    BlockchainTreeError::BlockSideChainIdConsistency { chain_id: chain_id.into() },
                     block.block,
                 ))
             }
@@ -470,7 +470,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             Some(parent_chain) => parent_chain,
             None => {
                 return Err(InsertBlockError::tree_error(
-                    BlockchainTreeError::BlockSideChainIdConsistency { chain_id },
+                    BlockchainTreeError::BlockSideChainIdConsistency { chain_id: chain_id.into() },
                     block.block,
                 ))
             }
@@ -1371,7 +1371,7 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(1)
-            .with_block_to_chain(HashMap::from([(block1.hash, 0), (block2.hash, 0)]))
+            .with_block_to_chain(HashMap::from([(block1.hash, 0.into()), (block2.hash, 0.into())]))
             .with_fork_to_child(HashMap::from([(block1.parent_hash, HashSet::from([block1.hash]))]))
             .with_pending_blocks((block1.number, HashSet::from([block1.hash])))
             .assert(&tree);
@@ -1430,7 +1430,7 @@ mod tests {
 
         TreeTester::default()
             .with_chain_num(1)
-            .with_block_to_chain(HashMap::from([(block1a_hash, 1)]))
+            .with_block_to_chain(HashMap::from([(block1a_hash, 1.into())]))
             .with_fork_to_child(HashMap::from([(
                 block1.parent_hash,
                 HashSet::from([block1a_hash]),
@@ -1453,7 +1453,10 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(2)
-            .with_block_to_chain(HashMap::from([(block1a_hash, 1), (block2a_hash, 2)]))
+            .with_block_to_chain(HashMap::from([
+                (block1a_hash, 1.into()),
+                (block2a_hash, 2.into()),
+            ]))
             .with_fork_to_child(HashMap::from([
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2a_hash])),
@@ -1480,7 +1483,7 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(2)
-            .with_block_to_chain(HashMap::from([(block1a_hash, 1), (block2.hash, 3)]))
+            .with_block_to_chain(HashMap::from([(block1a_hash, 1.into()), (block2.hash, 3.into())]))
             .with_fork_to_child(HashMap::from([
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2.hash])),
@@ -1501,9 +1504,9 @@ mod tests {
         TreeTester::default()
             .with_chain_num(2)
             .with_block_to_chain(HashMap::from([
-                (block1.hash, 4),
-                (block2a_hash, 4),
-                (block2.hash, 3),
+                (block1.hash, 4.into()),
+                (block2a_hash, 4.into()),
+                (block2.hash, 3.into()),
             ]))
             .with_fork_to_child(HashMap::from([
                 (block1.parent_hash, HashSet::from([block1.hash])),
@@ -1538,7 +1541,10 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(2)
-            .with_block_to_chain(HashMap::from([(block1a_hash, 5), (block2a_hash, 4)]))
+            .with_block_to_chain(HashMap::from([
+                (block1a_hash, 5.into()),
+                (block2a_hash, 4.into()),
+            ]))
             .with_fork_to_child(HashMap::from([
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2a_hash])),
@@ -1567,7 +1573,7 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(1)
-            .with_block_to_chain(HashMap::from([(block2a_hash, 4)]))
+            .with_block_to_chain(HashMap::from([(block2a_hash, 4.into())]))
             .with_fork_to_child(HashMap::from([(block1.hash(), HashSet::from([block2a_hash]))]))
             .with_pending_blocks((block2.number + 1, HashSet::from([])))
             .assert(&tree);
@@ -1586,7 +1592,7 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(2)
-            .with_block_to_chain(HashMap::from([(block2a_hash, 4), (block2.hash, 6)]))
+            .with_block_to_chain(HashMap::from([(block2a_hash, 4.into()), (block2.hash, 6.into())]))
             .with_fork_to_child(HashMap::from([(
                 block1.hash(),
                 HashSet::from([block2a_hash, block2.hash]),
@@ -1607,7 +1613,7 @@ mod tests {
         // |
         TreeTester::default()
             .with_chain_num(1)
-            .with_block_to_chain(HashMap::from([(block2a_hash, 4)]))
+            .with_block_to_chain(HashMap::from([(block2a_hash, 4.into())]))
             .with_fork_to_child(HashMap::from([(block1.hash(), HashSet::from([block2a_hash]))]))
             .with_pending_blocks((block2.number + 1, HashSet::new()))
             .assert(&tree);
