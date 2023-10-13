@@ -168,6 +168,21 @@ pub trait TransactionValidator: Send + Sync {
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction>;
 
+    /// Validates a batch of transactions.
+    ///
+    /// Must return all outcomes for the given transactions in the same order.
+    ///
+    /// See also [Self::validate_transaction].
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        futures_util::future::join_all(
+            transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
+        )
+        .await
+    }
+
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
