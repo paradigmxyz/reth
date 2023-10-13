@@ -1,6 +1,6 @@
 //! Blockchain tree state.
 
-use crate::{chain::BlockChainId, AppendableChain, BlockBuffer, BlockIndices};
+use crate::{AppendableChain, BlockBuffer, BlockIndices};
 use reth_primitives::{BlockHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders};
 use std::collections::{BTreeMap, HashMap};
 
@@ -39,6 +39,14 @@ impl TreeState {
         }
     }
 
+    /// Issues a new unique identifier for a new chain.
+    #[inline]
+    fn next_id(&mut self) -> BlockChainId {
+        let id = self.block_chain_id_generator;
+        self.block_chain_id_generator += 1;
+        BlockChainId(id)
+    }
+
     /// Expose internal indices of the BlockchainTree.
     #[inline]
     pub(crate) fn block_indices(&self) -> &BlockIndices {
@@ -70,8 +78,7 @@ impl TreeState {
         if chain.is_empty() {
             return None
         }
-        let chain_id = self.block_chain_id_generator;
-        self.block_chain_id_generator += 1;
+        let chain_id = self.next_id();
 
         self.block_indices.insert_chain(chain_id, &chain);
         // add chain_id -> chain index
@@ -90,5 +97,22 @@ impl TreeState {
         hash: &BlockHash,
     ) -> Option<&SealedBlockWithSenders> {
         self.buffered_blocks.lowest_ancestor(hash)
+    }
+}
+
+/// The ID of a sidechain internally in a [`BlockchainTree`][super::BlockchainTree].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct BlockChainId(u64);
+
+impl From<BlockChainId> for u64 {
+    fn from(value: BlockChainId) -> Self {
+        value.0
+    }
+}
+
+#[cfg(test)]
+impl From<u64> for BlockChainId {
+    fn from(value: u64) -> Self {
+        BlockChainId(value)
     }
 }
