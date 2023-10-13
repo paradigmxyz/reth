@@ -132,7 +132,7 @@ pub struct Eip4844TransactionRequest {
     pub input: Bytes,
     pub access_list: AccessList,
     pub max_fee_per_blob_gas: u128,
-    pub blob_versioned_hashes: Vec<FixedBytes<32>>,
+    pub blob_versioned_hashes: Vec<B256>,
     pub gas_price: U128,
 }
 /// Represents the `to` field of a transaction request
