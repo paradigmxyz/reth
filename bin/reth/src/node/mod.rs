@@ -60,9 +60,11 @@ use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
     HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
+use reth_prune::{segments::SegmentSet, Pruner};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
+use reth_snapshot::HighestSnapshotsTracker;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -282,7 +284,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
-        let _tree_config = BlockchainTreeConfig::default();
         let tree = BlockchainTree::new(
             tree_externals,
             BlockchainTreeConfig::default(),
@@ -456,17 +457,12 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
-            let mut pruner = reth_prune::Pruner::new(
-                db.clone(),
-                self.chain.clone(),
-                prune_config.block_interval,
-                prune_config.segments,
-                self.chain.prune_delete_limit,
-                highest_snapshots_rx,
-            );
+            let mut pruner = self.build_pruner(&prune_config, db.clone(), highest_snapshots_rx);
+
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
+
+            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
             Either::Left(events)
         } else {
             Either::Right(stream::empty())
@@ -879,20 +875,59 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
                     stage_config.transaction_lookup.commit_threshold,
-                    prune_modes.clone(),
+                    prune_modes.transaction_lookup,
                 ))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
-                    prune_modes.clone(),
+                    prune_modes.account_history,
                 ))
                 .set(IndexStorageHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
-                    prune_modes,
+                    prune_modes.storage_history,
                 )),
             )
             .build(db, self.chain.clone());
 
         Ok(pipeline)
+    }
+
+    fn build_pruner<DB: Database>(
+        &self,
+        config: &PruneConfig,
+        db: DB,
+        highest_snapshots_rx: HighestSnapshotsTracker,
+    ) -> Pruner<DB> {
+        let mut segments = SegmentSet::new();
+
+        if let Some(mode) = config.segments.receipts {
+            segments = segments.add_segment(reth_prune::segments::Receipts::new(mode));
+        }
+        if !config.segments.receipts_log_filter.is_empty() {
+            segments = segments.add_segment(reth_prune::segments::ReceiptsByLogs::new(
+                config.segments.receipts_log_filter.clone(),
+            ));
+        }
+        if let Some(mode) = config.segments.transaction_lookup {
+            segments = segments.add_segment(reth_prune::segments::TransactionLookup::new(mode));
+        }
+        if let Some(mode) = config.segments.sender_recovery {
+            segments = segments.add_segment(reth_prune::segments::SenderRecovery::new(mode));
+        }
+        if let Some(mode) = config.segments.account_history {
+            segments = segments.add_segment(reth_prune::segments::AccountHistory::new(mode));
+        }
+        if let Some(mode) = config.segments.storage_history {
+            segments = segments.add_segment(reth_prune::segments::StorageHistory::new(mode));
+        }
+
+        Pruner::new(
+            db,
+            self.chain.clone(),
+            segments.into_vec(),
+            config.block_interval,
+            self.chain.prune_delete_limit,
+            highest_snapshots_rx,
+        )
     }
 
     /// Change rpc port numbers based on the instance number.

@@ -164,7 +164,7 @@ mod test {
             }
 
             if with_filter {
-                nippy_jar = nippy_jar.with_cuckoo_filter(row_count as usize + 10).with_mphf();
+                nippy_jar = nippy_jar.with_cuckoo_filter(row_count as usize + 10).with_fmph();
             }
 
             let tx = db.tx().unwrap();

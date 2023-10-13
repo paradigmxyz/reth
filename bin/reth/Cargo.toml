@@ -19,7 +19,7 @@ normal = [
 [dependencies]
 # reth
 reth-config = { path = "../../crates/config" }
-reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -41,14 +41,14 @@ reth-rpc-api = { path = "../../crates/rpc/rpc-api", features = ["client"] }
 reth-network = { path = "../../crates/net/network", features = ["serde"] }
 reth-network-api.workspace = true
 reth-downloaders = { path = "../../crates/net/downloaders", features = ["test-utils"] }
-reth-tracing = { path = "../../crates/tracing" }
+reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-net-nat = { path = "../../crates/net/nat" }
 reth-payload-builder.workspace = true
 reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
 reth-prune = { path = "../../crates/prune" }
-reth-snapshot = { path = "../../crates/snapshot" }
+reth-snapshot = { path = "../../crates/snapshot", features = ["clap"] }
 reth-trie = { path = "../../crates/trie" }
 reth-nippy-jar = { path = "../../crates/storage/nippy-jar" }
 

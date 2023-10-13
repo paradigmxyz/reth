@@ -25,7 +25,46 @@ impl BlockTransactions {
     pub fn is_uncle(&self) -> bool {
         matches!(self, Self::Uncle)
     }
+
+    /// Returns an iterator over the transaction hashes.
+    pub fn iter(&self) -> BlockTransactionsHashIterator<'_> {
+        BlockTransactionsHashIterator::new(self)
+    }
 }
+
+/// An Iterator over the transaction hashes of a block.
+#[derive(Debug, Clone)]
+pub struct BlockTransactionsHashIterator<'a> {
+    txs: &'a BlockTransactions,
+    idx: usize,
+}
+
+impl<'a> BlockTransactionsHashIterator<'a> {
+    fn new(txs: &'a BlockTransactions) -> Self {
+        Self { txs, idx: 0 }
+    }
+}
+
+impl<'a> Iterator for BlockTransactionsHashIterator<'a> {
+    type Item = B256;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.txs {
+            BlockTransactions::Full(txs) => {
+                let tx = txs.get(self.idx);
+                self.idx += 1;
+                tx.map(|tx| tx.hash)
+            }
+            BlockTransactions::Hashes(txs) => {
+                let tx = txs.get(self.idx).copied();
+                self.idx += 1;
+                tx
+            }
+            BlockTransactions::Uncle => None,
+        }
+    }
+}
+
 /// Determines how the `transactions` field of [Block] should be filled.
 ///
 /// This essentially represents the `full:bool` argument in RPC calls that determine whether the
@@ -218,6 +257,7 @@ impl From<Header> for RichHeader {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Rich<T> {
     /// Standard value.
+    #[serde(flatten)]
     pub inner: T,
     /// Additional fields that should be serialized into the `Block` object
     #[serde(flatten)]
@@ -400,5 +440,38 @@ mod tests {
     fn block_overrides() {
         let s = r#"{"blockNumber": "0xe39dd0"}"#;
         let _overrides = serde_json::from_str::<BlockOverrides>(s).unwrap();
+    }
+
+    #[test]
+    fn serde_rich_block() {
+        let s = r#"{
+    "hash": "0xb25d0e54ca0104e3ebfb5a1dcdf9528140854d609886a300946fd6750dcb19f4",
+    "parentHash": "0x9400ec9ef59689c157ac89eeed906f15ddd768f94e1575e0e27d37c241439a5d",
+    "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+    "miner": "0x829bd824b016326a401d083b33d092293333a830",
+    "stateRoot": "0x546e330050c66d02923e7f1f3e925efaf64e4384eeecf2288f40088714a77a84",
+    "transactionsRoot": "0xd5eb3ad6d7c7a4798cc5fb14a6820073f44a941107c5d79dac60bd16325631fe",
+    "receiptsRoot": "0xb21c41cbb3439c5af25304e1405524c885e733b16203221900cb7f4b387b62f0",
+    "logsBloom": "0x1f304e641097eafae088627298685d20202004a4a59e4d8900914724e2402b028c9d596660581f361240816e82d00fa14250c9ca89840887a381efa600288283d170010ab0b2a0694c81842c2482457e0eb77c2c02554614007f42aaf3b4dc15d006a83522c86a240c06d241013258d90540c3008888d576a02c10120808520a2221110f4805200302624d22092b2c0e94e849b1e1aa80bc4cc3206f00b249d0a603ee4310216850e47c8997a20aa81fe95040a49ca5a420464600e008351d161dc00d620970b6a801535c218d0b4116099292000c08001943a225d6485528828110645b8244625a182c1a88a41087e6d039b000a180d04300d0680700a15794",
+    "difficulty": "0xc40faff9c737d",
+    "number": "0xa9a230",
+    "gasLimit": "0xbe5a66",
+    "gasUsed": "0xbe0fcc",
+    "timestamp": "0x5f93b749",
+    "extraData": "0x7070796520e4b883e5bda9e7a59ee4bb99e9b1bc0103",
+    "mixHash": "0xd5e2b7b71fbe4ddfe552fb2377bf7cddb16bbb7e185806036cee86994c6e97fc",
+    "nonce": "0x4722f2acd35abe0f",
+    "totalDifficulty": "0x3dc957fd8167fb2684a",
+    "uncles": [],
+    "transactions": [
+        "0xf435a26acc2a9ef73ac0b73632e32e29bd0e28d5c4f46a7e18ed545c93315916"
+    ],
+    "size": "0xaeb6"
+}"#;
+
+        let block = serde_json::from_str::<RichBlock>(s).unwrap();
+        let serialized = serde_json::to_string(&block).unwrap();
+        let block2 = serde_json::from_str::<RichBlock>(&serialized).unwrap();
+        assert_eq!(block, block2);
     }
 }

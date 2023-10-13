@@ -5,25 +5,38 @@ use crate::{
 use itertools::Itertools;
 use reth_db::{database::Database, table::Table, tables};
 use reth_interfaces::RethResult;
-use reth_primitives::{BlockNumber, PruneSegment};
+use reth_primitives::{BlockNumber, PruneMode, PruneSegment};
 use reth_provider::DatabaseProviderRW;
 use std::ops::RangeInclusive;
 use tracing::{instrument, trace};
 
-#[derive(Default)]
-#[non_exhaustive]
-pub(crate) struct Headers;
+#[derive(Debug)]
+pub struct Headers {
+    mode: PruneMode,
+}
 
-impl Segment for Headers {
-    const SEGMENT: PruneSegment = PruneSegment::Headers;
+impl Headers {
+    pub fn new(mode: PruneMode) -> Self {
+        Self { mode }
+    }
+}
+
+impl<DB: Database> Segment<DB> for Headers {
+    fn segment(&self) -> PruneSegment {
+        PruneSegment::Headers
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
+    }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune<DB: Database>(
+    fn prune(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let block_range = match input.get_next_block_range(provider, Self::SEGMENT)? {
+        let block_range = match input.get_next_block_range() {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No headers to prune");
@@ -101,7 +114,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_interfaces::test_utils::{generators, generators::random_header_range};
-    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, B256};
+    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestTransaction;
 
@@ -119,12 +132,19 @@ mod tests {
 
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
-            let input = PruneInput { to_block, delete_limit: 10 };
-            let segment = Headers::default();
+            let input = PruneInput {
+                previous_checkpoint: tx
+                    .inner()
+                    .get_prune_checkpoint(PruneSegment::Headers)
+                    .unwrap(),
+                to_block,
+                delete_limit: 10,
+            };
+            let segment = Headers::new(prune_mode);
 
             let next_block_number_to_prune = tx
                 .inner()
-                .get_prune_checkpoint(Headers::SEGMENT)
+                .get_prune_checkpoint(PruneSegment::Headers)
                 .unwrap()
                 .and_then(|checkpoint| checkpoint.block_number)
                 .map(|block_number| block_number + 1)
@@ -161,7 +181,7 @@ mod tests {
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
             assert_eq!(
-                tx.inner().get_prune_checkpoint(Headers::SEGMENT).unwrap(),
+                tx.inner().get_prune_checkpoint(PruneSegment::Headers).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: Some(last_pruned_block_number),
                     tx_number: None,
@@ -179,11 +199,12 @@ mod tests {
         let tx = TestTransaction::default();
 
         let input = PruneInput {
+            previous_checkpoint: None,
             to_block: 1,
             // Less than total number of tables for `Headers` segment
             delete_limit: 2,
         };
-        let segment = Headers::default();
+        let segment = Headers::new(PruneMode::Full);
 
         let provider = tx.inner_rw();
         let result = segment.prune(&provider, input).unwrap();
