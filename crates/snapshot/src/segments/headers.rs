@@ -1,4 +1,4 @@
-use crate::segments::{prepare_jar, Segment};
+use crate::segments::{prepare_jar, Segment, SegmentHeader};
 use reth_db::{
     cursor::DbCursorRO, database::Database, snapshot::create_snapshot_T1_T2_T3, table::Table,
     tables, transaction::DbTx, RawKey, RawTable,
@@ -47,7 +47,7 @@ impl Segment for Headers {
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()> {
         let range_len = range.clone().count();
-        let mut jar = prepare_jar::<DB, 3, tables::Headers>(
+        let mut jar = prepare_jar::<DB, 3>(
             provider,
             SnapshotSegment::Headers,
             self.filters,
@@ -86,6 +86,7 @@ impl Segment for Headers {
             tables::HeaderTD,
             tables::CanonicalHeaders,
             BlockNumber,
+            SegmentHeader,
         >(
             provider.tx_ref(),
             range,

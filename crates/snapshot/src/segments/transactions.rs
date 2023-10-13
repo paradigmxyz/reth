@@ -5,7 +5,7 @@ use reth_db::{
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    snapshot::{Compression, Filters},
+    snapshot::{Compression, Filters, SegmentHeader},
     BlockNumber, SnapshotSegment, TxNumber,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
@@ -46,21 +46,21 @@ impl Segment for Transactions {
         provider: &DatabaseProviderRO<'_, DB>,
         block_range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()> {
-        let range = provider.transaction_range_by_block_range(block_range)?;
-        let range_len = range.clone().count();
+        let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
+        let tx_range_len = tx_range.clone().count();
 
-        let mut jar = prepare_jar::<DB, 1, tables::Transactions>(
+        let mut jar = prepare_jar::<DB, 1>(
             provider,
             SnapshotSegment::Transactions,
             self.filters,
             self.compression,
-            range.clone(),
-            range_len,
+            block_range,
+            tx_range_len,
             || {
                 Ok([self.dataset_for_compression::<tables::Transactions>(
                     provider.tx_ref(),
-                    &range,
-                    range_len,
+                    &tx_range,
+                    tx_range_len,
                 )?])
             },
         )?;
@@ -75,14 +75,14 @@ impl Segment for Transactions {
             );
         }
 
-        create_snapshot_T1::<tables::Transactions, TxNumber>(
+        create_snapshot_T1::<tables::Transactions, TxNumber, SegmentHeader>(
             provider.tx_ref(),
-            range,
+            tx_range,
             None,
             // We already prepared the dictionary beforehand
             None::<Vec<std::vec::IntoIter<Vec<u8>>>>,
             hashes,
-            range_len,
+            tx_range_len,
             &mut jar,
         )?;
 

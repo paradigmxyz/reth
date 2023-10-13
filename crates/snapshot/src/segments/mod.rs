@@ -6,14 +6,14 @@ pub use transactions::Transactions;
 mod headers;
 pub use headers::Headers;
 
-use reth_db::{database::Database, table::Table, transaction::DbTx};
+use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
+    snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
     BlockNumber, SnapshotSegment,
 };
-use reth_provider::DatabaseProviderRO;
+use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
 use std::{ops::RangeInclusive, path::PathBuf};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
@@ -29,18 +29,20 @@ pub trait Segment {
 }
 
 /// Returns a [`NippyJar`] according to the desired configuration.
-pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize, T: Table>(
+pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     provider: &DatabaseProviderRO<'_, DB>,
     segment: SnapshotSegment,
     filters: Filters,
     compression: Compression,
-    range: RangeInclusive<BlockNumber>,
-    range_len: usize,
+    block_range: RangeInclusive<BlockNumber>,
+    total_rows: usize,
     prepare_compression: impl Fn() -> RethResult<Rows<COLUMNS>>,
-) -> RethResult<NippyJar> {
-    let mut nippy_jar = NippyJar::new_without_header(
+) -> RethResult<NippyJar<SegmentHeader>> {
+    let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
+    let mut nippy_jar = NippyJar::new(
         COLUMNS,
-        &get_snapshot_segment_file_name(segment, filters, compression, &range),
+        &get_snapshot_segment_file_name(segment, filters, compression, &block_range),
+        SegmentHeader::new(block_range, tx_range),
     );
 
     nippy_jar = match compression {
@@ -57,8 +59,6 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize, T: Table>(
     };
 
     if let Filters::WithFilters(inclusion_filter, phf) = filters {
-        let total_rows =
-            (provider.tx_ref().entries::<T>()? - *range.start() as usize).min(range_len);
         nippy_jar = match inclusion_filter {
             InclusionFilter::Cuckoo => nippy_jar.with_cuckoo_filter(total_rows),
         };

@@ -6,11 +6,11 @@ use reth_db::{
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_nippy_jar::{compression::Decompressor, NippyJar, NippyJarCursor};
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, SealedHeader,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    snapshot::SegmentHeader, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    B256, U256,
 };
 use std::ops::RangeBounds;
-
 /// SnapshotProvider
 ///
 ///  WIP Rudimentary impl just for tests
@@ -19,16 +19,12 @@ use std::ops::RangeBounds;
 #[derive(Debug)]
 pub struct SnapshotProvider<'a> {
     /// NippyJar
-    pub jar: &'a NippyJar,
-    /// Starting snapshot block if applied.
-    pub jar_start_block: u64,
-    /// Starting snapshot transaction if applied.
-    pub jar_start_transaction: u64,
+    pub jar: &'a NippyJar<SegmentHeader>,
 }
 
 impl<'a> SnapshotProvider<'a> {
     /// Creates cursor
-    pub fn cursor(&self) -> NippyJarCursor<'a> {
+    pub fn cursor(&self) -> NippyJarCursor<'a, SegmentHeader> {
         NippyJarCursor::new(self.jar, None).unwrap()
     }
 
@@ -36,7 +32,7 @@ impl<'a> SnapshotProvider<'a> {
     pub fn cursor_with_decompressors(
         &self,
         decompressors: Vec<Decompressor<'a>>,
-    ) -> NippyJarCursor<'a> {
+    ) -> NippyJarCursor<'a, SegmentHeader> {
         NippyJarCursor::new(self.jar, Some(decompressors)).unwrap()
     }
 }
@@ -62,7 +58,9 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
     fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
         Header::decompress(
             self.cursor()
-                .row_by_number_with_cols::<0b01, 2>((num - self.jar_start_block) as usize)?
+                .row_by_number_with_cols::<0b01, 2>(
+                    (num - self.jar.user_header().block_start()) as usize,
+                )?
                 .ok_or(ProviderError::HeaderNotFound(num.into()))?[0],
         )
         .map(Some)
@@ -146,7 +144,9 @@ impl<'a> TransactionsProvider for SnapshotProvider<'a> {
     fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
         TransactionSignedNoHash::decompress(
             self.cursor()
-                .row_by_number_with_cols::<0b1, 1>((num - self.jar_start_transaction) as usize)?
+                .row_by_number_with_cols::<0b1, 1>(
+                    (num - self.jar.user_header().tx_start()) as usize,
+                )?
                 .ok_or(ProviderError::TransactionNotFound(num.into()))?[0],
         )
         .map(Into::into)
@@ -285,7 +285,7 @@ mod test {
                 .unwrap()
                 .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into()));
 
-            create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber>(
+            create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber, ()>(
                 &tx,
                 range,
                 None,
@@ -299,11 +299,10 @@ mod test {
 
         // Use providers to query Header data and compare if it matches
         {
-            let jar = NippyJar::load_without_header(snap_file.path()).unwrap();
+            let jar = NippyJar::load(snap_file.path()).unwrap();
 
             let db_provider = factory.provider().unwrap();
-            let snap_provider =
-                SnapshotProvider { jar: &jar, jar_start_block: 0, jar_start_transaction: 0 };
+            let snap_provider = SnapshotProvider { jar: &jar };
 
             assert!(!headers.is_empty());
 

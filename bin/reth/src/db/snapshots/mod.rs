@@ -7,7 +7,7 @@ use reth_nippy_jar::{
     NippyJar,
 };
 use reth_primitives::{
-    snapshot::{Compression, InclusionFilter, PerfectHashingFunction},
+    snapshot::{Compression, InclusionFilter, PerfectHashingFunction, SegmentHeader},
     BlockNumber, ChainSpec, SnapshotSegment,
 };
 use reth_provider::{providers::SnapshotProvider, ProviderFactory};
@@ -125,9 +125,8 @@ impl Command {
     /// [`DecoderDictionary`] and [`Decompressor`] if necessary.
     fn prepare_jar_provider<'a>(
         &self,
-        jar: &'a mut NippyJar,
+        jar: &'a mut NippyJar<SegmentHeader>,
         dictionaries: &'a mut Option<Vec<DecoderDictionary<'_>>>,
-        tx_start: u64,
     ) -> eyre::Result<(SnapshotProvider<'a>, Vec<Decompressor<'a>>)> {
         let mut decompressors: Vec<Decompressor<'_>> = vec![];
         if let Some(reth_nippy_jar::compression::Compressors::Zstd(zstd)) = jar.compressor_mut() {
@@ -137,13 +136,6 @@ impl Command {
             }
         }
 
-        Ok((
-            SnapshotProvider {
-                jar: &*jar,
-                jar_start_block: self.from,
-                jar_start_transaction: tx_start,
-            },
-            decompressors,
-        ))
+        Ok((SnapshotProvider { jar: &*jar }, decompressors))
     }
 }
