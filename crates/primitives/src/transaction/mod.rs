@@ -1051,6 +1051,23 @@ impl TransactionSigned {
             TransactionSigned::decode_enveloped_typed_transaction(&mut data)
         }
     }
+
+    /// Returns the length without an RLP header - this is used for eth/68 sizes.
+    pub fn length_without_header(&self) -> usize {
+        // method computes the payload len without a RLP header
+        match &self.transaction {
+            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.payload_len_with_signature_without_header(&self.signature)
+            }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
+            }
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.payload_len_with_signature_without_header(&self.signature)
+            }
+        }
+    }
 }
 
 impl From<TransactionSignedEcRecovered> for TransactionSigned {
