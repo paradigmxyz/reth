@@ -4,10 +4,9 @@
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
-use reth_primitives::B256;
 use reth_primitives::{
     AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxEip4844, TxLegacy, U128, U256,
-    U64,
+    U64,B256,
 };
 use serde::{Deserialize, Serialize};
 /// Container type for various Ethereum transaction requests
