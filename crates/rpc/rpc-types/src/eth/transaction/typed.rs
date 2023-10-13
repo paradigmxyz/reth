@@ -4,12 +4,12 @@
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
+use reth_primitives::B256;
 use reth_primitives::{
-    revm_primitives::FixedBytes, AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930,
-    TxEip4844, TxLegacy, U128, U256, U64,
+    AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxEip4844, TxLegacy, U128, U256,
+    U64,
 };
 use serde::{Deserialize, Serialize};
-
 /// Container type for various Ethereum transaction requests
 ///
 /// Its variants correspond to specific allowed transactions:
@@ -134,6 +134,7 @@ pub struct Eip4844TransactionRequest {
     pub max_fee_per_blob_gas: u128,
     pub blob_versioned_hashes: Vec<B256>,
     pub gas_price: U128,
+    //pub sidecar: BlobTransactionSidecar,
 }
 /// Represents the `to` field of a transaction request
 ///
