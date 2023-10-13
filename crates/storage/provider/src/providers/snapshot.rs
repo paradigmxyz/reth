@@ -161,8 +161,21 @@ impl<'a> TransactionsProvider for SnapshotProvider<'a> {
         todo!()
     }
 
-    fn transaction_by_hash(&self, _hash: TxHash) -> RethResult<Option<TransactionSigned>> {
-        todo!()
+    fn transaction_by_hash(&self, hash: TxHash) -> RethResult<Option<TransactionSigned>> {
+        // WIP
+        let mut cursor = self.cursor();
+
+        let tx = TransactionSignedNoHash::decompress(
+            cursor.row_by_key_with_cols::<0b1, 1>(&hash.0).unwrap().unwrap()[0],
+        )
+        .unwrap().with_hash();
+
+        if tx.hash() == hash {
+            return Ok(Some(tx))
+        } else {
+            // check next snapshot
+        }
+        Ok(None)
     }
 
     fn transaction_by_hash_with_meta(
