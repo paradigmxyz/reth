@@ -501,6 +501,13 @@ where
 
                 TypedTransactionRequest::EIP1559(m)
             }
+            Some(TypedTransactionRequest::EIP4844(mut m)) => {
+                m.chain_id = chain_id.to();
+                m.gas_limit = gas_limit;
+                m.gas_price = gas_price;
+
+                TypedTransactionRequest::EIP4844(m)
+            }
             None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
         };
 
