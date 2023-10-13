@@ -6,6 +6,7 @@
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
 
 use reth_primitives::{
+    kzg::{Blob, Bytes48},
     AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxEip4844, TxLegacy, B256, U128,
     U256, U64,
 };
@@ -120,7 +121,7 @@ pub struct EIP1559TransactionRequest {
     pub access_list: AccessList,
 }
 /// Represents an EIP-4844 transaction request
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Eip4844TransactionRequest {
     pub chain_id: u64,
     pub nonce: U64,
@@ -134,7 +135,7 @@ pub struct Eip4844TransactionRequest {
     pub max_fee_per_blob_gas: u128,
     pub blob_versioned_hashes: Vec<B256>,
     pub gas_price: U128,
-    //pub sidecar: BlobTransactionSidecar,
+    pub sidecar: BlobTransactionSidecar,
 }
 /// Represents the `to` field of a transaction request
 ///
@@ -197,4 +198,13 @@ impl From<TransactionKind> for reth_primitives::TransactionKind {
             TransactionKind::Create => reth_primitives::TransactionKind::Create,
         }
     }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct BlobTransactionSidecar {
+    /// The blob data.
+    pub blobs: Vec<Blob>,
+    /// The blob commitments.
+    pub commitments: Vec<Bytes48>,
+    /// The blob proofs.
+    pub proofs: Vec<Bytes48>,
 }
