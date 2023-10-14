@@ -6,8 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-once_cell = "1.17.0"
-eyre = "0.6.8"
+once_cell.workspace = true
+eyre.workspace = true
 
 reth-primitives.workspace = true
 reth-network.workspace = true
