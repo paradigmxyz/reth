@@ -106,7 +106,7 @@ reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 reth-discv4 = { path = "./crates/net/discv4" }
 reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
-reth-tracing = {path = "./crates/tracing"}
+reth-tracing = { path = "./crates/tracing" }
 
 # revm
 revm = "3.5.0"
@@ -133,6 +133,7 @@ aquamarine = "0.3"
 bytes = "1.5"
 bitflags = "2.3"
 clap = "4"
+eyre = "0.6"
 tracing = "0.1.0"
 tracing-appender = "0.2"
 thiserror = "1.0"
@@ -145,6 +146,8 @@ itertools = "0.11"
 parking_lot = "0.12"
 metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
+once_cell = "1.17"
+syn = "2.0"
 
 ### proc-macros
 proc-macro2 = "1.0"

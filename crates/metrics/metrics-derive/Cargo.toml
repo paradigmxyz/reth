@@ -12,10 +12,10 @@ proc-macro = true
 
 [dependencies]
 proc-macro2.workspace = true
-syn = { version = "2.0", features = ["extra-traits"] }
+syn = { workspace = true, features = ["extra-traits"] }
 quote.workspace = true
 regex = "1.6.0"
-once_cell = "1.17.0"
+once_cell.workspace = true
 
 [dev-dependencies]
 metrics.workspace = true
