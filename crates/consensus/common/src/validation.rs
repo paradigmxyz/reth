@@ -468,7 +468,7 @@ mod tests {
         BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
         TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
-    use std::ops::{RangeBounds, RangeInclusive};
+    use std::ops::RangeInclusive;
 
     mock! {
         WithdrawalsProvider {}
