@@ -29,9 +29,7 @@ pub struct StoredBlockBodyIndices {
 impl StoredBlockBodyIndices {
     /// Return the range of transaction ids for this block.
     pub fn tx_num_range(&self) -> RangeInclusive<TxNumber> {
-        let start = self.first_tx_num;
-        let end = start + self.tx_count;
-        start..=end
+        self.first_tx_num..=(self.first_tx_num + self.tx_count - 1)
     }
 
     /// Return the index of last transaction in this block unless the block
