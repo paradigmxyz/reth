@@ -290,9 +290,9 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::optimism_goerli(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op.json"))
             .expect("Can't deserialize Optimism Goerli genesis json"),
-        genesis_hash: Some(H256(hex!(
+        genesis_hash: Some(b256!(
             "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
-        ))),
+        )),
         fork_timestamps: ForkTimestamps::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
@@ -317,7 +317,8 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
-        prune_batch_sizes: PruneBatchSizes::testnet(),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
         optimism: true,
         ..Default::default()
     }
@@ -331,9 +332,9 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::base_goerli(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_base.json"))
             .expect("Can't deserialize Base Goerli genesis json"),
-        genesis_hash: Some(H256(hex!(
+        genesis_hash: Some(b256!(
             "a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76"
-        ))),
+        )),
         fork_timestamps: ForkTimestamps::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
@@ -358,7 +359,8 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(1683219600)),
         ]),
         base_fee_params: BaseFeeParams::optimism_goerli(),
-        prune_batch_sizes: PruneBatchSizes::testnet(),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
         optimism: true,
         ..Default::default()
     }
@@ -372,9 +374,9 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::base_mainnet(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/base.json"))
             .expect("Can't deserialize Base genesis json"),
-        genesis_hash: Some(H256(hex!(
+        genesis_hash: Some(b256!(
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
-        ))),
+        )),
         fork_timestamps: ForkTimestamps::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
@@ -399,7 +401,8 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
         ]),
         base_fee_params: BaseFeeParams::optimism(),
-        prune_batch_sizes: PruneBatchSizes::mainnet(),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
         optimism: true,
         ..Default::default()
     }

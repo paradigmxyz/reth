@@ -1,7 +1,7 @@
-use crate::{Address, Bytes, TransactionKind, TxType, H256};
+use crate::{Address, Bytes, TransactionKind, TxType, TxValue, B256};
+use alloy_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
 use std::mem;
 
 /// Deposit transactions, also known as deposits are initiated on L1, and executed on L2.
@@ -9,7 +9,7 @@ use std::mem;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxDeposit {
     /// Hash that uniquely identifies the source of the deposit.
-    pub source_hash: H256,
+    pub source_hash: B256,
     /// The address of the sender account.
     pub from: Address,
     /// The address of the recipient account, or the null (zero-length) address if the deposited
@@ -18,7 +18,7 @@ pub struct TxDeposit {
     /// The ETH value to mint on L2.
     pub mint: Option<u128>,
     ///  The ETH value to send to the recipient account.
-    pub value: u128,
+    pub value: TxValue,
     /// The gas limit for the L2 transaction.
     pub gas_limit: u64,
     /// Field indicating if this transaction is exempt from the L2 gas limit.
@@ -32,7 +32,7 @@ impl TxDeposit {
     /// Calculates a heuristic for the in-memory size of the [TxDeposit] transaction.
     #[inline]
     pub fn size(&self) -> usize {
-        mem::size_of::<H256>() + // source_hash
+        mem::size_of::<B256>() + // source_hash
         mem::size_of::<Address>() + // from
         self.to.size() + // to
         mem::size_of::<Option<u128>>() + // mint
@@ -130,6 +130,12 @@ impl TxDeposit {
         length_of_length(len) + len
     }
 
+    pub(crate) fn payload_len_without_header(&self) -> usize {
+        let payload_length = self.fields_len();
+        // 'transaction type byte length' + 'header length' + 'payload length'
+        1 + length_of_length(payload_length) + payload_length
+    }
+
     /// Get the transaction type
     pub(crate) fn tx_type(&self) -> TxType {
         TxType::DEPOSIT
@@ -139,15 +145,15 @@ impl TxDeposit {
 #[cfg(test)]
 mod tests {
     use crate::{Bytes, TransactionSigned};
+    use alloy_rlp::Decodable;
     use bytes::BytesMut;
-    use reth_rlp::Decodable;
     use revm_primitives::hex_literal::hex;
 
     #[test]
     fn test_rlp_roundtrip() {
-        let bytes = hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240");
+        let bytes = Bytes::from_static(&hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"));
 
-        let tx_a = TransactionSigned::decode_enveloped(Bytes::from(&bytes[..])).unwrap();
+        let tx_a = TransactionSigned::decode_enveloped(bytes.clone()).unwrap();
         let tx_b = TransactionSigned::decode(&mut &bytes[..]).unwrap();
 
         let mut buf_a = BytesMut::default();

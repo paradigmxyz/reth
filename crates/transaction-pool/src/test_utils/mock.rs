@@ -285,6 +285,8 @@ impl MockTransaction {
             MockTransaction::Eip2930 { accesslist, .. } => {
                 *accesslist = list;
             }
+            #[cfg(feature = "optimism")]
+            MockTransaction::Deposit { .. } => {}
         }
         self
     }
@@ -427,6 +429,8 @@ impl MockTransaction {
             Self::Eip1559 { .. } => EIP1559_TX_TYPE_ID,
             Self::Eip4844 { .. } => EIP4844_TX_TYPE_ID,
             Self::Eip2930 { .. } => EIP2930_TX_TYPE_ID,
+            #[cfg(feature = "optimism")]
+            Self::Deposit(_) => DEPOSIT_TX_TYPE_ID,
         }
     }
 
@@ -835,6 +839,8 @@ impl From<MockTransaction> for Transaction {
                 access_list: accesslist,
                 input,
             }),
+            #[cfg(feature = "optimism")]
+            MockTransaction::Deposit(tx) => Self::Deposit(tx),
         }
     }
 }

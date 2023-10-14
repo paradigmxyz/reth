@@ -61,6 +61,9 @@ pub enum NamedChain {
     OptimismKovan = 69,
     OptimismGoerli = 420,
 
+    Base = 8453,
+    BaseGoerli = 84531,
+
     Arbitrum = 42161,
     ArbitrumTestnet = 421611,
     ArbitrumGoerli = 421613,
@@ -122,25 +125,25 @@ impl Chain {
     /// Returns the optimism goerli chain.
     #[cfg(feature = "optimism")]
     pub const fn optimism_goerli() -> Self {
-        Chain::Named(ethers_core::types::Chain::OptimismGoerli)
+        Chain::Named(NamedChain::OptimismGoerli)
     }
 
     /// Returns the optimism mainnet chain.
     #[cfg(feature = "optimism")]
     pub const fn optimism_mainnet() -> Self {
-        Chain::Named(ethers_core::types::Chain::Optimism)
+        Chain::Named(NamedChain::Optimism)
     }
 
     /// Returns the base goerli chain.
     #[cfg(feature = "optimism")]
     pub const fn base_goerli() -> Self {
-        Chain::Named(ethers_core::types::Chain::BaseGoerli)
+        Chain::Named(NamedChain::BaseGoerli)
     }
 
     /// Returns the base mainnet chain.
     #[cfg(feature = "optimism")]
     pub const fn base_mainnet() -> Self {
-        Chain::Named(ethers_core::types::Chain::Base)
+        Chain::Named(NamedChain::Base)
     }
 
     /// Returns the dev chain.

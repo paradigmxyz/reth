@@ -122,7 +122,7 @@ impl Transaction {
             Transaction::Eip1559(tx) => tx.signature_hash(),
             Transaction::Eip4844(tx) => tx.signature_hash(),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => H256::zero(),
+            Transaction::Deposit(_) => B256::ZERO,
         }
     }
 
@@ -214,6 +214,8 @@ impl Transaction {
             Transaction::Eip2930(tx) => Some(&tx.access_list),
             Transaction::Eip1559(tx) => Some(&tx.access_list),
             Transaction::Eip4844(tx) => Some(&tx.access_list),
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => None,
         }
     }
 
@@ -388,12 +390,12 @@ impl Transaction {
     }
 
     /// Returns the source hash of the transaction, which uniquely identifies its source.
-    /// If the transaction is not a deposit transaction, this will always return `H256::zero()`.
+    /// If the transaction is not a deposit transaction, this will always return `B256::zero()`.
     #[cfg(feature = "optimism")]
-    pub fn source_hash(&self) -> H256 {
+    pub fn source_hash(&self) -> B256 {
         match self {
             Transaction::Deposit(TxDeposit { source_hash, .. }) => *source_hash,
-            _ => H256::zero(),
+            _ => B256::ZERO,
         }
     }
 
@@ -1202,6 +1204,8 @@ impl TransactionSigned {
             Transaction::Eip4844(blob_tx) => {
                 blob_tx.payload_len_with_signature_without_header(&self.signature)
             }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len_without_header(),
         }
     }
 }

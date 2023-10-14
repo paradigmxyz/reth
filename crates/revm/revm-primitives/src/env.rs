@@ -2,7 +2,9 @@ use crate::config::revm_spec;
 use reth_primitives::{
     constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
     recover_signer,
-    revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
+    revm_primitives::{
+        AnalysisKind, BlockEnv, CfgEnv, Env, OptimismFields, SpecId, TransactTo, TxEnv,
+    },
     Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, B256, U256,
 };
@@ -152,6 +154,13 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
         // blob fields can be None for this tx
         blob_hashes: Vec::new(),
         max_fee_per_blob_gas: None,
+        #[cfg(feature = "optimism")]
+        optimism: OptimismFields {
+            source_hash: None,
+            mint: None,
+            is_system_transaction: Some(false),
+            enveloped_tx: None,
+        },
     };
 
     // ensure the block gas limit is >= the tx
@@ -303,8 +312,8 @@ where
                 TransactionKind::Call(to) => tx_env.transact_to = TransactTo::Call(*to),
                 TransactionKind::Create => tx_env.transact_to = TransactTo::create(),
             }
-            tx_env.value = U256::from(*value);
-            tx_env.data = input.0.clone();
+            tx_env.value = value.0;
+            tx_env.data = input.clone();
             tx_env.chain_id = None;
             tx_env.nonce = None;
         }

@@ -374,14 +374,8 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
-        &mut db,
-        &mut post_state,
-        &chain_spec,
-        block_number,
-        attributes.timestamp,
-        attributes.withdrawals,
-    )?;
+    let WithdrawalsOutcome { withdrawals_root, withdrawals } =
+        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
     let receipts_root = post_state.receipts_root(block_number);
     let logs_bloom = post_state.logs_bloom(block_number);

@@ -79,7 +79,7 @@ impl PooledTransactionsElement {
             Self::Eip1559 { transaction, .. } => transaction.signature_hash(),
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.signature_hash(),
             #[cfg(feature = "optimism")]
-            Self::Deposit { .. } => H256::zero(),
+            Self::Deposit { .. } => B256::ZERO,
         }
     }
 
@@ -273,6 +273,8 @@ impl PooledTransactionsElement {
                 // the encoding does not use a header, so we set `with_header` to false
                 blob_tx.payload_len_with_type(false)
             }
+            #[cfg(feature = "optimism")]
+            Self::Deposit { transaction, .. } => transaction.payload_len_without_header(),
         }
     }
 }

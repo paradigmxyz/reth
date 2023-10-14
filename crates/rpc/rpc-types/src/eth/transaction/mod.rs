@@ -73,7 +73,7 @@ pub struct Transaction {
     /// Hash that uniquely identifies the source of the deposit.
     #[cfg(feature = "optimism")]
     #[serde(rename = "sourceHash", skip_serializing_if = "Option::is_none")]
-    pub source_hash: Option<H256>,
+    pub source_hash: Option<B256>,
     /// The ETH value to mint on L2
     #[cfg(feature = "optimism")]
     #[serde(rename = "mint", skip_serializing_if = "Option::is_none")]

@@ -6507,6 +6507,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-revm-primitives",
  "reth-tasks",
  "revm",

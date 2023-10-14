@@ -207,7 +207,7 @@ impl ReceiptWithBloom {
                 let consumed = started_len - b.len();
                 let has_nonce = rlp_head.payload_length - consumed > 0;
                 let deposit_nonce =
-                    if has_nonce { Some(reth_rlp::Decodable::decode(b)?) } else { None };
+                    if has_nonce { Some(alloy_rlp::Decodable::decode(b)?) } else { None };
 
                 Receipt { tx_type, success, cumulative_gas_used, logs, deposit_nonce }
             }

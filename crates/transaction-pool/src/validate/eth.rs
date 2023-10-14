@@ -18,6 +18,7 @@ use reth_primitives::{
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
+use reth_revm::optimism::RethL1BlockInfo;
 use reth_revm_primitives::calculate_intrinsic_gas_after_merge;
 use reth_tasks::TaskSpawner;
 use std::{
@@ -31,7 +32,7 @@ use reth_primitives::bytes::BytesMut;
 #[cfg(feature = "optimism")]
 use reth_primitives::BlockNumberOrTag;
 #[cfg(feature = "optimism")]
-use reth_revm::optimism::L1BlockInfo;
+use revm::optimism::L1BlockInfo;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug, Clone)]
@@ -407,15 +408,23 @@ where
 
             let mut encoded = BytesMut::default();
             transaction.to_recovered_transaction().encode_enveloped(&mut encoded);
-            let cost_addition = match L1BlockInfo::try_from(&block) {
-                Ok(info) => info.calculate_tx_l1_cost(
+            let cost_addition = match reth_revm::optimism::extract_l1_info(&block).map(|info| {
+                info.l1_tx_data_fee(
                     Arc::clone(&self.chain_spec),
                     block.timestamp,
                     &encoded.freeze().into(),
                     transaction.is_deposit(),
-                ),
+                )
+            }) {
+                Ok(Ok(cost)) => cost,
                 Err(err) => {
                     return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
+                }
+                _ => {
+                    return TransactionValidationOutcome::Error(
+                        *transaction.hash(),
+                        "L1BlockInfoError".into(),
+                    )
                 }
             };
 
@@ -744,7 +753,7 @@ mod tests {
             from: signer,
             to: TransactionKind::Create,
             mint: None,
-            value: 0u128,
+            value: reth_primitives::TxValue(U256::ZERO),
             gas_limit: 0u64,
             is_system_transaction: false,
             input: Default::default(),
@@ -753,7 +762,8 @@ mod tests {
         let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
         let signed_recovered =
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
-        let pooled_tx = EthPooledTransaction::new(signed_recovered);
+        let len = signed_recovered.length_without_header();
+        let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
         let outcome = validator.validate_transaction(origin, pooled_tx).await;
 
         let err = match outcome {
