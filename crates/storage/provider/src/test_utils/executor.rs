@@ -41,7 +41,7 @@ impl BlockExecutor for TestExecutor {
         _total_difficulty: U256,
         _senders: Option<Vec<Address>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
-        return Err(BlockExecutionError::UnavailableForTest)
+        Err(BlockExecutionError::UnavailableForTest)
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {

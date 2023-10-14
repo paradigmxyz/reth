@@ -58,6 +58,12 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
     fn max_payload_tasks(&self) -> usize {
         self.max_payload_tasks
     }
+
+    // TODO(clabby): Move to rollupargs
+    #[cfg(feature = "optimism")]
+    fn compute_pending_block(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Clone, Debug, Default)]

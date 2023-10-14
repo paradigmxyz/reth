@@ -179,8 +179,8 @@ mod tests {
         bloom,
         hex_literal::hex,
         proofs::{calculate_receipt_root, calculate_transaction_root, genesis_state_root},
-        Address, Block, Bloom, Bytes, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256,
-        GOERLI, HOLESKY, MAINNET, SEPOLIA, U256,
+        Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256, GOERLI,
+        HOLESKY, MAINNET, SEPOLIA, U256,
     };
     use alloy_rlp::Decodable;
 
@@ -203,6 +203,8 @@ mod tests {
     #[cfg(feature = "optimism")]
     #[test]
     fn check_optimism_receipt_root() {
+        use reth_primitives::{Bloom, Bytes};
+
         let receipts = vec![
             // 0xb0d6ee650637911394396d81172bd1c637d568ed1fbddab0daddfca399c58b53
             ReceiptWithBloom {

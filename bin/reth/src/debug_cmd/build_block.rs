@@ -245,12 +245,20 @@ impl Command {
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
+            #[cfg(feature = "optimism")]
+            transactions: None,
+            #[cfg(feature = "optimism")]
+            no_tx_pool: None,
+            #[cfg(feature = "optimism")]
+            gas_limit: None,
         };
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
             PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
             self.chain.clone(),
+            #[cfg(feature = "optimism")]
+            true,
         );
         let args = BuildArguments::new(
             blockchain_db.clone(),

@@ -1,5 +1,7 @@
 use crate::{Address, Bytes, TransactionKind, TxType, TxValue, B256};
-use alloy_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
+use alloy_rlp::{
+    length_of_length, Decodable, Encodable, Error as DecodeError, Header, EMPTY_STRING_CODE,
+};
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
 use std::mem;

@@ -18,7 +18,6 @@ use reth_primitives::{
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
-use reth_revm::optimism::RethL1BlockInfo;
 use reth_revm_primitives::calculate_intrinsic_gas_after_merge;
 use reth_tasks::TaskSpawner;
 use std::{
@@ -28,11 +27,9 @@ use std::{
 use tokio::sync::Mutex;
 
 #[cfg(feature = "optimism")]
-use reth_primitives::bytes::BytesMut;
+use reth_primitives::{bytes::BytesMut, BlockNumberOrTag};
 #[cfg(feature = "optimism")]
-use reth_primitives::BlockNumberOrTag;
-#[cfg(feature = "optimism")]
-use revm::optimism::L1BlockInfo;
+use reth_revm::optimism::RethL1BlockInfo;
 
 /// Validator for Ethereum transactions.
 #[derive(Debug, Clone)]
@@ -729,8 +726,6 @@ pub fn ensure_max_init_code_size<T: PoolTransaction>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[cfg(feature = "optimism")]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_validate_optimism_transaction() {

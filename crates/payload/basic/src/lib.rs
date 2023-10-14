@@ -615,6 +615,7 @@ impl PayloadConfig {
         extra_data: Bytes,
         attributes: PayloadBuilderAttributes,
         chain_spec: Arc<ChainSpec>,
+        #[cfg(feature = "optimism")] compute_pending_block: bool,
     ) -> Self {
         // configure evm env based on parent block
         let (initialized_cfg, initialized_block_env) =
@@ -627,6 +628,8 @@ impl PayloadConfig {
             extra_data,
             attributes,
             chain_spec,
+            #[cfg(feature = "optimism")]
+            compute_pending_block,
         }
     }
 }

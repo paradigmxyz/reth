@@ -109,7 +109,8 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             .max_gas_limit(conf.max_gas_limit());
 
         #[cfg(feature = "optimism")]
-        let payload_job_config = payload_job_config.compute_pending_block(compute_pending_block);
+        let payload_job_config =
+            payload_job_config.compute_pending_block(conf.compute_pending_block());
 
         // The default payload builder is implemented on the unit type.
         #[cfg(not(feature = "optimism"))]
@@ -124,12 +125,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             components.provider(),
             components.pool(),
             components.task_executor(),
-            BasicPayloadJobGeneratorConfig::default()
-                .interval(conf.interval())
-                .deadline(conf.deadline())
-                .max_payload_tasks(conf.max_payload_tasks())
-                .extradata(conf.extradata_rlp_bytes())
-                .max_gas_limit(conf.max_gas_limit()),
+            payload_job_config,
             components.chain_spec(),
             payload_builder,
         );

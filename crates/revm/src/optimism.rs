@@ -81,6 +81,19 @@ pub trait RethL1BlockInfo {
         input: &Bytes,
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError>;
+
+    /// Computes the data gas cost for an L2 transaction.
+    ///
+    /// ### Takes
+    /// - `chain_spec`: The [ChainSpec] for the node.
+    /// - `timestamp`: The timestamp of the current block.
+    /// - `input`: The calldata of the transaction.
+    fn l1_data_gas(
+        &self,
+        chain_spec: Arc<ChainSpec>,
+        timestamp: u64,
+        input: &Bytes,
+    ) -> Result<U256, BlockExecutionError>;
 }
 
 impl RethL1BlockInfo for L1BlockInfo {
@@ -95,6 +108,23 @@ impl RethL1BlockInfo for L1BlockInfo {
             Ok(self.calculate_tx_l1_cost::<BedrockSpec>(input, is_deposit))
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             Ok(self.calculate_tx_l1_cost::<RegolithSpec>(input, is_deposit))
+        } else {
+            Err(reth_executor::BlockExecutionError::L1BlockInfoError {
+                message: "Optimism hardforks are not active".to_string(),
+            })
+        }
+    }
+
+    fn l1_data_gas(
+        &self,
+        chain_spec: Arc<ChainSpec>,
+        timestamp: u64,
+        input: &Bytes,
+    ) -> Result<U256, BlockExecutionError> {
+        if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
+            Ok(self.data_gas::<BedrockSpec>(input))
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+            Ok(self.data_gas::<RegolithSpec>(input))
         } else {
             Err(reth_executor::BlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),

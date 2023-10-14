@@ -2,15 +2,13 @@ use crate::config::revm_spec;
 use reth_primitives::{
     constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
     recover_signer,
-    revm_primitives::{
-        AnalysisKind, BlockEnv, CfgEnv, Env, OptimismFields, SpecId, TransactTo, TxEnv,
-    },
+    revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
     Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, B256, U256,
 };
 
 #[cfg(feature = "optimism")]
-use reth_primitives::TxDeposit;
+use reth_primitives::{revm_primitives::OptimismFields, TxDeposit};
 
 /// Convenience function to call both [fill_cfg_env] and [fill_block_env]
 pub fn fill_cfg_and_block_env(

@@ -45,11 +45,15 @@ use revm_primitives::{
 };
 
 #[cfg(feature = "optimism")]
+use alloy_primitives::hex;
+#[cfg(feature = "optimism")]
 use bytes::BytesMut;
 #[cfg(feature = "optimism")]
 use http::header::CONTENT_TYPE;
 #[cfg(feature = "optimism")]
-use reth_revm::{executor, optimism::L1BlockInfo};
+use reth_revm::optimism::RethL1BlockInfo;
+#[cfg(feature = "optimism")]
+use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
 use std::ops::Div;
 
@@ -905,26 +909,36 @@ where
 
             let block_timestamp = block.timestamp;
 
-            let l1_block_info: Option<executor::optimism::L1BlockInfo> =
-                block.body.get(0).ok_or(EthApiError::InternalEthError)?.input()[4..]
-                    .try_into()
-                    .map_err(|_| EthApiError::InternalEthError)
-                    .ok();
+            let l1_block_info: Option<L1BlockInfo> = reth_revm::optimism::parse_l1_info_tx(
+                &block.body.get(0).ok_or(EthApiError::InternalEthError)?.input()[4..],
+            )
+            .map_err(|_| EthApiError::InternalEthError)
+            .ok();
             let mut buf = BytesMut::default();
             tx.encode_enveloped(&mut buf);
             let data = &buf.freeze().into();
             if let Some(l1_block_info) = l1_block_info {
-                let l1_fee = (!tx.is_deposit()).then(|| {
-                    l1_block_info.calculate_tx_l1_cost(
-                        self.inner.provider.chain_spec(),
-                        block_timestamp,
-                        data,
-                        tx.is_deposit(),
-                    )
-                });
-                let l1_data_gas = (!tx.is_deposit()).then(|| {
-                    l1_block_info.data_gas(data, self.inner.provider.chain_spec(), block_timestamp)
-                });
+                let l1_fee = (!tx.is_deposit())
+                    .then(|| {
+                        l1_block_info.l1_tx_data_fee(
+                            self.inner.provider.chain_spec(),
+                            block_timestamp,
+                            data,
+                            tx.is_deposit(),
+                        )
+                    })
+                    .transpose()
+                    .map_err(|_| EthApiError::InternalEthError)?;
+                let l1_data_gas = (!tx.is_deposit())
+                    .then(|| {
+                        l1_block_info.l1_data_gas(
+                            self.inner.provider.chain_spec(),
+                            block_timestamp,
+                            data,
+                        )
+                    })
+                    .transpose()
+                    .map_err(|_| EthApiError::InternalEthError)?;
 
                 (Some(l1_block_info), l1_fee, l1_data_gas)
             } else {

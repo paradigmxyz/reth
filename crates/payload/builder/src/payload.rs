@@ -1,6 +1,6 @@
 //! Contains types required for building a payload.
 
-use alloy_rlp::{DecodeError, Encodable};
+use alloy_rlp::{Encodable, Error as DecodeError};
 use reth_primitives::{
     Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, B256, U256,
 };
