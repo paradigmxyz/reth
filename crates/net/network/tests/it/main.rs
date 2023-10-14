@@ -5,5 +5,6 @@ mod geth;
 mod requests;
 mod session;
 mod startup;
+mod txgossip;
 
 fn main() {}

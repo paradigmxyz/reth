@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
 use reth_network::{
@@ -11,7 +9,7 @@ use reth_primitives::{Signature, TransactionSigned, B256};
 use reth_provider::test_utils::MockEthProvider;
 use reth_transaction_pool::{
     test_utils::{testing_pool, MockTransaction},
-    TransactionOrigin, TransactionPool,
+    TransactionPool,
 };
 use tokio::sync::oneshot;
 
@@ -39,15 +37,14 @@ async fn test_large_tx_req() {
     let txs_hashes: Vec<B256> = txs.iter().map(|tx| tx.get_hash()).collect();
 
     // setup testnet
-    let mock_provider = Arc::new(MockEthProvider::default());
-    let mut net = Testnet::create_with(2, mock_provider.clone()).await;
+    let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
 
     // install request handlers
     net.for_each_mut(|peer| peer.install_request_handler());
 
     // insert generated txs into responding peer's pool
     let pool1 = testing_pool();
-    pool1.add_transactions(TransactionOrigin::Private, txs).await.unwrap();
+    pool1.add_external_transactions(txs).await.unwrap();
 
     // install transactions managers
     net.peers_mut()[0].install_transactions_manager(testing_pool());
