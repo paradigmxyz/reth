@@ -212,13 +212,18 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
 impl<Pool> TransactionsManager<Pool>
 where
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool,
 {
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
+}
 
+impl<Pool> TransactionsManager<Pool>
+where
+    Pool: TransactionPool + 'static,
+{
     #[inline]
     fn update_import_metrics(&self) {
         self.metrics.pending_pool_imports.set(self.pool_imports.len() as f64);
