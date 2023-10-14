@@ -1,16 +1,4 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs, unreachable_pub)]
-#![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-//! reth tracing subscribers and utilities.
+//! Reth tracing subscribers and utilities.
 //!
 //! Contains a standardized set of layers:
 //!
@@ -19,6 +7,17 @@
 //! - [`journald()`]
 //!
 //! As well as a simple way to initialize a subscriber: [`init`].
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
+use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::path::Path;
 use tracing::Subscriber;
 use tracing_subscriber::{
@@ -74,13 +73,28 @@ pub fn file<S>(
     filter: EnvFilter,
     dir: impl AsRef<Path>,
     file_name: impl AsRef<Path>,
+    max_size_bytes: u64,
+    max_files: usize,
 ) -> (BoxedLayer<S>, tracing_appender::non_blocking::WorkerGuard)
 where
     S: Subscriber,
     for<'a> S: LookupSpan<'a>,
 {
-    let (writer, guard) =
-        tracing_appender::non_blocking(tracing_appender::rolling::never(dir, file_name));
+    // Create log dir if it doesn't exist (RFA doesn't do this for us)
+    let log_dir = dir.as_ref();
+    if !log_dir.exists() {
+        std::fs::create_dir_all(log_dir).expect("Could not create log directory");
+    }
+
+    // Create layer
+    let (writer, guard) = tracing_appender::non_blocking(
+        RollingFileAppender::new(
+            log_dir.join(file_name.as_ref()),
+            RollingConditionBasic::new().max_size(max_size_bytes),
+            max_files,
+        )
+        .expect("Could not initialize file logging"),
+    );
     let layer = tracing_subscriber::fmt::layer()
         .with_ansi(false)
         .with_writer(writer)

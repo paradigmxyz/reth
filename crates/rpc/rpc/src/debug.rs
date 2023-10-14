@@ -10,21 +10,21 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
     EthApiSpec, TracingCallGuard,
 };
+use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    Account, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, H160, H256,
+    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
-    database::{State, SubState},
+    database::{StateProviderDatabase, SubState},
     env::tx_env_with_recovered,
     tracing::{
         js::{JsDbRequest, JsInspector},
         FourByteInspector, TracingInspector, TracingInspectorConfig,
     },
 };
-use reth_rlp::{Decodable, Encodable};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
@@ -96,7 +96,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut db = SubState::new(State::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let mut transactions = transactions.into_iter().peekable();
                 while let Some(tx) = transactions.next() {
@@ -169,7 +169,7 @@ where
     /// Ref: <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers>
     pub async fn debug_trace_transaction(
         &self,
-        tx_hash: H256,
+        tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> EthResult<GethTrace> {
         let (transaction, block) = match self.inner.eth_api.transaction_and_block(tx_hash).await? {
@@ -190,7 +190,7 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let mut db = SubState::new(State::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 // replay all transactions prior to the targeted transaction
                 replay_transactions_until(
                     &mut db,
@@ -289,7 +289,7 @@ where
                     // because JSTracer and all JS types are not Send
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
-                    let db = SubState::new(State::new(state));
+                    let db = CacheDB::new(StateProviderDatabase::new(state));
                     let has_state_overrides = overrides.has_state();
 
                     // If the caller provided state overrides we need to clone the DB so the js
@@ -330,7 +330,7 @@ where
             })
             .await?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default().into();
+        let return_value = result_output(&res.result).unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok(frame.into())
@@ -343,7 +343,7 @@ where
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> EthResult<Vec<GethTrace>> {
+    ) -> EthResult<Vec<Vec<GethTrace>>> {
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")))
         }
@@ -378,8 +378,9 @@ where
         self.inner
             .eth_api
             .spawn_with_state_at_block(at.into(), move |state| {
-                let mut results = Vec::with_capacity(bundles.len());
-                let mut db = SubState::new(State::new(state));
+                // the outer vec for the bundles
+                let mut all_bundles = Vec::with_capacity(bundles.len());
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -399,7 +400,7 @@ where
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
                 while let Some(bundle) = bundles.next() {
-                    //let mut result = Vec::with_capacity(bundle.len());
+                    let mut results = Vec::with_capacity(bundle.transactions.len());
                     let Bundle { transactions, block_override } = bundle;
 
                     let block_overrides = block_override.map(Box::new);
@@ -433,8 +434,10 @@ where
                         }
                         results.push(trace);
                     }
+
+                    all_bundles.push(results);
                 }
-                Ok(results)
+                Ok(all_bundles)
             })
             .await
     }
@@ -530,7 +533,7 @@ where
 
         let (res, _) = inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default().into();
+        let return_value = result_output(&res.result).unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))
@@ -585,9 +588,15 @@ where
 
         let db = if let Some(db) = db {
             let CacheDB { accounts, contracts, logs, block_hashes, .. } = db;
-            CacheDB { accounts, contracts, logs, block_hashes, db: State::new(state) }
+            CacheDB {
+                accounts,
+                contracts,
+                logs,
+                block_hashes,
+                db: StateProviderDatabase::new(state),
+            }
         } else {
-            CacheDB::new(State::new(state))
+            CacheDB::new(StateProviderDatabase::new(state))
         };
 
         let mut stream = ReceiverStream::new(rx);
@@ -721,8 +730,8 @@ where
 
     async fn debug_get_modified_accounts_by_hash(
         &self,
-        _start_hash: H256,
-        _end_hash: H256,
+        _start_hash: B256,
+        _end_hash: B256,
     ) -> RpcResult<()> {
         Ok(())
     }
@@ -741,7 +750,7 @@ where
 
     async fn debug_intermediate_roots(
         &self,
-        _block_hash: H256,
+        _block_hash: B256,
         _opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<()> {
         Ok(())
@@ -755,7 +764,7 @@ where
         Ok(())
     }
 
-    async fn debug_preimage(&self, _hash: H256) -> RpcResult<()> {
+    async fn debug_preimage(&self, _hash: B256) -> RpcResult<()> {
         Ok(())
     }
 
@@ -763,7 +772,7 @@ where
         Ok(())
     }
 
-    async fn debug_seed_hash(&self, _number: u64) -> RpcResult<H256> {
+    async fn debug_seed_hash(&self, _number: u64) -> RpcResult<B256> {
         Ok(Default::default())
     }
 
@@ -825,10 +834,10 @@ where
 
     async fn debug_storage_range_at(
         &self,
-        _block_hash: H256,
+        _block_hash: B256,
         _tx_idx: usize,
-        _contract_address: H160,
-        _key_start: H256,
+        _contract_address: Address,
+        _key_start: B256,
         _max_result: u64,
     ) -> RpcResult<()> {
         Ok(())
@@ -836,7 +845,7 @@ where
 
     async fn debug_trace_bad_block(
         &self,
-        _block_hash: H256,
+        _block_hash: B256,
         _opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<()> {
         Ok(())
@@ -880,7 +889,7 @@ where
 
     /// Handler for `debug_getRawTransaction`
     /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, hash: H256) -> RpcResult<Bytes> {
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
         let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
 
         let mut res = Vec::new();
@@ -934,7 +943,7 @@ where
     /// Handler for `debug_traceBlockByHash`
     async fn debug_trace_block_by_hash(
         &self,
-        block: H256,
+        block: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
@@ -954,7 +963,7 @@ where
     /// Handler for `debug_traceTransaction`
     async fn debug_trace_transaction(
         &self,
-        tx_hash: H256,
+        tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
@@ -978,7 +987,7 @@ where
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<GethTrace>> {
+    ) -> RpcResult<Vec<Vec<GethTrace>>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts).await?)
     }

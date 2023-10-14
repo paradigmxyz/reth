@@ -3,7 +3,7 @@
 //!
 //! See <https://openethereum.github.io/JSONRPC-trace-module>
 
-use reth_primitives::{Address, Bytes, H256, U256, U64};
+use reth_primitives::{Address, Bytes, B256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -60,7 +60,7 @@ impl TraceResults {
 pub struct TraceResultsWithTransactionHash {
     #[serde(flatten)]
     pub full_trace: TraceResults,
-    pub transaction_hash: H256,
+    pub transaction_hash: B256,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -88,7 +88,7 @@ pub struct AccountDiff {
     pub balance: Delta<U256>,
     pub code: Delta<Bytes>,
     pub nonce: Delta<U64>,
-    pub storage: BTreeMap<H256, Delta<H256>>,
+    pub storage: BTreeMap<B256, Delta<B256>>,
 }
 
 /// New-type for list of account diffs
@@ -307,7 +307,7 @@ pub struct LocalizedTransactionTrace {
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub block_hash: Option<H256>,
+    pub block_hash: Option<B256>,
     /// Block number the transaction is included in, None if pending.
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
@@ -315,7 +315,7 @@ pub struct LocalizedTransactionTrace {
     pub block_number: Option<u64>,
     /// Hash of the transaction
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub transaction_hash: Option<H256>,
+    pub transaction_hash: Option<B256>,
     /// Transaction index within the block, None if pending.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_position: Option<u64>,

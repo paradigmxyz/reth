@@ -18,6 +18,7 @@ metrics.workspace = true
 # async
 tokio = { workspace = true, features = ["full"], optional = true }
 futures = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
 
 [features]
-common = ["tokio", "futures"]
+common = ["tokio", "futures", "tokio-util"]

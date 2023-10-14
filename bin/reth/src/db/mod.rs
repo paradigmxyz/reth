@@ -24,6 +24,7 @@ mod clear;
 mod diff;
 mod get;
 mod list;
+mod snapshots;
 /// DB List TUI
 mod tui;
 
@@ -48,6 +49,7 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
@@ -84,6 +86,8 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
+    /// Snapshots tables from database
+    Snapshot(snapshots::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -208,6 +212,9 @@ impl Command {
             Subcommands::Clear(command) => {
                 let db = open_db(&db_path, self.db.log_level)?;
                 command.execute(&db)?;
+            }
+            Subcommands::Snapshot(command) => {
+                command.execute(&db_path, self.db.log_level, self.chain.clone())?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {

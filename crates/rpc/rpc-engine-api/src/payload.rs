@@ -1,6 +1,6 @@
-use reth_primitives::{Withdrawal, H256};
-use reth_rpc_types::engine::{ExecutionPayload, PayloadAttributes};
+use reth_primitives::B256;
 
+use reth_rpc_types::engine::{ExecutionPayload, PayloadAttributes};
 /// Either an [ExecutionPayload] or a [PayloadAttributes].
 pub(crate) enum PayloadOrAttributes<'a> {
     /// An [ExecutionPayload] and optional parent beacon block root.
@@ -8,7 +8,7 @@ pub(crate) enum PayloadOrAttributes<'a> {
         /// The inner execution payload
         payload: &'a ExecutionPayload,
         /// The parent beacon block root
-        parent_beacon_block_root: Option<H256>,
+        parent_beacon_block_root: Option<B256>,
     },
     /// A [PayloadAttributes].
     PayloadAttributes(&'a PayloadAttributes),
@@ -19,13 +19,13 @@ impl<'a> PayloadOrAttributes<'a> {
     /// block root.
     pub(crate) fn from_execution_payload(
         payload: &'a ExecutionPayload,
-        parent_beacon_block_root: Option<H256>,
+        parent_beacon_block_root: Option<B256>,
     ) -> Self {
         Self::ExecutionPayload { payload, parent_beacon_block_root }
     }
 
     /// Return the withdrawals for the payload or attributes.
-    pub(crate) fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+    pub(crate) fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::engine::payload::Withdrawal>> {
         match self {
             Self::ExecutionPayload { payload, .. } => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals.as_ref(),
@@ -36,12 +36,12 @@ impl<'a> PayloadOrAttributes<'a> {
     pub(crate) fn timestamp(&self) -> u64 {
         match self {
             Self::ExecutionPayload { payload, .. } => payload.timestamp(),
-            Self::PayloadAttributes(attributes) => attributes.timestamp.as_u64(),
+            Self::PayloadAttributes(attributes) => attributes.timestamp.to(),
         }
     }
 
     /// Return the parent beacon block root for the payload or attributes.
-    pub(crate) fn parent_beacon_block_root(&self) -> Option<H256> {
+    pub(crate) fn parent_beacon_block_root(&self) -> Option<B256> {
         match self {
             Self::ExecutionPayload { parent_beacon_block_root, .. } => *parent_beacon_block_root,
             Self::PayloadAttributes(attributes) => attributes.parent_beacon_block_root,

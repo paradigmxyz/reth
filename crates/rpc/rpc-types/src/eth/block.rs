@@ -1,7 +1,7 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader, Withdrawal, H256, H64, U256,
+    Address, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader, Withdrawal, B256, B64, U256,
     U64,
 };
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -12,7 +12,7 @@ use std::{collections::BTreeMap, ops::Deref};
 #[serde(untagged)]
 pub enum BlockTransactions {
     /// Only hashes
-    Hashes(Vec<H256>),
+    Hashes(Vec<B256>),
     /// Full transactions
     Full(Vec<Transaction>),
     /// Special case for uncle response.
@@ -25,7 +25,46 @@ impl BlockTransactions {
     pub fn is_uncle(&self) -> bool {
         matches!(self, Self::Uncle)
     }
+
+    /// Returns an iterator over the transaction hashes.
+    pub fn iter(&self) -> BlockTransactionsHashIterator<'_> {
+        BlockTransactionsHashIterator::new(self)
+    }
 }
+
+/// An Iterator over the transaction hashes of a block.
+#[derive(Debug, Clone)]
+pub struct BlockTransactionsHashIterator<'a> {
+    txs: &'a BlockTransactions,
+    idx: usize,
+}
+
+impl<'a> BlockTransactionsHashIterator<'a> {
+    fn new(txs: &'a BlockTransactions) -> Self {
+        Self { txs, idx: 0 }
+    }
+}
+
+impl<'a> Iterator for BlockTransactionsHashIterator<'a> {
+    type Item = B256;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.txs {
+            BlockTransactions::Full(txs) => {
+                let tx = txs.get(self.idx);
+                self.idx += 1;
+                tx.map(|tx| tx.hash)
+            }
+            BlockTransactions::Hashes(txs) => {
+                let tx = txs.get(self.idx).copied();
+                self.idx += 1;
+                tx
+            }
+            BlockTransactions::Uncle => None,
+        }
+    }
+}
+
 /// Determines how the `transactions` field of [Block] should be filled.
 ///
 /// This essentially represents the `full:bool` argument in RPC calls that determine whether the
@@ -56,7 +95,7 @@ pub enum BlockError {
     InvalidSignature,
     /// A raw block failed to decode
     #[error("failed to decode raw block {0}")]
-    RlpDecodeRawBlock(reth_rlp::DecodeError),
+    RlpDecodeRawBlock(alloy_rlp::Error),
 }
 
 /// Block representation
@@ -71,7 +110,7 @@ pub struct Block {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_difficulty: Option<U256>,
     /// Uncles' hashes
-    pub uncles: Vec<H256>,
+    pub uncles: Vec<B256>,
     /// Transactions
     #[serde(skip_serializing_if = "BlockTransactions::is_uncle")]
     pub transactions: BlockTransactions,
@@ -87,20 +126,20 @@ pub struct Block {
 #[serde(rename_all = "camelCase")]
 pub struct Header {
     /// Hash of the block
-    pub hash: Option<H256>,
+    pub hash: Option<B256>,
     /// Hash of the parent
-    pub parent_hash: H256,
+    pub parent_hash: B256,
     /// Hash of the uncles
     #[serde(rename = "sha3Uncles")]
-    pub uncles_hash: H256,
+    pub uncles_hash: B256,
     /// Alias of `author`
     pub miner: Address,
     /// State root hash
-    pub state_root: H256,
+    pub state_root: B256,
     /// Transactions root hash
-    pub transactions_root: H256,
+    pub transactions_root: B256,
     /// Transactions receipts root hash
-    pub receipts_root: H256,
+    pub receipts_root: B256,
     /// Logs bloom
     pub logs_bloom: Bloom,
     /// Difficulty
@@ -116,15 +155,15 @@ pub struct Header {
     /// Extra data
     pub extra_data: Bytes,
     /// Mix Hash
-    pub mix_hash: H256,
+    pub mix_hash: B256,
     /// Nonce
-    pub nonce: Option<H64>,
+    pub nonce: Option<B64>,
     /// Base fee per unit of gas (if past London)
     #[serde(rename = "baseFeePerGas", skip_serializing_if = "Option::is_none")]
     pub base_fee_per_gas: Option<U256>,
     /// Withdrawals root hash added by EIP-4895 and is ignored in legacy headers.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub withdrawals_root: Option<H256>,
+    pub withdrawals_root: Option<B256>,
     /// Blob gas used
     #[serde(rename = "blobGasUsed", skip_serializing_if = "Option::is_none")]
     pub blob_gas_used: Option<U64>,
@@ -133,7 +172,7 @@ pub struct Header {
     pub excess_blob_gas: Option<U64>,
     /// Parent beacon block root
     #[serde(rename = "parentBeaconBlockRoot", skip_serializing_if = "Option::is_none")]
-    pub parent_beacon_block_root: Option<H256>,
+    pub parent_beacon_block_root: Option<B256>,
 }
 
 // === impl Header ===
@@ -218,6 +257,7 @@ impl From<Header> for RichHeader {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Rich<T> {
     /// Standard value.
+    #[serde(flatten)]
     pub inner: T,
     /// Additional fields that should be serialized into the `Block` object
     #[serde(flatten)]
@@ -257,22 +297,37 @@ impl<T: Serialize> Serialize for Rich<T> {
 /// BlockOverrides is a set of header fields to override.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
-#[allow(missing_docs)]
 pub struct BlockOverrides {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Overrides the block number.
+    ///
+    /// For `eth_callMany` this will be the block number of the first simulated block. Each
+    /// following block increments its block number by 1
+    // Note: geth uses `number`, erigon uses `blockNumber`
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "blockNumber")]
     pub number: Option<U256>,
+    /// Overrides the difficulty of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub difficulty: Option<U256>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Overrides the timestamp of the block.
+    // Note: geth uses `time`, erigon uses `timestamp`
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "timestamp")]
     pub time: Option<U64>,
+    /// Overrides the gas limit of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gas_limit: Option<U64>,
+    /// Overrides the coinbase address of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coinbase: Option<Address>,
+    /// Overrides the prevrandao of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub random: Option<H256>,
+    pub random: Option<B256>,
+    /// Overrides the basefee of the block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_fee: Option<U256>,
+    /// A dictionary that maps blockNumber to a user-defined hash. It could be queried from the
+    /// solidity opcode BLOCKHASH.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_hash: Option<BTreeMap<u64, B256>>,
 }
 
 #[cfg(test)]
@@ -303,14 +358,14 @@ mod tests {
     fn serde_block() {
         let block = Block {
             header: Header {
-                hash: Some(H256::from_low_u64_be(1)),
-                parent_hash: H256::from_low_u64_be(2),
-                uncles_hash: H256::from_low_u64_be(3),
-                miner: Address::from_low_u64_be(4),
-                state_root: H256::from_low_u64_be(5),
-                transactions_root: H256::from_low_u64_be(6),
-                receipts_root: H256::from_low_u64_be(7),
-                withdrawals_root: Some(H256::from_low_u64_be(8)),
+                hash: Some(B256::with_last_byte(1)),
+                parent_hash: B256::with_last_byte(2),
+                uncles_hash: B256::with_last_byte(3),
+                miner: Address::with_last_byte(4),
+                state_root: B256::with_last_byte(5),
+                transactions_root: B256::with_last_byte(6),
+                receipts_root: B256::with_last_byte(7),
+                withdrawals_root: Some(B256::with_last_byte(8)),
                 number: Some(U256::from(9)),
                 gas_used: U256::from(10),
                 gas_limit: U256::from(11),
@@ -318,16 +373,16 @@ mod tests {
                 logs_bloom: Bloom::default(),
                 timestamp: U256::from(12),
                 difficulty: U256::from(13),
-                mix_hash: H256::from_low_u64_be(14),
-                nonce: Some(H64::from_low_u64_be(15)),
+                mix_hash: B256::with_last_byte(14),
+                nonce: Some(B64::with_last_byte(15)),
                 base_fee_per_gas: Some(U256::from(20)),
                 blob_gas_used: None,
                 excess_blob_gas: None,
                 parent_beacon_block_root: None,
             },
             total_difficulty: Some(U256::from(100000)),
-            uncles: vec![H256::from_low_u64_be(17)],
-            transactions: BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)]),
+            uncles: vec![B256::with_last_byte(17)],
+            transactions: BlockTransactions::Hashes(vec![B256::with_last_byte(18)]),
             size: Some(U256::from(19)),
             withdrawals: Some(vec![]),
         };
@@ -344,13 +399,13 @@ mod tests {
     fn serde_block_with_withdrawals_set_as_none() {
         let block = Block {
             header: Header {
-                hash: Some(H256::from_low_u64_be(1)),
-                parent_hash: H256::from_low_u64_be(2),
-                uncles_hash: H256::from_low_u64_be(3),
-                miner: Address::from_low_u64_be(4),
-                state_root: H256::from_low_u64_be(5),
-                transactions_root: H256::from_low_u64_be(6),
-                receipts_root: H256::from_low_u64_be(7),
+                hash: Some(B256::with_last_byte(1)),
+                parent_hash: B256::with_last_byte(2),
+                uncles_hash: B256::with_last_byte(3),
+                miner: Address::with_last_byte(4),
+                state_root: B256::with_last_byte(5),
+                transactions_root: B256::with_last_byte(6),
+                receipts_root: B256::with_last_byte(7),
                 withdrawals_root: None,
                 number: Some(U256::from(9)),
                 gas_used: U256::from(10),
@@ -359,16 +414,16 @@ mod tests {
                 logs_bloom: Bloom::default(),
                 timestamp: U256::from(12),
                 difficulty: U256::from(13),
-                mix_hash: H256::from_low_u64_be(14),
-                nonce: Some(H64::from_low_u64_be(15)),
+                mix_hash: B256::with_last_byte(14),
+                nonce: Some(B64::with_last_byte(15)),
                 base_fee_per_gas: Some(U256::from(20)),
                 blob_gas_used: None,
                 excess_blob_gas: None,
                 parent_beacon_block_root: None,
             },
             total_difficulty: Some(U256::from(100000)),
-            uncles: vec![H256::from_low_u64_be(17)],
-            transactions: BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)]),
+            uncles: vec![B256::with_last_byte(17)],
+            transactions: BlockTransactions::Hashes(vec![B256::with_last_byte(18)]),
             size: Some(U256::from(19)),
             withdrawals: None,
         };
@@ -379,5 +434,44 @@ mod tests {
         );
         let deserialized: Block = serde_json::from_str(&serialized).unwrap();
         assert_eq!(block, deserialized);
+    }
+
+    #[test]
+    fn block_overrides() {
+        let s = r#"{"blockNumber": "0xe39dd0"}"#;
+        let _overrides = serde_json::from_str::<BlockOverrides>(s).unwrap();
+    }
+
+    #[test]
+    fn serde_rich_block() {
+        let s = r#"{
+    "hash": "0xb25d0e54ca0104e3ebfb5a1dcdf9528140854d609886a300946fd6750dcb19f4",
+    "parentHash": "0x9400ec9ef59689c157ac89eeed906f15ddd768f94e1575e0e27d37c241439a5d",
+    "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+    "miner": "0x829bd824b016326a401d083b33d092293333a830",
+    "stateRoot": "0x546e330050c66d02923e7f1f3e925efaf64e4384eeecf2288f40088714a77a84",
+    "transactionsRoot": "0xd5eb3ad6d7c7a4798cc5fb14a6820073f44a941107c5d79dac60bd16325631fe",
+    "receiptsRoot": "0xb21c41cbb3439c5af25304e1405524c885e733b16203221900cb7f4b387b62f0",
+    "logsBloom": "0x1f304e641097eafae088627298685d20202004a4a59e4d8900914724e2402b028c9d596660581f361240816e82d00fa14250c9ca89840887a381efa600288283d170010ab0b2a0694c81842c2482457e0eb77c2c02554614007f42aaf3b4dc15d006a83522c86a240c06d241013258d90540c3008888d576a02c10120808520a2221110f4805200302624d22092b2c0e94e849b1e1aa80bc4cc3206f00b249d0a603ee4310216850e47c8997a20aa81fe95040a49ca5a420464600e008351d161dc00d620970b6a801535c218d0b4116099292000c08001943a225d6485528828110645b8244625a182c1a88a41087e6d039b000a180d04300d0680700a15794",
+    "difficulty": "0xc40faff9c737d",
+    "number": "0xa9a230",
+    "gasLimit": "0xbe5a66",
+    "gasUsed": "0xbe0fcc",
+    "timestamp": "0x5f93b749",
+    "extraData": "0x7070796520e4b883e5bda9e7a59ee4bb99e9b1bc0103",
+    "mixHash": "0xd5e2b7b71fbe4ddfe552fb2377bf7cddb16bbb7e185806036cee86994c6e97fc",
+    "nonce": "0x4722f2acd35abe0f",
+    "totalDifficulty": "0x3dc957fd8167fb2684a",
+    "uncles": [],
+    "transactions": [
+        "0xf435a26acc2a9ef73ac0b73632e32e29bd0e28d5c4f46a7e18ed545c93315916"
+    ],
+    "size": "0xaeb6"
+}"#;
+
+        let block = serde_json::from_str::<RichBlock>(s).unwrap();
+        let serialized = serde_json::to_string(&block).unwrap();
+        let block2 = serde_json::from_str::<RichBlock>(&serialized).unwrap();
+        assert_eq!(block, block2);
     }
 }

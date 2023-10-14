@@ -11,16 +11,13 @@ use crate::{
     },
     EthApi,
 };
-use ethers_core::utils::get_contract_address;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{AccessListWithGasUsed, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_revm::{
-    access_list::AccessListInspector,
-    database::{State, SubState},
-    env::tx_env_with_recovered,
+    access_list::AccessListInspector, database::StateProviderDatabase, env::tx_env_with_recovered,
 };
 use reth_rpc_types::{
     state::StateOverride, BlockError, Bundle, CallRequest, EthCallResponse, StateContext,
@@ -110,7 +107,7 @@ where
 
         self.spawn_with_state_at_block(at.into(), move |state| {
             let mut results = Vec::with_capacity(transactions.len());
-            let mut db = SubState::new(State::new(state));
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
             if replay_block_txs {
                 // only need to replay the transactions in the block if not all transactions are
@@ -169,7 +166,7 @@ where
     /// Estimates the gas usage of the `request` with the state.
     ///
     /// This will execute the [CallRequest] and find the best gas limit via binary search
-    fn estimate_gas_with<S>(
+    pub fn estimate_gas_with<S>(
         &self,
         mut cfg: CfgEnv,
         block: BlockEnv,
@@ -199,7 +196,7 @@ where
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
-        let mut db = SubState::new(State::new(state));
+        let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
@@ -338,11 +335,23 @@ where
         Ok(U256::from(highest_gas_limit))
     }
 
+    /// Creates the AccessList for the `request` at the [BlockId] or latest.
     pub(crate) async fn create_access_list_at(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+    ) -> EthResult<AccessListWithGasUsed> {
+        self.on_blocking_task(|this| async move {
+            this.create_access_list_with(request, block_number).await
+        })
+        .await
+    }
+
+    async fn create_access_list_with(
         &self,
         mut request: CallRequest,
         at: Option<BlockId>,
-    ) -> EthResult<AccessList> {
+    ) -> EthResult<AccessListWithGasUsed> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
@@ -358,7 +367,7 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         env.cfg.disable_base_fee = true;
 
-        let mut db = SubState::new(State::new(state));
+        let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
             // no gas limit was provided in the request, so we need to cap the request's gas limit
@@ -370,15 +379,15 @@ where
             to
         } else {
             let nonce = db.basic(from)?.unwrap_or_default().nonce;
-            get_contract_address(from, nonce).into()
+            from.create(nonce)
         };
 
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
-        let precompiles = get_precompiles(&env.cfg.spec_id);
+        let precompiles = get_precompiles(env.cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
-        let (result, _env) = inspect(&mut db, env, &mut inspector)?;
+        let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
             ExecutionResult::Halt { reason, .. } => Err(match reason {
@@ -390,7 +399,14 @@ where
             }
             ExecutionResult::Success { .. } => Ok(()),
         }?;
-        Ok(inspector.into_access_list())
+
+        let access_list = inspector.into_access_list();
+
+        // calculate the gas used using the access list
+        request.access_list = Some(access_list.clone());
+        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state())?;
+
+        Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 }
 
@@ -400,7 +416,7 @@ where
 fn map_out_of_gas_err<S>(
     env_gas_limit: U256,
     mut env: Env,
-    mut db: &mut CacheDB<State<S>>,
+    mut db: &mut CacheDB<StateProviderDatabase<S>>,
 ) -> EthApiError
 where
     S: StateProvider,

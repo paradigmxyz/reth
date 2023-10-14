@@ -5511,14 +5511,14 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_pruner_parts_duration_seconds_sum{instance=~\"$instance\"}[$__rate_interval]) / rate(reth_pruner_parts_duration_seconds_count{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_pruner_segments_duration_seconds_sum{instance=~\"$instance\"}[$__rate_interval]) / rate(reth_pruner_segments_duration_seconds_count{instance=~\"$instance\"}[$__rate_interval])",
           "instant": false,
-          "legendFormat": "{{part}}",
+          "legendFormat": "{{segment}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Pruner duration, per part",
+      "title": "Pruner duration, per segment",
       "type": "timeseries"
     },
     {

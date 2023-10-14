@@ -1,11 +1,10 @@
 //! An abstraction over ethereum signers.
 
 use crate::eth::error::SignError;
-use ethers_core::{
-    types::transaction::eip712::{Eip712, TypedData},
-    utils::hash_message,
+use alloy_dyn_abi::TypedData;
+use reth_primitives::{
+    eip191_hash_message, sign_message, Address, Signature, TransactionSigned, B256,
 };
-use reth_primitives::{sign_message, Address, Signature, TransactionSigned, H256};
 use reth_rpc_types::TypedTransactionRequest;
 
 use secp256k1::SecretKey;
@@ -48,12 +47,14 @@ impl DevSigner {
     fn get_key(&self, account: Address) -> Result<&SecretKey> {
         self.accounts.get(&account).ok_or(SignError::NoAccount)
     }
-    fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
+
+    fn sign_hash(&self, hash: B256, account: Address) -> Result<Signature> {
         let secret = self.get_key(account)?;
-        let signature = sign_message(H256::from_slice(secret.as_ref()), hash);
+        let signature = sign_message(B256::from_slice(secret.as_ref()), hash);
         signature.map_err(|_| SignError::CouldNotSign)
     }
 }
+
 #[async_trait::async_trait]
 impl EthSigner for DevSigner {
     fn accounts(&self) -> Vec<Address> {
@@ -67,7 +68,7 @@ impl EthSigner for DevSigner {
     async fn sign(&self, address: Address, message: &[u8]) -> Result<Signature> {
         // Hash message according to EIP 191:
         // https://ethereum.org/es/developers/docs/apis/json-rpc/#eth_sign
-        let hash = hash_message(message).into();
+        let hash = eip191_hash_message(message);
         self.sign_hash(hash, address)
     }
 
@@ -77,7 +78,7 @@ impl EthSigner for DevSigner {
         address: &Address,
     ) -> Result<TransactionSigned> {
         // convert to primitive transaction
-        let transaction = request.into_transaction();
+        let transaction = request.into_transaction().ok_or(SignError::InvalidTransactionRequest)?;
         let tx_signature_hash = transaction.signature_hash();
         let signature = self.sign_hash(tx_signature_hash, *address)?;
 
@@ -85,10 +86,12 @@ impl EthSigner for DevSigner {
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
-        let encoded: H256 = payload.encode_eip712().map_err(|_| SignError::TypedData)?.into();
+        let encoded = payload.eip712_signing_hash().map_err(|_| SignError::InvalidTypedData)?;
+        // let b256 = encoded;
         self.sign_hash(encoded, address)
     }
 }
+
 #[cfg(test)]
 mod test {
     use super::*;

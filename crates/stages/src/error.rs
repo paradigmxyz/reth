@@ -1,7 +1,7 @@
 use crate::pipeline::PipelineEvent;
 use reth_interfaces::{
     consensus, db::DatabaseError as DbError, executor, p2p::error::DownloadError,
-    provider::ProviderError,
+    provider::ProviderError, RethError,
 };
 use reth_primitives::SealedHeader;
 use thiserror::Error;
@@ -51,7 +51,7 @@ pub enum StageError {
     },
     /// Invalid pruning configuration
     #[error(transparent)]
-    PruningConfiguration(#[from] reth_primitives::PrunePartError),
+    PruningConfiguration(#[from] reth_primitives::PruneSegmentError),
     /// Invalid checkpoint passed to the stage
     #[error("Invalid stage checkpoint: {0}")]
     StageCheckpoint(u64),
@@ -67,7 +67,7 @@ pub enum StageError {
     Download(#[from] DownloadError),
     /// Internal error
     #[error(transparent)]
-    Internal(#[from] reth_interfaces::Error),
+    Internal(#[from] RethError),
     /// The stage encountered a recoverable error.
     ///
     /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
@@ -107,7 +107,7 @@ pub enum PipelineError {
     Database(#[from] DbError),
     /// The pipeline encountered an irrecoverable error in one of the stages.
     #[error("An interface error occurred.")]
-    Interface(#[from] reth_interfaces::Error),
+    Interface(#[from] RethError),
     /// The pipeline encountered an error while trying to send an event.
     #[error("The pipeline encountered an error while trying to send an event.")]
     Channel(#[from] SendError<PipelineEvent>),

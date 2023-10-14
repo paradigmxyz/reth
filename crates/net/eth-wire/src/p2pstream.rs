@@ -6,6 +6,7 @@ use crate::{
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage,
 };
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
@@ -14,7 +15,6 @@ use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     hex,
 };
-use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     io,
@@ -65,6 +65,7 @@ const MAX_P2P_CAPACITY: usize = 2;
 /// An un-authenticated [`P2PStream`]. This is consumed and returns a [`P2PStream`] after the
 /// `Hello` handshake is completed.
 #[pin_project]
+#[derive(Debug)]
 pub struct UnauthedP2PStream<S> {
     #[pin]
     inner: S,
@@ -687,10 +688,10 @@ impl P2PMessage {
     }
 }
 
-/// The [`Encodable`](reth_rlp::Encodable) implementation for [`P2PMessage::Ping`] and
-/// [`P2PMessage::Pong`] encodes the message as RLP, and prepends a snappy header to the RLP bytes
-/// for all variants except the [`P2PMessage::Hello`] variant, because the hello message is never
-/// compressed in the `p2p` subprotocol.
+/// The [`Encodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] encodes the
+/// message as RLP, and prepends a snappy header to the RLP bytes for all variants except the
+/// [`P2PMessage::Hello`] variant, because the hello message is never compressed in the `p2p`
+/// subprotocol.
 impl Encodable for P2PMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         (self.message_id() as u8).encode(out);
@@ -724,20 +725,21 @@ impl Encodable for P2PMessage {
     }
 }
 
-/// The [`Decodable`](reth_rlp::Decodable) implementation for [`P2PMessage`] assumes that each of
-/// the message variants are snappy compressed, except for the [`P2PMessage::Hello`] variant since
-/// the hello message is never compressed in the `p2p` subprotocol.
-/// The [`Decodable`] implementation for [`P2PMessage::Ping`] and
-/// [`P2PMessage::Pong`] expects a snappy encoded payload, see [`Encodable`] implementation.
+/// The [`Decodable`] implementation for [`P2PMessage`] assumes that each of the message variants
+/// are snappy compressed, except for the [`P2PMessage::Hello`] variant since the hello message is
+/// never compressed in the `p2p` subprotocol.
+///
+/// The [`Decodable`] implementation for [`P2PMessage::Ping`] and [`P2PMessage::Pong`] expects a
+/// snappy encoded payload, see [`Encodable`] implementation.
 impl Decodable for P2PMessage {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         /// Removes the snappy prefix from the Ping/Pong buffer
-        fn advance_snappy_ping_pong_payload(buf: &mut &[u8]) -> Result<(), DecodeError> {
+        fn advance_snappy_ping_pong_payload(buf: &mut &[u8]) -> alloy_rlp::Result<()> {
             if buf.len() < 3 {
-                return Err(DecodeError::InputTooShort)
+                return Err(RlpError::InputTooShort)
             }
             if buf[..3] != [0x01, 0x00, EMPTY_LIST_CODE] {
-                return Err(DecodeError::Custom("expected snappy payload"))
+                return Err(RlpError::Custom("expected snappy payload"))
             }
             buf.advance(3);
             Ok(())
@@ -745,7 +747,7 @@ impl Decodable for P2PMessage {
 
         let message_id = u8::decode(&mut &buf[..])?;
         let id = P2PMessageID::try_from(message_id)
-            .or(Err(DecodeError::Custom("unknown p2p message id")))?;
+            .or(Err(RlpError::Custom("unknown p2p message id")))?;
         buf.advance(1);
         match id {
             P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
@@ -826,12 +828,12 @@ impl Encodable for ProtocolVersion {
 }
 
 impl Decodable for ProtocolVersion {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let version = u8::decode(buf)?;
         match version {
             4 => Ok(ProtocolVersion::V4),
             5 => Ok(ProtocolVersion::V5),
-            _ => Err(DecodeError::Custom("unknown p2p protocol version")),
+            _ => Err(RlpError::Custom("unknown p2p protocol version")),
         }
     }
 }

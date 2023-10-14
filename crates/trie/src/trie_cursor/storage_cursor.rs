@@ -6,19 +6,20 @@ use reth_db::{
 };
 use reth_primitives::{
     trie::{BranchNodeCompact, StoredNibblesSubKey},
-    H256,
+    B256,
 };
 
 /// A cursor over the storage trie.
+#[derive(Debug)]
 pub struct StorageTrieCursor<C> {
     /// The underlying cursor.
     pub cursor: C,
-    hashed_address: H256,
+    hashed_address: B256,
 }
 
 impl<C> StorageTrieCursor<C> {
     /// Create a new storage trie cursor.
-    pub fn new(cursor: C, hashed_address: H256) -> Self {
+    pub fn new(cursor: C, hashed_address: B256) -> Self {
         Self { cursor, hashed_address }
     }
 }
@@ -74,9 +75,9 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
-        let hashed_address = H256::random();
+        let hashed_address = B256::random();
         let key = vec![0x2, 0x3];
-        let value = BranchNodeCompact::new(1, 1, 1, vec![H256::random()], None);
+        let value = BranchNodeCompact::new(1, 1, 1, vec![B256::random()], None);
 
         cursor
             .upsert(

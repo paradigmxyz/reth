@@ -1,7 +1,7 @@
 //! Decoding tests for [`PooledTransactions`]
-use reth_eth_wire::PooledTransactions;
+use alloy_rlp::{Decodable, Encodable};
+use reth_eth_wire::{EthVersion, PooledTransactions, ProtocolMessage};
 use reth_primitives::{hex, Bytes, PooledTransactionsElement};
-use reth_rlp::Decodable;
 use std::{fs, path::PathBuf};
 
 #[test]
@@ -10,7 +10,32 @@ fn decode_pooled_transactions_data() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/pooled_transactions_with_blob");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
     let hex_data = hex::decode(data.trim()).unwrap();
-    let _txs = PooledTransactions::decode(&mut &hex_data[..]).unwrap();
+    let txs = PooledTransactions::decode(&mut &hex_data[..]).unwrap();
+
+    // do a roundtrip test
+    let mut buf = Vec::new();
+    txs.encode(&mut buf);
+    if hex_data != buf {
+        panic!("mixed pooled transaction roundtrip failed");
+    }
+
+    // now do another decoding, on what we encoded - this should succeed
+    let txs2 = PooledTransactions::decode(&mut &buf[..]).unwrap();
+
+    // ensure that the payload length is the same
+    assert_eq!(txs.length(), txs2.length());
+
+    // ensure that the length is equal to the length of the encoded data
+    assert_eq!(txs.length(), buf.len());
+}
+
+#[test]
+fn decode_request_pair_pooled_blob_transactions() {
+    let network_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/request_pair_pooled_blob_transactions");
+    let data = fs::read_to_string(network_data_path).expect("Unable to read file");
+    let hex_data = hex::decode(data.trim()).unwrap();
+    let _txs = ProtocolMessage::decode_message(EthVersion::Eth68, &mut &hex_data[..]).unwrap();
 }
 
 #[test]

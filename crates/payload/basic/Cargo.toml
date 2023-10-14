@@ -13,12 +13,13 @@ description = "A basic payload builder for reth that uses the txpool API to buil
 reth-primitives.workspace = true
 reth-revm = { path = "../../revm" }
 reth-transaction-pool.workspace = true
-reth-rlp.workspace = true
 reth-provider.workspace = true
 reth-payload-builder.workspace = true
 reth-tasks.workspace = true
+reth-interfaces.workspace = true
 
 ## ethereum
+alloy-rlp.workspace = true
 revm.workspace = true
 
 ## async

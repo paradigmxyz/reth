@@ -5,8 +5,8 @@ use reth_tasks::{TaskExecutor, TaskManager};
 use std::future::Future;
 use tracing::trace;
 
-/// Used to execute cli commands
-#[derive(Default, Debug)]
+/// Executes CLI commands.
+#[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct CliRunner;
 

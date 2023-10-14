@@ -5,7 +5,7 @@ use crate::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_SIZE, TX_MAX_SIZE},
-    EthBlobTransactionSidecar, EthPoolTransaction, TransactionValidationOutcome,
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
     TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
@@ -17,7 +17,8 @@ use reth_primitives::{
     ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
+use reth_provider::{AccountReader, StateProviderFactory};
+use reth_revm_primitives::calculate_intrinsic_gas_after_merge;
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -42,6 +43,35 @@ where
     inner: Arc<EthTransactionValidatorInner<Client, T>>,
 }
 
+impl<Client, Tx> EthTransactionValidator<Client, Tx>
+where
+    Client: StateProviderFactory + BlockReaderIdExt,
+    Tx: EthPoolTransaction,
+{
+    /// Validates a single transaction.
+    ///
+    /// See also [TransactionValidator::validate_transaction]
+    pub fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        self.inner.validate_one(origin, transaction)
+    }
+
+    /// Validates all given transactions.
+    ///
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [Self::validate_one]
+    pub fn validate_all(
+        &self,
+        transactions: Vec<(TransactionOrigin, Tx)>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+    }
+}
+
 #[async_trait::async_trait]
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
@@ -55,7 +85,14 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.inner.validate_transaction(origin, transaction).await
+        self.validate_one(origin, transaction)
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_all(transactions)
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
@@ -107,19 +144,17 @@ where
     }
 }
 
-#[async_trait::async_trait]
-impl<Client, Tx> TransactionValidator for EthTransactionValidatorInner<Client, Tx>
+impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
     Tx: EthPoolTransaction,
 {
-    type Transaction = Tx;
-
-    async fn validate_transaction(
+    /// Validates a single transaction.
+    fn validate_one(
         &self,
         origin: TransactionOrigin,
-        mut transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
+        mut transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
         #[cfg(feature = "optimism")]
         if transaction.is_deposit() {
             return TransactionValidationOutcome::Invalid(
@@ -180,7 +215,7 @@ where
 
         // Check whether the init code size has been exceeded.
         if self.fork_tracker.is_shanghai_activated() {
-            if let Err(err) = self.ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
+            if let Err(err) = ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
@@ -222,6 +257,25 @@ where
                     InvalidTransactionError::ChainIdMismatch.into(),
                 )
             }
+        }
+
+        // intrinsic gas checks
+        let access_list =
+            transaction.access_list().map(|list| list.flattened()).unwrap_or_default();
+        let is_shanghai = self.fork_tracker.is_shanghai_activated();
+
+        if transaction.gas_limit() <
+            calculate_intrinsic_gas_after_merge(
+                transaction.input(),
+                transaction.kind(),
+                &access_list,
+                is_shanghai,
+            )
+        {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::IntrinsicGasTooLow,
+            )
         }
 
         let mut maybe_blob_sidecar = None;
@@ -396,11 +450,11 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
         // update all forks
-        if self.chain_spec.is_cancun_activated_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_shanghai_activated_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
@@ -439,7 +493,7 @@ impl EthTransactionValidatorBuilder {
     /// Creates a new builder for the given [ChainSpec]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         // If cancun is enabled at genesis, enable it
-        let cancun = chain_spec.is_cancun_activated_at_timestamp(chain_spec.genesis_timestamp());
+        let cancun = chain_spec.is_cancun_active_at_timestamp(chain_spec.genesis_timestamp());
 
         Self {
             chain_spec,
@@ -543,6 +597,15 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
+    /// Configures validation rules based on the head block's timestamp.
+    ///
+    /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
+    pub fn with_head_timestamp(mut self, timestamp: u64) -> Self {
+        self.cancun = self.chain_spec.is_cancun_active_at_timestamp(timestamp);
+        self.shanghai = self.chain_spec.is_shanghai_active_at_timestamp(timestamp);
+        self
+    }
+
     /// Builds a the [EthTransactionValidator] and spawns validation tasks via the
     /// [TransactionValidationTaskExecutor]
     ///
@@ -636,6 +699,22 @@ impl ForkTracker {
     /// Returns true if the Shanghai fork is activated.
     pub(crate) fn is_cancun_activated(&self) -> bool {
         self.cancun.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Ensure that the code size is not greater than `max_init_code_size`.
+/// `max_init_code_size` should be configurable so this will take it as an argument.
+pub fn ensure_max_init_code_size<T: PoolTransaction>(
+    transaction: &T,
+    max_init_code_size: usize,
+) -> Result<(), InvalidPoolTransactionError> {
+    if transaction.kind().is_create() && transaction.input().len() > max_init_code_size {
+        Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
+            transaction.size(),
+            max_init_code_size,
+        ))
+    } else {
+        Ok(())
     }
 }
 

@@ -210,11 +210,18 @@ pub struct ExecutionConfig {
     pub max_blocks: Option<u64>,
     /// The maximum amount of state changes to keep in memory before the execution stage commits.
     pub max_changes: Option<u64>,
+    /// The maximum gas to process before the execution stage commits.
+    pub max_cumulative_gas: Option<u64>,
 }
 
 impl Default for ExecutionConfig {
     fn default() -> Self {
-        Self { max_blocks: Some(500_000), max_changes: Some(5_000_000) }
+        Self {
+            max_blocks: Some(500_000),
+            max_changes: Some(5_000_000),
+            // 50k full blocks of 30M gas
+            max_cumulative_gas: Some(30_000_000 * 50_000),
+        }
     }
 }
 
@@ -285,12 +292,13 @@ pub struct PruneConfig {
     /// Minimum pruning interval measured in blocks.
     pub block_interval: usize,
     /// Pruning configuration for every part of the data that can be pruned.
-    pub parts: PruneModes,
+    #[serde(alias = "parts")]
+    pub segments: PruneModes,
 }
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 5, parts: PruneModes::none() }
+        Self { block_interval: 5, segments: PruneModes::none() }
     }
 }
 
@@ -331,7 +339,8 @@ mod tests {
     // ensures config deserialization is backwards compatible
     #[test]
     fn test_backwards_compatibility() {
-        let alpha_0_0_8 = r"#[stages.headers]
+        let alpha_0_0_8 = r"#
+[stages.headers]
 downloader_max_concurrent_requests = 100
 downloader_min_concurrent_requests = 5
 downloader_max_buffered_responses = 100
@@ -415,8 +424,33 @@ nanos = 0
 [sessions.protocol_breach_request_timeout]
 secs = 120
 nanos = 0
-#";
 
+[prune]
+block_interval = 5
+
+[prune.parts]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = { before = 1920000 }
+account_history = { distance = 16384 }
+storage_history = { distance = 16384 }
+[prune.parts.receipts_log_filter]
+'0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' = { before = 17000000 }
+'0xdac17f958d2ee523a2206206994597c13d831ec7' = { distance = 1000 }
+#";
         let _conf: Config = toml::from_str(alpha_0_0_8).unwrap();
+
+        let alpha_0_0_11 = r"#
+[prune.segments]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = { before = 1920000 }
+account_history = { distance = 16384 }
+storage_history = { distance = 16384 }
+[prune.segments.receipts_log_filter]
+'0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' = { before = 17000000 }
+'0xdac17f958d2ee523a2206206994597c13d831ec7' = { distance = 1000 }
+#";
+        let _conf: Config = toml::from_str(alpha_0_0_11).unwrap();
     }
 }

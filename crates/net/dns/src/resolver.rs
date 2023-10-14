@@ -36,7 +36,7 @@ impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
 
 /// An asynchronous DNS resolver
 ///
-/// See also [TokioAsyncResolver](trust_dns_resolver::TokioAsyncResolver)
+/// See also [TokioAsyncResolver]
 ///
 /// ```
 /// # fn t() {
@@ -48,7 +48,7 @@ impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
 /// Note: This [Resolver] can send multiple lookup attempts, See also
 /// [ResolverOpts](trust_dns_resolver::config::ResolverOpts) which configures 2 attempts (1 retry)
 /// by default.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DnsResolver(TokioAsyncResolver);
 
 // === impl DnsResolver ===

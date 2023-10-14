@@ -10,7 +10,6 @@ use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
@@ -29,7 +28,7 @@ use reth_stages::{
 };
 use reth_tasks::TaskExecutor;
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
 };
@@ -56,6 +55,7 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
@@ -98,13 +98,10 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
-            )))
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.discovery.addr,
+                self.network.discovery.port,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
             .start_network()
@@ -205,7 +202,11 @@ impl Command {
         let factory = reth_revm::Factory::new(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
             factory,
-            ExecutionStageThresholds { max_blocks: Some(1), max_changes: None },
+            ExecutionStageThresholds {
+                max_blocks: Some(1),
+                max_changes: None,
+                max_cumulative_gas: None,
+            },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::all(),
         );

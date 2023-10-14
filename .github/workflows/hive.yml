@@ -27,6 +27,7 @@ jobs:
         with:
           context: .
           tags: paradigmxyz/reth:main
+          build-args: BUILD_PROFILE=hivetests
           outputs: type=docker,dest=./artifacts/reth_image.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -102,6 +103,54 @@ jobs:
             # debug_ rpc methods
           - sim: ethereum/rpc-compat
             include: [debug_]
+            experimental: true
+          # Pyspec cancun jobs
+          - sim: pyspec
+            include: [cancun/eip4844]
+            experimental: true
+          - sim: pyspec
+            include: [cancun/eip4788]
+            experimental: true
+          - sim: pyspec
+            include: [cancun/eip6780]
+            experimental: true
+          - sim: pyspec
+            include: [cancun/eip5656]
+            experimental: true
+          - sim: pyspec
+            include: [cancun/eip1153]
+            experimental: true
+          - sim: pyspec
+            include: [cancun/eip7516]
+            experimental: true
+          # Pyspec shanghai jobs
+          - sim: pyspec
+            include: [shanghai/eip3651]
+            experimental: true
+          - sim: pyspec
+            include: [shanghai/eip3855]
+            experimental: true
+          - sim: pyspec
+            include: [shanghai/eip3860]
+            experimental: true
+          - sim: pyspec
+            include: [shanghai/eip4895]
+            experimental: true
+          # Pyspec merge and earlier jobs
+          - sim: pyspec
+            include: [merge/]
+            experimental: true
+          - sim: pyspec
+            include: [berlin/]
+            experimental: true
+          - sim: pyspec
+            include: [istanbul/]
+            experimental: true
+          - sim: pyspec
+            include: [homestead/]
+            experimental: true
+          - sim: pyspec
+            include: [frontier/]
             experimental: true
       fail-fast: false
     needs: prepare

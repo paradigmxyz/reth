@@ -1,4 +1,5 @@
 use super::file_codec::BlockFileCodec;
+use alloy_rlp::{Decodable, Header as RlpHeader};
 use itertools::Either;
 use reth_interfaces::{
     p2p::{
@@ -12,9 +13,8 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
-    H256,
+    B256,
 };
-use reth_rlp::{Decodable, Header as RlpHeader};
 use std::{
     collections::HashMap,
     iter::zip,
@@ -56,7 +56,7 @@ pub struct FileClient {
     bodies: HashMap<BlockHash, BlockBody>,
 }
 
-/// An error that can occur when constructing and using a [`FileClient`](FileClient).
+/// An error that can occur when constructing and using a [`FileClient`].
 #[derive(Debug, Error)]
 pub enum FileClientError {
     /// An error occurred when opening or reading the file.
@@ -65,7 +65,7 @@ pub enum FileClientError {
 
     /// An error occurred when decoding blocks, headers, or rlp headers from the file.
     #[error(transparent)]
-    Rlp(#[from] reth_rlp::DecodeError),
+    Rlp(#[from] alloy_rlp::Error),
 }
 
 impl FileClient {
@@ -75,7 +75,7 @@ impl FileClient {
         FileClient::from_file(file).await
     }
 
-    /// Initialize the [`FileClient`](FileClient) with a file directly.
+    /// Initialize the [`FileClient`] with a file directly.
     pub(crate) async fn from_file(mut file: File) -> Result<Self, FileClientError> {
         // get file len from metadata before reading
         let metadata = file.metadata().await?;
@@ -115,7 +115,7 @@ impl FileClient {
     }
 
     /// Get the tip hash of the chain.
-    pub fn tip(&self) -> Option<H256> {
+    pub fn tip(&self) -> Option<B256> {
         self.headers.get(&(self.headers.len() as u64)).map(|h| h.hash_slow())
     }
 
@@ -213,7 +213,7 @@ impl BodiesClient for FileClient {
 
     fn get_block_bodies_with_priority(
         &self,
-        hashes: Vec<H256>,
+        hashes: Vec<B256>,
         _priority: Priority,
     ) -> Self::Output {
         // this just searches the buffer, and fails if it can't find the block
@@ -255,6 +255,7 @@ mod tests {
         headers::{reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header},
         test_utils::{generate_bodies, generate_bodies_file},
     };
+    use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use futures::SinkExt;
     use futures_util::stream::StreamExt;
@@ -267,7 +268,6 @@ mod tests {
         test_utils::TestConsensus,
     };
     use reth_primitives::SealedHeader;
-    use reth_rlp::Encodable;
     use std::{
         io::{Read, Seek, SeekFrom, Write},
         sync::Arc,

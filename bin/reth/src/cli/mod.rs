@@ -19,6 +19,7 @@ use reth_tracing::{
 };
 use std::{fmt, fmt::Display, sync::Arc};
 
+pub mod components;
 pub mod config;
 pub mod ext;
 
@@ -40,6 +41,7 @@ pub struct Cli<Ext: RethCliExt = ()> {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
@@ -81,7 +83,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
 
         let _guard = self.init_tracing()?;
 
-        let runner = CliRunner::default();
+        let runner = CliRunner;
         match self.command {
             Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
@@ -110,6 +112,15 @@ impl<Ext: RethCliExt> Cli<Ext> {
 
         reth_tracing::init(layers);
         Ok(guard.flatten())
+    }
+
+    /// Configures the given node extension.
+    pub fn with_node_extension<C>(mut self, conf: C) -> Self
+    where
+        C: Into<Ext::Node>,
+    {
+        self.command.set_node_extension(conf.into());
+        self
     }
 }
 
@@ -154,14 +165,21 @@ pub enum Commands<Ext: RethCliExt = ()> {
     Recover(recover::Command),
 }
 
+impl<Ext: RethCliExt> Commands<Ext> {
+    /// Sets the node extension if it is the [NodeCommand](node::NodeCommand).
+    ///
+    /// This is a noop if the command is not the [NodeCommand](node::NodeCommand).
+    pub fn set_node_extension(&mut self, ext: Ext::Node) {
+        if let Commands::Node(command) = self {
+            command.ext = ext
+        }
+    }
+}
+
 /// The log configuration.
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
-    /// The flag to enable persistent logs.
-    #[arg(long = "log.persistent", global = true, conflicts_with = "journald")]
-    persistent: bool,
-
     /// The path to put log files in.
     #[arg(
         long = "log.directory",
@@ -171,6 +189,15 @@ pub struct Logs {
         conflicts_with = "journald"
     )]
     log_directory: PlatformPath<LogsDir>,
+
+    /// The maximum size (in MB) of log files.
+    #[arg(long = "log.max-size", value_name = "SIZE", global = true, default_value_t = 200)]
+    log_max_size: u64,
+
+    /// The maximum amount of log files that will be stored. If set to 0, background file logging
+    /// is disabled.
+    #[arg(long = "log.max-files", value_name = "COUNT", global = true, default_value_t = 5)]
+    log_max_files: usize,
 
     /// Log events to journald.
     #[arg(long = "log.journald", global = true, conflicts_with = "log_directory")]
@@ -191,6 +218,9 @@ pub struct Logs {
     color: ColorMode,
 }
 
+/// Constant to convert megabytes to bytes
+const MB_TO_BYTES: u64 = 1024 * 1024;
+
 impl Logs {
     /// Builds a tracing layer from the current log options.
     pub fn layer<S>(&self) -> eyre::Result<Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>>
@@ -202,8 +232,14 @@ impl Logs {
 
         if self.journald {
             Ok(Some((reth_tracing::journald(filter).expect("Could not connect to journald"), None)))
-        } else if self.persistent {
-            let (layer, guard) = reth_tracing::file(filter, &self.log_directory, "reth.log");
+        } else if self.log_max_files > 0 {
+            let (layer, guard) = reth_tracing::file(
+                filter,
+                &self.log_directory,
+                "reth.log",
+                self.log_max_size * MB_TO_BYTES,
+                self.log_max_files,
+            );
             Ok(Some((layer, Some(guard))))
         } else {
             Ok(None)
@@ -305,14 +341,12 @@ mod tests {
     /// name
     #[test]
     fn parse_logs_path() {
-        let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--log.persistent"]).unwrap();
+        let mut reth = Cli::<()>::try_parse_from(["reth", "node"]).unwrap();
         reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/mainnet"), "{:?}", log_dir);
 
-        let mut reth =
-            Cli::<()>::try_parse_from(["reth", "node", "--chain", "sepolia", "--log.persistent"])
-                .unwrap();
+        let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--chain", "sepolia"]).unwrap();
         reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);

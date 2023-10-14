@@ -12,7 +12,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, EthVersion, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_metrics::common::mpsc::MeteredSender;
+use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::{
     bandwidth_meter::{BandwidthMeter, MeteredStream},
     stream::HasRemoteAddr,
@@ -34,6 +34,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::PollSender;
 use tracing::{instrument, trace};
 
 mod active;
@@ -95,7 +96,7 @@ pub struct SessionManager {
     ///
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
-    active_session_tx: MeteredSender<ActiveSessionMessage>,
+    active_session_tx: MeteredPollSender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Used to measure inbound & outbound bandwidth across all managed streams
@@ -119,6 +120,7 @@ impl SessionManager {
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
+        let active_session_tx = PollSender::new(active_session_tx);
 
         Self {
             next_id: 0,
@@ -135,7 +137,7 @@ impl SessionManager {
             active_sessions: Default::default(),
             pending_sessions_tx,
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
-            active_session_tx: MeteredSender::new(active_session_tx, "network_active_session"),
+            active_session_tx: MeteredPollSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
             bandwidth_meter,
             metrics: Default::default(),
@@ -757,7 +759,12 @@ async fn start_pending_outbound_session(
     bandwidth_meter: BandwidthMeter,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
-        Ok(stream) => MeteredStream::new_with_meter(stream, bandwidth_meter),
+        Ok(stream) => {
+            if let Err(err) = stream.set_nodelay(true) {
+                tracing::warn!(target : "net::session", "set nodelay failed: {:?}", err);
+            }
+            MeteredStream::new_with_meter(stream, bandwidth_meter)
+        }
         Err(error) => {
             let _ = events
                 .send(PendingSessionEvent::OutgoingConnectionError {

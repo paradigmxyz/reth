@@ -27,6 +27,7 @@ pub fn rng_secret_key() -> SecretKey {
 }
 
 /// All network related initialization settings.
+#[derive(Debug)]
 pub struct NetworkConfig<C> {
     /// The client type that can interact with the chain.
     ///

@@ -38,7 +38,7 @@ use reth_primitives::{
     stage::StageCheckpoint,
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
-    PrunePart, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, H256,
+    PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -302,7 +302,7 @@ table!(
     /// There will be multiple accounts that have same bytecode
     /// So we would need to introduce reference counter.
     /// This will be small optimization on state.
-    ( Bytecodes ) H256 | Bytecode
+    ( Bytecodes ) B256 | Bytecode
 );
 
 table!(
@@ -312,7 +312,7 @@ table!(
 
 dupsort!(
     /// Stores the current value of a storage key.
-    ( PlainStorageState ) Address | [H256] StorageEntry
+    ( PlainStorageState ) Address | [B256] StorageEntry
 );
 
 table!(
@@ -370,7 +370,7 @@ dupsort!(
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
-    ( StorageChangeSet ) BlockNumberAddress | [H256] StorageEntry
+    ( StorageChangeSet ) BlockNumberAddress | [B256] StorageEntry
 );
 
 table!(
@@ -378,7 +378,7 @@ table!(
     /// This table is in preparation for merkelization and calculation of state root.
     /// We are saving whole account data as it is needed for partial update when
     /// part of storage is changed. Benefit for merkelization is that hashed addresses are sorted.
-    ( HashedAccount ) H256 | Account
+    ( HashedAccount ) B256 | Account
 );
 
 dupsort!(
@@ -386,7 +386,7 @@ dupsort!(
     /// hash of storage key `keccak256(key)`.
     /// This table is in preparation for merkelization and calculation of state root.
     /// Benefit for merklization is that hashed addresses/keys are sorted.
-    ( HashedStorage ) H256 | [H256] StorageEntry
+    ( HashedStorage ) B256 | [B256] StorageEntry
 );
 
 table!(
@@ -396,7 +396,7 @@ table!(
 
 dupsort!(
     /// From HashedAddress => NibblesSubKey => Intermediate value
-    ( StoragesTrie ) H256 | [StoredNibblesSubKey] StorageTrieEntry
+    ( StoragesTrie ) B256 | [StoredNibblesSubKey] StorageTrieEntry
 );
 
 table!(
@@ -417,8 +417,8 @@ table!(
 );
 
 table!(
-    /// Stores the highest pruned block number and prune mode of each prune part.
-    ( PruneCheckpoints ) PrunePart | PruneCheckpoint
+    /// Stores the highest pruned block number and prune mode of each prune segment.
+    ( PruneCheckpoints ) PruneSegment | PruneCheckpoint
 );
 
 /// Alias Types

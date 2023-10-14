@@ -6,7 +6,10 @@
 use crate::{
     blobstore::BlobStoreError,
     error::PoolError,
-    traits::{GetPooledTransactionLimit, TransactionListenerKind},
+    traits::{
+        BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar,
+        TransactionListenerKind,
+    },
     validate::ValidTransaction,
     AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
     NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PooledTransactionsElement,
@@ -92,6 +95,10 @@ impl TransactionPool for NoopTransactionPool {
         mpsc::channel(1).1
     }
 
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
+        mpsc::channel(1).1
+    }
+
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
         mpsc::channel(1).1
     }
@@ -139,6 +146,13 @@ impl TransactionPool for NoopTransactionPool {
     fn best_transactions_with_base_fee(
         &self,
         _: u64,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+        Box::new(std::iter::empty())
+    }
+
+    fn best_transactions_with_attributes(
+        &self,
+        _: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(std::iter::empty())
     }

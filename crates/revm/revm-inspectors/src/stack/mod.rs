@@ -1,14 +1,13 @@
-use std::fmt::Debug;
-
-use reth_primitives::{bytes::Bytes, Address, TxHash, H256};
+use reth_primitives::{Address, Bytes, TxHash, B256, U256};
 use revm::{
     inspectors::CustomPrintTracer,
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
     primitives::Env,
     Database, EVMData, Inspector,
 };
+use std::fmt::Debug;
 
-/// A wrapped [Inspector](revm::Inspector) that can be reused in the stack
+/// A wrapped [Inspector] that can be reused in the stack
 mod maybe_owned;
 pub use maybe_owned::MaybeOwnedInspector;
 
@@ -73,8 +72,8 @@ impl InspectorStack {
     }
 }
 
-#[derive(Default)]
 /// Configuration for the inspectors.
+#[derive(Debug, Default)]
 pub struct InspectorStackConfig {
     /// Enable revm inspector printer.
     /// In execution this will print opcode level traces directly to console.
@@ -105,10 +104,9 @@ where
         &mut self,
         interpreter: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
     ) -> InstructionResult {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.initialize_interp(interpreter, data, is_static);
+            let status = inspector.initialize_interp(interpreter, data);
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
@@ -123,10 +121,9 @@ where
         &mut self,
         interpreter: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
     ) -> InstructionResult {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step(interpreter, data, is_static);
+            let status = inspector.step(interpreter, data);
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
@@ -141,7 +138,7 @@ where
         &mut self,
         evm_data: &mut EVMData<'_, DB>,
         address: &Address,
-        topics: &[H256],
+        topics: &[B256],
         data: &Bytes,
     ) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
@@ -153,11 +150,10 @@ where
         &mut self,
         interpreter: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        is_static: bool,
         eval: InstructionResult,
     ) -> InstructionResult {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step_end(interpreter, data, is_static, eval);
+            let status = inspector.step_end(interpreter, data, eval);
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
@@ -172,10 +168,9 @@ where
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let (status, gas, retdata) = inspector.call(data, inputs, is_static);
+            let (status, gas, retdata) = inspector.call(data, inputs);
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
@@ -193,11 +188,10 @@ where
         remaining_gas: Gas,
         ret: InstructionResult,
         out: Bytes,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
             let (new_ret, new_gas, new_out) =
-                inspector.call_end(data, inputs, remaining_gas, ret, out.clone(), is_static);
+                inspector.call_end(data, inputs, remaining_gas, ret, out.clone());
 
             // If the inspector returns a different ret or a revert with a non-empty message,
             // we assume it wants to tell us something
@@ -247,9 +241,9 @@ where
         (ret, address, remaining_gas, out)
     }
 
-    fn selfdestruct(&mut self, contract: Address, target: Address) {
+    fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            Inspector::<DB>::selfdestruct(inspector, contract, target);
+            Inspector::<DB>::selfdestruct(inspector, contract, target, value);
         });
     }
 }

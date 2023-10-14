@@ -8,7 +8,7 @@ use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
     interpreter::opcode::{self, spec_opcode_gas},
-    primitives::{AccountInfo, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
+    primitives::{Account, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
 };
 use std::collections::{HashSet, VecDeque};
 
@@ -165,12 +165,8 @@ impl ParityTraceBuilder {
 
         let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
 
-        let mut trace = TraceResults {
-            output: output.into(),
-            trace: trace.unwrap_or_default(),
-            vm_trace,
-            state_diff,
-        };
+        let mut trace =
+            TraceResults { output, trace: trace.unwrap_or_default(), vm_trace, state_diff };
 
         // we're setting the gas used of the root trace explicitly to the gas used of the execution
         // result
@@ -211,11 +207,7 @@ impl ParityTraceBuilder {
 
         // check the state diff case
         if let Some(ref mut state_diff) = trace_res.state_diff {
-            populate_account_balance_nonce_diffs(
-                state_diff,
-                &db,
-                state.into_iter().map(|(addr, acc)| (addr, acc.info)),
-            )?;
+            populate_account_balance_nonce_diffs(state_diff, &db, state.iter())?;
         }
 
         // check the vm trace case
@@ -398,7 +390,7 @@ impl ParityTraceBuilder {
 
         // Calculate the stack items at this step
         let push_stack = {
-            let step_op = step.op.u8();
+            let step_op = step.op.get();
             let show_stack: usize;
             if (opcode::PUSH0..=opcode::PUSH32).contains(&step_op) {
                 show_stack = 1;
@@ -424,7 +416,7 @@ impl ParityTraceBuilder {
                     opcode::ADD |
                     opcode::EXP |
                     opcode::CALLER |
-                    opcode::SHA3 |
+                    opcode::KECCAK256 |
                     opcode::SUB |
                     opcode::ADDRESS |
                     opcode::GAS |
@@ -482,7 +474,7 @@ impl ParityTraceBuilder {
         let cost = self
             .spec_id
             .and_then(|spec_id| {
-                spec_opcode_gas(spec_id).get(step.op.u8() as usize).map(|op| op.get_gas())
+                spec_opcode_gas(spec_id).get(step.op.get() as usize).map(|op| op.get_gas())
             })
             .unwrap_or_default();
 
@@ -535,7 +527,7 @@ where
 ///
 /// iteratively fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
-    db: &DB,
+    db: DB,
     trace: &mut VmTrace,
     breadth_first_addresses: I,
 ) -> Result<(), DB::Error>
@@ -561,7 +553,7 @@ where
 
         let code_hash = if db_acc.code_hash != KECCAK_EMPTY { db_acc.code_hash } else { continue };
 
-        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes().into();
+        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes();
     }
 
     Ok(())
@@ -571,33 +563,51 @@ where
 /// in the [ExecutionResult] state map and compares the balance and nonce against what's in the
 /// `db`, which should point to the beginning of the transaction.
 ///
-/// It's expected that `DB` is a [CacheDB](revm::db::CacheDB) which at this point already contains
-/// all the accounts that are in the state map and never has to fetch them from disk.
-pub fn populate_account_balance_nonce_diffs<DB, I>(
+/// It's expected that `DB` is a revm [Database](revm::db::Database) which at this point already
+/// contains all the accounts that are in the state map and never has to fetch them from disk.
+///
+/// This is intended to be called after inspecting a transaction with the returned state.
+pub fn populate_account_balance_nonce_diffs<'a, DB, I>(
     state_diff: &mut StateDiff,
     db: DB,
     account_diffs: I,
 ) -> Result<(), DB::Error>
 where
-    I: IntoIterator<Item = (Address, AccountInfo)>,
+    I: IntoIterator<Item = (&'a Address, &'a Account)>,
     DB: DatabaseRef,
 {
     for (addr, changed_acc) in account_diffs.into_iter() {
+        let addr = *addr;
         let entry = state_diff.entry(addr).or_default();
-        let db_acc = db.basic(addr)?.unwrap_or_default();
-        entry.balance = if db_acc.balance == changed_acc.balance {
-            Delta::Unchanged
+
+        // we check if this account was created during the transaction
+        if changed_acc.is_created() {
+            entry.balance = Delta::Added(changed_acc.info.balance);
+            entry.nonce = Delta::Added(U64::from(changed_acc.info.nonce));
+            if changed_acc.info.code_hash == KECCAK_EMPTY {
+                // this is an additional check to ensure new accounts always get the empty code
+                // marked as added
+                entry.code = Delta::Added(Default::default());
+            }
         } else {
-            Delta::Changed(ChangedType { from: db_acc.balance, to: changed_acc.balance })
-        };
-        entry.nonce = if db_acc.nonce == changed_acc.nonce {
-            Delta::Unchanged
-        } else {
-            Delta::Changed(ChangedType {
-                from: U64::from(db_acc.nonce),
-                to: U64::from(changed_acc.nonce),
-            })
-        };
+            // account already exists, we need to fetch the account from the db
+            let db_acc = db.basic(addr)?.unwrap_or_default();
+            entry.balance = if db_acc.balance == changed_acc.info.balance {
+                Delta::Unchanged
+            } else {
+                Delta::Changed(ChangedType { from: db_acc.balance, to: changed_acc.info.balance })
+            };
+
+            // this is relevant for the caller and contracts
+            entry.nonce = if db_acc.nonce == changed_acc.info.nonce {
+                Delta::Unchanged
+            } else {
+                Delta::Changed(ChangedType {
+                    from: U64::from(db_acc.nonce),
+                    to: U64::from(changed_acc.info.nonce),
+                })
+            };
+        }
     }
 
     Ok(())

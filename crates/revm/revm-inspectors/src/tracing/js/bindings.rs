@@ -16,7 +16,7 @@ use boa_engine::{
     Context, JsArgs, JsError, JsNativeError, JsObject, JsResult, JsValue,
 };
 use boa_gc::{empty_trace, Finalize, Gc, Trace};
-use reth_primitives::{bytes::Bytes, Account, Address, H256, KECCAK_EMPTY, U256};
+use reth_primitives::{Account, Address, Bytes, B256, KECCAK_EMPTY, U256};
 use revm::{
     interpreter::{
         opcode::{PUSH0, PUSH32},
@@ -233,14 +233,14 @@ impl OpObj {
         let to_string = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure(move |_this, _args, _ctx| {
-                let op = OpCode::try_from_u8(value)
+                let op = OpCode::new(value)
                     .or_else(|| {
                         // if the opcode is invalid, we'll use the invalid opcode to represent it
                         // because this is invoked before the opcode is
                         // executed, the evm will eventually return a `Halt`
                         // with invalid/unknown opcode as result
                         let invalid_opcode = 0xfe;
-                        OpCode::try_from_u8(invalid_opcode)
+                        OpCode::new(invalid_opcode)
                     })
                     .expect("is valid opcode;");
                 let s = op.to_string();
@@ -327,7 +327,7 @@ impl Contract {
         let get_caller = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure(move |_this, _args, ctx| {
-                to_buf_value(caller.as_bytes().to_vec(), ctx)
+                to_buf_value(caller.as_slice().to_vec(), ctx)
             }),
         )
         .length(0)
@@ -336,7 +336,7 @@ impl Contract {
         let get_address = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure(move |_this, _args, ctx| {
-                to_buf_value(contract.as_bytes().to_vec(), ctx)
+                to_buf_value(contract.as_slice().to_vec(), ctx)
             }),
         )
         .length(0)
@@ -419,7 +419,7 @@ impl CallFrame {
         let get_from = FunctionObjectBuilder::new(
             ctx,
             NativeFunction::from_copy_closure(move |_this, _args, ctx| {
-                to_buf_value(caller.as_bytes().to_vec(), ctx)
+                to_buf_value(caller.as_slice().to_vec(), ctx)
             }),
         )
         .length(0)
@@ -428,7 +428,7 @@ impl CallFrame {
         let get_to = FunctionObjectBuilder::new(
             ctx,
             NativeFunction::from_copy_closure(move |_this, _args, ctx| {
-                to_buf_value(contract.as_bytes().to_vec(), ctx)
+                to_buf_value(contract.as_slice().to_vec(), ctx)
             }),
         )
         .length(0)
@@ -491,9 +491,9 @@ pub(crate) struct EvmContext {
     pub(crate) output: Bytes,
     /// Number, block number
     pub(crate) time: String,
-    pub(crate) block_hash: Option<H256>,
+    pub(crate) block_hash: Option<B256>,
     pub(crate) tx_index: Option<usize>,
-    pub(crate) tx_hash: Option<H256>,
+    pub(crate) tx_hash: Option<B256>,
 }
 
 impl EvmContext {
@@ -537,13 +537,13 @@ impl EvmContext {
         obj.set("output", to_buf(output.to_vec(), ctx)?, false, ctx)?;
         obj.set("time", time, false, ctx)?;
         if let Some(block_hash) = block_hash {
-            obj.set("blockHash", to_buf(block_hash.as_bytes().to_vec(), ctx)?, false, ctx)?;
+            obj.set("blockHash", to_buf(block_hash.as_slice().to_vec(), ctx)?, false, ctx)?;
         }
         if let Some(tx_index) = tx_index {
             obj.set("txIndex", tx_index as u64, false, ctx)?;
         }
         if let Some(tx_hash) = tx_hash {
-            obj.set("txHash", to_buf(tx_hash.as_bytes().to_vec(), ctx)?, false, ctx)?;
+            obj.set("txHash", to_buf(tx_hash.as_slice().to_vec(), ctx)?, false, ctx)?;
         }
 
         Ok(obj)
@@ -744,8 +744,8 @@ impl EvmDBInner {
                 ))))
             }
         };
-        let value: H256 = value.into();
-        to_buf(value.as_bytes().to_vec(), ctx)
+        let value: B256 = value.into();
+        to_buf(value.as_slice().to_vec(), ctx)
     }
 }
 
@@ -765,22 +765,22 @@ mod tests {
     fn test_contract() {
         let mut ctx = Context::default();
         let contract = Contract {
-            caller: Address::zero(),
-            contract: Address::zero(),
+            caller: Address::ZERO,
+            contract: Address::ZERO,
             value: U256::from(1337u64),
             input: vec![0x01, 0x02, 0x03].into(),
         };
-        let big_int = ctx.eval(Source::from_bytes(BIG_INT_JS.as_bytes())).unwrap();
+        let big_int = ctx.eval(Source::from_bytes(BIG_INT_JS)).unwrap();
         ctx.register_global_property("bigint", big_int, Attribute::all()).unwrap();
 
         let obj = contract.clone().into_js_object(&mut ctx).unwrap();
-        let s = r#"({
+        let s = "({
                 call: function(contract) { return contract.getCaller(); },
                 value: function(contract) { return contract.getValue(); },
                 input: function(contract) { return contract.getInput(); }
-        })"#;
+        })";
 
-        let eval_obj = ctx.eval(Source::from_bytes(s.as_bytes())).unwrap();
+        let eval_obj = ctx.eval(Source::from_bytes(s)).unwrap();
 
         let call = eval_obj.as_object().unwrap().get("call", &mut ctx).unwrap();
         let res = call

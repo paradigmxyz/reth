@@ -13,9 +13,10 @@ description = "revm inspector implementations used by reth"
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 
+# eth
+alloy-sol-types.workspace = true
+
 revm.workspace = true
-# remove from reth and reexport from revm
-hashbrown = "0.14"
 
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true, optional = true }
@@ -24,6 +25,7 @@ serde_json = { workspace = true, optional = true }
 # js-tracing-inspector
 boa_engine = { workspace = true, optional = true }
 boa_gc = { workspace = true, optional = true }
+
 tokio = { version = "1", features = ["sync"], optional = true }
 
 [features]

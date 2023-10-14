@@ -2,13 +2,15 @@
 
 use crate::{
     builder::ETH_REQUEST_CHANNEL_CAPACITY, error::NetworkError, eth_requests::EthRequestHandler,
-    NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkHandle, NetworkManager,
+    transactions::TransactionsManager, NetworkConfig, NetworkConfigBuilder, NetworkEvent,
+    NetworkHandle, NetworkManager,
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{capability::Capability, DisconnectReason, HelloBuilder};
 use reth_primitives::PeerId;
 use reth_provider::{test_utils::NoopProvider, BlockReader, HeaderProvider};
+use reth_transaction_pool::test_utils::TestPool;
 use secp256k1::SecretKey;
 use std::{
     fmt,
@@ -18,7 +20,10 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    sync::{mpsc::channel, oneshot},
+    sync::{
+        mpsc::{channel, unbounded_channel},
+        oneshot,
+    },
     task::JoinHandle,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -93,7 +98,8 @@ where
         let PeerConfig { config, client, secret_key } = config;
 
         let network = NetworkManager::new(config).await?;
-        let peer = Peer { network, client, secret_key, request_handler: None };
+        let peer =
+            Peer { network, client, secret_key, request_handler: None, transactions_manager: None };
         self.peers.push(peer);
         Ok(())
     }
@@ -130,13 +136,10 @@ where
         let mut net = self;
         let handle = tokio::task::spawn(async move {
             let mut tx = None;
-            loop {
-                tokio::select! {
-                    _ = &mut net => { break}
-                    inc = rx => {
-                        tx = inc.ok();
-                        break
-                    }
+            tokio::select! {
+                _ = &mut net => {}
+                inc = rx => {
+                    tx = inc.ok();
                 }
             }
             if let Some(tx) = tx {
@@ -190,6 +193,7 @@ where
 }
 
 /// A handle to a [`Testnet`] that can be shared.
+#[derive(Debug)]
 pub struct TestnetHandle<C> {
     _handle: JoinHandle<()>,
     terminate: oneshot::Sender<oneshot::Sender<Testnet<C>>>,
@@ -206,12 +210,16 @@ impl<C> TestnetHandle<C> {
     }
 }
 
+/// A peer in the [`Testnet`].
 #[pin_project]
+#[derive(Debug)]
 pub struct Peer<C> {
     #[pin]
     network: NetworkManager<C>,
     #[pin]
     request_handler: Option<EthRequestHandler<C>>,
+    #[pin]
+    transactions_manager: Option<TransactionsManager<TestPool>>,
     client: C,
     secret_key: SecretKey,
 }
@@ -245,6 +253,14 @@ where
         let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx);
         self.request_handler = Some(request_handler);
     }
+
+    /// Set a new transactions manager that's connected to the peer's network
+    pub fn install_transactions_manager(&mut self, pool: TestPool) {
+        let (tx, rx) = unbounded_channel();
+        self.network.set_transactions(tx);
+        let transactions_manager = TransactionsManager::new(self.handle(), pool, rx);
+        self.transactions_manager = Some(transactions_manager);
+    }
 }
 
 impl<C> Future for Peer<C>
@@ -260,11 +276,16 @@ where
             let _ = request.poll(cx);
         }
 
+        if let Some(tx_manager) = this.transactions_manager.as_pin_mut() {
+            let _ = tx_manager.poll(cx);
+        }
+
         this.network.poll(cx)
     }
 }
 
 /// A helper config for setting up the reth networking stack.
+#[derive(Debug)]
 pub struct PeerConfig<C = NoopProvider> {
     config: NetworkConfig<C>,
     client: C,
@@ -281,7 +302,8 @@ where
     pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
         let PeerConfig { config, client, secret_key } = self;
         let network = NetworkManager::new(config).await?;
-        let peer = Peer { network, client, secret_key, request_handler: None };
+        let peer =
+            Peer { network, client, secret_key, request_handler: None, transactions_manager: None };
         Ok(peer)
     }
 
@@ -330,6 +352,7 @@ impl Default for PeerConfig {
 /// A helper type to await network events
 ///
 /// This makes it easier to await established connections
+#[derive(Debug)]
 pub struct NetworkEventStream {
     inner: UnboundedReceiverStream<NetworkEvent>,
 }

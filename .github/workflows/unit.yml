@@ -22,6 +22,7 @@ jobs:
       matrix:
         partition: [1, 2]
         network: ["ethereum", "optimism"]
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -59,6 +60,7 @@ jobs:
       group: Reth
     env:
       RUST_LOG: info,sync=error
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -69,7 +71,7 @@ jobs:
           repository: ethereum/tests
           path: testing/ef-tests/ethereum-tests
           submodules: recursive
-          depth: 1
+          fetch-depth: 1
 
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
@@ -93,6 +95,7 @@ jobs:
     strategy:
       matrix:
         network: ["ethereum", "optimism"]
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -104,8 +107,9 @@ jobs:
   unit-success:
     if: always()
     name: unit success
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     needs: [test, eth-blockchain, doc-test]
+    timeout-minutes: 60
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1

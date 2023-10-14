@@ -2,7 +2,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives::{Header, SealedHeader, H256};
+use reth_primitives::{Header, SealedHeader, B256};
 use schnellru::{ByLength, LruMap};
 use std::sync::Arc;
 use tracing::warn;
@@ -16,7 +16,7 @@ const INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
 /// Keeps track of invalid headers.
 pub(crate) struct InvalidHeaderCache {
     /// This maps a header hash to a reference to its invalid ancestor.
-    headers: LruMap<H256, HeaderEntry>,
+    headers: LruMap<B256, HeaderEntry>,
     /// Metrics for the cache.
     metrics: InvalidHeaderCacheMetrics,
 }
@@ -26,7 +26,7 @@ impl InvalidHeaderCache {
         Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
     }
 
-    fn insert_entry(&mut self, hash: H256, header: Arc<Header>) {
+    fn insert_entry(&mut self, hash: B256, header: Arc<Header>) {
         self.headers.insert(hash, HeaderEntry { header, hit_count: 0 });
     }
 
@@ -34,7 +34,7 @@ impl InvalidHeaderCache {
     ///
     /// If this is called, the hit count for the entry is incremented.
     /// If the hit count exceeds the threshold, the entry is evicted and `None` is returned.
-    pub(crate) fn get(&mut self, hash: &H256) -> Option<Arc<Header>> {
+    pub(crate) fn get(&mut self, hash: &B256) -> Option<Arc<Header>> {
         {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
@@ -51,7 +51,7 @@ impl InvalidHeaderCache {
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
     pub(crate) fn insert_with_invalid_ancestor(
         &mut self,
-        header_hash: H256,
+        header_hash: B256,
         invalid_ancestor: Arc<Header>,
     ) {
         if self.get(&header_hash).is_none() {

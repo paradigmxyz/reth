@@ -1,17 +1,13 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! Reth task management.
+
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
-//! reth task management
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
@@ -138,6 +134,7 @@ impl TaskSpawner for TokioTaskExecutor {
 /// diagnostic purposes, since tokio task essentially fail silently. Therefore, this type is a
 /// Stream that yields the name of panicked task, See [`TaskExecutor::spawn_critical`]. In order to
 /// execute Tasks use the [`TaskExecutor`] type [`TaskManager::executor`].
+#[derive(Debug)]
 #[must_use = "TaskManager must be polled to monitor critical tasks"]
 pub struct TaskManager {
     /// Handle to the tokio runtime this task manager is associated with.

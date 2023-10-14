@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 reth-codecs = { path = "../storage/codecs" }
+reth-nippy-jar = { path = "../storage/nippy-jar" }
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 reth-network-api.workspace = true
@@ -38,14 +39,13 @@ secp256k1 = { workspace = true, default-features = false, features = [
 ], optional = true }
 modular-bitfield = "0.11.2"
 parking_lot.workspace = true
-clap = { version = "4", features = ["derive"], optional = true }
+clap = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
-reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 arbitrary = { workspace = true, features = ["derive"] }
-hex-literal.workspace = true
 secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]

@@ -21,6 +21,7 @@ reth-rpc-engine-api = { path = "../rpc-engine-api" }
 reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
+reth-rpc-types-compat.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
@@ -39,7 +40,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 reth-rpc-api = { path = "../rpc-api", features = ["client"] }
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }

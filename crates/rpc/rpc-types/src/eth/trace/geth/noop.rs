@@ -14,7 +14,7 @@ mod tests {
     use super::*;
     use crate::trace::geth::*;
 
-    const DEFAULT: &str = r#"{}"#;
+    const DEFAULT: &str = r"{}";
 
     #[test]
     fn test_serialize_noop_trace() {

@@ -31,8 +31,24 @@ Options:
           - mainnet
           - goerli
           - sepolia
+          - holesky
+          - dev
           
           [default: mainnet]
+
+      --instance <INSTANCE>
+          Add a new instance of a node.
+          
+          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
+          
+          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
+          
+          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+          
+          [default: 1]
+
+      --trusted-setup-file <PATH>
+          Overrides the KZG trusted setup by reading from the supplied file
 
   -h, --help
           Print help (see a summary with '-h')
@@ -74,7 +90,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.1/aarch64-apple-darwin]
+          [default: reth/VERSION/PLATFORM]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -92,20 +108,30 @@ Networking:
       --port <PORT>
           Network listening port. default: 30303
 
+      --max-outbound-peers <MAX_OUTBOUND_PEERS>
+          Maximum number of outbound requests. default: 100
+
+      --max-inbound-peers <MAX_INBOUND_PEERS>
+          Maximum number of inbound requests. default: 30
+
 RPC:
       --http
           Enable the HTTP-RPC server
 
       --http.addr <HTTP_ADDR>
           Http server address to listen on
+          
+          [default: 127.0.0.1]
 
       --http.port <HTTP_PORT>
           Http server port to listen on
+          
+          [default: 8545]
 
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
           
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -115,9 +141,13 @@ RPC:
 
       --ws.addr <WS_ADDR>
           Ws server address to listen on
+          
+          [default: 127.0.0.1]
 
       --ws.port <WS_PORT>
           Ws server port to listen on
+          
+          [default: 8546]
 
       --ws.origins <ws.origins>
           Origins from which to accept WebSocket requests
@@ -125,19 +155,25 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
           
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --ipcdisable
           Disable the IPC-RPC  server
 
       --ipcpath <IPCPATH>
           Filename for IPC socket/pipe within the datadir
+          
+          [default: /tmp/reth.ipc]
 
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
+          
+          [default: 127.0.0.1]
 
       --authrpc.port <AUTH_PORT>
           Auth server port to listen on
+          
+          [default: 8551]
 
       --authrpc.jwtsecret <PATH>
           Path to a JWT secret to use for authenticated RPC endpoints
@@ -150,7 +186,8 @@ RPC:
       --rpc-max-response-size <RPC_MAX_RESPONSE_SIZE>
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
           
-          [default: 100]
+          [default: 115]
+          [aliases: --rpc.returndata.limit]
 
       --rpc-max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
           Set the the maximum concurrent subscriptions per connection
@@ -160,12 +197,22 @@ RPC:
       --rpc-max-connections <COUNT>
           Maximum number of RPC server connections
           
-          [default: 100]
+          [default: 500]
 
       --rpc-max-tracing-requests <COUNT>
           Maximum number of concurrent tracing requests
           
           [default: 25]
+
+      --rpc-max-logs-per-response <COUNT>
+          Maximum number of logs that can be returned in a single response
+          
+          [default: 20000]
+
+      --rpc-gas-cap <GAS_CAP>
+          Maximum gas limit for `eth_call` and call tracing RPC methods
+          
+          [default: 50000000]
 
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
@@ -187,9 +234,6 @@ Gas Price Oracle:
           The percentile of gas prices to use for the estimate
           
           [default: 60]
-   
-      --rpc.gascap
-          Maximum gas limit for `eth_call` and call tracing RPC methods
 
       --block-cache-len <BLOCK_CACHE_LEN>
           Maximum number of block cache entries
@@ -242,11 +286,21 @@ TxPool:
           
           [default: 16]
 
+      --txpool.pricebump <PRICE_BUMP>
+          Price bump (in %) for the transaction pool underpriced check
+          
+          [default: 10]
+
+      --blobpool.pricebump <BLOB_TRANSACTION_PRICE_BUMP>
+          Price bump percentage to replace an already existing blob transaction
+          
+          [default: 100]
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
           
-          [default: reth/v0.1.0-alpha.1/macos]
+          [default: reth/VERSION/OS]
 
       --builder.gaslimit <GAS_LIMIT>
           Target gas ceiling for built blocks
@@ -311,13 +365,10 @@ Database:
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
 
-      --auto-mine
-          Automatically mine blocks for new transactions
-
 Dev testnet:
       --dev
           Start the node in dev mode
-
+          
           This mode uses a local proof-of-authority consensus engine with either fixed block times
           or automatically mined blocks.
           Disables network discovery and enables local http server.
@@ -331,20 +382,27 @@ Dev testnet:
           Interval between blocks.
           
           Parses strings using [humantime::parse_duration]
-          --dev.block-time 12s
-          
+          --dev.block_time 12s
+
 Pruning:
       --full
           Run full node. Only the most recent 128 block states are stored. This flag takes priority over pruning configuration in reth.toml
 
 Logging:
-      --log.persistent
-          The flag to enable persistent logs
-
       --log.directory <PATH>
           The path to put log files in
           
           [default: /reth/logs]
+
+      --log.max-size <SIZE>
+          The maximum size (in MB) of log files
+          
+          [default: 200]
+
+      --log.max-files <COUNT>
+          The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
+          
+          [default: 5]
 
       --log.journald
           Log events to journald
@@ -353,6 +411,16 @@ Logging:
           The filter to use for logs written to the log file
           
           [default: error]
+
+      --color <COLOR>
+          Sets whether or not the formatter emits ANSI terminal escape codes for colors and other text formatting
+          
+          [default: always]
+
+          Possible values:
+          - always: Colors on
+          - auto:   Colors on
+          - never:  Colors off
 
 Display:
   -v, --verbosity...

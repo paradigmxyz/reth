@@ -17,7 +17,7 @@ normal = [
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-db = { path = "../storage/db" }
+reth-db.workspace = true
 reth-provider.workspace = true
 reth-stages = { path = "../stages" }
 
@@ -25,6 +25,7 @@ reth-stages = { path = "../stages" }
 parking_lot.workspace = true
 lru = "0.11"
 tracing.workspace = true
+tokio = { workspace = true, features = ["macros", "sync"] }
 
 # metrics
 reth-metrics = { workspace = true, features = ["common"] }
@@ -35,13 +36,12 @@ aquamarine.workspace = true
 linked_hash_set = "0.1.4"
 
 [dev-dependencies]
-reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 parking_lot.workspace = true
 assert_matches.workspace = true
-tokio = { workspace = true, features = ["macros", "sync"] }
 
 [features]
 test-utils = []

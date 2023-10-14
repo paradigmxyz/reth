@@ -6,8 +6,8 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_primitives::{
-    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock, TransactionKind,
-    TransactionSignedEcRecovered, TxHash, H256, U256,
+    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock,
+    TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use std::{fmt, time::Instant};
 
@@ -16,7 +16,7 @@ mod eth;
 mod task;
 
 /// A `TransactionValidator` implementation that validates ethereum transaction.
-pub use eth::{EthTransactionValidator, EthTransactionValidatorBuilder};
+pub use eth::*;
 
 /// A spawnable task that performs transaction validation.
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
@@ -114,7 +114,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 
     /// Returns the hash of the transaction.
     #[inline]
-    pub(crate) fn hash(&self) -> &H256 {
+    pub(crate) fn hash(&self) -> &B256 {
         self.transaction().hash()
     }
 
@@ -168,28 +168,25 @@ pub trait TransactionValidator: Send + Sync {
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction>;
 
+    /// Validates a batch of transactions.
+    ///
+    /// Must return all outcomes for the given transactions in the same order.
+    ///
+    /// See also [Self::validate_transaction].
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        futures_util::future::join_all(
+            transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
+        )
+        .await
+    }
+
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {}
-
-    /// Ensure that the code size is not greater than `max_init_code_size`.
-    /// `max_init_code_size` should be configurable so this will take it as an argument.
-    fn ensure_max_init_code_size(
-        &self,
-        transaction: &Self::Transaction,
-        max_init_code_size: usize,
-    ) -> Result<(), InvalidPoolTransactionError> {
-        if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
-        {
-            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
-                transaction.size(),
-                max_init_code_size,
-            ))
-        } else {
-            Ok(())
-        }
-    }
 }
 
 /// A valid transaction in the pool.
@@ -209,8 +206,6 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub timestamp: Instant,
     /// Where this transaction originated from.
     pub origin: TransactionOrigin,
-    /// The length of the rlp encoded transaction (cached)
-    pub encoded_length: usize,
 }
 
 // === impl ValidPoolTransaction ===
@@ -239,6 +234,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Returns the internal identifier for this transaction.
     pub(crate) fn id(&self) -> &TransactionId {
         &self.transaction_id
+    }
+
+    /// Returns the length of the rlp encoded transaction
+    #[inline]
+    pub fn encoded_length(&self) -> usize {
+        self.transaction.encoded_length()
     }
 
     /// Returns the nonce set for this transaction.
@@ -322,7 +323,6 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
             propagate: self.propagate,
             timestamp: self.timestamp,
             origin: self.origin,
-            encoded_length: self.encoded_length,
         }
     }
 }

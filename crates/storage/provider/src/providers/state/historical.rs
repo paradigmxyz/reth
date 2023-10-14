@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader, PostState,
-    ProviderError, StateProvider, StateRootProvider,
+    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
+    BundleStateWithReceipts, ProviderError, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -10,9 +10,9 @@ use reth_db::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_interfaces::Result;
+use reth_interfaces::RethResult;
 use reth_primitives::{
-    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
+    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
 };
 use std::marker::PhantomData;
 
@@ -27,6 +27,7 @@ use std::marker::PhantomData;
 /// - [tables::StorageHistory]
 /// - [tables::AccountChangeSet]
 /// - [tables::StorageChangeSet]
+#[derive(Debug)]
 pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
     /// Transaction
     tx: &'b TX,
@@ -68,7 +69,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     }
 
     /// Lookup an account in the AccountHistory table
-    pub fn account_history_lookup(&self, address: Address) -> Result<HistoryInfo> {
+    pub fn account_history_lookup(&self, address: Address) -> RethResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
         }
@@ -87,7 +88,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         &self,
         address: Address,
         storage_key: StorageKey,
-    ) -> Result<HistoryInfo> {
+    ) -> RethResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
         }
@@ -106,7 +107,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         key: K,
         key_filter: impl Fn(&K) -> bool,
         lowest_available_block_number: Option<BlockNumber>,
-    ) -> Result<HistoryInfo>
+    ) -> RethResult<HistoryInfo>
     where
         T: Table<Key = K, Value = BlockNumberList>,
     {
@@ -160,7 +161,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
 
 impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> Result<Option<Account>> {
+    fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
         match self.account_history_lookup(address)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
@@ -182,11 +183,15 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
 
 impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
-    fn block_hash(&self, number: u64) -> Result<Option<H256>> {
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         self.tx.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
     }
 
-    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> Result<Vec<H256>> {
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> RethResult<Vec<B256>> {
         let range = start..end;
         self.tx
             .cursor_read::<tables::CanonicalHeaders>()
@@ -194,21 +199,25 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b
                 cursor
                     .walk_range(range)?
                     .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-                    .collect::<Result<Vec<_>>>()
+                    .collect::<RethResult<Vec<_>>>()
             })?
             .map_err(Into::into)
     }
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 'b, TX> {
-    fn state_root(&self, _post_state: PostState) -> Result<H256> {
+    fn state_root(&self, _post_state: &BundleStateWithReceipts) -> RethResult<B256> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }
 
 impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, TX> {
     /// Get storage.
-    fn storage(&self, address: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
+    fn storage(
+        &self,
+        address: Address,
+        storage_key: StorageKey,
+    ) -> RethResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
@@ -234,7 +243,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
@@ -242,14 +251,15 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     fn proof(
         &self,
         _address: Address,
-        _keys: &[H256],
-    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        _keys: &[B256],
+    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }
 
 /// State provider for a given block number.
 /// For more detailed description, see [HistoricalStateProviderRef].
+#[derive(Debug)]
 pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
     /// Database transaction
     tx: TX,
@@ -306,14 +316,14 @@ delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
-#[derive(Default, Copy, Clone)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct LowestAvailableBlocks {
     /// Lowest block number at which the account history is available. It may not be available if
-    /// [reth_primitives::PrunePart::AccountHistory] was pruned.
+    /// [reth_primitives::PruneSegment::AccountHistory] was pruned.
     /// [Option::None] means all history is available.
     pub account_history_block_number: Option<BlockNumber>,
     /// Lowest block number at which the storage history is available. It may not be available if
-    /// [reth_primitives::PrunePart::StorageHistory] was pruned.
+    /// [reth_primitives::PruneSegment::StorageHistory] was pruned.
     /// [Option::None] means all history is available.
     pub storage_history_block_number: Option<BlockNumber>,
 }
@@ -347,12 +357,11 @@ mod tests {
         BlockNumberList,
     };
     use reth_interfaces::provider::ProviderError;
-    use reth_primitives::{hex_literal::hex, Account, StorageEntry, H160, H256, U256};
+    use reth_primitives::{address, b256, Account, Address, StorageEntry, B256, U256};
 
-    const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
-    const HIGHER_ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000005"));
-    const STORAGE: H256 =
-        H256(hex!("0000000000000000000000000000000000000000000000000000000000000001"));
+    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
+    const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
+    const STORAGE: B256 = b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
     fn assert_state_provider<T: StateProvider>() {}
     #[allow(unused)]

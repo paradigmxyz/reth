@@ -33,7 +33,7 @@ skip-tree = []
 
 [licenses]
 unlicensed = "deny"
-confidence-threshold = 0.9
+confidence-threshold = 0.8
 # copyleft = "deny"
 
 # List of explicitly allowed licenses
@@ -95,8 +95,9 @@ unknown-registry = "warn"
 # in the allow list is encountered
 unknown-git = "deny"
 allow-git = [
+    # TODO: remove, see ./Cargo.toml
     "https://github.com/bluealloy/revm",
-    "https://github.com/boa-dev/boa",
+
     "https://github.com/ethereum/c-kzg-4844",
     "https://github.com/sigp/discv5",
     "https://github.com/stevefan1999-personal/rust-igd",

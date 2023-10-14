@@ -1,6 +1,6 @@
 //! bindings for state overrides in eth_call
 
-use reth_primitives::{Address, Bytes, H256, U256, U64};
+use reth_primitives::{Address, Bytes, B256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -24,16 +24,17 @@ pub struct AccountOverride {
     /// Fake key-value mapping to override all slots in the account storage before executing the
     /// call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<HashMap<H256, U256>>,
+    pub state: Option<HashMap<B256, U256>>,
     /// Fake key-value mapping to override individual slots in the account storage before executing
     /// the call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state_diff: Option<HashMap<H256, U256>>,
+    pub state_diff: Option<HashMap<B256, U256>>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_primitives::address;
 
     #[test]
     fn test_state_override() {
@@ -43,9 +44,8 @@ mod tests {
             }
         }"#;
         let state_override: StateOverride = serde_json::from_str(s).unwrap();
-        let acc = state_override
-            .get(&"0x0000000000000000000000000000000000000124".parse().unwrap())
-            .unwrap();
+        let acc =
+            state_override.get(&address!("0000000000000000000000000000000000000124")).unwrap();
         assert!(acc.code.is_some());
     }
     #[test]
@@ -62,9 +62,8 @@ mod tests {
                 }
             }"#;
         let state_override: StateOverride = serde_json::from_str(s).unwrap();
-        let acc = state_override
-            .get(&"0x1b5212AF6b76113afD94cD2B5a78a73B7d7A8222".parse().unwrap())
-            .unwrap();
+        let acc =
+            state_override.get(&address!("1b5212AF6b76113afD94cD2B5a78a73B7d7A8222")).unwrap();
         assert!(acc.state_diff.is_some());
     }
 }

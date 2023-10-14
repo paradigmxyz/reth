@@ -10,4 +10,4 @@ futures.workspace = true
 jsonrpsee.workspace = true
 reth.workspace = true
 tokio = { workspace = true, features = ["full"] }
-eyre = "0.6.8"
+eyre.workspace = true

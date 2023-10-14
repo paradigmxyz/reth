@@ -2,6 +2,7 @@
 
 use crate::Case;
 use reth_db::DatabaseError;
+use reth_interfaces::RethError;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -16,6 +17,9 @@ pub enum Error {
     /// The test was skipped
     #[error("Test was skipped")]
     Skipped,
+    /// No post state found in test
+    #[error("No post state found for validation")]
+    MissingPostState,
     /// An IO error occurred
     #[error("An error occurred interacting with the file system at {path}: {error}")]
     Io {
@@ -42,10 +46,10 @@ pub enum Error {
     Assertion(String),
     /// An error internally in reth occurred.
     #[error("Test failed: {0}")]
-    RethError(#[from] reth_interfaces::Error),
+    RethError(#[from] RethError),
     /// An error occurred while decoding RLP.
     #[error("An error occurred deserializing RLP")]
-    RlpDecodeError(#[from] reth_rlp::DecodeError),
+    RlpDecodeError(#[from] alloy_rlp::Error),
 }
 
 /// The result of running a test.

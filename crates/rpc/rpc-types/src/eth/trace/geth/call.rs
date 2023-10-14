@@ -1,4 +1,4 @@
-use reth_primitives::{serde_helper::num::from_int_or_hex, Address, Bytes, H256, U256};
+use reth_primitives::{serde_helper::num::from_int_or_hex, Address, Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// The response object for `debug_traceTransaction` with `"tracer": "callTracer"`
@@ -35,7 +35,7 @@ pub struct CallLogFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<Address>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub topics: Option<Vec<H256>>,
+    pub topics: Option<Vec<B256>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<Bytes>,
 }
@@ -49,6 +49,20 @@ pub struct CallConfig {
     pub only_top_call: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub with_log: Option<bool>,
+}
+
+impl CallConfig {
+    /// Sets the only top call flag
+    pub fn only_top_call(mut self) -> Self {
+        self.only_top_call = Some(true);
+        self
+    }
+
+    /// Sets the with log flag
+    pub fn with_log(mut self) -> Self {
+        self.with_log = Some(true);
+        self
+    }
 }
 
 #[cfg(test)]

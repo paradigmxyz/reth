@@ -81,7 +81,8 @@ impl PeersHandle {
 /// From this type, connections to peers are established or disconnected, see [`PeerAction`].
 ///
 /// The [`PeersManager`] will be notified on peer related changes
-pub(crate) struct PeersManager {
+#[derive(Debug)]
+pub struct PeersManager {
     /// All peers known to the network
     peers: HashMap<PeerId, Peer>,
     /// Copy of the sender half, so new [`PeersHandle`] can be created on demand.
@@ -117,7 +118,7 @@ pub(crate) struct PeersManager {
 
 impl PeersManager {
     /// Create a new instance with the given config
-    pub(crate) fn new(config: PeersConfig) -> Self {
+    pub fn new(config: PeersConfig) -> Self {
         let PeersConfig {
             refill_slots_interval,
             connection_info,
@@ -1020,6 +1021,7 @@ impl PeerConnectionState {
 }
 
 /// Commands the [`PeersManager`] listens for.
+#[derive(Debug)]
 pub(crate) enum PeerCommand {
     /// Command for manually add
     Add(PeerId, SocketAddr),
@@ -1046,28 +1048,47 @@ pub enum PeerAction {
         remote_addr: SocketAddr,
     },
     /// Disconnect an existing connection.
-    Disconnect { peer_id: PeerId, reason: Option<DisconnectReason> },
+    Disconnect {
+        /// The peer ID of the established connection.
+        peer_id: PeerId,
+        /// An optional reason for the disconnect.
+        reason: Option<DisconnectReason>,
+    },
     /// Disconnect an existing incoming connection, because the peers reputation is below the
     /// banned threshold or is on the [`BanList`]
     DisconnectBannedIncoming {
-        /// Peer id of the established connection.
+        /// The peer ID of the established connection.
         peer_id: PeerId,
     },
     /// Ban the peer in discovery.
-    DiscoveryBanPeerId { peer_id: PeerId, ip_addr: IpAddr },
+    DiscoveryBanPeerId {
+        /// The peer ID.
+        peer_id: PeerId,
+        /// The IP address.
+        ip_addr: IpAddr,
+    },
     /// Ban the IP in discovery.
-    DiscoveryBanIp { ip_addr: IpAddr },
+    DiscoveryBanIp {
+        /// The IP address.
+        ip_addr: IpAddr,
+    },
     /// Ban the peer temporarily
-    BanPeer { peer_id: PeerId },
+    BanPeer {
+        /// The peer ID.
+        peer_id: PeerId,
+    },
     /// Unban the peer temporarily
-    UnBanPeer { peer_id: PeerId },
+    UnBanPeer {
+        /// The peer ID.
+        peer_id: PeerId,
+    },
     /// Emit peerAdded event
     PeerAdded(PeerId),
     /// Emit peerRemoved event
     PeerRemoved(PeerId),
 }
 
-/// Config type for initiating a [`PeersManager`] instance
+/// Config type for initiating a [`PeersManager`] instance.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -1134,6 +1155,12 @@ impl PeersConfig {
         self
     }
 
+    /// Configure how long to ban bad peers
+    pub fn with_ban_duration(mut self, ban_duration: Duration) -> Self {
+        self.ban_duration = ban_duration;
+        self
+    }
+
     /// Maximum occupied slots for outbound connections.
     pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
         self.connection_info.num_outbound = num_outbound;
@@ -1174,6 +1201,12 @@ impl PeersConfig {
         self
     }
 
+    /// Maximum allowed concurrent outbound dials.
+    pub fn with_max_concurrent_dials(mut self, max_concurrent_outbound_dials: usize) -> Self {
+        self.connection_info.max_concurrent_outbound_dials = max_concurrent_outbound_dials;
+        self
+    }
+
     /// Nodes to always connect to.
     pub fn with_trusted_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
         self.trusted_nodes = nodes;
@@ -1198,6 +1231,18 @@ impl PeersConfig {
         self
     }
 
+    /// Configures how to weigh reputation changes.
+    pub fn with_reputation_weights(mut self, reputation_weights: ReputationChangeWeights) -> Self {
+        self.reputation_weights = reputation_weights;
+        self
+    }
+
+    /// Configures how long to backoff peers that are we failed to connect to for non-fatal reasons
+    pub fn with_backoff_durations(mut self, backoff_durations: PeerBackoffDurations) -> Self {
+        self.backoff_durations = backoff_durations;
+        self
+    }
+
     /// Read from file nodes available at launch. Ignored if None.
     pub fn with_basic_nodes_from_file(
         self,
@@ -1217,7 +1262,7 @@ impl PeersConfig {
 
 /// The durations to use when a backoff should be applied to a peer.
 ///
-/// See also [`BackoffKind`](BackoffKind).
+/// See also [`BackoffKind`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerBackoffDurations {
@@ -1304,7 +1349,7 @@ mod test {
     };
     use reth_net_common::ban_list::BanList;
     use reth_network_api::ReputationChangeKind;
-    use reth_primitives::{PeerId, H512};
+    use reth_primitives::{PeerId, B512};
     use std::{
         collections::HashSet,
         future::{poll_fn, Future},
@@ -1957,7 +2002,7 @@ mod test {
         let ban_list = BanList::new(HashSet::new(), vec![ip]);
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
-        peer_manager.add_peer(H512::default(), socket_addr, None);
+        peer_manager.add_peer(B512::default(), socket_addr, None);
 
         assert!(peer_manager.peers.is_empty());
     }
@@ -1986,7 +2031,7 @@ mod test {
     async fn test_on_active_inbound_ban_list() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        let given_peer_id: PeerId = H512::from_low_u64_ne(123403423412);
+        let given_peer_id = PeerId::random();
         let ban_list = BanList::new(vec![given_peer_id], HashSet::new());
         let config = PeersConfig::default().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
