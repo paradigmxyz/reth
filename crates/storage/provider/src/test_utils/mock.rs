@@ -18,7 +18,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::{RangeBounds, RangeInclusive},
+    ops::{Range, RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -265,7 +265,7 @@ impl TransactionsProvider for MockEthProvider {
 
     fn transactions_by_block_range(
         &self,
-        range: impl RangeBounds<reth_primitives::BlockNumber>,
+        range: Range<reth_primitives::BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         // init btreemap so we can return in order
         let mut map = BTreeMap::new();
@@ -280,7 +280,7 @@ impl TransactionsProvider for MockEthProvider {
 
     fn transactions_by_tx_range(
         &self,
-        range: impl RangeBounds<TxNumber>,
+        range: RangeInclusive<TxNumber>,
     ) -> RethResult<Vec<reth_primitives::TransactionSignedNoHash>> {
         let lock = self.blocks.lock();
         let transactions = lock
@@ -299,7 +299,7 @@ impl TransactionsProvider for MockEthProvider {
         Ok(transactions)
     }
 
-    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
         let lock = self.blocks.lock();
         let transactions = lock
             .values()

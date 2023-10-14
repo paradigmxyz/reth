@@ -22,7 +22,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashSet},
-    ops::{RangeBounds, RangeInclusive},
+    ops::{Range, RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
@@ -319,19 +319,19 @@ where
 
     fn transactions_by_block_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: Range<BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         self.database.provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
-        range: impl RangeBounds<TxNumber>,
+        range: RangeInclusive<TxNumber>,
     ) -> RethResult<Vec<TransactionSignedNoHash>> {
         self.database.provider()?.transactions_by_tx_range(range)
     }
 
-    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
         self.database.provider()?.senders_by_tx_range(range)
     }
 

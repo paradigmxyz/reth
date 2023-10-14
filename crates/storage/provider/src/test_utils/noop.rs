@@ -17,7 +17,7 @@ use reth_primitives::{
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
-    ops::{RangeBounds, RangeInclusive},
+    ops::{Range, RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -174,18 +174,18 @@ impl TransactionsProvider for NoopProvider {
 
     fn transactions_by_block_range(
         &self,
-        _range: impl RangeBounds<BlockNumber>,
+        _range: Range<BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         Ok(Vec::default())
     }
 
-    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, _range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
         Ok(Vec::default())
     }
 
     fn transactions_by_tx_range(
         &self,
-        _range: impl RangeBounds<TxNumber>,
+        _range: RangeInclusive<TxNumber>,
     ) -> RethResult<Vec<reth_primitives::TransactionSignedNoHash>> {
         Ok(Vec::default())
     }

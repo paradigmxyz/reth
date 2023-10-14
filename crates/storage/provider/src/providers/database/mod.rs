@@ -16,7 +16,7 @@ use reth_primitives::{
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
-    ops::{RangeBounds, RangeInclusive},
+    ops::{Range, RangeBounds, RangeInclusive},
     sync::Arc,
 };
 use tracing::trace;
@@ -295,19 +295,19 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
 
     fn transactions_by_block_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: Range<BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         self.provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
-        range: impl RangeBounds<TxNumber>,
+        range: RangeInclusive<TxNumber>,
     ) -> RethResult<Vec<TransactionSignedNoHash>> {
         self.provider()?.transactions_by_tx_range(range)
     }
 
-    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
         self.provider()?.senders_by_tx_range(range)
     }
 
