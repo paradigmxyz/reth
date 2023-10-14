@@ -95,7 +95,7 @@ hyper = "0.14.25"
 
 # misc
 aquamarine.workspace = true
-eyre = "0.6.8"
+eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
 tempfile.workspace = true
 backon = "0.4"
