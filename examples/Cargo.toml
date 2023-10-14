@@ -22,7 +22,7 @@ reth-network.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
 
-eyre = "0.6.8"
+eyre.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 tokio.workspace = true

@@ -43,7 +43,7 @@ thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 parking_lot.workspace = true
 derive_more = "0.99"
-eyre = "0.6.8"
+eyre.workspace = true
 paste = "1.0"
 
 # arbitrary utils

@@ -8,4 +8,4 @@ license.workspace = true
 [dependencies]
 reth.workspace = true
 clap.workspace = true
-eyre = "0.6"
+eyre.workspace = true
