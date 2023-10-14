@@ -11,9 +11,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256};
-use reth_provider::{
-    BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
-};
+use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     env::tx_env_with_recovered,
@@ -25,10 +23,10 @@ use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     state::StateOverride,
     trace::{filter::TraceFilter, parity::*},
-    BlockError, BlockOverrides, CallRequest, Index, TransactionInfo,
+    BlockError, BlockOverrides, CallRequest, Index,
 };
 use revm::{db::CacheDB, primitives::Env};
-use revm_primitives::{db::DatabaseCommit, ExecutionResult, ResultAndState, State};
+use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -294,7 +292,7 @@ where
         // trace all relevant blocks
         let mut block_traces = Vec::with_capacity(target_blocks.len());
         for (num, indices, highest_idx) in target_blocks {
-            let traces = self.trace_block_until(
+            let traces = self.inner.eth_api.trace_block_until(
                 num.into(),
                 Some(highest_idx),
                 TracingInspectorConfig::default_parity(),
@@ -346,130 +344,12 @@ where
             .await
     }
 
-    /// Executes all transactions of a block and returns a list of callback results invoked for each
-    /// transaction in the block.
-    ///
-    /// This
-    /// 1. fetches all transactions of the block
-    /// 2. configures the EVM evn
-    /// 3. loops over all transactions and executes them
-    /// 4. calls the callback with the transaction info, the execution result, the changed state
-    /// _after_ the transaction [StateProviderDatabase] and the database that points to the state
-    /// right _before_ the transaction.
-    async fn trace_block_with<F, R>(
-        &self,
-        block_id: BlockId,
-        config: TracingInspectorConfig,
-        f: F,
-    ) -> EthResult<Option<Vec<R>>>
-    where
-        // This is the callback that's invoked for each transaction with
-        F: for<'a> Fn(
-                TransactionInfo,
-                TracingInspector,
-                ExecutionResult,
-                &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
-            ) -> EthResult<R>
-            + Send
-            + 'static,
-        R: Send + 'static,
-    {
-        self.trace_block_until(block_id, None, config, f).await
-    }
-
-    /// Executes all transactions of a block.
-    ///
-    /// If a `highest_index` is given, this will only execute the first `highest_index`
-    /// transactions, in other words, it will stop executing transactions after the
-    /// `highest_index`th transaction.
-    async fn trace_block_until<F, R>(
-        &self,
-        block_id: BlockId,
-        highest_index: Option<u64>,
-        config: TracingInspectorConfig,
-        f: F,
-    ) -> EthResult<Option<Vec<R>>>
-    where
-        F: for<'a> Fn(
-                TransactionInfo,
-                TracingInspector,
-                ExecutionResult,
-                &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
-            ) -> EthResult<R>
-            + Send
-            + 'static,
-        R: Send + 'static,
-    {
-        let ((cfg, block_env, _), block) = futures::try_join!(
-            self.inner.eth_api.evm_env_at(block_id),
-            self.inner.eth_api.block_by_id(block_id),
-        )?;
-
-        let block = match block {
-            Some(block) => block,
-            None => return Ok(None),
-        };
-
-        // we need to get the state of the parent block because we're replaying this block on top of
-        // its parent block's state
-        let state_at = block.parent_hash;
-
-        let block_hash = block.hash;
-        let transactions = block.body;
-
-        // replay all transactions of the block
-        self.inner
-            .eth_api
-            .spawn_with_state_at_block(state_at.into(), move |state| {
-                let mut results = Vec::with_capacity(transactions.len());
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-                let max_transactions =
-                    highest_index.map_or(transactions.len(), |highest| highest as usize);
-                let mut transactions =
-                    transactions.into_iter().take(max_transactions).enumerate().peekable();
-
-                while let Some((idx, tx)) = transactions.next() {
-                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-                    let tx_info = TransactionInfo {
-                        hash: Some(tx.hash()),
-                        index: Some(idx as u64),
-                        block_hash: Some(block_hash),
-                        block_number: Some(block_env.number.try_into().unwrap_or(u64::MAX)),
-                        base_fee: Some(block_env.basefee.try_into().unwrap_or(u64::MAX)),
-                    };
-
-                    let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-
-                    let mut inspector = TracingInspector::new(config);
-                    let (res, _) = inspect(&mut db, env, &mut inspector)?;
-                    let ResultAndState { result, state } = res;
-                    results.push(f(tx_info, inspector, result, &state, &db)?);
-
-                    // need to apply the state changes of this transaction before executing the
-                    // next transaction
-                    if transactions.peek().is_some() {
-                        // need to apply the state changes of this transaction before executing
-                        // the next transaction
-                        db.commit(state)
-                    }
-                }
-
-                Ok(results)
-            })
-            .await
-            .map(Some)
-    }
-
     /// Returns traces created at given block.
     pub async fn trace_block(
         &self,
         block_id: BlockId,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let traces = self.trace_block_with(
+        let traces = self.inner.eth_api.trace_block_with(
             block_id,
             TracingInspectorConfig::default_parity(),
             |tx_info, inspector, res, _, _| {
@@ -530,27 +410,29 @@ where
         block_id: BlockId,
         trace_types: HashSet<TraceType>,
     ) -> EthResult<Option<Vec<TraceResultsWithTransactionHash>>> {
-        self.trace_block_with(
-            block_id,
-            tracing_config(&trace_types),
-            move |tx_info, inspector, res, state, db| {
-                let mut full_trace =
-                    inspector.into_parity_builder().into_trace_results(res, &trace_types);
+        self.inner
+            .eth_api
+            .trace_block_with(
+                block_id,
+                tracing_config(&trace_types),
+                move |tx_info, inspector, res, state, db| {
+                    let mut full_trace =
+                        inspector.into_parity_builder().into_trace_results(res, &trace_types);
 
-                // If statediffs were requested, populate them with the account balance and nonce
-                // from pre-state
-                if let Some(ref mut state_diff) = full_trace.state_diff {
-                    populate_account_balance_nonce_diffs(state_diff, db, state.iter())?;
-                }
+                    // If statediffs were requested, populate them with the account balance and
+                    // nonce from pre-state
+                    if let Some(ref mut state_diff) = full_trace.state_diff {
+                        populate_account_balance_nonce_diffs(state_diff, db, state.iter())?;
+                    }
 
-                let trace = TraceResultsWithTransactionHash {
-                    transaction_hash: tx_info.hash.expect("tx hash is set"),
-                    full_trace,
-                };
-                Ok(trace)
-            },
-        )
-        .await
+                    let trace = TraceResultsWithTransactionHash {
+                        transaction_hash: tx_info.hash.expect("tx hash is set"),
+                        full_trace,
+                    };
+                    Ok(trace)
+                },
+            )
+            .await
     }
 }
 
