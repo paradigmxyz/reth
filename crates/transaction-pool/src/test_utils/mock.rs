@@ -481,10 +481,6 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn input(&self) -> &Bytes {
-        panic!("not implemented")
-    }
-
     fn cost(&self) -> U256 {
         match self {
             MockTransaction::Legacy { gas_price, value, gas_limit, .. } => {
@@ -586,6 +582,17 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip2930 { to, .. } => to,
             #[cfg(feature = "optimism")]
             MockTransaction::Deposit(TxDeposit { to, .. }) => to,
+        }
+    }
+
+    fn input(&self) -> &[u8] {
+        match self {
+            MockTransaction::Legacy { .. } => &[],
+            MockTransaction::Eip1559 { input, .. } => input,
+            MockTransaction::Eip4844 { input, .. } => input,
+            MockTransaction::Eip2930 { input, .. } => input,
+            #[cfg(feature = "optimism")]
+            MockTransaction::Deposit { .. } => &[],
         }
     }
 

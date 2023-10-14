@@ -604,7 +604,7 @@ impl PayloadConfig {
         if self.chain_spec.optimism {
             return Default::default()
         }
-        reth_primitives::Bytes(self.extra_data.clone())
+        self.extra_data.clone()
     }
 }
 
@@ -977,7 +977,14 @@ where
     Client: StateProviderFactory,
 {
     let extra_data = config.extra_data();
-    let PayloadConfig { initialized_block_env, parent_block, attributes, chain_spec, initialized_cfg, .. } = config;
+    let PayloadConfig {
+        initialized_block_env,
+        parent_block,
+        attributes,
+        chain_spec,
+        initialized_cfg,
+        ..
+    } = config;
 
     debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building empty payload");
 
@@ -1033,7 +1040,6 @@ where
         extra_data,
         blob_gas_used: None,
         excess_blob_gas: None,
-        extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
     };
 

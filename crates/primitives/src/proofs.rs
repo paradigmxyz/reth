@@ -180,7 +180,7 @@ mod tests {
         hex_literal::hex,
         proofs::{calculate_receipt_root, calculate_transaction_root, genesis_state_root},
         Address, Block, Bloom, Bytes, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256,
-        GOERLI, H160, H256, HOLESKY, MAINNET, SEPOLIA, U256,
+        GOERLI, H256, HOLESKY, MAINNET, SEPOLIA, U256,
     };
     use alloy_rlp::Decodable;
 

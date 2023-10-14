@@ -4,7 +4,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, U256};
+use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, Receipt, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
 #[derive(Debug)]
@@ -40,8 +40,8 @@ impl BlockExecutor for TestExecutor {
         _block: &Block,
         _total_difficulty: U256,
         _senders: Option<Vec<Address>>,
-    ) -> Result<(PostState, u64), BlockExecutionError> {
-        Ok((self.0.clone().ok_or(BlockExecutionError::UnavailableForTest)?, 0))
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        return Err(BlockExecutionError::UnavailableForTest)
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {

@@ -43,7 +43,8 @@ pub mod option_u64_hex {
     where
         D: Deserializer<'de>,
     {
-        Ok(U64::deserialize(deserializer).map_or(None, |v| Some(v.as_u64())))
+        Ok(U64::deserialize(deserializer)
+            .map_or(None, |v| Some(u64::from_be_bytes(v.to_be_bytes()))))
     }
 }
 

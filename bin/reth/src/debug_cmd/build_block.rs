@@ -249,7 +249,7 @@ impl Command {
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            PayloadBuilderAttributes::new(best_block.hash, payload_attrs),
+            PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
             self.chain.clone(),
         );
         let args = BuildArguments::new(

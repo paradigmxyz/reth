@@ -1,6 +1,6 @@
 //! Contains types required for building a payload.
 
-use alloy_rlp::Encodable;
+use alloy_rlp::{DecodeError, Encodable};
 use reth_primitives::{
     Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, B256, U256,
 };
@@ -180,7 +180,7 @@ impl PayloadBuilderAttributes {
             },
         );
 
-        Self {
+        Ok(Self {
             id,
             parent,
             timestamp: attributes.timestamp.to(),

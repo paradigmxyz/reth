@@ -17,7 +17,7 @@ use reth_primitives::{
     ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-use reth_provider::{AccountReader, StateProviderFactory};
+use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_revm_primitives::calculate_intrinsic_gas_after_merge;
 use reth_tasks::TaskSpawner;
 use std::{

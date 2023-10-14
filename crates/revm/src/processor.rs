@@ -264,77 +264,6 @@ impl<'a> EVMProcessor<'a> {
         out.map_err(|e| BlockValidationError::EVM { hash, message: format!("{e:?}") }.into())
     }
 
-    /// Runs the provided transactions and commits their state to the run-time database.
-    ///
-    /// The returned [BundleStateWithReceipts] can be used to persist the changes to disk, and
-    /// contains the changes made by each transaction.
-    ///
-    /// The changes in [BundleStateWithReceipts] have a transition ID associated with them: there is
-    /// one transition ID for each transaction (with the first executed tx having transition ID
-    /// 0, and so on).
-    ///
-    /// The second returned value represents the total gas used by this block of transactions.
-    pub fn execute_transactions(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
-        self.init_env(&block.header, total_difficulty);
-
-        // perf: do not execute empty blocks
-        if block.body.is_empty() {
-            return Ok((Vec::new(), 0))
-        }
-
-        let senders = self.recover_senders(&block.body, senders)?;
-
-        let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
-        for (transaction, sender) in block.body.iter().zip(senders) {
-            let time = Instant::now();
-            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
-            // must be no greater than the block’s gasLimit.
-            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
-                }
-                .into())
-            }
-            // Execute transaction.
-            let ResultAndState { result, state } = self.transact(transaction, sender)?;
-            trace!(
-                target: "evm",
-                ?transaction, ?result, ?state,
-                "Executed transaction"
-            );
-            self.stats.execution_duration += time.elapsed();
-            let time = Instant::now();
-
-            self.db_mut().commit(state);
-
-            self.stats.apply_state_duration += time.elapsed();
-
-            // append gas used
-            cumulative_gas_used += result.gas_used();
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(Receipt {
-                tx_type: transaction.tx_type(),
-                // Success flag was added in `EIP-658: Embedding transaction status code in
-                // receipts`.
-                success: result.is_success(),
-                cumulative_gas_used,
-                // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-            });
-        }
-
-        Ok((receipts, cumulative_gas_used))
-    }
-
     /// Execute the block, verify gas usage and apply post-block state changes.
     fn execute_inner(
         &mut self,
@@ -486,6 +415,77 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         }
 
         self.save_receipts(receipts)
+    }
+
+    /// Runs the provided transactions and commits their state to the run-time database.
+    ///
+    /// The returned [BundleStateWithReceipts] can be used to persist the changes to disk, and
+    /// contains the changes made by each transaction.
+    ///
+    /// The changes in [BundleStateWithReceipts] have a transition ID associated with them: there is
+    /// one transition ID for each transaction (with the first executed tx having transition ID
+    /// 0, and so on).
+    ///
+    /// The second returned value represents the total gas used by this block of transactions.
+    fn execute_transactions(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        self.init_env(&block.header, total_difficulty);
+
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok((Vec::new(), 0))
+        }
+
+        let senders = self.recover_senders(&block.body, senders)?;
+
+        let mut cumulative_gas_used = 0;
+        let mut receipts = Vec::with_capacity(block.body.len());
+        for (transaction, sender) in block.body.iter().zip(senders) {
+            let time = Instant::now();
+            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
+            // must be no greater than the block’s gasLimit.
+            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
+            if transaction.gas_limit() > block_available_gas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: transaction.gas_limit(),
+                    block_available_gas,
+                }
+                .into())
+            }
+            // Execute transaction.
+            let ResultAndState { result, state } = self.transact(transaction, sender)?;
+            trace!(
+                target: "evm",
+                ?transaction, ?result, ?state,
+                "Executed transaction"
+            );
+            self.stats.execution_duration += time.elapsed();
+            let time = Instant::now();
+
+            self.db_mut().commit(state);
+
+            self.stats.apply_state_duration += time.elapsed();
+
+            // append gas used
+            cumulative_gas_used += result.gas_used();
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                // convert to reth log
+                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+            });
+        }
+
+        Ok((receipts, cumulative_gas_used))
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {

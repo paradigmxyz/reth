@@ -677,9 +677,6 @@ pub trait PoolTransaction:
     /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64;
 
-    /// The transaction input data.
-    fn input(&self) -> &Bytes;
-
     /// Returns the cost that this transaction is allowed to consume:
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
@@ -885,11 +882,6 @@ impl PoolTransaction for EthPooledTransaction {
     /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64 {
         self.transaction.nonce()
-    }
-
-    /// The transaction input data.
-    fn input(&self) -> &Bytes {
-        self.transaction.transaction.input()
     }
 
     /// Returns the cost that this transaction is allowed to consume:
