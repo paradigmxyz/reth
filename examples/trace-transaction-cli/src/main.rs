@@ -5,8 +5,6 @@
 //! ```not_rust
 //! cargo run -p trace-transaction-cli -- node --http --ws --receipient RECEIPIENT_ADDRESS
 //! ```
-//!
-//!
 use clap::Parser;
 use jsonrpsee::tokio;
 use reth::{
@@ -69,12 +67,12 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
                     let res = provider.transaction_by_hash(tx);
                     if let Ok(Some(tx_receipient)) = res {
                         if tx_receipient.kind().to() == Some(receipient) {
-                            // TODO: CAll trace_call 
+                            // TODO: CAll trace_call
                         }
                     }
                 }
             });
-        } 
+        }
 
         Ok(())
     }
