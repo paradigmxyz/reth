@@ -59,7 +59,7 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransactionsHandle {
     /// Command channel to the [`TransactionsManager`]
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,

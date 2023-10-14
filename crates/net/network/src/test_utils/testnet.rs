@@ -11,11 +11,13 @@ use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{capability::Capability, DisconnectReason, HelloBuilder};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_primitives::PeerId;
-use reth_provider::{test_utils::NoopProvider, BlockReader, HeaderProvider};
+use reth_primitives::{PeerId, MAINNET};
+use reth_provider::{test_utils::NoopProvider, BlockReader, HeaderProvider, StateProviderFactory};
+use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::{
+    blobstore::InMemoryBlobStore,
     test_utils::{testing_pool, TestPool},
-    TransactionPool,
+    EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
 use std::{
@@ -126,6 +128,15 @@ where
         self.peers.iter().map(|p| p.handle())
     }
 
+    /// Maps the pool of each peer with the given closure
+    pub fn map_pool<F, P>(self, f: F) -> Testnet<C, P>
+    where
+        F: Fn(Peer<C, Pool>) -> Peer<C, P>,
+        P: TransactionPool,
+    {
+        Testnet { peers: self.peers.into_iter().map(f).collect() }
+    }
+
     /// Apply a closure on each peer
     pub fn for_each<F>(&self, f: F)
     where
@@ -140,6 +151,30 @@ where
         F: FnMut(&mut Peer<C, Pool>),
     {
         self.peers.iter_mut().for_each(f)
+    }
+}
+
+impl<C, Pool> Testnet<C, Pool>
+where
+    C: StateProviderFactory + BlockReader + HeaderProvider + Clone + 'static,
+    Pool: TransactionPool,
+{
+    /// Installs an eth pool on each peer
+    pub fn with_eth_pool(self) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore>> {
+        self.map_pool(|peer| {
+            let blob_store = InMemoryBlobStore::default();
+            let pool = TransactionValidationTaskExecutor::eth(
+                peer.client.clone(),
+                MAINNET.clone(),
+                blob_store.clone(),
+                TokioTaskExecutor::default(),
+            );
+            peer.map_transactions_manager(EthTransactionPool::eth_pool(
+                pool,
+                blob_store,
+                Default::default(),
+            ))
+        })
     }
 }
 
@@ -326,6 +361,26 @@ where
         let transactions_manager = TransactionsManager::new(self.handle(), pool.clone(), rx);
         self.transactions_manager = Some(transactions_manager);
         self.pool = Some(pool);
+    }
+
+    /// Set a new transactions manager that's connected to the peer's network
+    pub fn map_transactions_manager<P>(self, pool: P) -> Peer<C, P>
+    where
+        P: TransactionPool,
+    {
+        let Self { mut network, request_handler, client, secret_key, .. } = self;
+        let (tx, rx) = unbounded_channel();
+        network.set_transactions(tx);
+        let transactions_manager =
+            TransactionsManager::new(network.handle().clone(), pool.clone(), rx);
+        Peer {
+            network,
+            request_handler,
+            transactions_manager: Some(transactions_manager),
+            pool: Some(pool),
+            client,
+            secret_key,
+        }
     }
 }
 
