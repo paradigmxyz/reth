@@ -262,6 +262,12 @@ where
         };
 
         let mut cfg = CfgEnv::default();
+
+        #[cfg(feature = "optimism")]
+        {
+            cfg.optimism = self.provider().chain_spec().optimism;
+        }
+
         let mut block_env = BlockEnv::default();
         // Note: for the PENDING block we assume it is past the known merge block and thus this will
         // not fail when looking up the total difficulty value for the blockenv.

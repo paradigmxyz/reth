@@ -245,7 +245,15 @@ impl<'a> EVMProcessor<'a> {
         sender: Address,
     ) -> Result<ResultAndState, BlockExecutionError> {
         // Fill revm structure.
+        #[cfg(not(feature = "optimism"))]
         fill_tx_env(&mut self.evm.env.tx, transaction, sender);
+
+        #[cfg(feature = "optimism")]
+        {
+            let mut envelope_buf = Vec::default();
+            transaction.encode_enveloped(&mut envelope_buf);
+            fill_tx_env(&mut self.evm.env.tx, transaction, sender, envelope_buf.into());
+        }
 
         let hash = transaction.hash();
         let out = if self.stack.should_inspect(&self.evm.env, hash) {

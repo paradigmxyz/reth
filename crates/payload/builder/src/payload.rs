@@ -210,6 +210,11 @@ impl PayloadBuilderAttributes {
         let mut cfg = CfgEnv::default();
         cfg.chain_id = chain_spec.chain().id();
 
+        #[cfg(feature = "optimism")]
+        {
+            cfg.optimism = chain_spec.optimism;
+        }
+
         // ensure we're not missing any timestamp based hardforks
         cfg.spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp);
 

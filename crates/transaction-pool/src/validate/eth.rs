@@ -740,8 +740,8 @@ mod tests {
         let client = MockEthProvider::default();
         let validator =
             // EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default());
-            EthTransactionValidatorBuilder::new(MAINNET.clone()).no_shanghai().no_cancun().build_with_tasks(client, TokioTaskExecutor::default(), InMemoryBlobStore::default());
-        let origin = TransactionOrigin::External;
+            crate::validate::EthTransactionValidatorBuilder::new(MAINNET.clone()).no_shanghai().no_cancun().build_with_tasks(client, TokioTaskExecutor::default(), InMemoryBlobStore::default());
+        let origin = crate::TransactionOrigin::External;
         let signer = Default::default();
         let deposit_tx = Transaction::Deposit(TxDeposit {
             source_hash: Default::default(),
@@ -759,10 +759,11 @@ mod tests {
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
         let len = signed_recovered.length_without_header();
         let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
-        let outcome = validator.validate_transaction(origin, pooled_tx).await;
+        let outcome =
+            crate::TransactionValidator::validate_transaction(&validator, origin, pooled_tx).await;
 
         let err = match outcome {
-            TransactionValidationOutcome::Invalid(_, err) => err,
+            crate::TransactionValidationOutcome::Invalid(_, err) => err,
             _ => panic!("Expected invalid transaction"),
         };
         assert_eq!(err.to_string(), "Transaction type not supported");

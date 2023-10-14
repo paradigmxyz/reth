@@ -1037,7 +1037,7 @@ impl ChainSpecBuilder {
     /// Enable Bedrock at genesis
     #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
-        self = self.london_activated();
+        self = self.paris_activated();
         self.hardforks.insert(Hardfork::Bedrock, ForkCondition::Block(0));
         self
     }
@@ -1046,9 +1046,9 @@ impl ChainSpecBuilder {
     /// For post-bedrock op-stack chains, this will be at genesis.
     /// For pre-bedrock op-stack chains, this will be at the timestamp of regolith activation.
     #[cfg(feature = "optimism")]
-    pub fn regolith_activated(mut self, timestamp: u64) -> Self {
+    pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Timestamp(timestamp));
+        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 

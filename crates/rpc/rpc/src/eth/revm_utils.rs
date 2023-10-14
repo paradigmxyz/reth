@@ -74,7 +74,15 @@ impl FillableTransaction for TransactionSignedEcRecovered {
     }
 
     fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
+        #[cfg(not(feature = "optimism"))]
         fill_tx_env_with_recovered(tx_env, self);
+
+        #[cfg(feature = "optimism")]
+        {
+            let mut envelope_buf = Vec::default();
+            self.encode_enveloped(&mut envelope_buf);
+            fill_tx_env_with_recovered(tx_env, self, envelope_buf.into());
+        }
         Ok(())
     }
 }
@@ -86,7 +94,15 @@ impl FillableTransaction for TransactionSigned {
     fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
         let signer =
             self.recover_signer().ok_or_else(|| EthApiError::InvalidTransactionSignature)?;
+        #[cfg(not(feature = "optimism"))]
         fill_tx_env(tx_env, self, signer);
+
+        #[cfg(feature = "optimism")]
+        {
+            let mut envelope_buf = Vec::default();
+            self.encode_enveloped(&mut envelope_buf);
+            fill_tx_env(tx_env, self, signer, envelope_buf.into());
+        }
         Ok(())
     }
 }
