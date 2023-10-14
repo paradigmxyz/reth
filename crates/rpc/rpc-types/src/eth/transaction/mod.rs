@@ -1,18 +1,19 @@
+use crate::access_list::AccessListItem;
 pub use common::TransactionInfo;
 pub use receipt::TransactionReceipt;
 pub use request::TransactionRequest;
-use reth_primitives::{AccessListItem, Address, Bytes, B256, U128, U256, U64};
+use reth_primitives::{Address, Bytes, B256, U128, U256, U64};
 use serde::{Deserialize, Serialize};
 pub use signature::{Parity, Signature};
 pub use typed::*;
-
+///access list
+pub mod access_list;
 mod common;
 mod receipt;
 mod request;
 mod signature;
 mod typed;
-///access list
-pub mod access_list;
+
 /// Transaction object used in RPC
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
