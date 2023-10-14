@@ -1,10 +1,11 @@
 use reth_primitives::{Address, B256, U256};
 use serde::Deserialize;
+use serde::Serialize;
 use std::mem;
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
 
-#[derive(Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessListItem {
     /// Account addresses that would be loaded at the start of execution
@@ -23,7 +24,7 @@ impl AccessListItem {
 
 /// AccessList as defined in EIP-2930
 
-#[derive(Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct AccessList(pub Vec<AccessListItem>);
 
 impl AccessList {
@@ -75,3 +76,29 @@ pub struct AccessListWithGasUsed {
     /// Estimated gas used with access list.
     pub gas_used: U256,
 }
+
+// impl From<reth_primitives::AccessList> for AccessList {
+//     fn from(list: reth_primitives::AccessList) -> Self {
+//         let converted_list: Vec<AccessListItem> = list
+//             .0
+//             .into_iter()
+//             .map(|item| AccessListItem { address: item.address, storage_keys: item.storage_keys })
+//             .collect();
+
+//         AccessList(converted_list)
+//     }
+// }
+// impl From<AccessList> for reth_primitives::AccessList {
+//     fn from(list: AccessList) -> Self {
+//         let converted_list: Vec<reth_primitives::AccessListItem> = list
+//             .0
+//             .into_iter()
+//             .map(|item| reth_primitives::AccessListItem {
+//                 address: item.address,
+//                 storage_keys: item.storage_keys,
+//             })
+//             .collect();
+
+//         reth_primitives::AccessList(converted_list)
+//     }
+// }
