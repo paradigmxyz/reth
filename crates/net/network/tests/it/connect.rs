@@ -23,6 +23,21 @@ use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_connect_all() {
+    reth_tracing::init_test_tracing();
+
+    let num_peers = 3;
+
+    let net = Testnet::create(num_peers).await;
+    let handle = net.spawn();
+    handle.connect_peers().await;
+
+    handle.peers().iter().for_each(|peer| {
+        assert_eq!(peer.network().num_connected_peers(), num_peers - 1);
+    });
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
     reth_tracing::init_test_tracing();
 

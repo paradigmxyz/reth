@@ -192,6 +192,13 @@ mod traits;
 /// Common test helpers for mocking a pool
 pub mod test_utils;
 
+/// Type alias for default ethereum transaction pool
+pub type EthTransactionPool<Client, S> = Pool<
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
+    CoinbaseTipOrdering<EthPooledTransaction>,
+    S,
+>;
+
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
 pub struct Pool<V, T: TransactionOrdering, S> {
@@ -262,12 +269,7 @@ where
     }
 }
 
-impl<Client, S>
-    Pool<
-        TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
-        CoinbaseTipOrdering<EthPooledTransaction>,
-        S,
-    >
+impl<Client, S> EthTransactionPool<Client, S>
 where
     Client: StateProviderFactory + Clone + 'static,
     S: BlobStore,
