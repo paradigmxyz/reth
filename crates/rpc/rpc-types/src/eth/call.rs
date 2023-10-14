@@ -1,9 +1,9 @@
+use crate::access_list::AccessList;
 use crate::BlockOverrides;
-use reth_primitives::{AccessList, Address, BlockId, Bytes, B256, U256, U64, U8};
+use reth_primitives::{Address, BlockId, Bytes, B256, U256, U64, U8};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 /// Bundle of transactions
-#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Bundle {
     /// Transactions
@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for TransactionIndex {
 }
 
 /// Call request for `eth_call` and adjacent methods.
-#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CallRequest {
     /// From
