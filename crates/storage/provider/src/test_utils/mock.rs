@@ -18,7 +18,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::{Range, RangeBounds, RangeInclusive},
+    ops::{Range, RangeInclusive},
     sync::Arc,
 };
 
@@ -152,7 +152,7 @@ impl HeaderProvider for MockEthProvider {
         Ok(Some(sum))
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
         let lock = self.headers.lock();
 
         let mut headers: Vec<_> =
@@ -164,7 +164,7 @@ impl HeaderProvider for MockEthProvider {
 
     fn sealed_headers_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         Ok(self.headers_range(range)?.into_iter().map(|h| h.seal_slow()).collect())
     }

@@ -17,7 +17,7 @@ use reth_primitives::{
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
-    ops::{Range, RangeBounds, RangeInclusive},
+    ops::{Range, RangeInclusive},
     sync::Arc,
 };
 
@@ -228,13 +228,13 @@ impl HeaderProvider for NoopProvider {
         Ok(None)
     }
 
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, _range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
         Ok(vec![])
     }
 
     fn sealed_headers_range(
         &self,
-        _range: impl RangeBounds<BlockNumber>,
+        _range: RangeInclusive<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         Ok(vec![])
     }

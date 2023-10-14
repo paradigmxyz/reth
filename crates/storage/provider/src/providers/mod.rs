@@ -22,7 +22,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashSet},
-    ops::{Range, RangeBounds, RangeInclusive},
+    ops::{Range, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
@@ -136,13 +136,13 @@ where
         self.database.provider()?.header_td_by_number(number)
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
         self.database.provider()?.headers_range(range)
     }
 
     fn sealed_headers_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         self.database.provider()?.sealed_headers_range(range)
     }

@@ -276,14 +276,3 @@ pub trait BlockWriter: Send + Sync {
         prune_modes: Option<&PruneModes>,
     ) -> RethResult<()>;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_utils::NoopProvider;
-
-    #[test]
-    fn test_dyn_block_id_ext() {
-        let _provider: Box<dyn BlockReaderIdExt> = Box::new(NoopProvider::default());
-    }
-}

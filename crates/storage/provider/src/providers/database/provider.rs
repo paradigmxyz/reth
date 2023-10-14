@@ -893,7 +893,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
         Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
         let mut cursor = self.tx.cursor_read::<tables::Headers>()?;
         cursor
             .walk_range(range)?
@@ -903,7 +903,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
 
     fn sealed_headers_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         let mut headers = vec![];
         for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
