@@ -717,7 +717,7 @@ pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
     /// Additional settings for handlers.
     config: RpcModuleConfig,
     /// Holds a clone of all the eth namespace handlers
-    eth: Option<EthHandlers<Provider, Pool, Network, Events>>,
+    pub eth: Option<EthHandlers<Provider, Pool, Network, Events>>,
     /// to put trace calls behind semaphore
     tracing_call_guard: TracingCallGuard,
     /// Contains the [Methods] of a module

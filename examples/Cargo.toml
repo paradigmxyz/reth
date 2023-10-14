@@ -21,7 +21,7 @@ reth-network-api.workspace = true
 reth-network.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
-
+reth-rpc.workspace = true
 eyre = "0.6.8"
 futures.workspace = true
 async-trait.workspace = true
