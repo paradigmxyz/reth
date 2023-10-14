@@ -76,7 +76,7 @@ reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-network = { path = ".", features = ["test-utils"] }
 
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 ethers-core = { workspace = true, default-features = false }

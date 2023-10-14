@@ -20,7 +20,13 @@ fn decode_pooled_transactions_data() {
     }
 
     // now do another decoding, on what we encoded - this should succeed
-    let _txs2 = PooledTransactions::decode(&mut &buf[..]).unwrap();
+    let txs2 = PooledTransactions::decode(&mut &buf[..]).unwrap();
+
+    // ensure that the payload length is the same
+    assert_eq!(txs.length(), txs2.length());
+
+    // ensure that the length is equal to the length of the encoded data
+    assert_eq!(txs.length(), buf.len());
 }
 
 #[test]

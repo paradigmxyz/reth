@@ -13,7 +13,7 @@ mod error;
 mod event;
 mod metrics;
 mod pruner;
-mod segments;
+pub mod segments;
 
 use crate::metrics::Metrics;
 pub use error::PrunerError;

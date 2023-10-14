@@ -17,6 +17,9 @@ pub enum Error {
     /// The test was skipped
     #[error("Test was skipped")]
     Skipped,
+    /// No post state found in test
+    #[error("No post state found for validation")]
+    MissingPostState,
     /// An IO error occurred
     #[error("An error occurred interacting with the file system at {path}: {error}")]
     Io {

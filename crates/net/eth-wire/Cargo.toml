@@ -39,7 +39,7 @@ proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 ethers-core = { workspace = true, default-features = false }
 
 test-fuzz = "4"
