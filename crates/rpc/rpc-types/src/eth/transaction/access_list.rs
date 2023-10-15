@@ -61,8 +61,8 @@ impl AccessList {
     #[inline]
     pub fn size(&self) -> usize {
         // take into account capacity
-        self.0.iter().map(AccessListItem::size).sum::<usize>()
-            + self.0.capacity() * mem::size_of::<AccessListItem>()
+        self.0.iter().map(AccessListItem::size).sum::<usize>() +
+            self.0.capacity() * mem::size_of::<AccessListItem>()
     }
 }
 
@@ -81,8 +81,8 @@ pub struct AccessListWithGasUsed {
 //         let converted_list: Vec<AccessListItem> = list
 //             .0
 //             .into_iter()
-//             .map(|item| AccessListItem { address: item.address, storage_keys: item.storage_keys })
-//             .collect();
+//             .map(|item| AccessListItem { address: item.address, storage_keys: item.storage_keys
+// })             .collect();
 
 //         AccessList(converted_list)
 //     }
