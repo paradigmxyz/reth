@@ -5,6 +5,7 @@ use reth_primitives::{
     TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, B256, U128,
     U256, U64,
 };
+use reth_rpc_types::access_list::AccessListItem;
 use reth_rpc_types::Transaction;
 use signature::from_primitive_signature;
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
