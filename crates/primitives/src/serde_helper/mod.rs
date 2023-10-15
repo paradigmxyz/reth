@@ -33,7 +33,7 @@ pub mod u64_hex {
     }
 }
 
-/// serde functions for handling `Option<u64>` as [U64](crate::U64)
+/// serde functions for handling `Option<u64>` as [U64]
 pub mod option_u64_hex {
     use crate::U64;
     use serde::{Deserialize, Deserializer};
