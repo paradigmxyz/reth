@@ -473,6 +473,30 @@ impl Transaction {
     }
 }
 
+impl From<TxLegacy> for Transaction {
+    fn from(tx: TxLegacy) -> Self {
+        Transaction::Legacy(tx)
+    }
+}
+
+impl From<TxEip2930> for Transaction {
+    fn from(tx: TxEip2930) -> Self {
+        Transaction::Eip2930(tx)
+    }
+}
+
+impl From<TxEip1559> for Transaction {
+    fn from(tx: TxEip1559) -> Self {
+        Transaction::Eip1559(tx)
+    }
+}
+
+impl From<TxEip4844> for Transaction {
+    fn from(tx: TxEip4844) -> Self {
+        Transaction::Eip4844(tx)
+    }
+}
+
 impl Compact for Transaction {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
