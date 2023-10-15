@@ -661,13 +661,18 @@ where
             Ok(outcome) => {
                 match outcome {
                     CanonicalOutcome::AlreadyCanonical { ref header } => {
+                        #[inline(always)]
+                        fn ignore_update_log(header_num: u64, canonical_tip_num: u64) {
+                            debug!(
+                                target: "consensus::engine",
+                                fcu_head_num=?header_num,
+                                current_head_num=?canonical_tip_num,
+                                "Ignoring beacon update to old head"
+                            );
+                        }
+
                         #[cfg(not(feature = "optimism"))]
-                        debug!(
-                            target: "consensus::engine",
-                            fcu_head_num=?header.number,
-                            current_head_num=?self.blockchain.canonical_tip().number,
-                            "Ignoring beacon update to old head"
-                        );
+                        ignore_update_log(header.number, self.blockchain.canonical_tip().number);
 
                         #[cfg(feature = "optimism")]
                         if self.chain_spec().optimism {
@@ -683,6 +688,11 @@ where
                                     header.clone(),
                                     elapsed,
                                 ),
+                            );
+                        } else {
+                            ignore_update_log(
+                                header.number,
+                                self.blockchain.canonical_tip().number,
                             );
                         }
                     }
