@@ -107,10 +107,14 @@ impl RethL1BlockInfo for L1BlockInfo {
         input: &Bytes,
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
+        if is_deposit {
+            return Ok(U256::ZERO)
+        }
+
         if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
-            Ok(self.calculate_tx_l1_cost::<BedrockSpec>(input, is_deposit))
+            Ok(self.calculate_tx_l1_cost::<BedrockSpec>(input))
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
-            Ok(self.calculate_tx_l1_cost::<RegolithSpec>(input, is_deposit))
+            Ok(self.calculate_tx_l1_cost::<RegolithSpec>(input))
         } else {
             Err(reth_executor::BlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),
