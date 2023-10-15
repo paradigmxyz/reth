@@ -111,6 +111,6 @@ mod test {
         assert_eq!(block_indices.last_tx_num(), first_tx_num + tx_count - 1);
         assert_eq!(block_indices.next_tx_num(), first_tx_num + tx_count);
         assert_eq!(block_indices.tx_count(), tx_count);
-        assert_eq!(block_indices.tx_num_range(), first_tx_num..=first_tx_num + tx_count);
+        assert_eq!(block_indices.tx_num_range(), first_tx_num..=first_tx_num + tx_count - 1);
     }
 }
