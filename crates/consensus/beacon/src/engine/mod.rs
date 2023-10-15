@@ -661,6 +661,7 @@ where
             Ok(outcome) => {
                 match outcome {
                     CanonicalOutcome::AlreadyCanonical { ref header } => {
+                        #[cfg(not(feature = "optimism"))]
                         debug!(
                             target: "consensus::engine",
                             fcu_head_num=?header.number,
@@ -668,7 +669,22 @@ where
                             "Ignoring beacon update to old head"
                         );
 
-                        // TODO(clabby): Update anyways for optimism.
+                        #[cfg(feature = "optimism")]
+                        if self.chain_spec().optimism {
+                            debug!(
+                                target: "consensus::engine",
+                                fcu_head_num=?header.number,
+                                current_head_num=?self.blockchain.canonical_tip().number,
+                                "[Optimism] Allowing beacon reorg to old head"
+                            );
+                            let _ = self.update_head(header.clone());
+                            self.listeners.notify(
+                                BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                                    header.clone(),
+                                    elapsed,
+                                ),
+                            );
+                        }
                     }
                     CanonicalOutcome::Committed { ref head } => {
                         debug!(

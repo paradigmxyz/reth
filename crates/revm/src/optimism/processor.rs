@@ -89,14 +89,12 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
             // nonces, so we don't need to touch the DB for those.
             let depositor = (is_regolith && transaction.is_deposit())
                 .then(|| {
-                    Ok::<_, BlockExecutionError>(
-                        self.db_mut()
-                            .load_cache_account(sender)
-                            .map_err(|_| BlockExecutionError::ProviderError)?
-                            .clone()
-                            .account
-                            .ok_or(BlockExecutionError::ProviderError)?,
-                    )
+                    self.db_mut()
+                        .load_cache_account(sender)
+                        .map_err(|_| BlockExecutionError::ProviderError)?
+                        .clone()
+                        .account
+                        .ok_or(BlockExecutionError::ProviderError)
                 })
                 .transpose()?;
 

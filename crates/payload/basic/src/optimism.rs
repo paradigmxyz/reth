@@ -73,13 +73,11 @@ where
         // nonces, so we don't need to touch the DB for those.
         let depositor = (is_regolith && sequencer_tx.is_deposit())
             .then(|| {
-                Ok::<_, PayloadBuilderError>(
-                    db.load_cache_account(sequencer_tx.signer())
-                        .map_err(|_| PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))?
-                        .clone()
-                        .account
-                        .ok_or(PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))?,
-                )
+                db.load_cache_account(sequencer_tx.signer())
+                    .map_err(|_| PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))?
+                    .clone()
+                    .account
+                    .ok_or(PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))
             })
             .transpose()?;
 
@@ -106,7 +104,7 @@ where
                         cumulative_gas_used,
                         logs: vec![],
                         #[cfg(feature = "optimism")]
-                        deposit_nonce: None,
+                        deposit_nonce: depositor.map(|account| account.info.nonce),
                     }));
                     executed_txs.push(sequencer_tx.into_signed());
                     continue

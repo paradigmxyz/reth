@@ -62,7 +62,7 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
     // TODO(clabby): Move to rollupargs
     #[cfg(feature = "optimism")]
     fn compute_pending_block(&self) -> bool {
-        true
+        false
     }
 }
 

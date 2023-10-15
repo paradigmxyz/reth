@@ -110,7 +110,8 @@ pub trait RethNodeCommandConfig: fmt::Debug {
 
         // TODO(clabby): Re-add conf option
         #[cfg(feature = "optimism")]
-        let payload_job_config = payload_job_config.compute_pending_block(false);
+        let payload_job_config =
+            payload_job_config.compute_pending_block(conf.compute_pending_block());
 
         // The default payload builder is implemented on the unit type.
         #[cfg(not(feature = "optimism"))]
@@ -121,7 +122,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         #[cfg(feature = "optimism")]
         let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder;
 
-        let payload_generator = BasicPayloadJobGenerator::new(
+        let payload_generator = BasicPayloadJobGenerator::with_builder(
             components.provider(),
             components.pool(),
             components.task_executor(),

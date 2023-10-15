@@ -86,7 +86,7 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
+impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
     /// Creates a new [BasicPayloadJobGenerator] with the given config.
     pub fn new(
         client: Client,
@@ -94,9 +94,8 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
         chain_spec: Arc<ChainSpec>,
-        builder: Builder,
     ) -> Self {
-        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, builder)
+        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, ())
     }
 }
 
