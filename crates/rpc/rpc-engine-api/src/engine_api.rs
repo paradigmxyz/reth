@@ -125,14 +125,6 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        // if let Some(ref attrs) = payload_attrs {
-        //     #[cfg(feature = "optimism")]
-        //     if attrs.gas_limit.is_none() && self.inner.chain_spec.optimism {
-        //         return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
-        //     }
-        //     self.validate_version_specific_fields(EngineApiMessageVersion::V1, &attrs.into())?;
-        // }
-
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
             .await
     }
@@ -564,6 +556,11 @@ where
     ) -> EngineApiResult<ForkchoiceUpdated> {
         if let Some(ref attrs) = payload_attrs {
             let attr_validation_res = self.validate_version_specific_fields(version, &attrs.into());
+
+            #[cfg(feature = "optimism")]
+            if attrs.gas_limit.is_none() && self.inner.chain_spec.optimism {
+                return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
+            }
 
             // From the engine API spec:
             //
