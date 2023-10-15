@@ -82,6 +82,30 @@ pub enum Delta<T> {
     Changed(ChangedType<T>),
 }
 
+// === impl Delta ===
+
+impl<T> Delta<T> {
+    /// Returns true if the value is unchanged
+    pub fn is_unchanged(&self) -> bool {
+        matches!(self, Delta::Unchanged)
+    }
+
+    /// Returns true if the value is added
+    pub fn is_added(&self) -> bool {
+        matches!(self, Delta::Added(_))
+    }
+
+    /// Returns true if the value is removed
+    pub fn is_removed(&self) -> bool {
+        matches!(self, Delta::Removed(_))
+    }
+
+    /// Returns true if the value is changed
+    pub fn is_changed(&self) -> bool {
+        matches!(self, Delta::Changed(_))
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountDiff {
