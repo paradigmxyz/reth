@@ -1,9 +1,8 @@
 //! Compatibility functions for rpc `Transaction` type.
 mod signature;
 use reth_primitives::{
-    AccessListItem, BlockNumber, Transaction as PrimitiveTransaction,
-    TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, B256, U128,
-    U256, U64,
+    BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
+    TransactionSignedEcRecovered, TxType, B256, U128, U256, U64,
 };
 use reth_rpc_types::access_list::AccessListItem;
 use reth_rpc_types::Transaction;
