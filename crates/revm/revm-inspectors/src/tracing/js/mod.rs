@@ -13,9 +13,7 @@ use crate::tracing::{
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
 use reth_primitives::{Account, Address, Bytes, B256, U256};
 use revm::{
-    interpreter::{
-        return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
-    },
+    interpreter::{CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter},
     precompile::Precompiles,
     primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo},
     Database, EVMData, Inspector,
@@ -206,6 +204,7 @@ impl JsInspector {
         )?)
     }
 
+    #[allow(unused)]
     fn try_fault(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
         let step = step.into_js_object(&mut self.ctx)?;
         let db = db.into_js_object(&mut self.ctx)?;
@@ -328,8 +327,8 @@ where
 
     fn step_end(
         &mut self,
-        interp: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
+        _interp: &mut Interpreter<'_>,
+        _data: &mut EVMData<'_, DB>,
     ) -> InstructionResult {
         if self.step_fn.is_none() {
             return InstructionResult::Continue
