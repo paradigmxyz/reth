@@ -948,6 +948,15 @@ impl ChainSpecBuilder {
         )
     }
 
+    /// Enable Optimism L2 modifications
+    ///
+    /// Warning: By itself, this does not enable the earliest Optimism hardfork, Bedrock.
+    #[cfg(feature = "optimism")]
+    pub fn optimism_activated(mut self) -> Self {
+        self.optimism = true;
+        self
+    }
+
     /// Enable Frontier at genesis.
     pub fn frontier_activated(mut self) -> Self {
         self.hardforks.insert(Hardfork::Frontier, ForkCondition::Block(0));

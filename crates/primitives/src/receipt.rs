@@ -6,14 +6,18 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
-use reth_codecs::{main_codec, Compact, CompactZstd};
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
 };
 
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::strategy::Strategy;
+
 /// Receipt containing result of transaction execution.
-#[main_codec(zstd)]
+#[main_codec(no_arbitrary, zstd)]
+#[add_arbitrary_tests]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Receipt {
     /// Receipt type.
@@ -175,6 +179,59 @@ impl ReceiptWithBloom {
     #[inline]
     fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for Receipt {
+    type Parameters = ();
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::{any, prop_compose};
+
+        prop_compose! {
+            fn arbitrary_receipt()(tx_type in any::<TxType>(),
+                        success in any::<bool>(),
+                        cumulative_gas_used in any::<u64>(),
+                        logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
+                        _deposit_nonce in any::<Option<u64>>()) -> Receipt
+            {
+                Receipt { tx_type,
+                    success,
+                    cumulative_gas_used,
+                    logs,
+                    // Only reecipts for deposit transactions may contain a deposit nonce
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce: (tx_type == TxType::DEPOSIT).then_some(_deposit_nonce).flatten()
+                }
+            }
+        };
+        arbitrary_receipt().boxed()
+    }
+
+    type Strategy = proptest::strategy::BoxedStrategy<Receipt>;
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Receipt {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let tx_type = TxType::arbitrary(u)?;
+        let success = bool::arbitrary(u)?;
+        let cumulative_gas_used = u64::arbitrary(u)?;
+        let logs = Vec::<Log>::arbitrary(u)?;
+
+        #[cfg(feature = "optimism")]
+        let deposit_nonce =
+            if tx_type == TxType::DEPOSIT { Option::<u64>::arbitrary(u)? } else { None };
+
+        Ok(Self {
+            tx_type,
+            success,
+            cumulative_gas_used,
+            logs,
+            #[cfg(feature = "optimism")]
+            deposit_nonce,
+        })
     }
 }
 

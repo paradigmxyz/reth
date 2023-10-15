@@ -189,7 +189,11 @@ pub fn fill_tx_env_with_recovered(
     transaction: &TransactionSignedEcRecovered,
     #[cfg(feature = "optimism")] envelope: Bytes,
 ) {
-    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope)
+    #[cfg(not(feature = "optimism"))]
+    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
+
+    #[cfg(feature = "optimism")]
+    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
 }
 
 /// Fill transaction environment from a [Transaction] and the given sender address.

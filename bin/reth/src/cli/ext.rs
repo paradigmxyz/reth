@@ -108,9 +108,9 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             .extradata(conf.extradata_rlp_bytes())
             .max_gas_limit(conf.max_gas_limit());
 
+        // TODO(clabby): Re-add conf option
         #[cfg(feature = "optimism")]
-        let payload_job_config =
-            payload_job_config.compute_pending_block(conf.compute_pending_block());
+        let payload_job_config = payload_job_config.compute_pending_block(false);
 
         // The default payload builder is implemented on the unit type.
         #[cfg(not(feature = "optimism"))]

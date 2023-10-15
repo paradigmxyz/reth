@@ -134,18 +134,18 @@ mod tests {
         );
         #[cfg(feature = "optimism")]
         {
+            #[inline(always)]
+            fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
+                let cs = ChainSpecBuilder::mainnet().optimism_activated();
+                f(cs).build()
+            }
+
             assert_eq!(
-                revm_spec(
-                    &ChainSpecBuilder::mainnet().bedrock_activated().build(),
-                    Head::default()
-                ),
+                revm_spec(&op_cs(|cs| cs.bedrock_activated()), Head::default()),
                 revm_primitives::BEDROCK
             );
             assert_eq!(
-                revm_spec(
-                    &ChainSpecBuilder::mainnet().regolith_activated().build(),
-                    Head::default()
-                ),
+                revm_spec(&op_cs(|cs| cs.regolith_activated()), Head::default()),
                 revm_primitives::REGOLITH
             );
         }

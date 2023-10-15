@@ -6,6 +6,9 @@ use revm::{
 };
 use std::sync::Arc;
 
+/// Optimism-specific processor implementation for the `EVMProcessor`
+pub mod processor;
+
 /// Extracts the [L1BlockInfo] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
 pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, BlockExecutionError> {

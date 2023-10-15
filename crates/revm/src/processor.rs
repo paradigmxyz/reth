@@ -2,7 +2,6 @@ use crate::{
     database::StateProviderDatabase,
     env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    into_reth_log,
     stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
@@ -15,16 +14,21 @@ use reth_primitives::{
     PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
 };
-use reth_provider::{
-    BlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableBlockExecutor,
-    StateProvider,
-};
+use reth_provider::{BlockExecutor, BlockExecutorStats, PrunableBlockExecutor, StateProvider};
 use revm::{
     db::{states::bundle_state::BundleRetention, StateDBBox},
     primitives::ResultAndState,
-    DatabaseCommit, State, EVM,
+    State, EVM,
 };
 use std::{sync::Arc, time::Instant};
+
+#[cfg(not(feature = "optimism"))]
+use crate::into_reth_log;
+#[cfg(not(feature = "optimism"))]
+use reth_provider::BundleStateWithReceipts;
+#[cfg(not(feature = "optimism"))]
+use revm::DatabaseCommit;
+#[cfg(not(feature = "optimism"))]
 use tracing::{debug, trace};
 
 /// EVMProcessor is a block executor that uses revm to execute blocks or multiple blocks.
@@ -47,9 +51,9 @@ use tracing::{debug, trace};
 #[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a> {
     /// The configured chain-spec
-    chain_spec: Arc<ChainSpec>,
+    pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
-    evm: EVM<StateDBBox<'a, RethError>>,
+    pub(crate) evm: EVM<StateDBBox<'a, RethError>>,
     /// Hook and inspector stack that we want to invoke on that hook.
     stack: InspectorStack,
     /// The collection of receipts.
@@ -57,10 +61,10 @@ pub struct EVMProcessor<'a> {
     /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
-    receipts: Receipts,
+    pub(crate) receipts: Receipts,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
-    first_block: Option<BlockNumber>,
+    pub(crate) first_block: Option<BlockNumber>,
     /// The maximum known block.
     tip: Option<BlockNumber>,
     /// Pruning configuration.
@@ -70,7 +74,7 @@ pub struct EVMProcessor<'a> {
     /// block. None means there isn't any kind of configuration.
     pruning_address_filter: Option<(u64, Vec<Address>)>,
     /// Execution stats
-    stats: BlockExecutorStats,
+    pub(crate) stats: BlockExecutorStats,
 }
 
 impl<'a> EVMProcessor<'a> {
@@ -141,7 +145,7 @@ impl<'a> EVMProcessor<'a> {
         self.evm.db().expect("Database inside EVM is always set")
     }
 
-    fn recover_senders(
+    pub(crate) fn recover_senders(
         &mut self,
         body: &[TransactionSigned],
         senders: Option<Vec<Address>>,
@@ -162,7 +166,7 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Initializes the config and block env.
-    fn init_env(&mut self, header: &Header, total_difficulty: U256) {
+    pub(crate) fn init_env(&mut self, header: &Header, total_difficulty: U256) {
         // Set state clear flag.
         let state_clear_flag =
             self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(header.number);
@@ -250,7 +254,7 @@ impl<'a> EVMProcessor<'a> {
 
         #[cfg(feature = "optimism")]
         {
-            let mut envelope_buf = Vec::default();
+            let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
             transaction.encode_enveloped(&mut envelope_buf);
             fill_tx_env(&mut self.evm.env.tx, transaction, sender, envelope_buf.into());
         }
@@ -273,7 +277,7 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Execute the block, verify gas usage and apply post-block state changes.
-    fn execute_inner(
+    pub(crate) fn execute_inner(
         &mut self,
         block: &Block,
         total_difficulty: U256,
@@ -387,6 +391,8 @@ impl<'a> EVMProcessor<'a> {
     }
 }
 
+/// Default Ethereum implementation of the [BlockExecutor] trait for the [EVMProcessor].
+#[cfg(not(feature = "optimism"))]
 impl<'a> BlockExecutor for EVMProcessor<'a> {
     fn execute(
         &mut self,
@@ -547,6 +553,7 @@ pub fn verify_receipt<'a>(
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "optimism"))]
 mod tests {
     use super::*;
     use reth_interfaces::RethResult;
