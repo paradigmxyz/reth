@@ -1,8 +1,9 @@
 //! Helpers for deriving contract addresses
 
+use alloy_primitives::B256;
+
 // re-export from revm
-use crate::{keccak256, Address, U256};
-pub use revm_primitives::utilities::{create2_address, create_address};
+use crate::{Address, U256};
 
 /// Returns the CREATE2 address of a smart contract as specified in
 /// [EIP1014](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1014.md)
@@ -15,8 +16,7 @@ pub fn create2_address_from_code(
     init_code: impl AsRef<[u8]>,
     salt: U256,
 ) -> Address {
-    let init_code_hash = keccak256(init_code);
-    create2_address(from, init_code_hash, salt)
+    from.create2_from_code(B256::from(salt), init_code)
 }
 
 #[cfg(test)]
@@ -37,7 +37,7 @@ mod tests {
         .iter()
         .enumerate()
         {
-            let address = create_address(from, nonce as u64);
+            let address = from.create(nonce as u64);
             assert_eq!(address, expected.parse::<Address>().unwrap());
         }
     }
@@ -98,8 +98,7 @@ mod tests {
             assert_eq!(expected, create2_address_from_code(from, init_code.clone(), salt));
 
             // get_create2_address_from_hash()
-            let init_code_hash = keccak256(init_code);
-            assert_eq!(expected, create2_address(from, init_code_hash,  salt))
+            assert_eq!(expected, from.create2_from_code(B256::from(salt), init_code))
         }
     }
 }

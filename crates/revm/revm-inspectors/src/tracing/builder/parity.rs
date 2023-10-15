@@ -385,7 +385,10 @@ impl ParityTraceBuilder {
         let maybe_memory = if step.memory.is_empty() {
             None
         } else {
-            Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+            Some(MemoryDelta {
+                off: step.memory_size,
+                data: step.memory.slice(0, step.memory.len()).to_vec().into(),
+            })
         };
 
         // Calculate the stack items at this step
@@ -549,11 +552,11 @@ where
 
         let addr = addrs.next().expect("there should be an address");
 
-        let db_acc = db.basic(addr)?.unwrap_or_default();
+        let db_acc = db.basic_ref(addr)?.unwrap_or_default();
 
         let code_hash = if db_acc.code_hash != KECCAK_EMPTY { db_acc.code_hash } else { continue };
 
-        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes();
+        curr_ref.code = db.code_by_hash_ref(code_hash)?.original_bytes();
     }
 
     Ok(())
@@ -591,7 +594,8 @@ where
             }
         } else {
             // account already exists, we need to fetch the account from the db
-            let db_acc = db.basic(addr)?.unwrap_or_default();
+            let db_acc = db.basic_ref(addr)?.unwrap_or_default();
+
             entry.balance = if db_acc.balance == changed_acc.info.balance {
                 Delta::Unchanged
             } else {

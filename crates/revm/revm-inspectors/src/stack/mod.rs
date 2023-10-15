@@ -102,7 +102,7 @@ where
 {
     fn initialize_interp(
         &mut self,
-        interpreter: &mut Interpreter,
+        interpreter: &mut Interpreter<'_>,
         data: &mut EVMData<'_, DB>,
     ) -> InstructionResult {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
@@ -119,7 +119,7 @@ where
 
     fn step(
         &mut self,
-        interpreter: &mut Interpreter,
+        interpreter: &mut Interpreter<'_>,
         data: &mut EVMData<'_, DB>,
     ) -> InstructionResult {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
@@ -148,12 +148,11 @@ where
 
     fn step_end(
         &mut self,
-        interpreter: &mut Interpreter,
+        interpreter: &mut Interpreter<'_>,
         data: &mut EVMData<'_, DB>,
-        eval: InstructionResult,
     ) -> InstructionResult {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step_end(interpreter, data, eval);
+            let status = inspector.step_end(interpreter, data);
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {

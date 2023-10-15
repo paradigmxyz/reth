@@ -27,7 +27,7 @@ where
 {
     fn step(
         &mut self,
-        _interp: &mut Interpreter,
+        _interp: &mut Interpreter<'_>,
         _data: &mut EVMData<'_, DB>,
     ) -> InstructionResult {
         self.count += 1;

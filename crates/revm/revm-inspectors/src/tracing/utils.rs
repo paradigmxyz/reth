@@ -1,9 +1,6 @@
 //! Util functions for revm related ops
 
-use reth_primitives::{
-    contract::{create2_address_from_code, create_address},
-    hex, Address,
-};
+use reth_primitives::{contract::create2_address_from_code, hex, Address};
 use revm::{
     interpreter::CreateInputs,
     primitives::{CreateScheme, SpecId},
@@ -32,7 +29,7 @@ pub(crate) fn gas_used(spec: SpecId, spent: u64, refunded: u64) -> u64 {
 #[inline]
 pub(crate) fn get_create_address(call: &CreateInputs, nonce: u64) -> Address {
     match call.scheme {
-        CreateScheme::Create => create_address(call.caller, nonce),
+        CreateScheme::Create => call.caller.create(nonce),
         CreateScheme::Create2 { salt } => {
             create2_address_from_code(call.caller, call.init_code.clone(), salt)
         }

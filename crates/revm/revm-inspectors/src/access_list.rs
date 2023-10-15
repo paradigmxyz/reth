@@ -63,7 +63,7 @@ where
 {
     fn step(
         &mut self,
-        interpreter: &mut Interpreter,
+        interpreter: &mut Interpreter<'_>,
         _data: &mut EVMData<'_, DB>,
     ) -> InstructionResult {
         match interpreter.current_opcode() {

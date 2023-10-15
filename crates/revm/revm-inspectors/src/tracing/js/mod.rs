@@ -287,7 +287,11 @@ impl<DB> Inspector<DB> for JsInspector
 where
     DB: Database,
 {
-    fn step(&mut self, interp: &mut Interpreter, data: &mut EVMData<'_, DB>) -> InstructionResult {
+    fn step(
+        &mut self,
+        interp: &mut Interpreter<'_>,
+        data: &mut EVMData<'_, DB>,
+    ) -> InstructionResult {
         if self.step_fn.is_none() {
             return InstructionResult::Continue
         }
@@ -297,7 +301,7 @@ where
         let step = StepLog {
             stack: StackObj(interp.stack.clone()),
             op: interp.current_opcode().into(),
-            memory: MemoryObj(interp.memory.clone()),
+            memory: MemoryObj(interp.shared_memory.clone()),
             pc: interp.program_counter() as u64,
             gas_remaining: interp.gas.remaining(),
             cost: interp.gas.spend(),
@@ -324,32 +328,31 @@ where
 
     fn step_end(
         &mut self,
-        interp: &mut Interpreter,
+        interp: &mut Interpreter<'_>,
         data: &mut EVMData<'_, DB>,
-        eval: InstructionResult,
     ) -> InstructionResult {
         if self.step_fn.is_none() {
             return InstructionResult::Continue
         }
 
-        if matches!(eval, return_revert!()) {
-            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
-
-            let step = StepLog {
-                stack: StackObj(interp.stack.clone()),
-                op: interp.current_opcode().into(),
-                memory: MemoryObj(interp.memory.clone()),
-                pc: interp.program_counter() as u64,
-                gas_remaining: interp.gas.remaining(),
-                cost: interp.gas.spend(),
-                depth: data.journaled_state.depth(),
-                refund: interp.gas.refunded() as u64,
-                error: Some(format!("{:?}", eval)),
-                contract: self.active_call().contract.clone(),
-            };
-
-            let _ = self.try_fault(step, db);
-        }
+        // if matches!(eval, return_revert!()) {
+        //     let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+        //
+        //     let step = StepLog {
+        //         stack: StackObj(interp.stack.clone()),
+        //         op: interp.current_opcode().into(),
+        //         memory: MemoryObj(interp.shared_memory.clone()),
+        //         pc: interp.program_counter() as u64,
+        //         gas_remaining: interp.gas.remaining(),
+        //         cost: interp.gas.spend(),
+        //         depth: data.journaled_state.depth(),
+        //         refund: interp.gas.refunded() as u64,
+        //         error: Some(format!("{:?}", eval)),
+        //         contract: self.active_call().contract.clone(),
+        //     };
+        //
+        //     let _ = self.try_fault(step, db);
+        // }
 
         InstructionResult::Continue
     }

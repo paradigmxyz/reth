@@ -39,10 +39,7 @@ use revm::{
     primitives::{BlockEnv, CfgEnv},
     Inspector,
 };
-use revm_primitives::{
-    db::DatabaseCommit, utilities::create_address, Env, ExecutionResult, ResultAndState, SpecId,
-    State,
-};
+use revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State};
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBox<'r>>>;
@@ -1058,7 +1055,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     match tx.transaction.kind() {
         Create => {
             res_receipt.contract_address =
-                Some(create_address(transaction.signer(), tx.transaction.nonce()));
+                Some(transaction.signer().create(tx.transaction.nonce()));
         }
         Call(addr) => {
             res_receipt.to = Some(*addr);

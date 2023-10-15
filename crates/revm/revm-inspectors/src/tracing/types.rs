@@ -13,7 +13,7 @@ use reth_rpc_types::trace::{
     },
 };
 use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
+    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, SharedMemory, Stack,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
@@ -641,7 +641,7 @@ pub(crate) struct CallTraceStep {
     /// All allocated memory in a step
     ///
     /// This will be empty if memory capture is disabled
-    pub(crate) memory: Memory,
+    pub(crate) memory: SharedMemory,
     /// Size of memory at the beginning of the step
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
@@ -691,7 +691,7 @@ impl CallTraceStep {
         }
 
         if opts.is_memory_enabled() {
-            log.memory = Some(convert_memory(self.memory.data()));
+            log.memory = Some(convert_memory(self.memory.slice(0, self.memory.len())));
         }
 
         log
