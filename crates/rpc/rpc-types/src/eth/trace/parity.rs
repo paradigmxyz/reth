@@ -85,6 +85,11 @@ pub enum Delta<T> {
 // === impl Delta ===
 
 impl<T> Delta<T> {
+    /// Creates a new [Delta::Changed] variant
+    pub fn changed(from: T, to: T) -> Self {
+        Self::Changed(ChangedType { from, to })
+    }
+
     /// Returns true if the value is unchanged
     pub fn is_unchanged(&self) -> bool {
         matches!(self, Delta::Unchanged)

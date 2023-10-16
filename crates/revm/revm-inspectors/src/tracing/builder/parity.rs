@@ -602,8 +602,14 @@ where
             let db_acc = db.basic(addr)?.unwrap_or_default();
 
             // update _changed_ storage values
-            for (key, slot) in changed_acc.storage.iter().filter(|(_, val)| val.is_changed()) {
-                entry.storage.insert((*key).into(), Delta::Added(slot.present_value.into()));
+            for (key, slot) in changed_acc.storage.iter().filter(|(_, slot)| slot.is_changed()) {
+                entry.storage.insert(
+                    (*key).into(),
+                    Delta::changed(
+                        slot.previous_or_original_value.into(),
+                        slot.present_value.into(),
+                    ),
+                );
             }
 
             // check if the account was changed at all
