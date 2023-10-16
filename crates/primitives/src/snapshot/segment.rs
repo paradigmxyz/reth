@@ -14,7 +14,7 @@ pub enum SnapshotSegment {
     Receipts,
 }
 
-/// A [`NippyJar`] segment header that contains information common to all segments.
+/// A segment header that contains information common to all segments. Used for storage.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SegmentHeader {
     block_range: RangeInclusive<BlockNumber>,
