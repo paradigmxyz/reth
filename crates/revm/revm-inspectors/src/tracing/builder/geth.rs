@@ -208,7 +208,7 @@ impl GethTraceBuilder {
             Ok(PreStateFrame::Default(prestate))
         } else {
             let mut state_diff = DiffMode::default();
-            let mut change_types = HashMap::with_capacity(account_diffs.len());
+            let mut account_change_kinds = HashMap::with_capacity(account_diffs.len());
             for (addr, changed_acc) in account_diffs {
                 let db_acc = db.basic(addr)?.unwrap_or_default();
                 let db_code = db_acc.code.as_ref();
@@ -251,16 +251,17 @@ impl GethTraceBuilder {
                     AccountChangeKind::Modify
                 };
 
-                change_types.insert(addr, (pre_change, post_change));
+                account_change_kinds.insert(addr, (pre_change, post_change));
             }
 
             self.update_storage_from_trace_diff_mode(&mut state_diff.pre, DiffStateKind::Pre);
             self.update_storage_from_trace_diff_mode(&mut state_diff.post, DiffStateKind::Post);
 
+            dbg!(state_diff.post.keys().collect::<Vec<_>>());
             // ensure we're only keeping changed entries
             state_diff.retain_changed().remove_zero_storage_values();
 
-            self.diff_traces(&mut state_diff.pre, &mut state_diff.post, change_types);
+            self.diff_traces(&mut state_diff.pre, &mut state_diff.post, account_change_kinds);
             Ok(PreStateFrame::Diff(state_diff))
         }
     }
