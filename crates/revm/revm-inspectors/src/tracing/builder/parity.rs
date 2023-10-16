@@ -156,11 +156,7 @@ impl ParityTraceBuilder {
         trace_types: &HashSet<TraceType>,
     ) -> TraceResults {
         let gas_used = res.gas_used();
-        let output = match res {
-            ExecutionResult::Success { output, .. } => output.data().clone(),
-            ExecutionResult::Revert { output, .. } => output.clone(),
-            ExecutionResult::Halt { .. } => Default::default(),
-        };
+        let output = res.output().cloned().unwrap_or_default();
 
         let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
 

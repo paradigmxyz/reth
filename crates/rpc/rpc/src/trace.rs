@@ -597,8 +597,9 @@ mod tests {
         let mut s = HashSet::new();
         s.insert(TraceType::StateDiff);
         let config = tracing_config(&s);
-        assert!(config.record_steps);
-        assert!(config.record_state_diff);
+        // not required
+        assert!(!config.record_steps);
+        assert!(!config.record_state_diff);
 
         let mut s = HashSet::new();
         s.insert(TraceType::VmTrace);
@@ -611,6 +612,7 @@ mod tests {
         s.insert(TraceType::StateDiff);
         let config = tracing_config(&s);
         assert!(config.record_steps);
-        assert!(config.record_state_diff);
+        // not required for StateDiff
+        assert!(!config.record_state_diff);
     }
 }
