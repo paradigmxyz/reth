@@ -182,6 +182,7 @@ impl HashBuilder {
 
         tracing::debug!(target: "trie::hash_builder", ?current, ?succeeding, "updating merkle tree");
 
+        let common_prefix_len = succeeding.common_prefix_length(&current);
         let mut i = 0;
         loop {
             let span = tracing::span!(
@@ -197,7 +198,6 @@ impl HashBuilder {
             let preceding_exists = !self.groups.is_empty();
             let preceding_len: usize = self.groups.len().saturating_sub(1);
 
-            let common_prefix_len = succeeding.common_prefix_length(&current);
             let len = std::cmp::max(preceding_len, common_prefix_len);
             assert!(len < current.len());
 
