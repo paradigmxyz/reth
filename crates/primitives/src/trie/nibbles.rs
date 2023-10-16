@@ -276,8 +276,6 @@ impl Nibbles {
 
     /// Extend the current nibbles with another nibbles.
     pub fn extend(&mut self, b: impl AsRef<[u8]>) {
-        // self.hex_data.extend_from_slice(b.as_ref());
-
         let mut bytes = self.hex_data.to_vec();
         bytes.extend_from_slice(b.as_ref());
         self.hex_data = bytes.into();
