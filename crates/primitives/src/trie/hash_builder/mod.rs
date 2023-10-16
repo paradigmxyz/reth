@@ -411,7 +411,7 @@ impl HashBuilder {
 
     fn retain_proof_from_buf(&mut self, prefix: &Nibbles) {
         if let Some(proof_retainer) = self.proof_retainer.as_mut() {
-            proof_retainer.retain(&prefix, &self.rlp_buf)
+            proof_retainer.retain(prefix, &self.rlp_buf)
         }
     }
 

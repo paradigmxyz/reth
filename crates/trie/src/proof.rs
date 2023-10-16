@@ -133,7 +133,7 @@ where
             hashed_address,
         );
 
-        let mut proofs = slots.into_iter().copied().map(StorageProof::new).collect::<Vec<_>>();
+        let mut proofs = slots.iter().copied().map(StorageProof::new).collect::<Vec<_>>();
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty(hashed_address)? {
@@ -184,9 +184,8 @@ where
             proof.set_proof(
                 proof_nodes
                     .iter()
-                    .filter_map(|(path, node)| {
-                        proof.nibbles.starts_with(&path).then(|| node.clone())
-                    })
+                    .filter(|(path, _)| proof.nibbles.starts_with(path))
+                    .map(|(_, node)| node.clone())
                     .collect(),
             );
         }

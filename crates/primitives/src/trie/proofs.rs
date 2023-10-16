@@ -58,7 +58,7 @@ pub struct StorageProof {
 impl StorageProof {
     /// Create new storage proof from the storage slot.
     pub fn new(key: B256) -> Self {
-        let nibbles = Nibbles::unpack(keccak256(&key));
+        let nibbles = Nibbles::unpack(keccak256(key));
         Self { key, nibbles, ..Default::default() }
     }
 
