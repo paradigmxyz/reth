@@ -15,6 +15,7 @@ use std::{path::Path, sync::Arc};
 
 mod bench;
 mod headers;
+mod receipts;
 mod transactions;
 
 #[derive(Parser, Debug)]
@@ -88,7 +89,13 @@ impl Command {
                                 InclusionFilter::Cuckoo,
                                 *phf,
                             )?,
-                        SnapshotSegment::Receipts => todo!(),
+                        SnapshotSegment::Receipts => self
+                            .generate_receipts_snapshot::<DatabaseEnvRO>(
+                                &provider,
+                                *compression,
+                                InclusionFilter::Cuckoo,
+                                *phf,
+                            )?,
                     }
                 }
             }
@@ -113,7 +120,14 @@ impl Command {
                         InclusionFilter::Cuckoo,
                         *phf,
                     )?,
-                    SnapshotSegment::Receipts => todo!(),
+                    SnapshotSegment::Receipts => self.bench_receipts_snapshot(
+                        db_path,
+                        log_level,
+                        chain.clone(),
+                        *compression,
+                        InclusionFilter::Cuckoo,
+                        *phf,
+                    )?,
                 }
             }
         }

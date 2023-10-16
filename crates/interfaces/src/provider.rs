@@ -43,6 +43,9 @@ pub enum ProviderError {
     /// Thrown we were unable to find a specific transaction
     #[error("Transaction does not exist {0:?}")]
     TransactionNotFound(BlockHashOrNumber),
+    /// Thrown we were unable to find a specific receipt
+    #[error("Receipt does not exist {0:?}")]
+    ReceiptNotFound(BlockHashOrNumber),
     /// Thrown we were unable to find the best block
     #[error("Best block does not exist")]
     BestBlockNotFound,
