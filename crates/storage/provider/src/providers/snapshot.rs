@@ -6,7 +6,7 @@ use reth_db::{
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_nippy_jar::{compression::Decompressor, NippyJar, NippyJarCursor};
 use reth_primitives::{BlockHash, BlockNumber, Header, SealedHeader, U256};
-use std::ops::RangeBounds;
+use std::ops::RangeInclusive;
 
 /// SnapshotProvider
 ///
@@ -85,13 +85,13 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
         unimplemented!();
     }
 
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, _range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
         unimplemented!();
     }
 
     fn sealed_headers_range(
         &self,
-        _range: impl RangeBounds<BlockNumber>,
+        _range: RangeInclusive<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         unimplemented!();
     }
