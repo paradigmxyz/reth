@@ -263,9 +263,7 @@ where
                             .into_pre_state_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                // we need to record statediffs independently of the config
-                                .with_state_diffs(),
+                            TracingInspectorConfig::from_geth_config(&config),
                         );
 
                         let frame =
@@ -492,9 +490,7 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                // we need to record statediffs independently of the config
-                                .with_state_diffs(),
+                            TracingInspectorConfig::from_geth_config(&config),
                         );
                         let (res, _) = inspect(&mut *db, env, &mut inspector)?;
 
