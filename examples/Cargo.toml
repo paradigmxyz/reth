@@ -26,7 +26,7 @@ eyre.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
-
+reth-rpc-types-compat.workspace = true
 [[example]]
 name = "db-access"
 path = "db-access.rs"

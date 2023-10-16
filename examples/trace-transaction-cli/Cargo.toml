@@ -7,8 +7,6 @@ license.workspace = true
 
 [dependencies]
 reth.workspace = true
-reth-rpc.workspace = true
-reth-primitives.workspace = true
 clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 eyre = "0.6"
