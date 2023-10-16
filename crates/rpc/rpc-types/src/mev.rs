@@ -1,6 +1,6 @@
 //! MEV-share bundle type bindings
 #![allow(missing_docs)]
-use ethers_core::types::{Address, BlockId, BlockNumber, Bytes, Log, TxHash, H256, U256, U64};
+use reth_primitives::{Address, BlockId, BlockNumber, Bytes, Log, TxHash, B256, U256, U64};
 use serde::{
     ser::{SerializeSeq, Serializer},
     Deserialize, Deserializer, Serialize,
@@ -49,13 +49,13 @@ impl Inclusion {
     /// Returns the block number of the first block the bundle is valid for.
     #[inline]
     pub fn block_number(&self) -> u64 {
-        self.block.as_u64()
+        self.block.to()
     }
 
     /// Returns the block number of the last block the bundle is valid for.
     #[inline]
     pub fn max_block_number(&self) -> Option<u64> {
-        self.max_block.as_ref().map(|b| b.as_u64())
+        self.max_block.as_ref().map(|b| b.to())
     }
 }
 
@@ -272,7 +272,7 @@ impl<'de> Deserialize<'de> for PrivacyHint {
 #[serde(rename_all = "camelCase")]
 pub struct SendBundleResponse {
     /// Hash of the bundle bodies.
-    pub bundle_hash: H256,
+    pub bundle_hash: B256,
 }
 
 /// The version of the MEV-share API to use.
@@ -415,7 +415,7 @@ impl PrivateTransactionPreferences {
 #[serde(rename_all = "camelCase")]
 pub struct CancelPrivateTransactionRequest {
     /// Transaction hash of the transaction to be canceled
-    pub tx_hash: H256,
+    pub tx_hash: B256,
 }
 
 // TODO(@optimiz-r): Revisit after <https://github.com/flashbots/flashbots-docs/issues/424> is closed.
@@ -577,7 +577,7 @@ pub struct EthSendBundle {
     pub max_timestamp: Option<u64>,
     /// list of hashes of possibly reverting txs
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reverting_tx_hashes: Vec<H256>,
+    pub reverting_tx_hashes: Vec<B256>,
     /// UUID that can be used to cancel/replace this bundle
     #[serde(rename = "replacementUuid", skip_serializing_if = "Option::is_none")]
     pub replacement_uuid: Option<String>,
@@ -588,7 +588,7 @@ pub struct EthSendBundle {
 #[serde(rename_all = "camelCase")]
 pub struct EthBundleHash {
     /// Hash of the bundle bodies.
-    pub bundle_hash: H256,
+    pub bundle_hash: B256,
 }
 
 /// Bundle of transactions for `eth_callBundle`
@@ -641,20 +641,32 @@ pub struct EthCallBundleTransactionResult {
     pub gas_price: U256,
     pub gas_used: u64,
     pub to_address: Address,
-    pub tx_hash: H256,
+    pub tx_hash: B256,
     pub value: Bytes,
 }
 
 mod u256_numeric_string {
-    use ethers_core::types::{serde_helpers::StringifiedNumeric, U256};
+    use reth_primitives::U256;
     use serde::{de, Deserialize, Serializer};
+    use std::str::FromStr;
 
     pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<U256, D::Error>
     where
         D: de::Deserializer<'de>,
     {
-        let num = StringifiedNumeric::deserialize(deserializer)?;
-        num.try_into().map_err(de::Error::custom)
+        let val = serde_json::Value::deserialize(deserializer)?;
+        match val {
+            serde_json::Value::String(s) => {
+                if let Ok(val) = s.parse::<u128>() {
+                    return Ok(U256::from(val))
+                }
+                U256::from_str(&s).map_err(de::Error::custom)
+            }
+            serde_json::Value::Number(num) => {
+                num.as_u64().map(U256::from).ok_or_else(|| de::Error::custom("invalid u256"))
+            }
+            _ => Err(de::Error::custom("invalid u256")),
+        }
     }
 
     pub(crate) fn serialize<S>(val: &U256, serializer: S) -> Result<S::Ok, S::Error>
@@ -669,7 +681,7 @@ mod u256_numeric_string {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers_core::types::Bytes;
+    use reth_primitives::Bytes;
     use std::str::FromStr;
 
     #[test]
@@ -768,7 +780,7 @@ mod tests {
 
         let bundle = SendBundleRequest {
             protocol_version: ProtocolVersion::V0_1,
-            inclusion: Inclusion { block: 1.into(), max_block: None },
+            inclusion: Inclusion { block: U64::from(1), max_block: None },
             bundle_body,
             validity,
             privacy,
