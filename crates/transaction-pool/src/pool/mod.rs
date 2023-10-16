@@ -94,7 +94,6 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
-
 mod events;
 pub use events::{FullTransactionEvent, TransactionEvent};
 
@@ -392,7 +391,7 @@ where
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
-                let encoded_length = transaction.encoded_length();
+                let _encoded_length = transaction.encoded_length();
 
                 // split the valid transaction and the blob sidecar if it has any
                 let (transaction, maybe_sidecar) = match transaction {
@@ -412,7 +411,6 @@ where
                     propagate,
                     timestamp: Instant::now(),
                     origin,
-                    encoded_length,
                 };
 
                 let added = self.pool.write().add_transaction(tx, balance, state_nonce)?;

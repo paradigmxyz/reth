@@ -473,6 +473,30 @@ impl Transaction {
     }
 }
 
+impl From<TxLegacy> for Transaction {
+    fn from(tx: TxLegacy) -> Self {
+        Transaction::Legacy(tx)
+    }
+}
+
+impl From<TxEip2930> for Transaction {
+    fn from(tx: TxEip2930) -> Self {
+        Transaction::Eip2930(tx)
+    }
+}
+
+impl From<TxEip1559> for Transaction {
+    fn from(tx: TxEip1559) -> Self {
+        Transaction::Eip1559(tx)
+    }
+}
+
+impl From<TxEip4844> for Transaction {
+    fn from(tx: TxEip4844) -> Self {
+        Transaction::Eip4844(tx)
+    }
+}
+
 impl Compact for Transaction {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
@@ -1049,6 +1073,23 @@ impl TransactionSigned {
             TransactionSigned::decode_rlp_legacy_transaction(&mut data)
         } else {
             TransactionSigned::decode_enveloped_typed_transaction(&mut data)
+        }
+    }
+
+    /// Returns the length without an RLP header - this is used for eth/68 sizes.
+    pub fn length_without_header(&self) -> usize {
+        // method computes the payload len without a RLP header
+        match &self.transaction {
+            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.payload_len_with_signature_without_header(&self.signature)
+            }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
+            }
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.payload_len_with_signature_without_header(&self.signature)
+            }
         }
     }
 }

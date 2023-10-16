@@ -48,6 +48,18 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one(origin, transaction)
     }
+
+    /// Validates all given transactions.
+    ///
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [Self::validate_one]
+    pub fn validate_all(
+        &self,
+        transactions: Vec<(TransactionOrigin, Tx)>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+    }
 }
 
 #[async_trait::async_trait]
@@ -64,6 +76,13 @@ where
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         self.validate_one(origin, transaction)
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_all(transactions)
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {

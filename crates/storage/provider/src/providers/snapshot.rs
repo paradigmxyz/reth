@@ -10,7 +10,8 @@ use reth_primitives::{
     SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
     B256, U256,
 };
-use std::ops::RangeBounds;
+use std::ops::{Range, RangeInclusive};
+
 /// SnapshotProvider
 ///
 ///  WIP Rudimentary impl just for tests
@@ -88,13 +89,13 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
         unimplemented!();
     }
 
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, _range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
         unimplemented!();
     }
 
     fn sealed_headers_range(
         &self,
-        _range: impl RangeBounds<BlockNumber>,
+        _range: RangeInclusive<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         unimplemented!();
     }
@@ -199,18 +200,18 @@ impl<'a> TransactionsProvider for SnapshotProvider<'a> {
 
     fn transactions_by_block_range(
         &self,
-        _range: impl RangeBounds<BlockNumber>,
+        _range: Range<BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         todo!()
     }
 
-    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, _range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
         todo!()
     }
 
     fn transactions_by_tx_range(
         &self,
-        _range: impl RangeBounds<TxNumber>,
+        _range: RangeInclusive<TxNumber>,
     ) -> RethResult<Vec<reth_primitives::TransactionSignedNoHash>> {
         todo!()
     }

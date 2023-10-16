@@ -577,6 +577,11 @@ where
     DB: DatabaseRef,
 {
     for (addr, changed_acc) in account_diffs.into_iter() {
+        // if the account was selfdestructed and created during the transaction, we can ignore it
+        if changed_acc.is_selfdestructed() && changed_acc.is_created() {
+            continue
+        }
+
         let addr = *addr;
         let entry = state_diff.entry(addr).or_default();
 
@@ -592,6 +597,19 @@ where
         } else {
             // account already exists, we need to fetch the account from the db
             let db_acc = db.basic(addr)?.unwrap_or_default();
+
+            // check if the account was changed at all
+            // NOTE: changed storage values are set by the the
+            // `CallTraceNode::parity_update_state_diff`
+            if entry.storage.is_empty() &&
+                db_acc == changed_acc.info &&
+                !changed_acc.is_selfdestructed()
+            {
+                // clear the entry if the account was not changed
+                state_diff.remove(&addr);
+                continue
+            }
+
             entry.balance = if db_acc.balance == changed_acc.info.balance {
                 Delta::Unchanged
             } else {

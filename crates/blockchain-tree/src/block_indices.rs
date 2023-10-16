@@ -1,6 +1,6 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
-use super::chain::BlockChainId;
+use super::state::BlockChainId;
 use crate::canonical_chain::CanonicalChain;
 use linked_hash_set::LinkedHashSet;
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
