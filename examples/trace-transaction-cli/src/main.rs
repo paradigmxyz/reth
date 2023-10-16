@@ -13,14 +13,16 @@ use reth::{
         ext::{RethCliExt, RethNodeCommandConfig},
         Cli,
     },
+    primitives::{Address, BlockId},
     providers::TransactionsProvider,
+    rpc::{
+        compat::transaction::to_call_request,
+        types::{state::StateOverride, trace::parity::TraceType, BlockOverrides},
+    },
+    tasks::TaskSpawner,
     transaction_pool::TransactionPool,
-    primitives::{Address,BlockId},
-    rpc::{compat::transaction::to_call_request,types::{trace::parity::TraceType,state::StateOverride,BlockOverrides}},
-    tasks::TaskSpawner
 };
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 fn main() {
     Cli::<MyRethCliExt>::parse().run().unwrap();
 }
@@ -57,47 +59,52 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
         let provider = components.provider().clone();
         let receipients = Arc::new(self.receipients.clone()); // Clone into an Arc
         let traceapi = rpc_components.registry.trace_api();
-         let eth_handlers = rpc_components.registry.eth_handlers().clone(); 
-            let api = eth_handlers.api;
-            let tx_pool = api.pool();
-            let mut tx_subscription = tx_pool.pending_transactions_listener();
+        let eth_handlers = rpc_components.registry.eth_handlers().clone();
+        let api = eth_handlers.api;
+        let tx_pool = api.pool();
+        let mut tx_subscription = tx_pool.pending_transactions_listener();
 
-            // Spawn an async block to listen for transactions.
-            components.task_executor().spawn(Box::pin(async move {
-                // Awaiting for a new transaction and print it.
-                while let Some(tx) = tx_subscription.recv().await {
-                    println!("Transaction received: {:?}", tx);
-                    let res = provider.transaction_by_hash(tx);
-                    if let Ok(Some(tx_receipient)) = res {
-                        if let Some(tx_recipient_address) = tx_receipient.kind().to() {
-                            if receipients.contains(&tx_recipient_address) {
-                                let blockdetails = provider.transaction_by_hash_with_meta(tx);
-                                
-                                let base_fee = match blockdetails {
-                                    Ok(Some((_,meta))) =>{
-                                        meta.base_fee
-                                    }
-                                    Ok(None) =>{
-                                        Some(u64::default())
-                                    }
-                                    Err(_e) =>{
-                                        Some(u64::default())
-                                    }
-                                };
-                                let callrequest = to_call_request(tx_receipient,base_fee);
-                                let mut tracetype = HashSet::new();
-                                tracetype.insert(TraceType::Trace);
-                                let block_id :Option<BlockId> = None; 
-                                let state_override :Option<StateOverride> = None;
-                                let block_override: Option<BlockOverrides> = None;
-                                let boxed_block_override = block_override.map(Box::new);
-                                let trace_result = traceapi.trace_call(callrequest,tracetype,block_id,state_override,boxed_block_override).await;
-                                println!("trace result for transaction : {:?} is {:?}",tx,trace_result);
-                            }
+        // Spawn an async block to listen for transactions.
+        components.task_executor().spawn(Box::pin(async move {
+            // Awaiting for a new transaction and print it.
+            while let Some(tx) = tx_subscription.recv().await {
+                println!("Transaction received: {:?}", tx);
+                let res = provider.transaction_by_hash(tx);
+                if let Ok(Some(tx_receipient)) = res {
+                    if let Some(tx_recipient_address) = tx_receipient.kind().to() {
+                        if receipients.contains(&tx_recipient_address) {
+                            let blockdetails = provider.transaction_by_hash_with_meta(tx);
+
+                            let base_fee = match blockdetails {
+                                Ok(Some((_, meta))) => meta.base_fee,
+                                Ok(None) => Some(u64::default()),
+                                Err(_e) => Some(u64::default()),
+                            };
+                            let callrequest = to_call_request(tx_receipient, base_fee);
+                            let mut tracetype = HashSet::new();
+                            tracetype.insert(TraceType::Trace);
+                            let block_id: Option<BlockId> = None;
+                            let state_override: Option<StateOverride> = None;
+                            let block_override: Option<BlockOverrides> = None;
+                            let boxed_block_override = block_override.map(Box::new);
+                            let trace_result = traceapi
+                                .trace_call(
+                                    callrequest,
+                                    tracetype,
+                                    block_id,
+                                    state_override,
+                                    boxed_block_override,
+                                )
+                                .await;
+                            println!(
+                                "trace result for transaction : {:?} is {:?}",
+                                tx, trace_result
+                            );
                         }
                     }
                 }
-            }));
+            }
+        }));
         Ok(())
     }
 }
