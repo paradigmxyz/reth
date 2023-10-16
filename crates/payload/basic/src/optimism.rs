@@ -37,7 +37,9 @@ where
 
     debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+    let block_gas_limit: u64 = attributes
+        .gas_limit
+        .unwrap_or(initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX));
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::new();
