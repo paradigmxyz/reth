@@ -121,6 +121,11 @@ impl TracingInspectorConfig {
         self
     }
 
+    /// Sets state diff recording to true.
+    pub fn with_state_diffs(self) -> Self {
+        self.set_steps_and_state_diffs(true)
+    }
+
     /// Configure whether the tracer should record state diffs
     pub fn set_state_diffs(mut self, record_state_diff: bool) -> Self {
         self.record_state_diff = record_state_diff;

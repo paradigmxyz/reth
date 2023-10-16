@@ -4,9 +4,7 @@ use crate::tracing::{config::TraceStyle, utils::convert_memory};
 use alloy_sol_types::decode_revert_reason;
 use reth_primitives::{Address, Bytes, B256, U256, U64};
 use reth_rpc_types::trace::{
-    geth::{
-        AccountState, CallFrame, CallLogFrame, DiffStateKind, GethDefaultTracingOptions, StructLog,
-    },
+    geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
         Action, ActionType, CallAction, CallOutput, CallType, CreateAction, CreateOutput,
         SelfdestructAction, TraceOutput, TransactionTrace,
@@ -16,7 +14,7 @@ use revm::interpreter::{
     opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -253,16 +251,6 @@ impl CallTraceNode {
         stack.extend(self.call_step_stack().into_iter().rev());
     }
 
-    /// Returns all changed slots and the recorded changes
-    fn changed_storage_slots(&self) -> BTreeMap<U256, Vec<StorageChange>> {
-        let mut changed_slots: BTreeMap<U256, Vec<StorageChange>> = BTreeMap::new();
-        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            changed_slots.entry(change.key).or_default().push(change);
-        }
-
-        changed_slots
-    }
-
     /// Returns a list of all steps in this trace in the order they were executed
     ///
     /// If the step is a call, the id of the child trace is set.
@@ -445,84 +433,6 @@ impl CallTraceNode {
         }
 
         call_frame
-    }
-
-    /// Adds storage in-place to account state for all accounts that were touched in the trace
-    /// [CallTrace] execution.
-    ///
-    /// * `account_states` - the account map updated in place.
-    /// * `kind` - if [DiffStateKind::Post], it adds storage values after trace transaction
-    ///   execution, if [DiffStateKind::Pre], returns the storage values before trace execution.
-    pub(crate) fn geth_update_account_storage(
-        &self,
-        account_states: &mut BTreeMap<Address, AccountState>,
-        kind: DiffStateKind,
-    ) {
-        let addr = self.trace.address;
-        let acc_state = account_states.entry(addr).or_default();
-        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value, .. } = change;
-            let value_to_insert = if kind.is_post() {
-                B256::from(value)
-            } else {
-                match had_value {
-                    Some(had_value) => B256::from(had_value),
-                    None => continue,
-                }
-            };
-            acc_state.storage.insert(key.into(), value_to_insert);
-        }
-    }
-
-    /// Updates the account storage for all accounts that were touched in the trace.
-    ///
-    /// Depending on the [DiffStateKind] this will either insert the initial value
-    /// [DiffStateKind::Pre] or the final value [DiffStateKind::Post] of the storage slot.
-    pub(crate) fn geth_update_account_storage_diff_mode(
-        &self,
-        account_states: &mut BTreeMap<Address, AccountState>,
-        kind: DiffStateKind,
-    ) {
-        let addr = self.execution_address();
-        let changed_slots = self.changed_storage_slots();
-
-        // loop over all changed slots and track the storage changes of that slot
-        for (slot, changes) in changed_slots {
-            let account = account_states.entry(addr).or_default();
-
-            let mut initial_value = account.storage.get(&B256::from(slot)).copied().map(Into::into);
-            let mut final_value = None;
-
-            for change in changes {
-                if initial_value.is_none() {
-                    // set the initial value for the first storage change depending on the change
-                    // reason
-                    initial_value = match change.reason {
-                        StorageChangeReason::SSTORE => Some(change.had_value.unwrap_or_default()),
-                        StorageChangeReason::SLOAD => Some(change.value),
-                    };
-                }
-
-                if change.reason == StorageChangeReason::SSTORE {
-                    // keep track of the actual state value that's updated on sstore
-                    final_value = Some(change.value);
-                }
-            }
-
-            if final_value.is_none() || initial_value.is_none() {
-                continue
-            }
-
-            if initial_value == final_value {
-                // unchanged
-                continue
-            }
-
-            let value_to_write =
-                if kind.is_post() { final_value } else { initial_value }.expect("exists; qed");
-
-            account.storage.insert(B256::from(slot), B256::from(value_to_write));
-        }
     }
 }
 
