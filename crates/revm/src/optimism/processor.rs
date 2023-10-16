@@ -92,8 +92,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     self.db_mut()
                         .load_cache_account(sender)
                         .map_err(|_| BlockExecutionError::ProviderError)?
-                        .clone()
-                        .account
+                        .account_info()
                         .ok_or(BlockExecutionError::ProviderError)
                 })
                 .transpose()?;
@@ -106,13 +105,14 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                         if is_regolith || !transaction.is_system_transaction() {
                             cumulative_gas_used += transaction.gas_limit();
                         }
+
                         receipts.push(Receipt {
                             tx_type: transaction.tx_type(),
                             success: false,
                             cumulative_gas_used,
                             logs: vec![],
                             #[cfg(feature = "optimism")]
-                            deposit_nonce: depositor.map(|account| account.info.nonce),
+                            deposit_nonce: depositor.map(|account| account.nonce),
                         });
                         continue
                     }
@@ -144,7 +144,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 // convert to reth log
                 logs: result.into_logs().into_iter().map(into_reth_log).collect(),
                 #[cfg(feature = "optimism")]
-                deposit_nonce: depositor.map(|account| account.info.nonce),
+                deposit_nonce: depositor.map(|account| account.nonce),
             });
         }
 

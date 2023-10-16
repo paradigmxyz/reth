@@ -75,8 +75,7 @@ where
             .then(|| {
                 db.load_cache_account(sequencer_tx.signer())
                     .map_err(|_| PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))?
-                    .clone()
-                    .account
+                    .account_info()
                     .ok_or(PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))
             })
             .transpose()?;
@@ -98,13 +97,14 @@ where
                     if is_regolith || !sequencer_tx.is_system_transaction() {
                         cumulative_gas_used += sequencer_tx.gas_limit();
                     }
+
                     receipts.push(Some(Receipt {
                         tx_type: sequencer_tx.tx_type(),
                         success: false,
                         cumulative_gas_used,
                         logs: vec![],
                         #[cfg(feature = "optimism")]
-                        deposit_nonce: depositor.map(|account| account.info.nonce),
+                        deposit_nonce: depositor.map(|account| account.nonce),
                     }));
                     executed_txs.push(sequencer_tx.into_signed());
                     continue
@@ -146,7 +146,7 @@ where
             cumulative_gas_used,
             logs: result.logs().into_iter().map(into_reth_log).collect(),
             #[cfg(feature = "optimism")]
-            deposit_nonce: depositor.map(|account| account.info.nonce),
+            deposit_nonce: depositor.map(|account| account.nonce),
         }));
 
         // append transaction to the list of executed transactions
