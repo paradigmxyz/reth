@@ -257,9 +257,11 @@ impl GethTraceBuilder {
             self.update_storage_from_trace_diff_mode(&mut state_diff.pre, DiffStateKind::Pre);
             self.update_storage_from_trace_diff_mode(&mut state_diff.post, DiffStateKind::Post);
 
-            dbg!(state_diff.post.keys().collect::<Vec<_>>());
+            dbg!(&state_diff.post);
             // ensure we're only keeping changed entries
             state_diff.retain_changed().remove_zero_storage_values();
+            dbg!("AFTER");
+            dbg!(&state_diff.post);
 
             self.diff_traces(&mut state_diff.pre, &mut state_diff.post, account_change_kinds);
             Ok(PreStateFrame::Diff(state_diff))
