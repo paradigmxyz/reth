@@ -93,23 +93,6 @@ where
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
             Err(err) => {
-                if sequencer_tx.is_deposit() {
-                    if is_regolith || !sequencer_tx.is_system_transaction() {
-                        cumulative_gas_used += sequencer_tx.gas_limit();
-                    }
-
-                    receipts.push(Some(Receipt {
-                        tx_type: sequencer_tx.tx_type(),
-                        success: false,
-                        cumulative_gas_used,
-                        logs: vec![],
-                        #[cfg(feature = "optimism")]
-                        deposit_nonce: depositor.map(|account| account.nonce),
-                    }));
-                    executed_txs.push(sequencer_tx.into_signed());
-                    continue
-                }
-
                 match err {
                     EVMError::Transaction(err) => {
                         if matches!(err, InvalidTransaction::NonceTooLow { .. }) {

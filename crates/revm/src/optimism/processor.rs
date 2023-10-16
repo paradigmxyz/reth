@@ -98,27 +98,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 .transpose()?;
 
             // Execute transaction.
-            let ResultAndState { result, state } = match self.transact(transaction, sender) {
-                Ok(res) => res,
-                Err(err) => {
-                    if transaction.is_deposit() {
-                        if is_regolith || !transaction.is_system_transaction() {
-                            cumulative_gas_used += transaction.gas_limit();
-                        }
-
-                        receipts.push(Receipt {
-                            tx_type: transaction.tx_type(),
-                            success: false,
-                            cumulative_gas_used,
-                            logs: vec![],
-                            #[cfg(feature = "optimism")]
-                            deposit_nonce: depositor.map(|account| account.nonce),
-                        });
-                        continue
-                    }
-                    return Err(err)
-                }
-            };
+            let ResultAndState { result, state } = self.transact(transaction, sender)?;
             trace!(
                 target: "evm",
                 ?transaction, ?result, ?state,
