@@ -146,22 +146,17 @@ impl ParityTraceBuilder {
     /// Consumes the inspector and returns the trace results according to the configured trace
     /// types.
     ///
-    /// Warning: If `trace_types` contains [TraceType::StateDiff] the returned [StateDiff] will only
-    /// contain accounts with changed state, not including their balance changes because this is not
-    /// tracked during inspection and requires the State map returned after inspection. Use
-    /// [ParityTraceBuilder::into_trace_results_with_state] to populate the balance and nonce
-    /// changes for the [StateDiff] using the [DatabaseRef].
+    /// Warning: If `trace_types` contains [TraceType::StateDiff] the returned [StateDiff] will not
+    /// be filled. Use [ParityTraceBuilder::into_trace_results_with_state] or
+    /// [populate_state_diff] to populate the balance and nonce changes for the [StateDiff]
+    /// using the [DatabaseRef].
     pub fn into_trace_results(
         self,
-        res: ExecutionResult,
+        res: &ExecutionResult,
         trace_types: &HashSet<TraceType>,
     ) -> TraceResults {
         let gas_used = res.gas_used();
-        let output = match res {
-            ExecutionResult::Success { output, .. } => output.into_data(),
-            ExecutionResult::Revert { output, .. } => output,
-            ExecutionResult::Halt { .. } => Default::default(),
-        };
+        let output = res.output().cloned().unwrap_or_default();
 
         let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
 
@@ -186,14 +181,14 @@ impl ParityTraceBuilder {
     /// with the [TracingInspector](crate::tracing::TracingInspector).
     pub fn into_trace_results_with_state<DB>(
         self,
-        res: ResultAndState,
+        res: &ResultAndState,
         trace_types: &HashSet<TraceType>,
         db: DB,
     ) -> Result<TraceResults, DB::Error>
     where
         DB: DatabaseRef,
     {
-        let ResultAndState { result, state } = res;
+        let ResultAndState { ref result, ref state } = res;
 
         let breadth_first_addresses = if trace_types.contains(&TraceType::VmTrace) {
             CallTraceNodeWalkerBF::new(&self.nodes)
@@ -207,7 +202,7 @@ impl ParityTraceBuilder {
 
         // check the state diff case
         if let Some(ref mut state_diff) = trace_res.state_diff {
-            populate_account_balance_nonce_diffs(state_diff, &db, state.iter())?;
+            populate_state_diff(state_diff, &db, state.iter())?;
         }
 
         // check the vm trace case
@@ -218,7 +213,12 @@ impl ParityTraceBuilder {
         Ok(trace_res)
     }
 
-    /// Returns the tracing types that are configured in the set
+    /// Returns the tracing types that are configured in the set.
+    ///
+    /// Warning: if [TraceType::StateDiff] is provided this does __not__ fill the state diff, since
+    /// this requires access to the account diffs.
+    ///
+    /// See [Self::into_trace_results_with_state] and [populate_state_diff].
     pub fn into_trace_type_traces(
         self,
         trace_types: &HashSet<TraceType>,
@@ -234,7 +234,6 @@ impl ParityTraceBuilder {
             if trace_types.contains(&TraceType::VmTrace) { Some(self.vm_trace()) } else { None };
 
         let mut traces = Vec::with_capacity(if with_traces { self.nodes.len() } else { 0 });
-        let mut diff = StateDiff::default();
 
         for node in self.iter_traceable_nodes() {
             let trace_address = self.trace_address(node.idx);
@@ -262,13 +261,10 @@ impl ParityTraceBuilder {
                     }
                 }
             }
-            if with_diff {
-                node.parity_update_state_diff(&mut diff);
-            }
         }
 
         let traces = with_traces.then_some(traces);
-        let diff = with_diff.then_some(diff);
+        let diff = with_diff.then_some(StateDiff::default());
 
         (traces, vm_trace, diff)
     }
@@ -565,9 +561,7 @@ where
 ///
 /// It's expected that `DB` is a revm [Database](revm::db::Database) which at this point already
 /// contains all the accounts that are in the state map and never has to fetch them from disk.
-///
-/// This is intended to be called after inspecting a transaction with the returned state.
-pub fn populate_account_balance_nonce_diffs<'a, DB, I>(
+pub fn populate_state_diff<'a, DB, I>(
     state_diff: &mut StateDiff,
     db: DB,
     account_diffs: I,
@@ -586,7 +580,7 @@ where
         let entry = state_diff.entry(addr).or_default();
 
         // we check if this account was created during the transaction
-        if changed_acc.is_created() {
+        if changed_acc.is_created() || changed_acc.is_loaded_as_not_existing() {
             entry.balance = Delta::Added(changed_acc.info.balance);
             entry.nonce = Delta::Added(U64::from(changed_acc.info.nonce));
             if changed_acc.info.code_hash == KECCAK_EMPTY {
@@ -594,13 +588,27 @@ where
                 // marked as added
                 entry.code = Delta::Added(Default::default());
             }
+
+            // new storage values
+            for (key, slot) in changed_acc.storage.iter() {
+                entry.storage.insert((*key).into(), Delta::Added(slot.present_value.into()));
+            }
         } else {
             // account already exists, we need to fetch the account from the db
             let db_acc = db.basic(addr)?.unwrap_or_default();
 
+            // update _changed_ storage values
+            for (key, slot) in changed_acc.storage.iter().filter(|(_, slot)| slot.is_changed()) {
+                entry.storage.insert(
+                    (*key).into(),
+                    Delta::changed(
+                        slot.previous_or_original_value.into(),
+                        slot.present_value.into(),
+                    ),
+                );
+            }
+
             // check if the account was changed at all
-            // NOTE: changed storage values are set by the the
-            // `CallTraceNode::parity_update_state_diff`
             if entry.storage.is_empty() &&
                 db_acc == changed_acc.info &&
                 !changed_acc.is_selfdestructed()

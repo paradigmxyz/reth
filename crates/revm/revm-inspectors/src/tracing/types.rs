@@ -8,15 +8,15 @@ use reth_rpc_types::trace::{
         AccountState, CallFrame, CallLogFrame, DiffStateKind, GethDefaultTracingOptions, StructLog,
     },
     parity::{
-        Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
-        CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TransactionTrace,
+        Action, ActionType, CallAction, CallOutput, CallType, CreateAction, CreateOutput,
+        SelfdestructAction, TraceOutput, TransactionTrace,
     },
 };
 use revm::interpreter::{
     opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -306,74 +306,6 @@ impl CallTraceNode {
     #[inline]
     pub(crate) fn is_selfdestruct(&self) -> bool {
         self.status() == InstructionResult::SelfDestruct
-    }
-
-    /// Updates the values of the state diff
-    pub(crate) fn parity_update_state_diff(&self, diff: &mut StateDiff) {
-        let addr = self.trace.address;
-        let acc = diff.entry(addr).or_default();
-
-        if self.kind().is_any_create() {
-            let code = self.trace.output.clone();
-            if acc.code == Delta::Unchanged {
-                acc.code = Delta::Added(code)
-            }
-        }
-
-        // iterate over all storage diffs
-        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value, .. } = change;
-            let b256_value = B256::from(value);
-            match acc.storage.entry(key.into()) {
-                Entry::Vacant(entry) => {
-                    if let Some(had_value) = had_value {
-                        if value != had_value {
-                            entry.insert(Delta::Changed(ChangedType {
-                                from: had_value.into(),
-                                to: b256_value,
-                            }));
-                        }
-                    } else {
-                        entry.insert(Delta::Added(b256_value));
-                    }
-                }
-                Entry::Occupied(mut entry) => {
-                    let value = match entry.get() {
-                        Delta::Unchanged => {
-                            if let Some(had_value) = had_value {
-                                if value != had_value {
-                                    Delta::Changed(ChangedType {
-                                        from: had_value.into(),
-                                        to: b256_value,
-                                    })
-                                } else {
-                                    Delta::Unchanged
-                                }
-                            } else {
-                                Delta::Added(b256_value)
-                            }
-                        }
-                        Delta::Added(added) => {
-                            if added == &b256_value {
-                                Delta::Added(*added)
-                            } else {
-                                Delta::Changed(ChangedType { from: *added, to: b256_value })
-                            }
-                        }
-                        Delta::Removed(_) => Delta::Added(b256_value),
-                        Delta::Changed(c) => {
-                            if c.from == b256_value {
-                                // remains unchanged if the value is the same
-                                Delta::Unchanged
-                            } else {
-                                Delta::Changed(ChangedType { from: c.from, to: b256_value })
-                            }
-                        }
-                    };
-                    entry.insert(value);
-                }
-            }
-        }
     }
 
     /// Converts this node into a parity `TransactionTrace`
