@@ -243,6 +243,7 @@ mod test {
         // Ranges
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
+        let segment_header = SegmentHeader::new(range.clone(), range.clone());
 
         // Data sources
         let db = create_test_rw_db();
@@ -277,7 +278,7 @@ mod test {
             let with_compression = true;
             let with_filter = true;
 
-            let mut nippy_jar = NippyJar::new_without_header(2, snap_file.path());
+            let mut nippy_jar = NippyJar::new(2, snap_file.path(), segment_header);
 
             if with_compression {
                 nippy_jar = nippy_jar.with_zstd(false, 0);
@@ -300,7 +301,7 @@ mod test {
                 .unwrap()
                 .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into()));
 
-            create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber, ()>(
+            create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber, SegmentHeader>(
                 &tx,
                 range,
                 None,
