@@ -1,7 +1,7 @@
 use crate::segments::{prepare_jar, Segment, SegmentHeader};
 use reth_db::{
-    cursor::DbCursorRO, database::Database, snapshot::create_snapshot_T1_T2_T3, table::Table,
-    tables, transaction::DbTx, RawKey, RawTable,
+    cursor::DbCursorRO, database::Database, snapshot::create_snapshot_T1_T2_T3, tables,
+    transaction::DbTx, RawKey, RawTable,
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{
@@ -22,21 +22,6 @@ impl Headers {
     /// Creates new instance of [Headers] snapshot segment.
     pub fn new(compression: Compression, filters: Filters) -> Self {
         Self { compression, filters }
-    }
-
-    // Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
-    fn dataset_for_compression<DB: Database, T: Table<Key = BlockNumber>>(
-        &self,
-        provider: &DatabaseProviderRO<'_, DB>,
-        range: &RangeInclusive<BlockNumber>,
-        range_len: usize,
-    ) -> RethResult<Vec<Vec<u8>>> {
-        let mut cursor = provider.tx_ref().cursor_read::<RawTable<T>>()?;
-        Ok(cursor
-            .walk_back(Some(RawKey::from(*range.end())))?
-            .take(range_len.min(1000))
-            .map(|row| row.map(|(_key, value)| value.into_value()).expect("should exist"))
-            .collect::<Vec<_>>())
     }
 }
 

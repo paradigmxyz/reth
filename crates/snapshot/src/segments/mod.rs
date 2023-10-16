@@ -6,7 +6,9 @@ pub use transactions::Transactions;
 mod headers;
 pub use headers::Headers;
 
-use reth_db::database::Database;
+use reth_db::{
+    cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, RawKey, RawTable,
+};
 use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
@@ -26,6 +28,21 @@ pub trait Segment {
         provider: &DatabaseProviderRO<'_, DB>,
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()>;
+
+    /// Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
+    fn dataset_for_compression<DB: Database, T: Table<Key = u64>>(
+        &self,
+        provider: &DatabaseProviderRO<'_, DB>,
+        range: &RangeInclusive<u64>,
+        range_len: usize,
+    ) -> RethResult<Vec<Vec<u8>>> {
+        let mut cursor = provider.tx_ref().cursor_read::<RawTable<T>>()?;
+        Ok(cursor
+            .walk_back(Some(RawKey::from(*range.end())))?
+            .take(range_len.min(1000))
+            .map(|row| row.map(|(_key, value)| value.into_value()).expect("should exist"))
+            .collect::<Vec<_>>())
+    }
 }
 
 /// Returns a [`NippyJar`] according to the desired configuration.

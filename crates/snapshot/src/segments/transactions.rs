@@ -1,8 +1,5 @@
 use crate::segments::{prepare_jar, Segment};
-use reth_db::{
-    cursor::DbCursorRO, database::Database, snapshot::create_snapshot_T1, table::Table, tables,
-    transaction::DbTx, RawKey, RawTable,
-};
+use reth_db::{database::Database, snapshot::create_snapshot_T1, tables};
 use reth_interfaces::RethResult;
 use reth_primitives::{
     snapshot::{Compression, Filters, SegmentHeader},
@@ -23,21 +20,6 @@ impl Transactions {
     pub fn new(compression: Compression, filters: Filters) -> Self {
         Self { compression, filters }
     }
-
-    // Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
-    fn dataset_for_compression<'tx, T: Table<Key = TxNumber>>(
-        &self,
-        tx: &impl DbTx<'tx>,
-        range: &RangeInclusive<TxNumber>,
-        range_len: usize,
-    ) -> RethResult<Vec<Vec<u8>>> {
-        let mut cursor = tx.cursor_read::<RawTable<T>>()?;
-        Ok(cursor
-            .walk_back(Some(RawKey::from(*range.end())))?
-            .take(range_len.min(1000))
-            .map(|row| row.map(|(_key, value)| value.into_value()).expect("should exist"))
-            .collect::<Vec<_>>())
-    }
 }
 
 impl Segment for Transactions {
@@ -57,8 +39,8 @@ impl Segment for Transactions {
             block_range,
             tx_range_len,
             || {
-                Ok([self.dataset_for_compression::<tables::Transactions>(
-                    provider.tx_ref(),
+                Ok([self.dataset_for_compression::<DB, tables::Transactions>(
+                    provider,
                     &tx_range,
                     tx_range_len,
                 )?])
