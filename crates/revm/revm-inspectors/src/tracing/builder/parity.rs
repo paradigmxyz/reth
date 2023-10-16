@@ -584,7 +584,7 @@ where
         let entry = state_diff.entry(addr).or_default();
 
         // we check if this account was created during the transaction
-        if changed_acc.is_created() {
+        if changed_acc.is_created() || changed_acc.is_loaded_as_not_existing() {
             entry.balance = Delta::Added(changed_acc.info.balance);
             entry.nonce = Delta::Added(U64::from(changed_acc.info.nonce));
             if changed_acc.info.code_hash == KECCAK_EMPTY {
