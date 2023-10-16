@@ -257,11 +257,8 @@ impl GethTraceBuilder {
             self.update_storage_from_trace_diff_mode(&mut state_diff.pre, DiffStateKind::Pre);
             self.update_storage_from_trace_diff_mode(&mut state_diff.post, DiffStateKind::Post);
 
-            dbg!(&state_diff.post);
             // ensure we're only keeping changed entries
             state_diff.retain_changed().remove_zero_storage_values();
-            dbg!("AFTER");
-            dbg!(&state_diff.post);
 
             self.diff_traces(&mut state_diff.pre, &mut state_diff.post, account_change_kinds);
             Ok(PreStateFrame::Diff(state_diff))
@@ -300,10 +297,9 @@ impl GethTraceBuilder {
         post: &mut BTreeMap<Address, AccountState>,
         change_type: HashMap<Address, (AccountChangeKind, AccountChangeKind)>,
     ) {
-        // Don't keep destroyed accounts in the post state
         post.retain(|addr, post_state| {
-            // only keep accounts that are not created
-            if change_type.get(addr).map(|ty| !ty.1.is_selfdestruct()).unwrap_or(false) {
+            // Don't keep destroyed accounts in the post state
+            if change_type.get(addr).map(|ty| ty.1.is_selfdestruct()).unwrap_or(false) {
                 return false
             }
             if let Some(pre_state) = pre.get(addr) {
