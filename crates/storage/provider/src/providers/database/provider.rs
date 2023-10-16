@@ -893,7 +893,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
         Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
         let mut cursor = self.tx.cursor_read::<tables::Headers>()?;
         cursor
             .walk_range(range)?
@@ -903,7 +903,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
 
     fn sealed_headers_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         let mut headers = vec![];
         for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
@@ -1246,7 +1246,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
 
     fn transactions_by_block_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: Range<BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         let mut results = Vec::new();
         let mut body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
@@ -1270,7 +1270,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
 
     fn transactions_by_tx_range(
         &self,
-        range: impl RangeBounds<TxNumber>,
+        range: RangeInclusive<TxNumber>,
     ) -> RethResult<Vec<TransactionSignedNoHash>> {
         Ok(self
             .tx
@@ -1280,7 +1280,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .collect::<Result<Vec<_>, _>>()?)
     }
 
-    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
         Ok(self
             .tx
             .cursor_read::<tables::TxSenders>()?
