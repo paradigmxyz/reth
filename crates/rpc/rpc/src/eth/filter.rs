@@ -425,6 +425,7 @@ struct ActiveFilter {
     kind: FilterKind,
 }
 
+/// A receiver for pending transactions that returns all new transactions since the last poll.
 #[derive(Debug, Clone)]
 struct PendingTransactionsReceiver {
     txs_receiver: Arc<Mutex<Receiver<TxHash>>>,
@@ -435,9 +436,9 @@ impl PendingTransactionsReceiver {
         PendingTransactionsReceiver { txs_receiver: Arc::new(Mutex::new(receiver)) }
     }
 
+    /// Returns all new pending transactions received since the last poll.
     async fn drain(&self) -> Vec<B256> {
         let mut pending_txs = Vec::new();
-
         let mut prepared_stream = self.txs_receiver.lock().await;
 
         while let Ok(tx_hash) = prepared_stream.try_recv() {
