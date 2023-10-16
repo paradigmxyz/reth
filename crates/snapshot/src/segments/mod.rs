@@ -6,6 +6,9 @@ pub use transactions::Transactions;
 mod headers;
 pub use headers::Headers;
 
+mod receipts;
+pub use receipts::Receipts;
+
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, RawKey, RawTable,
 };
