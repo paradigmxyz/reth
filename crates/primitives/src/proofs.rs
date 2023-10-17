@@ -3,8 +3,8 @@
 use crate::{
     b256, keccak256,
     trie::{HashBuilder, Nibbles},
-    Address, GenesisAccount, Header, Log, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned,
-    Withdrawal, B256,
+    Address, GenesisAccount, Header, Log, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
+    TransactionSigned, Withdrawal, B256,
 };
 use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
@@ -102,10 +102,28 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
 /// Calculates the receipt root for a header for the reference type of [ReceiptWithBloom].
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
-pub fn calculate_receipt_root_ref<T>(receipts: &[&T]) -> B256
-where
-    for<'a> ReceiptWithBloomRef<'a>: From<&'a T>,
-{
+pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
+    #[cfg(feature = "optimism")]
+    {
+        // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
+        // the receipt root calculation does not include the deposit nonce in the receipt
+        // encoding. This will be fixd in the next hardfork, however for now, we must strip
+        // the deposit nonce from the receipts before calculating the receipt root.
+        let receipts = receipts
+            .iter()
+            .map(|r| {
+                let mut r = (*r).clone();
+                r.deposit_nonce = None;
+                r
+            })
+            .collect::<Vec<_>>();
+
+        ordered_trie_root_with_encoder(&receipts, |r, buf| {
+            ReceiptWithBloomRef::from(r).encode_inner(buf, false)
+        })
+    }
+
+    #[cfg(not(feature = "optimism"))]
     ordered_trie_root_with_encoder(receipts, |r, buf| {
         ReceiptWithBloomRef::from(r).encode_inner(buf, false)
     })
