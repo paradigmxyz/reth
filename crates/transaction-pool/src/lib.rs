@@ -148,10 +148,7 @@ use crate::pool::PoolInner;
 use aquamarine as _;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
@@ -230,19 +227,21 @@ where
     }
 
     /// Returns future that validates all transaction in the given iterator.
+    ///
+    /// This returns the validated transactions in the iterator's order.
     async fn validate_all(
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
-        let outcome = futures_util::future::join_all(
+    ) -> PoolResult<Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)>> {
+        let outcomes = futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate(origin, tx)),
         )
         .await
         .into_iter()
-        .collect::<HashMap<_, _>>();
+        .collect();
 
-        Ok(outcome)
+        Ok(outcomes)
     }
 
     /// Validates the given transaction
@@ -348,7 +347,8 @@ where
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         let validated = self.validate_all(origin, transactions).await?;
 
-        let transactions = self.pool.add_transactions(origin, validated.into_values());
+        let transactions =
+            self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx));
         Ok(transactions)
     }
 
