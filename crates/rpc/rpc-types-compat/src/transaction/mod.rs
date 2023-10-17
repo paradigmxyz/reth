@@ -1,9 +1,9 @@
 //! Compatibility functions for rpc `Transaction` type.
 mod signature;
 use reth_primitives::{
-    AccessListItem, BlockNumber, Bytes, Transaction as PrimitiveTransaction,
-    TransactionKind as PrimitiveTransactionKind, TransactionSigned, TransactionSignedEcRecovered,
-    TxType, B256, U128, U256, U64,
+    AccessListItem, BlockNumber, Transaction as PrimitiveTransaction,
+    TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, B256, U128,
+    U256, U64,
 };
 use reth_rpc_types::{CallInput, CallRequest, Transaction};
 use signature::from_primitive_signature;
@@ -133,16 +133,10 @@ fn fill(
     }
 }
 
-/// Convert [TransactionSigned] to [CallRequest]
-pub fn to_call_request(tx: TransactionSigned, base_fee: Option<u64>) -> CallRequest {
-    let signaturehash = tx.transaction.signature_hash();
-    let signature = tx.signature();
-    let signer = signature.recover_signer(signaturehash);
-
+/// Convert [TransactionSignedEcRecovered] to [CallRequest]
+pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequest {
+    let from = tx.signer();
     let to = tx.transaction.to();
-    let gas_price = tx.transaction.effective_gas_price(base_fee);
-    let max_fee_per_gas = tx.transaction.max_fee_per_gas();
-    let max_priority_fee_per_gas = tx.transaction.max_priority_fee_per_gas();
     let gas = tx.transaction.gas_limit();
     let value = tx.transaction.value();
     let input = tx.transaction.input().clone();
@@ -153,41 +147,28 @@ pub fn to_call_request(tx: TransactionSigned, base_fee: Option<u64>) -> CallRequ
     let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
     let tx_type = tx.transaction.tx_type();
 
+    // fees depending on the transaction type
+    let (gas_price, max_fee_per_gas) = if tx.is_dynamic_fee() {
+        (None, Some(tx.max_fee_per_gas()))
+    } else {
+        (Some(tx.max_fee_per_gas()), None)
+    };
+    let max_priority_fee_per_gas = tx.transaction.max_priority_fee_per_gas();
+
     CallRequest {
-        from: signer,
+        from: Some(from),
         to,
-        gas_price: Some(U256::from(gas_price)),
-        max_fee_per_gas: Some(U256::from(max_fee_per_gas)),
-        max_priority_fee_per_gas: Some(convert_to_u256_option(max_priority_fee_per_gas)),
+        gas_price: gas_price.map(U256::from),
+        max_fee_per_gas: max_fee_per_gas.map(U256::from),
+        max_priority_fee_per_gas: max_priority_fee_per_gas.map(U256::from),
         gas: Some(U256::from(gas)),
         value: Some(value.into()),
-        input: convert_bytes_to_call_input(input),
+        input: CallInput::new(input),
         nonce: Some(U64::from(nonce)),
-        chain_id: Some(convert_to_u64(chain_id)),
+        chain_id: chain_id.map(U64::from),
         access_list,
-        max_fee_per_blob_gas: Some(convert_to_u256_option(max_fee_per_blob_gas)),
+        max_fee_per_blob_gas: max_fee_per_blob_gas.map(U256::from),
         blob_versioned_hashes,
         transaction_type: Some(tx_type.into()),
     }
-}
-
-/// Convert [`Option<u64>`] to [U64]
-pub fn convert_to_u64(val: Option<u64>) -> U64 {
-    match val {
-        Some(price) => U64::from(price),
-        None => U64::from(0),
-    }
-}
-
-/// Convert [`Option<u128>`] to [U256]
-pub fn convert_to_u256_option(val: Option<u128>) -> U256 {
-    match val {
-        Some(price) => U256::from(price),
-        None => U256::from(0),
-    }
-}
-
-/// Convert [Bytes] to [CallInput]
-pub fn convert_bytes_to_call_input(val: Bytes) -> CallInput {
-    CallInput { input: Some(val.clone()), data: Some(val) }
 }
