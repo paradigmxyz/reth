@@ -19,6 +19,7 @@ use reth_primitives::{
 ///
 /// Proof generator adds the target address and slots to the prefix set, enables the proof retainer
 /// on the hash builder and follows the same algorithm as the state root calculator.
+/// See `StateRoot::root` for more info.
 #[derive(Debug)]
 pub struct Proof<'a, TX, H> {
     /// A reference to the database transaction.
