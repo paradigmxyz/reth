@@ -645,7 +645,7 @@ where
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
-        mut transactions: Vec<PooledTransactionsElement>,
+        transactions: Vec<PooledTransactionsElement>,
         source: TransactionSource,
     ) {
         // If the node is pipeline syncing, ignore transactions
