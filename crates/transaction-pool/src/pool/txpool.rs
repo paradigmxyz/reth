@@ -156,7 +156,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
             }
             Ordering::Less => {
-                // decreased blob fee: recheck basefee pool and promote all that are now valid
+                // decreased blob fee: recheck blob pool and promote all that are now valid
             }
         }
     }
