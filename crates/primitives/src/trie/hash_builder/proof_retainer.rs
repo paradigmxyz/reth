@@ -5,7 +5,10 @@ use std::collections::BTreeMap;
 /// It is intended to be used within the [`HashBuilder`](crate::trie::HashBuilder).
 #[derive(Debug)]
 pub struct ProofRetainer {
+    /// The nibbles of the target trie keys to retain proofs for.
     targets: Vec<Nibbles>,
+    /// The map of retained proofs (RLP serialized trie nodes)
+    /// with their corresponding key in the trie.
     proofs: BTreeMap<Nibbles, Bytes>,
 }
 
@@ -25,7 +28,7 @@ impl ProofRetainer {
         self.proofs
     }
 
-    /// Prepends the proof.
+    /// Retain the proof if the key matches any of the targets.
     pub fn retain(&mut self, prefix: &Nibbles, proof: &[u8]) {
         if self.matches(prefix) {
             self.proofs.insert(prefix.clone(), Bytes::from(proof.to_vec()));
