@@ -9,10 +9,10 @@ use std::{
     sync::Arc,
 };
 
-/// A set of __all__ validated blob transactions in the pool.
+/// A set of validated blob transactions in the pool that are __not pending__.
 ///
-/// The purpose of this pool is keep track of blob transactions that are either pending or queued
-/// and to evict the worst blob transactions once the sub-pool is full.
+/// The purpose of this pool is keep track of blob transactions that are queued and to evict the
+/// worst blob transactions once the sub-pool is full.
 ///
 /// This expects that certain constraints are met:
 ///   - blob transactions are always gap less

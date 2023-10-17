@@ -1852,14 +1852,14 @@ mod tests {
         let id = *validated.id();
         pool.add_transaction(validated, on_chain_balance, on_chain_nonce).unwrap();
 
-        assert_eq!(pool.pending_pool.len(), 1);
-
+        // assert pool lengths
         assert!(pool.pending_pool.is_empty());
-        assert_eq!(pool.basefee_pool.len(), 1);
+        assert_eq!(pool.blob_transactions.len(), 1);
 
+        // check tx state and derived subpool
         let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
-        assert_eq!(internal_tx.subpool, SubPool::Blob);
         assert!(!internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(internal_tx.subpool, SubPool::Blob);
 
         // set block info so the pools are updated
         block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap());
@@ -1867,8 +1867,12 @@ mod tests {
 
         // check that the tx is promoted
         let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
-        assert_eq!(internal_tx.subpool, SubPool::Pending);
         assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(internal_tx.subpool, SubPool::Pending);
+
+        // wait....
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert_eq!(pool.blob_transactions.len(), 0);
     }
 
     #[test]
