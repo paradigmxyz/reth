@@ -146,7 +146,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Updates the tracked blob fee
-    fn update_blob_fee(&mut self, _pending_blob_fee: u64) {
+    fn update_blob_fee(&mut self, _pending_blob_fee: u128) {
         // TODO(mattsse): update blob txs
     }
 
@@ -207,7 +207,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         if let Some(blob_fee) = pending_blob_fee {
             self.all_transactions.pending_blob_fee = blob_fee;
-            self.update_blob_fee(pending_basefee)
+            self.update_blob_fee(blob_fee)
         }
     }
 
