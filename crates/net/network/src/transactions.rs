@@ -149,8 +149,8 @@ pub struct TransactionsManager<Pool> {
     ///
     /// From which we get all new incoming transaction related messages.
     network_events: UnboundedReceiverStream<NetworkEvent>,
-    /// All currently active requests for pooled transactions.
-    inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
+    /// Transaction fetcher to handle inflight and missing transaction requests.
+    transaction_fetcher: TransactionFetcher,
     /// All currently pending transactions grouped by peers.
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
@@ -510,7 +510,7 @@ where
             };
 
             if peer.request_tx.try_send(req).is_ok() {
-                self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
+                self.transaction_fetcher.register_inflight(GetPooledTxRequestFut::new(peer_id, rx));
             } else {
                 // peer channel is saturated, drop the request
                 self.metrics.egress_peer_channel_full.increment(1);
