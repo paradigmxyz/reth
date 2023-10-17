@@ -145,9 +145,9 @@ The `Database` trait also implements the `DatabaseGAT` trait which defines two a
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// RO database transaction
-    type TX: DbTx<'a> + Send + Sync;
+    type TX: DbTx + Send + Sync;
     /// RW database transaction
-    type TXMut: DbTxMut<'a> + DbTx<'a> + Send + Sync;
+    type TXMut: DbTxMut + DbTx + Send + Sync;
 }
 ```
 
@@ -161,7 +161,7 @@ The `TX` type can be any type that implements the `DbTx` trait, which provides a
 
 ```rust ignore
 /// Read only transaction
-pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
+pub trait DbTx: for<'a> DbTxGAT<'a> {
     /// Get value
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
     /// Commit for read only transaction will consume and free transaction and allows
@@ -180,7 +180,7 @@ The `TXMut` type can be any type that implements the `DbTxMut` trait, which prov
 
 ```rust ignore
 /// Read write transaction that allows writing to database
-pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
+pub trait DbTxMut: for<'a> DbTxMutGAT<'a> {
     /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error>;
     /// Delete value from database
@@ -227,7 +227,7 @@ impl<'a, DB: Database> Deref for Transaction<'a, DB> {
 }
 ```
 
-The `Transaction` struct implements the `Deref` trait, which returns a reference to its `tx` field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `DatabaseGAT` trait, which is defined as `type TXMut: DbTxMut<'a> + DbTx<'a> + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
+The `Transaction` struct implements the `Deref` trait, which returns a reference to its `tx` field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `DatabaseGAT` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
 
 Notice that the function uses a [turbofish](https://techblog.tonsser.com/posts/what-is-rusts-turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter.
 

@@ -226,6 +226,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.sender()
     }
 
+    /// Returns the recipient of the transaction if it is not a CREATE transaction.
+    pub fn to(&self) -> Option<Address> {
+        self.transaction.to()
+    }
+
     /// Returns the internal identifier for the sender of this transaction
     pub(crate) fn sender_id(&self) -> SenderId {
         self.transaction_id.sender
