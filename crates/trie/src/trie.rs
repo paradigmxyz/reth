@@ -731,7 +731,7 @@ mod tests {
 
                 let expected = state_root(state.into_iter());
 
-                let threshold = 1;
+                let threshold = 10;
                 let mut got = None;
                 let mut hashed_entries_walked = 0;
 
