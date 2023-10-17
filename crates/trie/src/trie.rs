@@ -95,10 +95,7 @@ impl<'a, TX, H> StateRoot<'a, TX, H> {
     }
 }
 
-impl<'a, 'tx, TX> StateRoot<'a, TX, &'a TX>
-where
-    TX: DbTx<'tx>,
-{
+impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
     /// Create a new [StateRoot] instance.
     pub fn new(tx: &'a TX) -> Self {
         Self {
@@ -180,9 +177,9 @@ where
     }
 }
 
-impl<'a, 'tx, TX, H> StateRoot<'a, TX, H>
+impl<'a, TX, H> StateRoot<'a, TX, H>
 where
-    TX: DbTx<'tx>,
+    TX: DbTx,
     H: HashedCursorFactory + Clone,
 {
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
@@ -381,10 +378,7 @@ pub struct StorageRoot<'a, TX, H> {
     pub changed_prefixes: PrefixSet,
 }
 
-impl<'a, 'tx, TX> StorageRoot<'a, TX, &'a TX>
-where
-    TX: DbTx<'tx>,
-{
+impl<'a, TX: DbTx> StorageRoot<'a, TX, &'a TX> {
     /// Creates a new storage root calculator given an raw address.
     pub fn new(tx: &'a TX, address: Address) -> Self {
         Self::new_hashed(tx, keccak256(address))
@@ -441,9 +435,9 @@ impl<'a, TX, H> StorageRoot<'a, TX, H> {
     }
 }
 
-impl<'a, 'tx, TX, H> StorageRoot<'a, TX, H>
+impl<'a, TX, H> StorageRoot<'a, TX, H>
 where
-    TX: DbTx<'tx>,
+    TX: DbTx,
     H: HashedCursorFactory,
 {
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
@@ -559,8 +553,8 @@ mod tests {
     use reth_provider::{DatabaseProviderRW, ProviderFactory};
     use std::{collections::BTreeMap, ops::Mul, str::FromStr};
 
-    fn insert_account<'a, TX: DbTxMut<'a>>(
-        tx: &TX,
+    fn insert_account(
+        tx: &impl DbTxMut,
         address: Address,
         account: Account,
         storage: &BTreeMap<B256, U256>,
@@ -570,11 +564,7 @@ mod tests {
         insert_storage(tx, hashed_address, storage);
     }
 
-    fn insert_storage<'a, TX: DbTxMut<'a>>(
-        tx: &TX,
-        hashed_address: B256,
-        storage: &BTreeMap<B256, U256>,
-    ) {
+    fn insert_storage(tx: &impl DbTxMut, hashed_address: B256, storage: &BTreeMap<B256, U256>) {
         for (k, v) in storage {
             tx.put::<tables::HashedStorage>(
                 hashed_address,

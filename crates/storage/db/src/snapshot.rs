@@ -32,12 +32,12 @@ macro_rules! generate_snapshot_func {
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
                 /// * `nippy_jar`: Snapshot object responsible for file generation.
                 #[allow(non_snake_case)]
-                pub fn [<create_snapshot$(_ $tbl)+>]<'tx,
+                pub fn [<create_snapshot$(_ $tbl)+>]<
                     $($tbl: Table<Key=K>,)+
                     K
                 >
                 (
-                    tx: &impl DbTx<'tx>,
+                    tx: &impl DbTx,
                     range: RangeInclusive<K>,
                     additional: Option<Vec<Box<dyn Iterator<Item = Result<Vec<u8>, Box<dyn StdError + Send + Sync>>>>>>,
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,

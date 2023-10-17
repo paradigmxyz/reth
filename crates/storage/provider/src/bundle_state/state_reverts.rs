@@ -25,7 +25,7 @@ impl StateReverts {
     /// Write reverts to database.
     ///
     /// Note:: Reverts will delete all wiped storage from plain state.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+    pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
         first_block: BlockNumber,

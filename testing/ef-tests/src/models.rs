@@ -150,10 +150,7 @@ pub struct State(BTreeMap<Address, Account>);
 
 impl State {
     /// Write the state to the database.
-    pub fn write_to_db<'a, Tx>(&self, tx: &'a Tx) -> Result<(), Error>
-    where
-        Tx: DbTxMut<'a>,
-    {
+    pub fn write_to_db(&self, tx: &impl DbTxMut) -> Result<(), Error> {
         for (&address, account) in self.0.iter() {
             let hashed_address = keccak256(address);
             let has_code = !account.code.is_empty();
@@ -211,10 +208,7 @@ impl Account {
     /// Check that the account matches what is in the database.
     ///
     /// In case of a mismatch, `Err(Error::Assertion)` is returned.
-    pub fn assert_db<'a, Tx>(&self, address: Address, tx: &'a Tx) -> Result<(), Error>
-    where
-        Tx: DbTx<'a>,
-    {
+    pub fn assert_db(&self, address: Address, tx: &impl DbTx) -> Result<(), Error> {
         let account = tx.get::<tables::PlainAccountState>(address)?.ok_or_else(|| {
             Error::Assertion(format!("Expected account ({address:?}) is missing from DB: {self:?}"))
         })?;

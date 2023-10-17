@@ -1,7 +1,7 @@
 //! Cursor wrapper for libmdbx-sys.
 
 use reth_interfaces::db::DatabaseWriteOperation;
-use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
+use std::{borrow::Cow, collections::Bound, ops::RangeBounds};
 
 use crate::{
     common::{PairResult, ValueOnlyResult},
@@ -55,7 +55,7 @@ macro_rules! compress_or_ref {
     };
 }
 
-impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T> {
+impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<'_, K, T> {
     fn first(&mut self) -> PairResult<T> {
         decode!(self.inner.first())
     }
@@ -84,10 +84,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         decode!(self.inner.get_current())
     }
 
-    fn walk<'cursor>(
-        &'cursor mut self,
-        start_key: Option<T::Key>,
-    ) -> Result<Walker<'cursor, 'tx, T, Self>, DatabaseError>
+    fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -103,10 +100,10 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         Ok(Walker::new(self, start))
     }
 
-    fn walk_range<'cursor>(
-        &'cursor mut self,
+    fn walk_range(
+        &mut self,
         range: impl RangeBounds<T::Key>,
-    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<RangeWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -123,10 +120,10 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
     }
 
-    fn walk_back<'cursor>(
-        &'cursor mut self,
+    fn walk_back(
+        &mut self,
         start_key: Option<T::Key>,
-    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -141,7 +138,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
     }
 }
 
-impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, K, T> {
+impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<'_, K, T> {
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
         decode!(self.inner.next_dup())
@@ -179,11 +176,11 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
     /// - None, Some(subkey): like first case, but in the first key
     /// - None, None: first item in the table
     /// of a DUPSORT table.
-    fn walk_dup<'cursor>(
-        &'cursor mut self,
+    fn walk_dup(
+        &mut self,
         key: Option<T::Key>,
         subkey: Option<T::SubKey>,
-    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, DatabaseError> {
+    ) -> Result<DupWalker<'_, T, Self>, DatabaseError> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
                 // encode key and decode it after.
@@ -218,11 +215,11 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
             (None, None) => self.first().transpose(),
         };
 
-        Ok(DupWalker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
+        Ok(DupWalker::<'_, T, Self> { cursor: self, start })
     }
 }
 
-impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
+impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     ///
@@ -274,7 +271,7 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     }
 }
 
-impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
+impl<T: DupSort> DbDupCursorRW<T> for Cursor<'_, RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
         self.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
     }

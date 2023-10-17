@@ -35,9 +35,9 @@ impl<'a, TX> Proof<'a, TX, &'a TX> {
     }
 }
 
-impl<'a, 'tx, TX, H> Proof<'a, TX, H>
+impl<'a, TX, H> Proof<'a, TX, H>
 where
-    TX: DbTx<'tx>,
+    TX: DbTx,
     H: HashedCursorFactory + Clone,
 {
     /// Generate an account proof from intermediate nodes.

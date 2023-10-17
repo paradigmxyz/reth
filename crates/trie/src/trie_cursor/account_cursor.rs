@@ -14,9 +14,9 @@ impl<C> AccountTrieCursor<C> {
     }
 }
 
-impl<'a, C> TrieCursor<StoredNibbles> for AccountTrieCursor<C>
+impl<C> TrieCursor<StoredNibbles> for AccountTrieCursor<C>
 where
-    C: DbCursorRO<'a, tables::AccountsTrie>,
+    C: DbCursorRO<tables::AccountsTrie>,
 {
     fn seek_exact(
         &mut self,

@@ -620,9 +620,9 @@ mod tests {
                 .map_err(|e| e.into())
         }
 
-        fn insert_storage_entry<'a, TX: DbTxMut<'a>>(
+        fn insert_storage_entry<TX: DbTxMut>(
             &self,
-            tx: &'a TX,
+            tx: &TX,
             tid_address: BlockNumberAddress,
             entry: StorageEntry,
             hash: bool,

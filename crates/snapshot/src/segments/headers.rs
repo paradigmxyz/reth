@@ -24,9 +24,9 @@ impl Headers {
     }
 
     // Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
-    fn dataset_for_compression<'tx, T: Table<Key = BlockNumber>>(
+    fn dataset_for_compression<T: Table<Key = BlockNumber>>(
         &self,
-        tx: &impl DbTx<'tx>,
+        tx: &impl DbTx,
         range: &RangeInclusive<BlockNumber>,
         range_len: usize,
     ) -> RethResult<Vec<Vec<u8>>> {
@@ -40,11 +40,7 @@ impl Headers {
 }
 
 impl Segment for Headers {
-    fn snapshot<'tx>(
-        &self,
-        tx: &impl DbTx<'tx>,
-        range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<()> {
+    fn snapshot(&self, tx: &impl DbTx, range: RangeInclusive<BlockNumber>) -> RethResult<()> {
         let range_len = range.clone().count();
         let mut jar = prepare_jar::<3, tables::Headers>(
             tx,

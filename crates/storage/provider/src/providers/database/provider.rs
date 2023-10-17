@@ -50,7 +50,7 @@ use std::{
 };
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
-pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TX>;
+pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<<DB as DatabaseGAT<'this>>::TX>;
 
 /// A [`DatabaseProvider`] that holds a read-write database transaction.
 ///
@@ -58,18 +58,18 @@ pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<'this, <DB as Database
 /// Once that issue is solved, we can probably revert back to being an alias type.
 #[derive(Debug)]
 pub struct DatabaseProviderRW<'this, DB: Database>(
-    pub DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TXMut>,
+    pub DatabaseProvider<<DB as DatabaseGAT<'this>>::TXMut>,
 );
 
 impl<'this, DB: Database> Deref for DatabaseProviderRW<'this, DB> {
-    type Target = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TXMut>;
+    type Target = DatabaseProvider<<DB as DatabaseGAT<'this>>::TXMut>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<'this, DB: Database> DerefMut for DatabaseProviderRW<'this, DB> {
+impl<DB: Database> DerefMut for DatabaseProviderRW<'_, DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -90,21 +90,17 @@ impl<'this, DB: Database> DatabaseProviderRW<'this, DB> {
 /// A provider struct that fetchs data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
 #[derive(Debug)]
-pub struct DatabaseProvider<'this, TX>
-where
-    Self: 'this,
-{
+pub struct DatabaseProvider<TX> {
     /// Database transaction.
     tx: TX,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
-    _phantom_data: std::marker::PhantomData<&'this TX>,
 }
 
-impl<'this, TX: DbTxMut<'this>> DatabaseProvider<'this, TX> {
+impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
     pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { tx, chain_spec, _phantom_data: std::marker::PhantomData }
+        Self { tx, chain_spec }
     }
 }
 
@@ -120,7 +116,7 @@ impl<'this, TX: DbTxMut<'this>> DatabaseProvider<'this, TX> {
 /// The boundary shard (the shard is split by the block number) is removed from the database. Any
 /// indices that are above the block number are filtered out. The boundary shard is returned for
 /// reinsertion (if it's not empty).
-fn unwind_history_shards<'a, S, T, C>(
+fn unwind_history_shards<S, T, C>(
     cursor: &mut C,
     start_key: T::Key,
     block_number: BlockNumber,
@@ -129,7 +125,7 @@ fn unwind_history_shards<'a, S, T, C>(
 where
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<S>>,
-    C: DbCursorRO<'a, T> + DbCursorRW<'a, T>,
+    C: DbCursorRO<T> + DbCursorRW<T>,
 {
     let mut item = cursor.seek_exact(start_key)?;
     while let Some((sharded_key, list)) = item {
@@ -156,10 +152,10 @@ where
     Ok(Vec::new())
 }
 
-impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
+impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
     pub fn new(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { tx, chain_spec, _phantom_data: std::marker::PhantomData }
+        Self { tx, chain_spec }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -189,7 +185,7 @@ impl<'this, TX: DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
+impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// Commit database transaction.
     pub fn commit(self) -> RethResult<bool> {
         Ok(self.tx.commit()?)
@@ -795,13 +791,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> AccountReader for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> AccountReader for DatabaseProvider<TX> {
     fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
         Ok(self.tx.get::<tables::PlainAccountState>(address)?)
     }
 }
 
-impl<'this, TX: DbTx<'this>> AccountExtReader for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> AccountExtReader for DatabaseProvider<TX> {
     fn changed_accounts_with_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -845,7 +841,7 @@ impl<'this, TX: DbTx<'this>> AccountExtReader for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> ChangeSetReader for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> ChangeSetReader for DatabaseProvider<TX> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
@@ -862,7 +858,7 @@ impl<'this, TX: DbTx<'this>> ChangeSetReader for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
         if let Some(num) = self.block_number(*block_hash)? {
             Ok(self.header_by_number(num)?)
@@ -928,7 +924,7 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> BlockHashReader for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
     fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         Ok(self.tx.get::<tables::CanonicalHeaders>(number)?)
     }
@@ -947,7 +943,7 @@ impl<'this, TX: DbTx<'this>> BlockHashReader for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> BlockNumReader for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> BlockNumReader for DatabaseProvider<TX> {
     fn chain_info(&self) -> RethResult<ChainInfo> {
         let best_number = self.best_block_number()?;
         let best_hash = self.block_hash(best_number)?.unwrap_or_default();
@@ -970,7 +966,7 @@ impl<'this, TX: DbTx<'this>> BlockNumReader for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> RethResult<Option<Block>> {
         if source.is_database() {
             self.block(hash.into())
@@ -1145,7 +1141,7 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     fn transaction_id(&self, tx_hash: TxHash) -> RethResult<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TxHashNumber>(tx_hash)?)
     }
@@ -1294,7 +1290,7 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
     }
 }
 
-impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     fn receipt(&self, id: TxNumber) -> RethResult<Option<Receipt>> {
         Ok(self.tx.get::<tables::Receipts>(id)?)
     }
@@ -1327,7 +1323,7 @@ impl<'this, TX: DbTx<'this>> ReceiptProvider for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> WithdrawalsProvider for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -1355,7 +1351,7 @@ impl<'this, TX: DbTx<'this>> WithdrawalsProvider for DatabaseProvider<'this, TX>
     }
 }
 
-impl<'this, TX: DbTx<'this>> EvmEnvProvider for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
     fn fill_env_at(
         &self,
         cfg: &mut CfgEnv,
@@ -1426,7 +1422,7 @@ impl<'this, TX: DbTx<'this>> EvmEnvProvider for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTx<'this>> StageCheckpointReader for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> StageCheckpointReader for DatabaseProvider<TX> {
     fn get_stage_checkpoint(&self, id: StageId) -> RethResult<Option<StageCheckpoint>> {
         Ok(self.tx.get::<tables::SyncStage>(id.to_string())?)
     }
@@ -1437,7 +1433,7 @@ impl<'this, TX: DbTx<'this>> StageCheckpointReader for DatabaseProvider<'this, T
     }
 }
 
-impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this, TX> {
+impl<TX: DbTxMut> StageCheckpointWriter for DatabaseProvider<TX> {
     /// Save stage checkpoint progress.
     fn save_stage_checkpoint_progress(&self, id: StageId, checkpoint: Vec<u8>) -> RethResult<()> {
         Ok(self.tx.put::<tables::SyncStageProgress>(id.to_string(), checkpoint)?)
@@ -1470,7 +1466,7 @@ impl<'this, TX: DbTxMut<'this>> StageCheckpointWriter for DatabaseProvider<'this
     }
 }
 
-impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> StorageReader for DatabaseProvider<TX> {
     fn plainstate_storages(
         &self,
         addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
@@ -1533,7 +1529,7 @@ impl<'this, TX: DbTx<'this>> StorageReader for DatabaseProvider<'this, TX> {
     }
 }
 
-impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider<'this, TX> {
+impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
     fn insert_hashes(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -1768,7 +1764,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HashingWriter for DatabaseProvider
     }
 }
 
-impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider<'this, TX> {
+impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
     fn calculate_history_indices(&self, range: RangeInclusive<BlockNumber>) -> RethResult<()> {
         // account history stage
         {
@@ -1900,7 +1896,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> HistoryWriter for DatabaseProvider
     }
 }
 
-impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseProvider<'this, TX> {
+impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     /// Return range of blocks and its execution result
     fn get_or_take_block_and_execution_range<const TAKE: bool>(
         &self,
@@ -1999,7 +1995,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockExecutionWriter for DatabaseP
     }
 }
 
-impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'this, TX> {
+impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     fn insert_block(
         &self,
         block: SealedBlock,
@@ -2134,13 +2130,13 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> BlockWriter for DatabaseProvider<'
     }
 }
 
-impl<'this, TX: DbTx<'this>> PruneCheckpointReader for DatabaseProvider<'this, TX> {
+impl<TX: DbTx> PruneCheckpointReader for DatabaseProvider<TX> {
     fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
         Ok(self.tx.get::<tables::PruneCheckpoints>(segment)?)
     }
 }
 
-impl<'this, TX: DbTxMut<'this>> PruneCheckpointWriter for DatabaseProvider<'this, TX> {
+impl<TX: DbTxMut> PruneCheckpointWriter for DatabaseProvider<TX> {
     fn save_prune_checkpoint(
         &self,
         segment: PruneSegment,
