@@ -1,6 +1,5 @@
 use std::{
     fmt,
-    marker::PhantomData,
     ops::{Bound, RangeBounds},
 };
 
@@ -11,7 +10,7 @@ use crate::{
 };
 
 /// A read-only cursor over table `T`.
-pub trait DbCursorRO<'tx, T: Table> {
+pub trait DbCursorRO<T: Table> {
     /// Positions the cursor at the first entry in the table, returning it.
     fn first(&mut self) -> PairResult<T>;
 
@@ -38,18 +37,15 @@ pub trait DbCursorRO<'tx, T: Table> {
     ///
     /// If `start_key` is `None`, then the walker will start from the first entry of the table,
     /// otherwise it starts at the entry greater than or equal to the provided key.
-    fn walk<'cursor>(
-        &'cursor mut self,
-        start_key: Option<T::Key>,
-    ) -> Result<Walker<'cursor, 'tx, T, Self>, DatabaseError>
+    fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError>
     where
         Self: Sized;
 
     /// Get an iterator that walks over a range of keys in the table.
-    fn walk_range<'cursor>(
-        &'cursor mut self,
+    fn walk_range(
+        &mut self,
         range: impl RangeBounds<T::Key>,
-    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<RangeWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized;
 
@@ -57,16 +53,16 @@ pub trait DbCursorRO<'tx, T: Table> {
     ///
     /// If `start_key` is `None`, then the walker will start from the last entry of the table,
     /// otherwise it starts at the entry greater than or equal to the provided key.
-    fn walk_back<'cursor>(
-        &'cursor mut self,
+    fn walk_back(
+        &mut self,
         start_key: Option<T::Key>,
-    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized;
 }
 
 /// A read-only cursor over the dup table `T`.
-pub trait DbDupCursorRO<'tx, T: DupSort> {
+pub trait DbDupCursorRO<T: DupSort> {
     /// Positions the cursor at the next KV pair of the table, returning it.
     fn next_dup(&mut self) -> PairResult<T>;
 
@@ -95,17 +91,17 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
     /// | `Some` | `None`   | [`DbCursorRO::seek()`]               |
     /// | `None` | `Some`   | [`DbDupCursorRO::seek_by_key_subkey()`] |
     /// | `Some` | `Some`   | [`DbDupCursorRO::seek_by_key_subkey()`] |
-    fn walk_dup<'cursor>(
-        &'cursor mut self,
+    fn walk_dup(
+        &mut self,
         key: Option<T::Key>,
         subkey: Option<T::SubKey>,
-    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<DupWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized;
 }
 
 /// Read write cursor over table.
-pub trait DbCursorRW<'tx, T: Table> {
+pub trait DbCursorRW<T: Table> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
@@ -125,7 +121,7 @@ pub trait DbCursorRW<'tx, T: Table> {
 }
 
 /// Read Write Cursor over DupSorted table.
-pub trait DbDupCursorRW<'tx, T: DupSort> {
+pub trait DbDupCursorRW<T: DupSort> {
     /// Delete all duplicate entries for current key.
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError>;
 
@@ -140,28 +136,24 @@ pub trait DbDupCursorRW<'tx, T: DupSort> {
 /// Reason why we have two lifetimes is to distinguish between `'cursor` lifetime
 /// and inherited `'tx` lifetime. If there is only one, rust would short circle
 /// the Cursor lifetime and it wouldn't be possible to use Walker.
-pub struct Walker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
+pub struct Walker<'cursor, T: Table, CURSOR: DbCursorRO<T>> {
     /// Cursor to be used to walk through the table.
     cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
     start: IterPairResult<T>,
-    /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
-    _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'tx, T, CURSOR> fmt::Debug for Walker<'_, 'tx, T, CURSOR>
+impl<T, CURSOR> fmt::Debug for Walker<'_, T, CURSOR>
 where
     T: Table,
-    CURSOR: DbCursorRO<'tx, T> + fmt::Debug,
+    CURSOR: DbCursorRO<T> + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Walker").field("cursor", &self.cursor).field("start", &self.start).finish()
     }
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
-    for Walker<'cursor, 'tx, T, CURSOR>
-{
+impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> std::iter::Iterator for Walker<'cursor, T, CURSOR> {
     type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
@@ -173,22 +165,20 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     }
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> Walker<'cursor, 'tx, T, CURSOR> {
+impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Walker<'cursor, T, CURSOR> {
     /// construct Walker
     pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>) -> Self {
-        Self { cursor, start, _tx_phantom: std::marker::PhantomData }
+        Self { cursor, start }
     }
 
     /// convert current [`Walker`] to [`ReverseWalker`] which iterates reversely
-    pub fn rev(self) -> ReverseWalker<'cursor, 'tx, T, CURSOR> {
+    pub fn rev(self) -> ReverseWalker<'cursor, T, CURSOR> {
         let start = self.cursor.current().transpose();
         ReverseWalker::new(self.cursor, start)
     }
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
-    Walker<'cursor, 'tx, T, CURSOR>
-{
+impl<'cursor, T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> Walker<'cursor, T, CURSOR> {
     /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.cursor.delete_current()
@@ -197,19 +187,17 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
 
 /// Provides a reverse iterator to `Cursor` when handling `Table`.
 /// Also check [`Walker`]
-pub struct ReverseWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
+pub struct ReverseWalker<'cursor, T: Table, CURSOR: DbCursorRO<T>> {
     /// Cursor to be used to walk through the table.
     cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
     start: IterPairResult<T>,
-    /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
-    _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'tx, T, CURSOR> fmt::Debug for ReverseWalker<'_, 'tx, T, CURSOR>
+impl<T, CURSOR> fmt::Debug for ReverseWalker<'_, T, CURSOR>
 where
     T: Table,
-    CURSOR: DbCursorRO<'tx, T> + fmt::Debug,
+    CURSOR: DbCursorRO<T> + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReverseWalker")
@@ -219,30 +207,28 @@ where
     }
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> ReverseWalker<'cursor, 'tx, T, CURSOR> {
+impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> ReverseWalker<'cursor, T, CURSOR> {
     /// construct ReverseWalker
     pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>) -> Self {
-        Self { cursor, start, _tx_phantom: std::marker::PhantomData }
+        Self { cursor, start }
     }
 
     /// convert current [`ReverseWalker`] to [`Walker`] which iterate forwardly
-    pub fn forward(self) -> Walker<'cursor, 'tx, T, CURSOR> {
+    pub fn forward(self) -> Walker<'cursor, T, CURSOR> {
         let start = self.cursor.current().transpose();
         Walker::new(self.cursor, start)
     }
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
-    ReverseWalker<'cursor, 'tx, T, CURSOR>
-{
+impl<'cursor, T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> ReverseWalker<'cursor, T, CURSOR> {
     /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.cursor.delete_current()
     }
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
-    for ReverseWalker<'cursor, 'tx, T, CURSOR>
+impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> std::iter::Iterator
+    for ReverseWalker<'cursor, T, CURSOR>
 {
     type Item = Result<TableRow<T>, DatabaseError>;
 
@@ -258,7 +244,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
 
 /// Provides a range iterator to `Cursor` when handling `Table`.
 /// Also check [`Walker`]
-pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
+pub struct RangeWalker<'cursor, T: Table, CURSOR: DbCursorRO<T>> {
     /// Cursor to be used to walk through the table.
     cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
@@ -267,14 +253,12 @@ pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     end_key: Bound<T::Key>,
     /// flag whether is ended
     is_done: bool,
-    /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
-    _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'tx, T, CURSOR> fmt::Debug for RangeWalker<'_, 'tx, T, CURSOR>
+impl<T, CURSOR> fmt::Debug for RangeWalker<'_, T, CURSOR>
 where
     T: Table,
-    CURSOR: DbCursorRO<'tx, T> + fmt::Debug,
+    CURSOR: DbCursorRO<T> + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RangeWalker")
@@ -286,8 +270,8 @@ where
     }
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
-    for RangeWalker<'cursor, 'tx, T, CURSOR>
+impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> std::iter::Iterator
+    for RangeWalker<'cursor, T, CURSOR>
 {
     type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
@@ -317,7 +301,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     }
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 'tx, T, CURSOR> {
+impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> RangeWalker<'cursor, T, CURSOR> {
     /// construct RangeWalker
     pub fn new(
         cursor: &'cursor mut CURSOR,
@@ -334,13 +318,11 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 't
             None => true,
             _ => false,
         };
-        Self { cursor, start, end_key, is_done, _tx_phantom: std::marker::PhantomData }
+        Self { cursor, start, end_key, is_done }
     }
 }
 
-impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
-    RangeWalker<'cursor, 'tx, T, CURSOR>
-{
+impl<'cursor, T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> RangeWalker<'cursor, T, CURSOR> {
     /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.cursor.delete_current()
@@ -352,19 +334,17 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
 /// Reason why we have two lifetimes is to distinguish between `'cursor` lifetime
 /// and inherited `'tx` lifetime. If there is only one, rust would short circle
 /// the Cursor lifetime and it wouldn't be possible to use Walker.
-pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> {
+pub struct DupWalker<'cursor, T: DupSort, CURSOR: DbDupCursorRO<T>> {
     /// Cursor to be used to walk through the table.
     pub cursor: &'cursor mut CURSOR,
     /// Value where to start the walk.
     pub start: IterPairResult<T>,
-    /// Phantom data for 'tx. As it is only used for `DbDupCursorRO`.
-    pub _tx_phantom: PhantomData<&'tx T>,
 }
 
-impl<'tx, T, CURSOR> fmt::Debug for DupWalker<'_, 'tx, T, CURSOR>
+impl<T, CURSOR> fmt::Debug for DupWalker<'_, T, CURSOR>
 where
     T: DupSort,
-    CURSOR: DbDupCursorRO<'tx, T> + fmt::Debug,
+    CURSOR: DbDupCursorRO<T> + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DupWalker")
@@ -374,17 +354,15 @@ where
     }
 }
 
-impl<'cursor, 'tx, T: DupSort, CURSOR: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T>>
-    DupWalker<'cursor, 'tx, T, CURSOR>
-{
+impl<'cursor, T: DupSort, CURSOR: DbCursorRW<T> + DbDupCursorRO<T>> DupWalker<'cursor, T, CURSOR> {
     /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.cursor.delete_current()
     }
 }
 
-impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> std::iter::Iterator
-    for DupWalker<'cursor, 'tx, T, CURSOR>
+impl<'cursor, T: DupSort, CURSOR: DbDupCursorRO<T>> std::iter::Iterator
+    for DupWalker<'cursor, T, CURSOR>
 {
     type Item = Result<TableRow<T>, DatabaseError>;
     fn next(&mut self) -> Option<Self::Item> {
