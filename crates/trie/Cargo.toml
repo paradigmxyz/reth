@@ -44,8 +44,10 @@ triehash = "0.8"
 proptest.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
 tokio-stream.workspace = true
-criterion = "0.5"
+once_cell.workspace = true
+serde_json.workspace = true
 pretty_assertions = "1.3.0"
+criterion = "0.5"
 
 [features]
 test-utils = ["triehash"]

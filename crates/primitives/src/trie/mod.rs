@@ -8,6 +8,10 @@ pub use nodes::BranchNodeCompact;
 pub mod hash_builder;
 pub use hash_builder::HashBuilder;
 
+/// Merkle trie proofs.
+mod proofs;
+pub use proofs::{AccountProof, StorageProof};
+
 mod mask;
 mod nibbles;
 mod storage;
