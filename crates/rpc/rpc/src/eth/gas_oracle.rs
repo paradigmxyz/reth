@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 /// The number of transactions sampled in a block
-pub const SAMPLE_NUMBER: usize = 3usize;
+pub const SAMPLE_NUMBER: usize = 3_usize;
 
 /// The default maximum gas price to use for the estimate
 pub const DEFAULT_MAX_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
