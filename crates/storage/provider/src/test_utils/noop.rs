@@ -17,7 +17,7 @@ use reth_primitives::{
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
-    ops::{Range, RangeInclusive},
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -174,18 +174,18 @@ impl TransactionsProvider for NoopProvider {
 
     fn transactions_by_block_range(
         &self,
-        _range: Range<BlockNumber>,
+        _range: impl RangeBounds<BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         Ok(Vec::default())
     }
 
-    fn senders_by_tx_range(&self, _range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
         Ok(Vec::default())
     }
 
     fn transactions_by_tx_range(
         &self,
-        _range: RangeInclusive<TxNumber>,
+        _range: impl RangeBounds<TxNumber>,
     ) -> RethResult<Vec<reth_primitives::TransactionSignedNoHash>> {
         Ok(Vec::default())
     }
@@ -228,13 +228,13 @@ impl HeaderProvider for NoopProvider {
         Ok(None)
     }
 
-    fn headers_range(&self, _range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
         Ok(vec![])
     }
 
     fn sealed_headers_range(
         &self,
-        _range: RangeInclusive<BlockNumber>,
+        _range: impl RangeBounds<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         Ok(vec![])
     }

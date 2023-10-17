@@ -468,7 +468,7 @@ mod tests {
         BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
         TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
-    use std::ops::RangeInclusive;
+    use std::ops::RangeBounds;
 
     mock! {
         WithdrawalsProvider {}
@@ -539,13 +539,13 @@ mod tests {
             Ok(None)
         }
 
-        fn headers_range(&self, _range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
+        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
             Ok(vec![])
         }
 
         fn sealed_headers_range(
             &self,
-            _range: RangeInclusive<BlockNumber>,
+            _range: impl RangeBounds<BlockNumber>,
         ) -> RethResult<Vec<SealedHeader>> {
             Ok(vec![])
         }

@@ -2,7 +2,7 @@
 
 use reth_codecs::{main_codec, Compact};
 use reth_primitives::{Header, TxNumber, Withdrawal, B256};
-use std::ops::RangeInclusive;
+use std::ops::Range;
 
 /// Total number of transactions.
 pub type NumTransactions = u64;
@@ -28,8 +28,8 @@ pub struct StoredBlockBodyIndices {
 
 impl StoredBlockBodyIndices {
     /// Return the range of transaction ids for this block.
-    pub fn tx_num_range(&self) -> RangeInclusive<TxNumber> {
-        self.first_tx_num..=(self.first_tx_num + self.tx_count).saturating_sub(1)
+    pub fn tx_num_range(&self) -> Range<TxNumber> {
+        self.first_tx_num..self.first_tx_num + self.tx_count
     }
 
     /// Return the index of last transaction in this block unless the block
@@ -111,6 +111,6 @@ mod test {
         assert_eq!(block_indices.last_tx_num(), first_tx_num + tx_count - 1);
         assert_eq!(block_indices.next_tx_num(), first_tx_num + tx_count);
         assert_eq!(block_indices.tx_count(), tx_count);
-        assert_eq!(block_indices.tx_num_range(), first_tx_num..=first_tx_num + tx_count - 1);
+        assert_eq!(block_indices.tx_num_range(), first_tx_num..first_tx_num + tx_count);
     }
 }
