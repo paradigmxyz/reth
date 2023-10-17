@@ -821,7 +821,24 @@ where
 
         // Advance all imports
         while let Poll::Ready(Some(import_res)) = this.pool_imports.poll_next_unpin(cx) {
-            // ... (same logic as before) ...
+            match import_res {
+                Ok(hash) => {
+                    this.on_good_import(hash);
+                }
+                Err(err) => {
+                    // if we're _currently_ syncing and the transaction is bad we ignore it,
+                    // otherwise we penalize the peer that sent the bad
+                    // transaction with the assumption that the peer should have
+                    // known that this transaction is bad. (e.g. consensus
+                    // rules)
+                    if err.is_bad_transaction() && !this.network.is_syncing() {
+                        trace!(target: "net::tx", ?err, "Bad transaction import");
+                        this.on_bad_import(*err.hash());
+                        continue
+                    }
+                    this.on_good_import(*err.hash());
+                }
+            }
         }
 
         this.update_import_metrics();
@@ -985,7 +1002,7 @@ struct GetPooledTxRequestFut {
 }
 
 impl GetPooledTxRequestFut {
-    pub fn new(
+    fn new(
         peer_id: PeerId,
         tx_hash: TxHash,
         response: oneshot::Receiver<RequestResult<PooledTransactions>>,
