@@ -263,15 +263,10 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-        // list of all seen addresses
-        let mut addresses_seen = vec![];
-
         // add account changeset changes
         for (block_number, account_before) in account_changeset.into_iter().rev() {
             let AccountBeforeTx { info: old_info, address } = account_before;
-            if !addresses_seen.contains(&address) {
-                // save address as seen
-                addresses_seen.push(address);
+            if !bundle_builder.get_states().contains(&address) {
                 if let Some(new_info) = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1) {
                     bundle_builder =
                         bundle_builder.state_present_account_info(address, into_revm_acc(new_info));
@@ -293,7 +288,7 @@ impl<'this, TX: DbTxMut<'this> + DbTx<'this>> DatabaseProvider<'this, TX> {
         // add storage changeset changes
         for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
             let BlockNumberAddress((block_number, address)) = block_and_address;
-            if !addresses_seen.contains(&address) {
+            if !bundle_builder.get_states().contains(&address) {
                 if let Some(present_info) =
                     plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1)
                 {
