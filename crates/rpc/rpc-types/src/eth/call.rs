@@ -158,6 +158,16 @@ pub struct CallInput {
 }
 
 impl CallInput {
+    /// Creates a new instance with the given input data.
+    pub fn new(data: Bytes) -> Self {
+        Self::maybe_input(Some(data))
+    }
+
+    /// Creates a new instance with the given input data.
+    pub fn maybe_input(input: Option<Bytes>) -> Self {
+        Self { input, data: None }
+    }
+
     /// Consumes the type and returns the optional input data.
     ///
     /// Returns an error if both `data` and `input` fields are set and not equal.

@@ -51,6 +51,7 @@ members = [
     "examples/cli-extension-event-hooks",
     "examples/rpc-db",
     "examples/manual-p2p",
+    "examples/trace-transaction-cli"
 ]
 default-members = ["bin/reth"]
 
@@ -107,7 +108,6 @@ reth-discv4 = { path = "./crates/net/discv4" }
 reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
-
 # revm
 revm = "3.5.0"
 revm-primitives = "1.3.0"
