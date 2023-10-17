@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 /// The number of transactions sampled in a block
-pub const SAMPLE_NUMBER: u32 = 3;
+pub const SAMPLE_NUMBER: usize = 3_usize;
 
 /// The default maximum gas price to use for the estimate
 pub const DEFAULT_MAX_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
@@ -88,6 +88,8 @@ pub struct GasPriceOracle<Provider> {
     cache: EthStateCache,
     /// The config for the oracle
     oracle_config: GasPriceOracleConfig,
+    /// The price under which the sample will be ignored.
+    ignore_price: Option<u128>,
     /// The latest calculated price and its block hash
     last_price: Mutex<GasPriceOracleResult>,
 }
@@ -107,8 +109,9 @@ where
             warn!(prev_percentile = ?oracle_config.percentile, "Invalid configured gas price percentile, assuming 100.");
             oracle_config.percentile = 100;
         }
+        let ignore_price = oracle_config.ignore_price.map(|price| price.saturating_to());
 
-        Self { provider, oracle_config, last_price: Default::default(), cache }
+        Self { provider, oracle_config, last_price: Default::default(), cache, ignore_price }
     }
 
     /// Returns the configuration of the gas price oracle.
@@ -148,7 +151,7 @@ where
 
         for _ in 0..max_blocks {
             let (parent_hash, block_values) = self
-                .get_block_values(current_hash, SAMPLE_NUMBER as usize)
+                .get_block_values(current_hash, SAMPLE_NUMBER)
                 .await?
                 .ok_or(EthApiError::UnknownBlockNumber)?;
 
@@ -201,51 +204,52 @@ where
         limit: usize,
     ) -> EthResult<Option<(B256, Vec<U256>)>> {
         // check the cache (this will hit the disk if the block is not cached)
-        let block = match self.cache.get_block(block_hash).await? {
+        let mut block = match self.cache.get_block(block_hash).await? {
             Some(block) => block,
             None => return Ok(None),
         };
 
-        // sort the transactions by effective tip
-        // but first filter those that should be ignored
-        let txs = block.body.iter();
-        let mut txs = txs
-            .filter(|tx| {
-                if let Some(ignore_under) = self.oracle_config.ignore_price {
-                    if tx.effective_gas_tip(block.base_fee_per_gas).map(U256::from) <
-                        Some(ignore_under)
-                    {
-                        return false
-                    }
+        let base_fee_per_gas = block.base_fee_per_gas;
+        let parent_hash = block.parent_hash;
+
+        // sort the functions by ascending effective tip first
+        block.body.sort_by_cached_key(|tx| tx.effective_gas_tip(base_fee_per_gas));
+
+        let mut prices = Vec::with_capacity(limit);
+
+        for tx in block.body.iter() {
+            let mut effective_gas_tip = None;
+            // ignore transactions with a tip under the configured threshold
+            if let Some(ignore_under) = self.ignore_price {
+                let tip = tx.effective_gas_tip(base_fee_per_gas);
+                effective_gas_tip = Some(tip);
+                if tip < Some(ignore_under) {
+                    continue
                 }
+            }
 
-                // recover sender, check if coinbase
-                let sender = tx.recover_signer();
-                match sender {
-                    // transactions will be filtered if this is false
-                    Some(addr) => addr != block.beneficiary,
-                    // TODO: figure out an error for this case or ignore
-                    None => false,
+            // check if the sender was the coinbase, if so, ignore
+            if let Some(sender) = tx.recover_signer() {
+                if sender == block.beneficiary {
+                    continue
                 }
-            })
-            // map all values to effective_gas_tip because we will be returning those values
-            // anyways
-            .map(|tx| tx.effective_gas_tip(block.base_fee_per_gas))
-            .collect::<Vec<_>>();
+            }
 
-        // now do the sort
-        txs.sort_unstable();
-
-        // fill result with the top `limit` transactions
-        let mut final_result = Vec::with_capacity(limit);
-        for tx in txs.iter().take(limit) {
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
-            // less than the base fee
-            let effective_tip = tx.ok_or(RpcInvalidTransactionError::FeeCapTooLow)?;
-            final_result.push(U256::from(effective_tip));
+            // less than the base fee which would be invalid
+            let effective_gas_tip = effective_gas_tip
+                .unwrap_or_else(|| tx.effective_gas_tip(base_fee_per_gas))
+                .ok_or(RpcInvalidTransactionError::FeeCapTooLow)?;
+
+            prices.push(U256::from(effective_gas_tip));
+
+            // we have enough entries
+            if prices.len() >= limit {
+                break
+            }
         }
 
-        Ok(Some((block.parent_hash, final_result)))
+        Ok(Some((parent_hash, prices)))
     }
 }
 
