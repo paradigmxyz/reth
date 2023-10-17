@@ -653,12 +653,6 @@ where
             return
         }
 
-        // Sort response by nonce so 4844 transactions can be inserted in nonce order.
-        //
-        // This is required because the pool does not allow nonce gaps for blob transactions, and
-        // the response is not necessarily ordered by nonce.
-        transactions.sort_by_key(|tx| tx.nonce());
-
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
         let mut num_already_seen = 0;
