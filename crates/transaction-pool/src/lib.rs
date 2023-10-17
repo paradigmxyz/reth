@@ -227,19 +227,21 @@ where
     }
 
     /// Returns future that validates all transaction in the given iterator.
+    ///
+    /// This validates the transactions in the iterator's order.
     async fn validate_all(
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
     ) -> PoolResult<Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)>> {
-        let outcome = futures_util::future::join_all(
-            transactions.into_iter().map(|tx| self.validate(origin, tx)),
-        )
-        .await
-        .into_iter()
-        .collect();
+        let mut outcomes = Vec::new();
 
-        Ok(outcome)
+        for tx in transactions.into_iter() {
+            let validate_outcome = self.validate(origin, tx).await;
+            outcomes.push(validate_outcome);
+        }
+
+        Ok(outcomes)
     }
 
     /// Validates the given transaction
