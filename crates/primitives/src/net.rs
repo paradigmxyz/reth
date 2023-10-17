@@ -155,6 +155,11 @@ pub static HOLESKY_BOOTNODES : [&str; 2] = [
     "enode://a3435a0155a3e837c02f5e7f5662a2f1fbc25b48e4dc232016e1c51b544cb5b4510ef633ea3278c0e970fa8ad8141e2d4d0f9f95456c537ff05fdf9b31c15072@178.128.136.233:30303",
 ];
 
+/// Ephemery bootnodes
+pub static EPHEMERY_BOOTNODES : [&str; 1] = [
+    "enode://0f2c301a9a3f9fa2ccfa362b79552c052905d8c2982f707f46cd29ece5a9e1c14ecd06f4ac951b228f059a43c6284a1a14fce709e8976cac93b50345218bf2e9@135.181.140.168:30343",
+];
+
 /// Returns parsed mainnet nodes
 pub fn mainnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(&MAINNET_BOOTNODES[..])
@@ -174,6 +179,12 @@ pub fn sepolia_nodes() -> Vec<NodeRecord> {
 pub fn holesky_nodes() -> Vec<NodeRecord> {
     parse_nodes(&HOLESKY_BOOTNODES[..])
 }
+
+/// Returns parsed ephemery nodes
+pub fn ephemery_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&EPHEMERY_BOOTNODES[..])
+}
+
 
 /// Parses all the nodes
 fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<NodeRecord> {

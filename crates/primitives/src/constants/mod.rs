@@ -72,7 +72,7 @@ pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
 /// Multiplier for converting mgas to gas.
 pub const MGAS_TO_GAS: u64 = 1_000_000u64;
 
-/// The Ethereum mainnet genesis hash.
+/// The Ethereum mainnet genesis hash. // TODO Ephemery?
 pub const MAINNET_GENESIS: B256 =
     b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 

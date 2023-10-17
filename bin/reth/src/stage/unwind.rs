@@ -32,6 +32,7 @@ pub struct Command {
     /// - goerli
     /// - sepolia
     /// - holesky
+    /// - ephemery
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",

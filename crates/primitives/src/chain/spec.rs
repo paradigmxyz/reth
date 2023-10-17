@@ -202,6 +202,49 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
+/// The Ephemery spec
+pub static EPHEMERY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::ephemery(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/ephemery.json"))
+            .expect("Can't deserialize Ephemery genesis 0 json"),
+        genesis_hash: Some(b256!(
+            // TODO Ephemery: figure out genesis hash
+            "00000000000000000000000000000000000000000000"
+        )),
+        paris_block_and_final_difficulty: Some((0, U256::from(1))),
+        fork_timestamps: ForkTimestamps::default().shanghai(1696000704),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Dao, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1638471600)),
+        ]),
+        deposit_contract: Some(DepositContract::new(
+            address!("4242424242424242424242424242424242424242"),
+            0,
+            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
+        )),
+        base_fee_params: BaseFeeParams::ethereum(),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
+    }
+    .into()
+});
+
 /// Dev testnet specification
 ///
 /// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test test
@@ -909,7 +952,7 @@ pub enum ForkCondition {
     /// The fork is activated after a certain block.
     Block(BlockNumber),
     /// The fork is activated after a total difficulty has been reached.
-    TTD {
+    TTD { // TODO - is this needed for Ephemery?
         /// The block number at which TTD is reached, if it is known.
         ///
         /// This should **NOT** be set unless you want this block advertised as [EIP-2124][eip2124]
@@ -1189,7 +1232,7 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{b256, hex, NamedChain, B256, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA, U256};
+    use crate::{b256, hex, NamedChain, B256, DEV, EPHEMERY, GOERLI, HOLESKY, MAINNET, SEPOLIA, U256};
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
     use std::str::FromStr;

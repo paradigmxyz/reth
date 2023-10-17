@@ -24,6 +24,7 @@ Options:
           - goerli
           - sepolia
           - holesky
+          - ephemery
           
           [default: mainnet]
 

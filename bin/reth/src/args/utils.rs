@@ -1,7 +1,7 @@
 //! Clap parser utilities
 
 use reth_primitives::{
-    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, GOERLI, HOLESKY, MAINNET,
+    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, EPHEMERY, GOERLI, HOLESKY, MAINNET,
     SEPOLIA,
 };
 use std::{
@@ -26,6 +26,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
         "holesky" => HOLESKY.clone(),
+        "ephemery" => EPHEMERY.clone(),
         "dev" => DEV.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
@@ -42,6 +43,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
         "holesky" => HOLESKY.clone(),
+        "ephemery" => EPHEMERY.clone(),
         "dev" => DEV.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
@@ -112,7 +114,7 @@ mod tests {
 
     #[test]
     fn parse_chain_spec() {
-        for chain in ["mainnet", "sepolia", "goerli", "holesky"] {
+        for chain in ["mainnet", "sepolia", "goerli", "holesky", "ephemery"] {
             chain_spec_value_parser(chain).unwrap();
             genesis_value_parser(chain).unwrap();
         }

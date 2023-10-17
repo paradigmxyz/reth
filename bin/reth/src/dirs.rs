@@ -334,5 +334,9 @@ mod tests {
         let path = MaybePlatformPath::<DataDirPath>::default();
         let path = path.unwrap_or_chain_default(Chain::sepolia());
         assert!(path.as_ref().ends_with("reth/sepolia"), "{:?}", path);
+
+        let path = MaybePlatformPath::<DataDirPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::ephemery());
+        assert!(path.as_ref().ends_with("reth/ephemery"), "{:?}", path);
     }
 }

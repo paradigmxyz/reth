@@ -56,11 +56,11 @@ pub use block::{
 pub use bytes::{Buf, BufMut, BytesMut};
 pub use chain::{
     AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
-    DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, GOERLI, HOLESKY, MAINNET,
+    DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, EPHEMERY, GOERLI, HOLESKY, MAINNET,
     SEPOLIA,
 };
 pub use compression::*;
-pub use constants::{
+pub use constants::{ // TODO Ephemery: figure out genesis hash
     DEV_GENESIS, EMPTY_OMMER_ROOT, GOERLI_GENESIS, HOLESKY_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS,
     SEPOLIA_GENESIS,
 };
@@ -72,8 +72,8 @@ pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use net::{
-    goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, GOERLI_BOOTNODES,
-    HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
+    ephemery_nodes, goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, EPHEMERY_BOOTNODES, 
+    GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
 pub use prune::{

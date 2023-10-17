@@ -1,5 +1,5 @@
 use crate::{
-    holesky_nodes,
+    ephemery_nodes, holesky_nodes,
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     NodeRecord, U256, U64,
 };
@@ -14,7 +14,7 @@ use strum::{AsRefStr, EnumCount, EnumIter, EnumString, EnumVariantNames};
 mod spec;
 pub use spec::{
     AllGenesisFormats, BaseFeeParams, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
-    ForkTimestamps, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+    ForkTimestamps, DEV, EPHEMERY, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
 
 // The chain info module.
@@ -53,6 +53,8 @@ pub enum NamedChain {
     Kovan = 42,
     Holesky = 17000,
     Sepolia = 11155111,
+    Ephemery = 1638471600,
+    // TODO Ephemery: chain id calculation
 
     Optimism = 10,
     OptimismKovan = 69,
@@ -116,6 +118,11 @@ impl Chain {
         Chain::Named(NamedChain::Holesky)
     }
 
+    /// Returns the ephemery chain.
+    pub const fn ephemery() -> Self {
+        Chain::Named(NamedChain::Ephemery)
+    }
+
     /// Returns the dev chain.
     pub const fn dev() -> Self {
         Chain::Named(NamedChain::Dev)
@@ -152,6 +159,7 @@ impl Chain {
             C::Goerli => Some(goerli_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
+            C::Ephemery => Some(ephemery_nodes()),
             _ => None,
         }
     }
