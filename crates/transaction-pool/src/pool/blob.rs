@@ -22,7 +22,7 @@ pub(crate) struct BlobTransactions<T: PoolTransaction> {
     /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: BTreeMap<TransactionId, Arc<ValidPoolTransaction<T>>>,
+    by_id: BTreeMap<TransactionId, BlobTransaction<T>>,
     /// _All_ transactions sorted by blob priority.
     all: BTreeSet<BlobTransaction<T>>,
     /// Keeps track of the size of this pool.
@@ -53,10 +53,10 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         // keep track of size
         self.size_of += tx.size();
 
-        self.by_id.insert(id, tx.clone());
-
         let ord = BlobOrd { submission_id };
         let transaction = BlobTransaction { ord, transaction: tx };
+
+        self.by_id.insert(id, transaction.clone());
         self.all.insert(transaction);
     }
 
@@ -68,13 +68,12 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         // remove from queues
         let tx = self.by_id.remove(id)?;
 
-        // TODO: remove from ordered set
-        // self.best.remove(&tx);
+        self.all.remove(&tx);
 
         // keep track of size
         self.size_of -= tx.transaction.size();
 
-        Some(tx)
+        Some(tx.transaction)
     }
 
     /// Returns all transactions that satisfy the given basefee and blob_fee.
@@ -99,6 +98,13 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     /// Number of transactions in the entire pool
     pub(crate) fn len(&self) -> usize {
         self.by_id.len()
+    }
+
+    /// Returns whether the pool is empty
+    #[cfg(test)]
+    #[allow(unused)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
     }
 
     /// Returns all transactions that satisfy the given blob fee.
@@ -172,6 +178,12 @@ struct BlobTransaction<T: PoolTransaction> {
     ord: BlobOrd,
 }
 
+impl<T: PoolTransaction> Clone for BlobTransaction<T> {
+    fn clone(&self) -> Self {
+        Self { transaction: self.transaction.clone(), ord: self.ord.clone() }
+    }
+}
+
 impl<T: PoolTransaction> Eq for BlobTransaction<T> {}
 
 impl<T: PoolTransaction> PartialEq<Self> for BlobTransaction<T> {
@@ -192,7 +204,7 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BlobOrd {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,

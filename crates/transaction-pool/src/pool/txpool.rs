@@ -148,15 +148,16 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Updates the tracked blob fee
-    fn update_blob_fee(&mut self, pending_blob_fee: u128) {
-        // TODO: std::mem::swap pending_blob_fee
-        match pending_blob_fee.cmp(&self.all_transactions.pending_blob_fee) {
+    fn update_blob_fee(&mut self, mut pending_blob_fee: u128) {
+        std::mem::swap(&mut self.all_transactions.pending_blob_fee, &mut pending_blob_fee);
+        match self.all_transactions.pending_blob_fee.cmp(&pending_blob_fee) {
             Ordering::Equal => {
                 // fee unchanged, nothing to update
             }
             Ordering::Greater => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
-                let removed = self.pending_pool.update_blob_fee(pending_blob_fee);
+                let removed =
+                    self.pending_pool.update_blob_fee(self.all_transactions.pending_blob_fee);
                 for tx in removed {
                     let to = {
                         let tx =
@@ -173,7 +174,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             Ordering::Less => {
                 // decreased blob fee: recheck blob pool and promote all that are now valid
-                let removed = self.blob_transactions.enforce_blob_fee(pending_blob_fee);
+                let removed =
+                    self.blob_transactions.enforce_blob_fee(self.all_transactions.pending_blob_fee);
                 for tx in removed {
                     let to = {
                         let tx =
@@ -1836,6 +1838,46 @@ mod tests {
     }
 
     #[test]
+    fn test_demote_valid_tx_with_increasing_blob_fee() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+
+        // set block info so the tx is initially underpriced w.r.t. blob fee
+        let mut block_info = pool.get_block_info();
+        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap());
+        pool.set_block_info(block_info);
+
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, on_chain_balance, on_chain_nonce).unwrap();
+
+        // assert pool lengths
+        assert!(pool.blob_transactions.is_empty());
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        // check tx state and derived subpool
+        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+        assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(internal_tx.subpool, SubPool::Pending);
+
+        // set block info so the pools are updated
+        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap() + 1);
+        pool.set_block_info(block_info);
+
+        // check that the tx is promoted
+        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+        assert!(!internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(internal_tx.subpool, SubPool::Blob);
+
+        // make sure the blob transaction was promoted into the pending pool
+        assert_eq!(pool.blob_transactions.len(), 1);
+        assert!(pool.pending_pool.is_empty());
+    }
+
+    #[test]
     fn test_promote_valid_tx_with_decreasing_blob_fee() {
         let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
@@ -1870,9 +1912,9 @@ mod tests {
         assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(internal_tx.subpool, SubPool::Pending);
 
-        // wait....
+        // make sure the blob transaction was promoted into the pending pool
         assert_eq!(pool.pending_pool.len(), 1);
-        assert_eq!(pool.blob_transactions.len(), 0);
+        assert!(pool.blob_transactions.is_empty());
     }
 
     #[test]
