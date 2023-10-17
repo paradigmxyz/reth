@@ -972,15 +972,18 @@ struct GetPooledTxResponse {
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
 struct GetPooledTxRequestFut {
+    tx_hash: TxHash,
     #[pin]
     inner: Option<GetPooledTxRequest>,
 }
 
 impl GetPooledTxRequestFut {
     fn new(
+        tx_hash: TxHash,
         peer_id: PeerId,
         response: oneshot::Receiver<RequestResult<PooledTransactions>>,
     ) -> Self {
+        tx_hash,
         Self { inner: Some(GetPooledTxRequest { peer_id, response }) }
     }
 }
@@ -1022,8 +1025,8 @@ struct Peer {
 /// * missing hashes and peers that send us these - so we can possibly re-request them
 
 struct TransactionFetcher {
-    /// The set of transaction hashes that are currently being requested.
-    inflight_hashes: HashSet<TxHash>,
+    /// All currently active requests for pooled transactions.
+    inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
 
     /// Mapping of transaction hashes to the peers that have advertised them.
     missing_hashes: HashMap<TxHash, Vec<PeerId>>,
