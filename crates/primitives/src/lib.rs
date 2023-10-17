@@ -44,7 +44,7 @@ pub mod snapshot;
 pub mod stage;
 mod storage;
 /// Helpers for working with transactions
-mod transaction;
+pub mod transaction;
 pub mod trie;
 mod withdrawal;
 

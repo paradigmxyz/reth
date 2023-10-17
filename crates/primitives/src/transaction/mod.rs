@@ -235,6 +235,21 @@ impl Transaction {
         }
     }
 
+    /// Blob versioned hashes for eip4844 transaction, for legacy,eip1559 and eip2930 transactions
+    /// this is `None`
+    ///
+    /// This is also commonly referred to as the "blob versioned hashes" (`BlobVersionedHashes`).
+    pub fn blob_versioned_hashes(&self) -> Option<Vec<B256>> {
+        match self {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(_) => None,
+            Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
+                Some(blob_versioned_hashes.to_vec())
+            }
+        }
+    }
+
     /// Max fee per blob gas for eip4844 transaction [TxEip4844].
     ///
     /// Returns `None` for non-eip4844 transactions.

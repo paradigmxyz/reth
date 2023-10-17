@@ -1,0 +1,16 @@
+[package]
+name = "trace-transaction-cli"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+clap = { workspace = true, features = ["derive"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+futures-util.workspace = true
+eyre.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

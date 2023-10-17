@@ -723,6 +723,12 @@ pub trait PoolTransaction:
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind;
 
+    /// Returns the recipient of the transaction if it is not a [TransactionKind::Create]
+    /// transaction.
+    fn to(&self) -> Option<Address> {
+        (*self.kind()).to()
+    }
+
     /// Returns the input data of this transaction.
     fn input(&self) -> &[u8];
 

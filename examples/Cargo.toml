@@ -21,12 +21,10 @@ reth-network-api.workspace = true
 reth-network.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
-
 eyre.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
-
 [[example]]
 name = "db-access"
 path = "db-access.rs"

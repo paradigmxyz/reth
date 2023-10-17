@@ -7990,6 +7990,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6bc1c9ce2b5135ac7f93c72918fc37feb872bdc6a5533a8b85eb4b86bfdae52"
 
 [[package]]
+name = "trace-transaction-cli"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "futures-util",
+ "jsonrpsee",
+ "reth",
+ "tokio",
+]
+
+[[package]]
 name = "tracing"
 version = "0.1.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
