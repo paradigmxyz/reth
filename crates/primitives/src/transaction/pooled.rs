@@ -88,6 +88,16 @@ impl PooledTransactionsElement {
         }
     }
 
+    /// Returns the transaction nonce.
+    pub fn nonce(&self) -> u64 {
+        match self {
+            Self::Legacy { transaction, .. } => transaction.nonce,
+            Self::Eip2930 { transaction, .. } => transaction.nonce,
+            Self::Eip1559 { transaction, .. } => transaction.nonce,
+            Self::BlobTransaction(blob_tx) => blob_tx.transaction.nonce,
+        }
+    }
+
     /// Recover signer from signature and hash.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].

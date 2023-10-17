@@ -734,6 +734,7 @@ where
                 // we can't fit this _blob_ transaction into the block, so we mark it as invalid,
                 // which removes its dependent transactions from the iterator. This is similar to
                 // the gas limit condition for regular transactions above.
+                trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
                 best_txs.mark_invalid(&pool_tx);
                 continue
             }
