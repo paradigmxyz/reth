@@ -156,20 +156,20 @@ impl PayloadBuilderAttributes {
     ///
     /// Derives the unique [PayloadId] for the given parent and attributes
     pub fn try_new(parent: B256, attributes: PayloadAttributes) -> Result<Self, DecodeError> {
-        #[cfg(feature = "optimism")]
-        let transactions = attributes
-            .transactions
-            .as_ref()
-            .unwrap_or(&Vec::default())
-            .iter()
-            .map(|tx| TransactionSigned::decode_enveloped(tx.clone()))
-            .collect::<Result<_, _>>()?;
-
         #[cfg(not(feature = "optimism"))]
         let id = payload_id(&parent, &attributes);
 
         #[cfg(feature = "optimism")]
-        let id = payload_id(&parent, &attributes, &transactions);
+        let (id, transactions) = {
+            let transactions = attributes
+                .transactions
+                .as_ref()
+                .unwrap_or(&Vec::default())
+                .iter()
+                .map(|tx| TransactionSigned::decode_enveloped(tx.clone()))
+                .collect::<Result<_, _>>()?;
+            (payload_id(&parent, &attributes, &transactions), transactions)
+        };
 
         let withdraw = attributes.withdrawals.map(
             |withdrawals: Vec<reth_rpc_types::engine::payload::Withdrawal>| {
