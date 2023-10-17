@@ -35,10 +35,7 @@ impl<'a, TX> PrefixSetLoader<'a, TX> {
     }
 }
 
-impl<'a, 'b, TX> PrefixSetLoader<'a, TX>
-where
-    TX: DbTx<'b>,
-{
+impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
     /// Load all account and storage changes for the given block range.
     pub fn load(
         self,

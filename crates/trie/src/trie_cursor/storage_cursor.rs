@@ -24,9 +24,9 @@ impl<C> StorageTrieCursor<C> {
     }
 }
 
-impl<'a, C> TrieCursor<StoredNibblesSubKey> for StorageTrieCursor<C>
+impl<C> TrieCursor<StoredNibblesSubKey> for StorageTrieCursor<C>
 where
-    C: DbDupCursorRO<'a, tables::StoragesTrie> + DbCursorRO<'a, tables::StoragesTrie>,
+    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie>,
 {
     fn seek_exact(
         &mut self,

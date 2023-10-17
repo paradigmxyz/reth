@@ -12,9 +12,9 @@ use std::{fmt::Debug, sync::Arc};
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// RO database transaction
-    type TX: DbTx<'a> + Send + Sync + Debug;
+    type TX: DbTx + Send + Sync + Debug;
     /// RW database transaction
-    type TXMut: DbTxMut<'a> + DbTx<'a> + TableImporter<'a> + Send + Sync + Debug;
+    type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug;
 }
 
 /// Main Database trait that spawns transactions to be executed.
