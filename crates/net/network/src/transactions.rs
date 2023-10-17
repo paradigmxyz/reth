@@ -277,7 +277,7 @@ where
     fn on_new_transactions(&mut self, hashes: Vec<TxHash>) {
         // Nothing to propagate while initially syncing
         if self.network.is_initially_syncing() {
-            return;
+            return
         }
 
         trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
@@ -409,7 +409,7 @@ where
 
         if full_transactions.transactions.is_empty() {
             // nothing to propagate
-            return None;
+            return None
         }
 
         let new_full_transactions = full_transactions.build();
@@ -436,7 +436,7 @@ where
         let propagated = {
             let Some(peer) = self.peers.get_mut(&peer_id) else {
                 // no such peer
-                return;
+                return
             };
 
             let to_propagate: Vec<PropagateTransaction> =
@@ -457,7 +457,7 @@ where
 
             if new_pooled_hashes.is_empty() {
                 // nothing to propagate
-                return;
+                return
             }
 
             for hash in new_pooled_hashes.iter_hashes().copied() {
@@ -485,7 +485,7 @@ where
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return;
+            return
         }
 
         let mut num_already_seen = 0;
@@ -503,7 +503,7 @@ where
 
             if hashes.is_empty() {
                 // nothing to request
-                return;
+                return
             }
 
             // enforce recommended soft limit, however the peer may enforce an arbitrary limit on
@@ -523,7 +523,7 @@ where
                         .register_inflight(GetPooledTxRequestFut::new(peer_id, hash, rx));
                 } else {
                     self.metrics.egress_peer_channel_full.increment(1);
-                    return;
+                    return
                 }
             }
 
@@ -635,7 +635,7 @@ where
                         self.pool.pooled_transactions_max(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
                     if pooled_txs.is_empty() {
                         // do not send a message if there are no transactions in the pool
-                        return;
+                        return
                     }
 
                     for pooled_tx in pooled_txs.into_iter() {
@@ -660,7 +660,7 @@ where
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return;
+            return
         }
 
         // tracks the quality of the given transactions
@@ -674,7 +674,7 @@ where
                     tx
                 } else {
                     has_bad_transactions = true;
-                    continue;
+                    continue
                 };
 
                 // track that the peer knows this transaction, but only if this is a new broadcast.
@@ -729,7 +729,7 @@ where
             RequestError::Timeout => ReputationChangeKind::Timeout,
             RequestError::ChannelClosed | RequestError::ConnectionDropped => {
                 // peer is already disconnected
-                return;
+                return
             }
             RequestError::BadResponse => ReputationChangeKind::BadTransactions,
         };
@@ -877,7 +877,7 @@ impl FullTransactionsBuilder {
     fn push(&mut self, transaction: &PropagateTransaction) {
         let new_size = self.total_size + transaction.size;
         if new_size > MAX_FULL_TRANSACTIONS_PACKET_SIZE {
-            return;
+            return
         }
 
         self.total_size = new_size;
