@@ -69,7 +69,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
     assert_ne!(td, U256::ZERO);
 
     // Can query headers by range as well, already sealed!
-    let headers = provider.sealed_headers_range(100..=200)?;
+    let headers = provider.sealed_headers_range(100..200)?;
     assert_eq!(headers.len(), 100);
 
     Ok(())
@@ -101,7 +101,7 @@ fn txs_provider_example<T: TransactionsProvider>(provider: T) -> eyre::Result<()
     let _block = provider.transaction_block(txid)?;
 
     // Can query the txs in the range [100, 200)
-    let _txs_by_tx_range = provider.transactions_by_tx_range(100..=200)?;
+    let _txs_by_tx_range = provider.transactions_by_tx_range(100..200)?;
     // Can query the txs in the _block_ range [100, 200)]
     let _txs_by_block_range = provider.transactions_by_block_range(100..200)?;
 

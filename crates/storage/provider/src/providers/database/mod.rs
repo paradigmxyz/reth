@@ -16,7 +16,7 @@ use reth_primitives::{
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
-    ops::{Range, RangeInclusive},
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
 use tracing::trace;
@@ -170,13 +170,13 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         self.provider()?.header_td_by_number(number)
     }
 
-    fn headers_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
         self.provider()?.headers_range(range)
     }
 
     fn sealed_headers_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         self.provider()?.sealed_headers_range(range)
     }
@@ -295,19 +295,19 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
 
     fn transactions_by_block_range(
         &self,
-        range: Range<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         self.provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
-        range: RangeInclusive<TxNumber>,
+        range: impl RangeBounds<TxNumber>,
     ) -> RethResult<Vec<TransactionSignedNoHash>> {
         self.provider()?.transactions_by_tx_range(range)
     }
 
-    fn senders_by_tx_range(&self, range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
         self.provider()?.senders_by_tx_range(range)
     }
 
