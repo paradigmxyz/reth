@@ -243,12 +243,10 @@ where
 
             prices.push(U256::from(effective_gas_tip));
 
-            if prices.len() < limit {
-                continue
-            }
-
             // we have enough entries
-            break
+            if prices.len() >= limit {
+                break
+            }
         }
 
         Ok(Some((parent_hash, prices)))
