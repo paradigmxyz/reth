@@ -25,4 +25,11 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth = { workspace = true }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
+tempfile = { workspace = true }
+clap = { workspace = true }
+jsonrpsee = { workspace = true }
+eyre = { workspace = true }
+reth-payload-builder = { workspace = true }
