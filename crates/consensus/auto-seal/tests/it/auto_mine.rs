@@ -6,9 +6,10 @@ use reth::{node::NodeCommand, runner::CliRunner, cli::{components::RethNodeCompo
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{Chain, ChainSpec, ChainSpecBuilder, Genesis, hex, revm_primitives::HashMap, U256, GenesisAccount, Address, stage::StageId, Head};
 use reth_db:: DatabaseEnv;
-use reth_provider::ProviderFactory;
+use reth_provider::{ProviderFactory, CanonStateSubscriptions, CanonStateNotification};
 use clap::Parser;
 use reth_transaction_pool::TransactionPool;
+use tokio::sync::{mpsc, oneshot};
 
 // #[derive(Debug)]
 // struct TestExt;
@@ -17,7 +18,7 @@ use reth_transaction_pool::TransactionPool;
 // }
 
 #[derive(Debug)]
-struct AutoMineConfig;
+struct AutoMineConfig(mpsc::Sender<CanonStateNotification>);
 
 impl RethNodeCommandConfig for AutoMineConfig {
     fn on_components_initialized<Reth: RethNodeComponents>(
@@ -36,8 +37,14 @@ impl RethNodeCommandConfig for AutoMineConfig {
         let pool = components.pool();
         let size = pool.pool_size();
         println!("size {size:?}");
-        panic!("node started");
-        // Ok(())
+        let mut canon_events = components.events().subscribe_to_canonical_state();
+        let sender = self.0.clone();
+        tokio::spawn(async move {
+            println!("spawning update listener...");
+            let update = canon_events.recv().await.expect("canon state updated");
+            sender.send(update).await.unwrap();
+        });
+        Ok(())
     }
 
     fn on_rpc_server_started<Conf, Reth>(
@@ -74,12 +81,16 @@ pub fn test_auto_mine() {
         .into_path();
     let datadir = temp_path.to_str().expect("temp path is okay");
 
-    let no_args = NoArgs::with(AutoMineConfig);
+    let (tx, mut rx) = mpsc::channel(1);
+    let no_args = NoArgs::with(AutoMineConfig(tx));
     let mut command = NodeCommand::<NoArgsCliExt<AutoMineConfig>>::parse_from([
         "reth",
         "--dev",
         "--datadir",
         datadir,
+        "--debug.max-block",
+        "1",
+        // "--debug.terminate",
     ])
     .with_ext::<NoArgsCliExt<AutoMineConfig>>(no_args);
     // add custom chain
@@ -87,6 +98,14 @@ pub fn test_auto_mine() {
 
     let runner = CliRunner::default();
     let res = runner.run_command_until_exit(|ctx| command.execute(ctx));
+    let (tx, done) = oneshot::channel();
+    tokio::spawn(async move {
+        let res = rx.recv().await.unwrap();
+        println!("res: {res:?}");
+        let _ = tx.send(res);
+    });
+    let _ = done.blocking_recv();
+
     println!("res {res:?}");
 }
 
