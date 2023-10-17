@@ -154,9 +154,34 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             Ordering::Greater => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
+                let removed = self.pending_pool.update_blob_fee(pending_blob_fee);
+                for tx in removed {
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+
+                        // remove the blob fee cap block flag, this should set the subpool to
+                        // Blob instead of Pending
+                        tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
+                }
             }
             Ordering::Less => {
                 // decreased blob fee: recheck blob pool and promote all that are now valid
+                let removed = self.blob_transactions.enforce_blob_fee(pending_blob_fee);
+                for tx in removed {
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
+                }
             }
         }
     }

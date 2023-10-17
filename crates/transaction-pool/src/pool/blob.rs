@@ -101,6 +101,44 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         self.by_id.len()
     }
 
+    /// Returns all transactions that satisfy the given blob fee.
+    fn satisfy_blob_fee_ids(&self, blob_fee: u128) -> Vec<TransactionId> {
+        let mut transactions = Vec::new();
+        {
+            let mut iter = self.by_id.iter().peekable();
+
+            while let Some((id, tx)) = iter.next() {
+                if tx.transaction.max_fee_per_blob_gas() < Some(blob_fee) {
+                    // still parked in blob pool -> skip descendant transactions
+                    'this: while let Some((peek, _)) = iter.peek() {
+                        if peek.sender != id.sender {
+                            break 'this
+                        }
+                        iter.next();
+                    }
+                } else {
+                    transactions.push(*id);
+                }
+            }
+        }
+        transactions
+    }
+
+    /// Removes all transactions and their dependent transaction from the subpool that no longer
+    /// satisfy the given blobfee.
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    pub(crate) fn enforce_blob_fee(&mut self, blob_fee: u128) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let to_remove = self.satisfy_blob_fee_ids(blob_fee);
+
+        let mut removed = Vec::with_capacity(to_remove.len());
+        for id in to_remove {
+            removed.push(self.remove_transaction(&id).expect("transaction exists"));
+        }
+
+        removed
+    }
+
     /// Returns `true` if the transaction with the given id is already included in this pool.
     #[cfg(test)]
     #[allow(unused)]
