@@ -146,9 +146,19 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Updates the tracked blob fee
-    fn update_blob_fee(&mut self, _pending_blob_fee: u128) {
+    fn update_blob_fee(&mut self, pending_blob_fee: u128) {
         // TODO: std::mem::swap pending_blob_fee
-        // TODO(mattsse): update blob txs
+        match pending_blob_fee.cmp(&self.all_transactions.pending_blob_fee) {
+            Ordering::Equal => {
+                // fee unchanged, nothing to update
+            }
+            Ordering::Greater => {
+                // increased blob fee: recheck pending pool and remove all that are no longer valid
+            }
+            Ordering::Less => {
+                // decreased blob fee: recheck basefee pool and promote all that are now valid
+            }
+        }
     }
 
     /// Updates the tracked basefee
@@ -887,6 +897,17 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.pending_basefee = pending_basefee;
         if let Some(pending_blob_fee) = pending_blob_fee {
             self.pending_blob_fee = pending_blob_fee;
+        }
+    }
+
+    /// Gets the [BlockInfo] corresponding to the current pool settings
+    #[cfg(test)]
+    pub(crate) fn get_block_info(&self) -> BlockInfo {
+        BlockInfo {
+            last_seen_block_hash: self.last_seen_block_hash,
+            last_seen_block_number: self.last_seen_block_number,
+            pending_basefee: self.pending_basefee,
+            pending_blob_fee: Some(self.pending_blob_fee),
         }
     }
 
@@ -1745,8 +1766,8 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions { pending_blob_fee: 10_000_000, ..Default::default() };
-        pool.pending_blob_fee = 10_000_000;
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
+        pool.pending_blob_fee = tx.max_fee_per_blob_gas().unwrap() + 1;
         let valid_tx = f.validated(tx);
         let InsertOk { state, .. } =
             pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
@@ -1754,6 +1775,61 @@ mod tests {
         assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
 
         let _ = pool.txs.get(&valid_tx.transaction_id).unwrap();
+    }
+
+    #[test]
+    fn test_valid_tx_with_decreasing_blob_fee() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions { pending_blob_fee: 10_000_000, ..Default::default() };
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+
+        pool.pending_blob_fee = tx.max_fee_per_blob_gas().unwrap() + 1;
+        let valid_tx = f.validated(tx.clone());
+        let InsertOk { state, .. } =
+            pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+
+        let _ = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        pool.remove_transaction(&valid_tx.transaction_id);
+
+        pool.pending_blob_fee = tx.max_fee_per_blob_gas().unwrap();
+        let InsertOk { state, .. } =
+            pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert!(state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+    }
+
+    #[test]
+    fn test_promote_valid_tx_with_decreasing_blob_fee() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions { pending_blob_fee: 10_000_000, ..Default::default() };
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+
+        pool.pending_blob_fee = tx.max_fee_per_blob_gas().unwrap() + 1;
+        let valid_tx = f.validated(tx.clone());
+        let InsertOk { state, .. } =
+            pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+
+        let internal_tx = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        assert_eq!(internal_tx.subpool, SubPool::Blob);
+        assert!(!internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+
+        // set block info so the pools are updated
+        let mut block_info = pool.get_block_info();
+        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap());
+        pool.set_block_info(block_info);
+
+        // check that the tx is promoted
+        let internal_tx = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        assert_eq!(internal_tx.subpool, SubPool::Pending);
+        assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
     }
 
     #[test]
