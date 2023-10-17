@@ -131,6 +131,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             basefee_size: self.basefee_pool.size(),
             queued: self.queued_pool.len(),
             queued_size: self.queued_pool.size(),
+            blob: self.blob_transactions.len(),
+            blob_size: self.blob_transactions.size(),
             total: self.all_transactions.len(),
         }
     }
@@ -246,6 +248,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         if let Some(blob_fee) = pending_blob_fee {
             self.update_blob_fee(blob_fee)
         }
+    }
+
+    /// Gets the [BlockInfo] corresponding to the current pool settings
+    #[cfg(test)]
+    pub(crate) fn get_block_info(&self) -> BlockInfo {
+        self.all_transactions.get_block_info()
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
@@ -778,8 +786,8 @@ impl<T: TransactionOrdering> TxPool<T> {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn assert_invariants(&self) {
         let size = self.size();
-        let actual = size.basefee + size.pending + size.queued;
-        assert_eq!(size.total, actual,  "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}", size.basefee, size.pending, size.queued);
+        let actual = size.basefee + size.pending + size.queued + size.blob;
+        assert_eq!(size.total, actual,  "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}, blob:{}", size.basefee, size.pending, size.queued, size.blob);
         self.all_transactions.assert_invariants();
         self.pending_pool.assert_invariants();
         self.basefee_pool.assert_invariants();
@@ -1832,27 +1840,33 @@ mod tests {
         let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = AllTransactions { pending_blob_fee: 10_000_000, ..Default::default() };
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
 
-        pool.pending_blob_fee = tx.max_fee_per_blob_gas().unwrap() + 1;
-        let valid_tx = f.validated(tx.clone());
-        let InsertOk { state, .. } =
-            pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        assert!(state.contains(TxState::NO_NONCE_GAPS));
-        assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        // set block info so the tx is initially underpriced w.r.t. blob fee
+        let mut block_info = pool.get_block_info();
+        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap() + 1);
+        pool.set_block_info(block_info);
 
-        let internal_tx = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, on_chain_balance, on_chain_nonce).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        assert!(pool.pending_pool.is_empty());
+        assert_eq!(pool.basefee_pool.len(), 1);
+
+        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
         assert_eq!(internal_tx.subpool, SubPool::Blob);
         assert!(!internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
 
         // set block info so the pools are updated
-        let mut block_info = pool.get_block_info();
         block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap());
         pool.set_block_info(block_info);
 
         // check that the tx is promoted
-        let internal_tx = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
         assert_eq!(internal_tx.subpool, SubPool::Pending);
         assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
     }
