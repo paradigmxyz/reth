@@ -133,6 +133,11 @@ impl<'a> EVMProcessor<'a> {
         self.stack = stack;
     }
 
+    /// Configure the executor with the give block.
+    pub fn set_first_block(&mut self, num: BlockNumber) {
+        self.first_block = Some(num);
+    }
+
     /// Returns a reference to the database
     pub fn db_mut(&mut self) -> &mut StateDBBox<'a, RethError> {
         // Option will be removed from EVM in the future.
@@ -346,6 +351,7 @@ impl<'a> EVMProcessor<'a> {
         self.apply_beacon_root_contract_call(block)?;
         let (receipts, cumulative_gas_used) =
             self.execute_transactions(block, total_difficulty, senders)?;
+        tracing::debug!(target: "consensus::auto", ?receipts, "execute inner: ");
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
@@ -380,6 +386,7 @@ impl<'a> EVMProcessor<'a> {
         self.stats.merge_transitions_duration += time.elapsed();
 
         if self.first_block.is_none() {
+            tracing::debug!(target: "consensus::auto", block_number = ?block.number, "first block is none. setting to: ");
             self.first_block = Some(block.number);
         }
 
@@ -469,6 +476,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
     ) -> Result<(), BlockExecutionError> {
         // execute block
         let receipts = self.execute_inner(block, total_difficulty, senders)?;
+        tracing::debug!(target: "consensus::auto", ?receipts, "execute and verify: ");
 
         // TODO Before Byzantium, receipts contained state root that would mean that expensive
         // operation as hashing that is needed for state root got calculated in every

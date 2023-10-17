@@ -209,11 +209,14 @@ impl BundleStateWithReceipts {
 
     /// Transform block number to the index of block.
     fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
+        tracing::debug!(target: "consensus::auto", first_block = ?self.first_block, block_num = ?block_number);
         if self.first_block > block_number {
             return None
         }
         let index = block_number - self.first_block;
+        tracing::debug!(target: "consensus::auto", ?index, receipts = ?self.receipts);
         if index >= self.receipts.len() as u64 {
+            tracing::debug!(target: "consensus::auto", returning_none = index >= self.receipts.len() as u64);
             return None
         }
         Some(index as usize)
@@ -244,7 +247,9 @@ impl BundleStateWithReceipts {
 
     /// Return all block receipts
     pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Option<Receipt>] {
+        tracing::debug!(target: "consensus::auto", ?block_number, "receipts by block: ");
         let Some(index) = self.block_number_to_index(block_number) else { return &[] };
+        tracing::debug!(target: "consensus::auto", ?index, "receipts by block - made it to index: ");
         &self.receipts[index]
     }
 
