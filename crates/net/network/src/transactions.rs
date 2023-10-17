@@ -1016,6 +1016,75 @@ struct Peer {
     client_version: Arc<String>,
 }
 
+// === TransactionFetcher ===
+/// * active requests - especially inflight hashes, so that whenever we receive new missing hashes 
+///   we can check first if they're already being requested.
+/// * missing hashes and peers that send us these - so we can possibly re-request them
+
+struct TransactionFetcher {
+    /// The set of transaction hashes that are currently being requested.
+    inflight_hashes: HashSet<TxHash>,
+
+    /// Mapping of transaction hashes to the peers that have advertised them.
+    missing_hashes: HashMap<TxHash, Vec<PeerId>>,
+}
+
+impl TransactionFetcher {
+    fn new() -> Self {
+        Self {
+            inflight_hashes: HashSet::new(),
+            missing_hashes: HashMap::new(),
+        }
+    }
+
+    /// Marks the given transaction hashes as being requested.
+    fn mark_as_inflight(&mut self, hashes: &[TxHash]) {
+        for hash in hashes {
+            self.inflight_hashes.insert(hash.clone());
+        }
+    }
+
+    /// Removes the given transaction hashes from the inflight list.
+    fn remove_inflight(&mut self, hashes: &[TxHash]) {
+        for hash in hashes {
+            self.inflight_hashes.remove(hash);
+        }
+    }
+
+    /// Adds missing transaction hashes and the peer that advertised them.
+    fn add_missing_hashes(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
+        for hash in hashes {
+            if !self.inflight_hashes.contains(hash) {
+                self.missing_hashes.entry(hash.clone()).or_default().push(peer_id.clone());
+            }
+        }
+    }
+
+    /// Fetches a set of missing transaction hashes. This method can be extended to consider
+    /// various fetching strategies, e.g., prioritize by peer or hash age.
+    fn fetch_missing(&mut self) -> BoxFuture<'static, ()> {
+        // Example: Fetching the first missing hash (if available)
+        let maybe_tx_hash = self.missing_hashes.keys().next().cloned();
+        if let Some(tx_hash) = maybe_tx_hash {
+            let peers = self.missing_hashes.remove(&tx_hash).unwrap();
+            let peer = peers.first().cloned().expect("There should be at least one peer");
+            
+            // Here, send the GetPooledTxRequest and mark the hash as inflight.
+            self.mark_as_inflight(&[tx_hash.clone()]);
+            
+            // Dummy example without actual sending.
+            // Normally, you would use the network layer to send the request and handle the response.
+            Box::pin(async move {
+                // Simulate some async work, like sending the request to the peer.
+                // On actual receipt of response, `remove_inflight` should be called.
+            })
+        } else {
+            Box::pin(async {})
+        }
+    }
+
+}
+
 /// Commands to send to the [`TransactionsManager`]
 #[derive(Debug)]
 enum TransactionsCommand {

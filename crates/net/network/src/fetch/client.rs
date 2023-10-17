@@ -123,3 +123,31 @@ impl BodiesClient for FetchClient {
         }
     }
 }
+
+/// TransactionFetcher needs to track:
+/// * active requests - especially inflight hashes, so that whenever we receive new missing hashes 
+///   we can check first if they're already being requested.
+/// * missing hashes and peers that send us these - so we can possibly re-request them
+impl TransactionFetcher for FetchClient {
+
+    /// All currently active requests for pooled transactions.
+    inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
+
+    /// Sends a `GetBlockBodies` request to an available peer.
+    fn get_block_bodies_with_priority(
+        &self,
+        request: Vec<B256>,
+        priority: Priority,
+    ) -> Self::Output {
+        let (response, rx) = oneshot::channel();
+        if self
+            .request_tx
+            .send(DownloadRequest::GetBlockBodies { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
+    }
+}
