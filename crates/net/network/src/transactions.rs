@@ -541,7 +541,8 @@ where
                     .0
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
-                    .filter_map(Result::ok);
+                    .filter_map(Result::ok)
+                    .collect();
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
@@ -644,7 +645,7 @@ where
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
-        transactions: impl IntoIterator<Item = PooledTransactionsElement>,
+        transactions: Vec<PooledTransactionsElement>,
         source: TransactionSource,
     ) {
         // If the node is pipeline syncing, ignore transactions
