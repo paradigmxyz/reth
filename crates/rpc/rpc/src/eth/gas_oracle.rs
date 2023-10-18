@@ -82,26 +82,6 @@ impl GasPriceOracleConfig {
     }
 }
 
-/// Wrapper struct for LruMap
-#[derive(Debug)]
-pub struct GasPriceOracleInner {
-    last_price: GasPriceOracleResult,
-    lowest_effective_tip_cache: EffectiveTipLruCache,
-}
-
-/// Wrapper struct for LruMap
-#[derive(Deref, DerefMut)]
-pub struct EffectiveTipLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
-
-impl Debug for EffectiveTipLruCache {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("EffectiveTipLruCache")
-            .field("cache_length", &self.len())
-            .field("cache_memory_usage", &self.memory_usage())
-            .finish()
-    }
-}
-
 /// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
 pub struct GasPriceOracle<Provider> {
@@ -135,9 +115,13 @@ where
         }
         let ignore_price = oracle_config.ignore_price.map(|price| price.saturating_to());
 
+        // this is the number of blocks that we will cache the values for
+        let cached_values = (oracle_config.blocks * 5).max(oracle_config.max_block_history as u32);
         let inner = Mutex::new(GasPriceOracleInner {
             last_price: Default::default(),
-            lowest_effective_tip_cache: EffectiveTipLruCache(LruMap::new(ByLength::new(100))),
+            lowest_effective_tip_cache: EffectiveTipLruCache(LruMap::new(ByLength::new(
+                cached_values,
+            ))),
         });
 
         Self { provider, oracle_config, cache, ignore_price, inner }
@@ -290,6 +274,26 @@ where
         }
 
         Ok(Some((parent_hash, prices)))
+    }
+}
+
+/// Container type for mutable inner state of the [GasPriceOracle]
+#[derive(Debug)]
+struct GasPriceOracleInner {
+    last_price: GasPriceOracleResult,
+    lowest_effective_tip_cache: EffectiveTipLruCache,
+}
+
+/// Wrapper struct for LruMap
+#[derive(Deref, DerefMut)]
+pub struct EffectiveTipLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
+
+impl Debug for EffectiveTipLruCache {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EffectiveTipLruCache")
+            .field("cache_length", &self.len())
+            .field("cache_memory_usage", &self.memory_usage())
+            .finish()
     }
 }
 
