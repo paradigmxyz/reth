@@ -66,17 +66,17 @@ impl TraceRequest {
     }
 
     /// Inserts [`TraceType::Trace`]
-    pub fn with_trace_trace(self) -> Self {
+    pub fn with_trace(self) -> Self {
         self.with_trace_type(TraceType::Trace)
     }
 
     /// Inserts [`TraceType::VmTrace`]
-    pub fn with_trace_vmtrace(self) -> Self {
+    pub fn with_vm_trace(self) -> Self {
         self.with_trace_type(TraceType::VmTrace)
     }
 
     /// Inserts [`TraceType::StateDiff`]
-    pub fn with_trace_statediff(self) -> Self {
+    pub fn with_statediff(self) -> Self {
         self.with_trace_type(TraceType::StateDiff)
     }
 }
