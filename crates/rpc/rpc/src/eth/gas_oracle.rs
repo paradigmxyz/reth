@@ -9,12 +9,10 @@ use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
 use reth_provider::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::{self, Debug, Formatter},
-    ops::{Deref, DerefMut},
-};
+use std::fmt::{self, Debug, Formatter};
 use tokio::sync::Mutex;
 use tracing::warn;
+use derive_more::{Deref, DerefMut};
 
 /// The number of transactions sampled in a block
 pub const SAMPLE_NUMBER: usize = 3_usize;
@@ -88,21 +86,8 @@ impl GasPriceOracleConfig {
 type BlockHash = FixedBytes<32>;
 
 /// Wrapper struct for LruMap
+#[derive(Deref, DerefMut)]
 pub struct EffectiveTipLruCache(LruMap<BlockHash, (BlockHash, Vec<U256>), ByLength>);
-
-impl Deref for EffectiveTipLruCache {
-    type Target = LruMap<BlockHash, (BlockHash, Vec<U256>), ByLength>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for EffectiveTipLruCache {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
 
 impl Debug for EffectiveTipLruCache {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
