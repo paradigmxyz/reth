@@ -27,6 +27,7 @@ tracing.workspace = true
 # misc 
 thiserror.workspace = true
 derive_more = "0.99"
+auto_impl = "1"
 
 # test-utils
 triehash = { version = "0.8", optional = true }
