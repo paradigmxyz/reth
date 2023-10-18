@@ -76,11 +76,10 @@ where
         let depositor = (is_regolith && sequencer_tx.is_deposit())
             .then(|| {
                 db.load_cache_account(sequencer_tx.signer())
-                    .map_err(|_| PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))?
-                    .account_info()
-                    .ok_or(PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))
+                    .map(|acc| acc.account_info().unwrap_or_default())
             })
-            .transpose()?;
+            .transpose()
+            .map_err(|_| PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))?;
 
         // Configure the environment for the block.
         let env = Env {

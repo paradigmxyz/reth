@@ -91,11 +91,10 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 .then(|| {
                     self.db_mut()
                         .load_cache_account(sender)
-                        .map_err(|_| BlockExecutionError::ProviderError)?
-                        .account_info()
-                        .ok_or(BlockExecutionError::ProviderError)
+                        .map(|acc| acc.account_info().unwrap_or_default())
                 })
-                .transpose()?;
+                .transpose()
+                .map_err(|_| BlockExecutionError::ProviderError)?;
 
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
