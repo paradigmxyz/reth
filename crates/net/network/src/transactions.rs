@@ -1056,7 +1056,7 @@ struct Peer {
 ///   we can check first if they're already being requested.
 /// * missing hashes and peers that send us these - so we can possibly re-request them
 
-#[derive(Debug)]
+#[derive(Debug,Default)]
 struct TransactionFetcher {
     /// All currently active requests for pooled transactions.
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
@@ -1066,9 +1066,6 @@ struct TransactionFetcher {
 }
 
 impl TransactionFetcher {
-    fn new() -> Self {
-        Self { inflight_requests: FuturesUnordered::new(), missing_hashes: HashMap::new() }
-    }
 
     /// Adds a request as inflight.
     fn register_inflight(&mut self, request: GetPooledTxRequestFut) {
