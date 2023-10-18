@@ -374,7 +374,7 @@ where
         block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
         trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
-        let res = EthApi::get_proof(self, address, keys, block_number);
+        let res = EthApi::get_proof(self, address, keys, block_number).await;
 
         Ok(res.map_err(|e| match e {
             EthApiError::InvalidBlockRange => {
@@ -389,7 +389,7 @@ where
 mod tests {
     use crate::{
         eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-        EthApi, TracingCallPool,
+        BlockingTaskPool, EthApi,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_interfaces::test_utils::{generators, generators::Rng};
@@ -427,7 +427,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
-            TracingCallPool::build().expect("failed to build tracing pool"),
+            BlockingTaskPool::build().expect("failed to build tracing pool"),
         )
     }
 

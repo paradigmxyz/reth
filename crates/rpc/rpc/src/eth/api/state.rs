@@ -83,7 +83,7 @@ where
         Ok(B256::new(value.to_be_bytes()))
     }
 
-    pub(crate) fn get_proof(
+    pub(crate) async fn get_proof(
         &self,
         address: Address,
         keys: Vec<JsonStorageKey>,
@@ -107,11 +107,17 @@ where
             return Err(EthApiError::InvalidBlockRange)
         }
 
-        let state = self.state_at_block_id(block_id)?;
-
-        let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
-        let proof = state.proof(address, &storage_keys)?;
-        Ok(from_primitive_account_proof(proof))
+        let this = self.clone();
+        self.inner
+            .blocking_task_pool
+            .spawn(move || {
+                let state = this.state_at_block_id(block_id)?;
+                let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
+                let proof = state.proof(address, &storage_keys)?;
+                Ok(from_primitive_account_proof(proof))
+            })
+            .await
+            .map_err(|_| EthApiError::InternalBlockingTaskError)?
     }
 }
 
@@ -120,7 +126,7 @@ mod tests {
     use super::*;
     use crate::{
         eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-        TracingCallPool,
+        BlockingTaskPool,
     };
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
@@ -140,7 +146,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
-            TracingCallPool::build().expect("failed to build tracing pool"),
+            BlockingTaskPool::build().expect("failed to build tracing pool"),
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -162,7 +168,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(mock_provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
-            TracingCallPool::build().expect("failed to build tracing pool"),
+            BlockingTaskPool::build().expect("failed to build tracing pool"),
         );
 
         let storage_key: U256 = storage_key.into();
