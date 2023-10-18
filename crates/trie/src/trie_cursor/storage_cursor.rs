@@ -24,13 +24,15 @@ impl<C> StorageTrieCursor<C> {
     }
 }
 
-impl<C> TrieCursor<StoredNibblesSubKey> for StorageTrieCursor<C>
+impl<C> TrieCursor for StorageTrieCursor<C>
 where
     C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie>,
 {
+    type Key = StoredNibblesSubKey;
+
     fn seek_exact(
         &mut self,
-        key: StoredNibblesSubKey,
+        key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self
             .cursor
@@ -41,7 +43,7 @@ where
 
     fn seek(
         &mut self,
-        key: StoredNibblesSubKey,
+        key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self
             .cursor
