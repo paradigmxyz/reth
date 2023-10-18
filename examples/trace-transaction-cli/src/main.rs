@@ -17,7 +17,10 @@ use reth::{
         Cli,
     },
     primitives::{Address, IntoRecoveredTransaction},
-    rpc::{compat::transaction::transaction_to_call_request, types::trace::parity::TraceType},
+    rpc::{
+        compat::transaction::transaction_to_call_request,
+        types::trace::{parity::TraceType, tracerequest::TraceRequest},
+    },
     tasks::TaskSpawner,
     transaction_pool::TransactionPool,
 };
@@ -76,16 +79,9 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
                         // trace the transaction with `trace_call`
                         let callrequest =
                             transaction_to_call_request(tx.to_recovered_transaction());
-                        if let Ok(trace_result) = traceapi
-                            .trace_call(
-                                callrequest,
-                                HashSet::from([TraceType::Trace]),
-                                None,
-                                None,
-                                None,
-                            )
-                            .await
-                        {
+                        let tracerequest =
+                            TraceRequest::new(callrequest).with_trace_type(TraceType::Trace);
+                        if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {
                             println!(
                                 "trace result for transaction : {:?} is {:?}",
                                 tx.hash(),
