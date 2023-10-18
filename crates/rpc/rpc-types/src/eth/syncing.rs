@@ -1,4 +1,4 @@
-use reth_primitives::{B512, U256, U64};
+use alloy_primitives::{B512, U256, U64};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 

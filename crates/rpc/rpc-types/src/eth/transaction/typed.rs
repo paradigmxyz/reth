@@ -3,11 +3,11 @@
 //! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
+use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
 use reth_primitives::{
     kzg::{Blob, Bytes48},
-    AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxEip4844, TxLegacy, B256, U128,
-    U256, U64,
+    AccessList, Transaction, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
 };
 use serde::{Deserialize, Serialize};
 /// Container type for various Ethereum transaction requests
