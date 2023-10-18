@@ -5,6 +5,7 @@ use crate::eth::{
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
 };
 use alloy_primitives::FixedBytes;
+use derive_more::{Deref, DerefMut};
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
 use reth_provider::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
@@ -12,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
 use tokio::sync::Mutex;
 use tracing::warn;
-use derive_more::{Deref, DerefMut};
 
 /// The number of transactions sampled in a block
 pub const SAMPLE_NUMBER: usize = 3_usize;
