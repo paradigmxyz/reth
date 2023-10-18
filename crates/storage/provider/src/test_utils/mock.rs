@@ -10,9 +10,9 @@ use parking_lot::Mutex;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{
-    keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt, SealedBlock,
-    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
+    keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
+    BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
+    SealedBlock, SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
@@ -507,11 +507,7 @@ impl StateProvider for MockEthProvider {
         }))
     }
 
-    fn proof(
-        &self,
-        _address: Address,
-        _keys: &[B256],
-    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
+    fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
         todo!()
     }
 }

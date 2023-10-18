@@ -21,10 +21,7 @@ impl From<StateChangeset> for StateChanges {
 
 impl StateChanges {
     /// Write the post state to the database.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
-        mut self,
-        tx: &TX,
-    ) -> Result<(), DatabaseError> {
+    pub fn write_to_db<TX: DbTxMut + DbTx>(mut self, tx: &TX) -> Result<(), DatabaseError> {
         // sort all entries so they can be written to database in more performant way.
         // and take smaller memory footprint.
         self.0.accounts.par_sort_by_key(|a| a.0);

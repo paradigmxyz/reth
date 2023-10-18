@@ -29,17 +29,20 @@ use reth_revm::{
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
-    CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
-    TypedTransactionRequest,
+    BlockError, CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt,
+    TransactionRequest, TypedTransactionRequest,
 };
-use reth_rpc_types_compat::from_recovered_with_block_context;
+use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
     primitives::{BlockEnv, CfgEnv},
     Inspector,
 };
-use revm_primitives::{utilities::create_address, Env, ResultAndState, SpecId};
+use revm_primitives::{
+    db::DatabaseCommit, utilities::create_address, Env, ExecutionResult, ResultAndState, SpecId,
+    State,
+};
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBox<'r>>>;
@@ -47,7 +50,7 @@ pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBo
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
 /// Async functions that are spawned onto the
-/// [TracingCallPool](crate::tracing_call::TracingCallPool) begin with `spawn_`
+/// [BlockingTaskPool](crate::blocking_pool::BlockingTaskPool) begin with `spawn_`
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
@@ -219,7 +222,7 @@ pub trait EthTransactions: Send + Sync {
     /// the database that points to the beginning of the transaction.
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
-    /// [TracingCallPool](crate::tracing_call::TracingCallPool).
+    /// [BlockingTaskPool](crate::blocking_pool::BlockingTaskPool).
     async fn spawn_trace_transaction_in_block<F, R>(
         &self,
         hash: B256,
@@ -232,6 +235,59 @@ pub trait EthTransactions: Send + Sync {
                 TracingInspector,
                 ResultAndState,
                 StateCacheDB<'a>,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static;
+
+    /// Executes all transactions of a block and returns a list of callback results invoked for each
+    /// transaction in the block.
+    ///
+    /// This
+    /// 1. fetches all transactions of the block
+    /// 2. configures the EVM evn
+    /// 3. loops over all transactions and executes them
+    /// 4. calls the callback with the transaction info, the execution result, the changed state
+    /// _after_ the transaction [StateProviderDatabase] and the database that points to the state
+    /// right _before_ the transaction.
+    async fn trace_block_with<F, R>(
+        &self,
+        block_id: BlockId,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        // This is the callback that's invoked for each transaction with
+        F: for<'a> Fn(
+                TransactionInfo,
+                TracingInspector,
+                ExecutionResult,
+                &'a State,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static;
+
+    /// Executes all transactions of a block.
+    ///
+    /// If a `highest_index` is given, this will only execute the first `highest_index`
+    /// transactions, in other words, it will stop executing transactions after the
+    /// `highest_index`th transaction.
+    async fn trace_block_until<F, R>(
+        &self,
+        block_id: BlockId,
+        highest_index: Option<u64>,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        F: for<'a> Fn(
+                TransactionInfo,
+                TracingInspector,
+                ExecutionResult,
+                &'a State,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -269,13 +325,13 @@ where
     {
         let this = self.clone();
         self.inner
-            .tracing_call_pool
+            .blocking_task_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
                 f(state)
             })
             .await
-            .map_err(|_| EthApiError::InternalTracingError)?
+            .map_err(|_| EthApiError::InternalBlockingTaskError)?
     }
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
@@ -501,6 +557,13 @@ where
 
                 TypedTransactionRequest::EIP1559(m)
             }
+            Some(TypedTransactionRequest::EIP4844(mut m)) => {
+                m.chain_id = chain_id.to();
+                m.gas_limit = gas_limit;
+                m.gas_price = gas_price;
+
+                TypedTransactionRequest::EIP4844(m)
+            }
             None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
         };
 
@@ -531,7 +594,7 @@ where
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let this = self.clone();
         self.inner
-            .tracing_call_pool
+            .blocking_task_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
@@ -547,7 +610,7 @@ where
                 f(db, env)
             })
             .await
-            .map_err(|_| EthApiError::InternalTracingError)?
+            .map_err(|_| EthApiError::InternalBlockingTaskError)?
     }
 
     async fn transact_call_at(
@@ -676,6 +739,105 @@ where
             let mut inspector = TracingInspector::new(config);
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
             f(tx_info, inspector, res, db)
+        })
+        .await
+        .map(Some)
+    }
+
+    async fn trace_block_with<F, R>(
+        &self,
+        block_id: BlockId,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        // This is the callback that's invoked for each transaction with
+        F: for<'a> Fn(
+                TransactionInfo,
+                TracingInspector,
+                ExecutionResult,
+                &'a State,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        self.trace_block_until(block_id, None, config, f).await
+    }
+
+    async fn trace_block_until<F, R>(
+        &self,
+        block_id: BlockId,
+        highest_index: Option<u64>,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        F: for<'a> Fn(
+                TransactionInfo,
+                TracingInspector,
+                ExecutionResult,
+                &'a State,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        let ((cfg, block_env, _), block) =
+            futures::try_join!(self.evm_env_at(block_id), self.block_by_id(block_id),)?;
+
+        let block = match block {
+            Some(block) => block,
+            None => return Ok(None),
+        };
+
+        // we need to get the state of the parent block because we're replaying this block on top of
+        // its parent block's state
+        let state_at = block.parent_hash;
+
+        let block_hash = block.hash;
+        let transactions = block.body;
+
+        // replay all transactions of the block
+        self.spawn_with_state_at_block(state_at.into(), move |state| {
+            let mut results = Vec::with_capacity(transactions.len());
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+            let max_transactions =
+                highest_index.map_or(transactions.len(), |highest| highest as usize);
+            let mut transactions =
+                transactions.into_iter().take(max_transactions).enumerate().peekable();
+
+            while let Some((idx, tx)) = transactions.next() {
+                let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                let tx_info = TransactionInfo {
+                    hash: Some(tx.hash()),
+                    index: Some(idx as u64),
+                    block_hash: Some(block_hash),
+                    block_number: Some(block_env.number.try_into().unwrap_or(u64::MAX)),
+                    base_fee: Some(block_env.basefee.try_into().unwrap_or(u64::MAX)),
+                };
+
+                let tx = tx_env_with_recovered(&tx);
+                let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+
+                let mut inspector = TracingInspector::new(config);
+                let (res, _) = inspect(&mut db, env, &mut inspector)?;
+                let ResultAndState { result, state } = res;
+                results.push(f(tx_info, inspector, result, &state, &db)?);
+
+                // need to apply the state changes of this transaction before executing the
+                // next transaction
+                if transactions.peek().is_some() {
+                    // need to apply the state changes of this transaction before executing
+                    // the next transaction
+                    db.commit(state)
+                }
+            }
+
+            Ok(results)
         })
         .await
         .map(Some)
@@ -932,7 +1094,7 @@ mod tests {
     use super::*;
     use crate::{
         eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-        EthApi, TracingCallPool,
+        BlockingTaskPool, EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
@@ -954,7 +1116,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
-            TracingCallPool::build().expect("failed to build tracing pool"),
+            BlockingTaskPool::build().expect("failed to build tracing pool"),
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

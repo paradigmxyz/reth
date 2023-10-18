@@ -1,46 +1,51 @@
-use crate::{segments::PruneOutput, PrunerError};
+use crate::{
+    segments::{PruneInput, PruneOutput, Segment},
+    PrunerError,
+};
 use reth_db::{database::Database, tables};
 use reth_primitives::{
-    BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig,
-    MINIMUM_PRUNING_DISTANCE,
+    PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
-use reth_provider::{
-    BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
-    TransactionsProvider,
-};
+use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
 
-#[derive(Default)]
-#[non_exhaustive]
-pub(crate) struct ReceiptsByLogs;
+#[derive(Debug)]
+pub struct ReceiptsByLogs {
+    config: ReceiptsLogPruneConfig,
+}
 
 impl ReceiptsByLogs {
-    /// Prune receipts up to the provided block, inclusive, by filtering logs. Works as in inclusion
-    /// list, and removes every receipt not belonging to it. Respects the batch size.
-    #[instrument(level = "trace", skip(self, provider), target = "pruner")]
-    pub(crate) fn prune<DB: Database>(
+    pub fn new(config: ReceiptsLogPruneConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl<DB: Database> Segment<DB> for ReceiptsByLogs {
+    fn segment(&self) -> PruneSegment {
+        PruneSegment::ContractLogs
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        None
+    }
+
+    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    fn prune(
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
-        receipts_log_filter: &ReceiptsLogPruneConfig,
-        tip_block_number: BlockNumber,
-        delete_limit: usize,
+        input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
         // `MINIMUM_PRUNING_DISTANCE`.
         let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
-            .prune_target_block(
-                tip_block_number,
-                MINIMUM_PRUNING_DISTANCE,
-                PruneSegment::ContractLogs,
-            )?
+            .prune_target_block(input.to_block, PruneSegment::ContractLogs)?
             .map(|(bn, _)| bn)
             .unwrap_or_default();
 
         // Get status checkpoint from latest run
-        let mut last_pruned_block = provider
-            .get_prune_checkpoint(PruneSegment::ContractLogs)?
-            .and_then(|checkpoint| checkpoint.block_number);
+        let mut last_pruned_block =
+            input.previous_checkpoint.and_then(|checkpoint| checkpoint.block_number);
 
         let initial_last_pruned_block = last_pruned_block;
 
@@ -54,8 +59,7 @@ impl ReceiptsByLogs {
 
         // Figure out what receipts have already been pruned, so we can have an accurate
         // `address_filter`
-        let address_filter =
-            receipts_log_filter.group_by_block(tip_block_number, last_pruned_block)?;
+        let address_filter = self.config.group_by_block(input.to_block, last_pruned_block)?;
 
         // Splits all transactions in different block ranges. Each block range will have its own
         // filter address list and will check it while going through the table
@@ -108,7 +112,7 @@ impl ReceiptsByLogs {
             "Calculated block ranges and filtered addresses",
         );
 
-        let mut limit = delete_limit;
+        let mut limit = input.delete_limit;
         let mut done = true;
         let mut last_pruned_transaction = None;
         for (start_block, end_block, num_addresses) in block_ranges {
@@ -183,8 +187,9 @@ impl ReceiptsByLogs {
         //
         // Only applies if we were able to prune everything intended for this run, otherwise the
         // checkpoint is the `last_pruned_block`.
-        let prune_mode_block = receipts_log_filter
-            .lowest_block_with_distance(tip_block_number, initial_last_pruned_block)?
+        let prune_mode_block = self
+            .config
+            .lowest_block_with_distance(input.to_block, initial_last_pruned_block)?
             .unwrap_or(to_block);
 
         provider.save_prune_checkpoint(
@@ -196,13 +201,13 @@ impl ReceiptsByLogs {
             },
         )?;
 
-        Ok(PruneOutput { done, pruned: delete_limit - limit, checkpoint: None })
+        Ok(PruneOutput { done, pruned: input.delete_limit - limit, checkpoint: None })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::receipts_by_logs::ReceiptsByLogs;
+    use crate::segments::{receipts_by_logs::ReceiptsByLogs, PruneInput, Segment};
     use assert_matches::assert_matches;
     use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
     use reth_interfaces::test_utils::{
@@ -261,7 +266,17 @@ mod tests {
             let receipts_log_filter =
                 ReceiptsLogPruneConfig(BTreeMap::from([(deposit_contract_addr, prune_mode)]));
 
-            let result = ReceiptsByLogs::default().prune(&provider, &receipts_log_filter, tip, 10);
+            let result = ReceiptsByLogs::new(receipts_log_filter).prune(
+                &provider,
+                PruneInput {
+                    previous_checkpoint: tx
+                        .inner()
+                        .get_prune_checkpoint(PruneSegment::ContractLogs)
+                        .unwrap(),
+                    to_block: tip,
+                    delete_limit: 10,
+                },
+            );
             provider.commit().expect("commit");
 
             assert_matches!(result, Ok(_));

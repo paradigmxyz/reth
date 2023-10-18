@@ -235,6 +235,21 @@ impl Transaction {
         }
     }
 
+    /// Blob versioned hashes for eip4844 transaction, for legacy,eip1559 and eip2930 transactions
+    /// this is `None`
+    ///
+    /// This is also commonly referred to as the "blob versioned hashes" (`BlobVersionedHashes`).
+    pub fn blob_versioned_hashes(&self) -> Option<Vec<B256>> {
+        match self {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(_) => None,
+            Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
+                Some(blob_versioned_hashes.to_vec())
+            }
+        }
+    }
+
     /// Max fee per blob gas for eip4844 transaction [TxEip4844].
     ///
     /// Returns `None` for non-eip4844 transactions.
@@ -470,6 +485,30 @@ impl Transaction {
             Transaction::Eip4844(tx) => Some(tx),
             _ => None,
         }
+    }
+}
+
+impl From<TxLegacy> for Transaction {
+    fn from(tx: TxLegacy) -> Self {
+        Transaction::Legacy(tx)
+    }
+}
+
+impl From<TxEip2930> for Transaction {
+    fn from(tx: TxEip2930) -> Self {
+        Transaction::Eip2930(tx)
+    }
+}
+
+impl From<TxEip1559> for Transaction {
+    fn from(tx: TxEip1559) -> Self {
+        Transaction::Eip1559(tx)
+    }
+}
+
+impl From<TxEip4844> for Transaction {
+    fn from(tx: TxEip4844) -> Self {
+        Transaction::Eip4844(tx)
     }
 }
 
@@ -1049,6 +1088,23 @@ impl TransactionSigned {
             TransactionSigned::decode_rlp_legacy_transaction(&mut data)
         } else {
             TransactionSigned::decode_enveloped_typed_transaction(&mut data)
+        }
+    }
+
+    /// Returns the length without an RLP header - this is used for eth/68 sizes.
+    pub fn length_without_header(&self) -> usize {
+        // method computes the payload len without a RLP header
+        match &self.transaction {
+            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
+            Transaction::Eip2930(access_list_tx) => {
+                access_list_tx.payload_len_with_signature_without_header(&self.signature)
+            }
+            Transaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
+            }
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.payload_len_with_signature_without_header(&self.signature)
+            }
         }
     }
 }

@@ -363,8 +363,14 @@ impl<'a> EVMProcessor<'a> {
 
         let time = Instant::now();
         let retention = if self.tip.map_or(true, |tip| {
-            !self.prune_modes.should_prune_account_history(block.number, tip) &&
-                !self.prune_modes.should_prune_storage_history(block.number, tip)
+            !self
+                .prune_modes
+                .account_history
+                .map_or(false, |mode| mode.should_prune(block.number, tip)) &&
+                !self
+                    .prune_modes
+                    .storage_history
+                    .map_or(false, |mode| mode.should_prune(block.number, tip))
         }) {
             BundleRetention::Reverts
         } else {
@@ -405,7 +411,7 @@ impl<'a> EVMProcessor<'a> {
         // Block receipts should not be retained
         if self.prune_modes.receipts == Some(PruneMode::Full) ||
                 // [`PruneSegment::Receipts`] takes priority over [`PruneSegment::ContractLogs`]
-                self.prune_modes.should_prune_receipts(block_number, tip)
+            self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
         {
             receipts.clear();
             return Ok(())
@@ -547,7 +553,9 @@ mod tests {
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
-        keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
+        keccak256,
+        trie::AccountProof,
+        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use revm::{Database, TransitionState};
@@ -628,12 +636,8 @@ mod tests {
             Ok(self.contracts.get(&code_hash).cloned())
         }
 
-        fn proof(
-            &self,
-            _address: Address,
-            _keys: &[B256],
-        ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
-            todo!()
+        fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
+            unimplemented!("proof generation is not supported")
         }
     }
 

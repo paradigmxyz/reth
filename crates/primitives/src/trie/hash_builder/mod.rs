@@ -2,14 +2,20 @@ use super::{
     nodes::{rlp_hash, BranchNode, ExtensionNode, LeafNode},
     BranchNodeCompact, Nibbles, TrieMask,
 };
-use crate::{keccak256, proofs::EMPTY_ROOT, B256};
-use std::{collections::HashMap, fmt::Debug};
+use crate::{keccak256, proofs::EMPTY_ROOT, Bytes, B256};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+};
 
 mod state;
 pub use state::HashBuilderState;
 
 mod value;
 pub use value::HashBuilderValue;
+
+mod proof_retainer;
+pub use proof_retainer::ProofRetainer;
 
 /// A component used to construct the root hash of the trie. The primary purpose of a Hash Builder
 /// is to build the Merkle proof that is essential for verifying the integrity and authenticity of
@@ -47,6 +53,7 @@ pub struct HashBuilder {
     stored_in_database: bool,
 
     updated_branch_nodes: Option<HashMap<Nibbles, BranchNodeCompact>>,
+    proof_retainer: Option<ProofRetainer>,
 
     rlp_buf: Vec<u8>,
 }
@@ -62,6 +69,7 @@ impl From<HashBuilderState> for HashBuilder {
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,
             updated_branch_nodes: None,
+            proof_retainer: None,
             rlp_buf: Vec::with_capacity(32),
         }
     }
@@ -90,6 +98,12 @@ impl HashBuilder {
         self
     }
 
+    /// Enable proof retainer for the specified target nibbles.
+    pub fn with_proof_retainer(mut self, targets: Vec<Nibbles>) -> Self {
+        self.proof_retainer = Some(ProofRetainer::new(targets));
+        self
+    }
+
     /// Enables the Hash Builder to store updated branch nodes.
     ///
     /// Call [HashBuilder::split] to get the updates to branch nodes.
@@ -103,6 +117,11 @@ impl HashBuilder {
     pub fn split(mut self) -> (Self, HashMap<Nibbles, BranchNodeCompact>) {
         let updates = self.updated_branch_nodes.take();
         (self, updates.unwrap_or_default())
+    }
+
+    /// Take and return the proofs retained.
+    pub fn take_proofs(&mut self) -> BTreeMap<Nibbles, Bytes> {
+        self.proof_retainer.take().map(ProofRetainer::into_proofs).unwrap_or_default()
     }
 
     /// The number of total updates accrued.
@@ -141,13 +160,6 @@ impl HashBuilder {
         self.stored_in_database = stored_in_database;
     }
 
-    fn set_key_value<T: Into<HashBuilderValue>>(&mut self, key: Nibbles, value: T) {
-        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "old key/value");
-        self.key = key;
-        self.value = value.into();
-        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "new key/value");
-    }
-
     /// Returns the current root hash of the trie builder.
     pub fn root(&mut self) -> B256 {
         // Clears the internal state
@@ -157,6 +169,13 @@ impl HashBuilder {
             self.value = HashBuilderValue::Bytes(vec![]);
         }
         self.current_root()
+    }
+
+    fn set_key_value<T: Into<HashBuilderValue>>(&mut self, key: Nibbles, value: T) {
+        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "old key/value");
+        self.key = key;
+        self.value = value.into();
+        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "new key/value");
     }
 
     fn current_root(&self) -> B256 {
@@ -252,6 +271,7 @@ impl HashBuilder {
 
                         self.rlp_buf.clear();
                         self.stack.push(leaf_node.rlp(&mut self.rlp_buf));
+                        self.retain_proof_from_buf(&current);
                     }
                     HashBuilderValue::Hash(hash) => {
                         tracing::debug!(target: "trie::hash_builder", ?hash, "pushing branch node hash");
@@ -281,6 +301,7 @@ impl HashBuilder {
                 }, "extension node rlp");
                 self.rlp_buf.clear();
                 self.stack.push(extension_node.rlp(&mut self.rlp_buf));
+                self.retain_proof_from_buf(&current.slice(0, len_from));
                 self.resize_masks(len_from);
             }
 
@@ -292,7 +313,7 @@ impl HashBuilder {
             // Insert branch nodes in the stack
             if !succeeding.is_empty() || preceding_exists {
                 // Pushes the corresponding branch node to the stack
-                let children = self.push_branch_node(len);
+                let children = self.push_branch_node(&current, len);
                 // Need to store the branch node in an efficient format
                 // outside of the hash builder
                 self.store_branch_node(&current, len, children);
@@ -323,7 +344,7 @@ impl HashBuilder {
     /// Given the size of the longest common prefix, it proceeds to create a branch node
     /// from the state mask and existing stack state, and store its RLP to the top of the stack,
     /// after popping all the relevant elements from the stack.
-    fn push_branch_node(&mut self, len: usize) -> Vec<B256> {
+    fn push_branch_node(&mut self, current: &Nibbles, len: usize) -> Vec<B256> {
         let state_mask = self.groups[len];
         let hash_mask = self.hash_masks[len];
         let branch_node = BranchNode::new(&self.stack);
@@ -331,6 +352,7 @@ impl HashBuilder {
 
         self.rlp_buf.clear();
         let rlp = branch_node.rlp(state_mask, &mut self.rlp_buf);
+        self.retain_proof_from_buf(&current.slice(0, len));
 
         // Clears the stack from the branch node elements
         let first_child_idx = self.stack.len() - state_mask.count_ones() as usize;
@@ -384,6 +406,12 @@ impl HashBuilder {
             if let Some(nodes) = self.updated_branch_nodes.as_mut() {
                 nodes.insert(common_prefix, n);
             }
+        }
+    }
+
+    fn retain_proof_from_buf(&mut self, prefix: &Nibbles) {
+        if let Some(proof_retainer) = self.proof_retainer.as_mut() {
+            proof_retainer.retain(prefix, &self.rlp_buf)
         }
     }
 

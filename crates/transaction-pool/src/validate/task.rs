@@ -159,15 +159,17 @@ where
         let hash = *transaction.hash();
         let (tx, rx) = oneshot::channel();
         {
-            let to_validation_task = self.to_validation_task.clone();
-            let to_validation_task = to_validation_task.lock().await;
-            let validator = self.validator.clone();
-            let res = to_validation_task
-                .send(Box::pin(async move {
-                    let res = validator.validate_transaction(origin, transaction).await;
-                    let _ = tx.send(res);
-                }))
-                .await;
+            let res = {
+                let to_validation_task = self.to_validation_task.clone();
+                let to_validation_task = to_validation_task.lock().await;
+                let validator = self.validator.clone();
+                to_validation_task
+                    .send(Box::pin(async move {
+                        let res = validator.validate_transaction(origin, transaction).await;
+                        let _ = tx.send(res);
+                    }))
+                    .await
+            };
             if res.is_err() {
                 return TransactionValidationOutcome::Error(
                     hash,

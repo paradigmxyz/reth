@@ -193,15 +193,12 @@ impl BundleStateWithReceipts {
     /// # Returns
     ///
     /// The state root for this [BundleState].
-    pub fn state_root_slow<'a, 'tx, TX: DbTx<'tx>>(
-        &self,
-        tx: &'a TX,
-    ) -> Result<B256, StateRootError> {
+    pub fn state_root_slow<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
         let hashed_post_state = self.hash_state_slow();
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
         StateRoot::new(tx)
-            .with_hashed_cursor_factory(&hashed_cursor_factory)
+            .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefix_set)
             .with_changed_storage_prefixes(storage_prefix_set)
             .root()
@@ -338,7 +335,7 @@ impl BundleStateWithReceipts {
     ///
     /// `omit_changed_check` should be set to true of bundle has some of it data
     /// detached, This would make some original values not known.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+    pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
         is_value_known: OriginalValuesKnown,

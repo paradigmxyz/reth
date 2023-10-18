@@ -59,7 +59,7 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransactionsHandle {
     /// Command channel to the [`TransactionsManager`]
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
@@ -212,13 +212,18 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
 impl<Pool> TransactionsManager<Pool>
 where
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool,
 {
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
+}
 
+impl<Pool> TransactionsManager<Pool>
+where
+    Pool: TransactionPool + 'static,
+{
     #[inline]
     fn update_import_metrics(&self) {
         self.metrics.pending_pool_imports.set(self.pool_imports.len() as f64);
@@ -536,7 +541,8 @@ where
                     .0
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
-                    .filter_map(Result::ok);
+                    .filter_map(Result::ok)
+                    .collect();
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
@@ -639,7 +645,7 @@ where
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
-        transactions: impl IntoIterator<Item = PooledTransactionsElement>,
+        transactions: Vec<PooledTransactionsElement>,
         source: TransactionSource,
     ) {
         // If the node is pipeline syncing, ignore transactions
@@ -845,7 +851,7 @@ impl PropagateTransaction {
 
     /// Create a new instance from a pooled transaction
     fn new<T: PoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
-        let size = tx.encoded_length;
+        let size = tx.encoded_length();
         let transaction = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
         Self { size, transaction }
     }
@@ -900,7 +906,7 @@ impl PooledTransactionsHashesBuilder {
             PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
             PooledTransactionsHashesBuilder::Eth68(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
-                msg.sizes.push(pooled_tx.encoded_length);
+                msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.tx_type());
             }
         }

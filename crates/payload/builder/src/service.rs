@@ -314,7 +314,7 @@ where
 }
 
 type PayloadFuture =
-    Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send>>;
+    Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send + Sync>>;
 
 /// Message type for the [PayloadBuilderService].
 enum PayloadServiceCommand {
