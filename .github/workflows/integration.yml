@@ -94,6 +94,11 @@ jobs:
             --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 \
             --debug.max-block 100000 \
             --debug.terminate
+      
+      - name: Verify the target block hash
+        run: |
+          cargo run --profile release \
+            db get CanonicalHeaders 100000 | grep 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4
 
   integration-success:
     if: always()
