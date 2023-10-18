@@ -3,8 +3,8 @@ use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts};
 use auto_impl::auto_impl;
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{
-    Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, Bytes,
-    StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
+    trie::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
+    Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
 
 /// Type alias of boxed [StateProvider].
@@ -24,11 +24,7 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
     fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>>;
 
     /// Get account and storage proofs.
-    fn proof(
-        &self,
-        address: Address,
-        keys: &[B256],
-    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)>;
+    fn proof(&self, address: Address, keys: &[B256]) -> RethResult<AccountProof>;
 
     /// Get account code by its address.
     ///
