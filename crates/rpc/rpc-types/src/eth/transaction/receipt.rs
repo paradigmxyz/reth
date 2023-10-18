@@ -1,5 +1,5 @@
 use crate::Log;
-use reth_primitives::{Address, Bloom, B256, U128, U256, U64, U8};
+use alloy_primitives::{Address, Bloom, B256, U128, U256, U64, U8};
 use serde::{Deserialize, Serialize};
 
 /// Transaction receipt

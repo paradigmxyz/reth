@@ -1,7 +1,8 @@
 pub use crate::Withdrawal;
+use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
 use reth_primitives::{
     kzg::{Blob, Bytes48},
-    Address, BlobTransactionSidecar, Bloom, Bytes, SealedBlock, B256, B64, U256, U64,
+    BlobTransactionSidecar, SealedBlock,
 };
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 

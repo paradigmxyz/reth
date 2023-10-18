@@ -1,6 +1,7 @@
 //! MEV-share bundle type bindings
 #![allow(missing_docs)]
-use reth_primitives::{Address, BlockId, BlockNumber, Bytes, Log, TxHash, B256, U256, U64};
+use alloy_primitives::{Address, BlockNumber, Bytes, TxHash, B256, U256, U64};
+use reth_primitives::{BlockId, Log};
 use serde::{
     ser::{SerializeSeq, Serializer},
     Deserialize, Deserializer, Serialize,
@@ -646,7 +647,7 @@ pub struct EthCallBundleTransactionResult {
 }
 
 mod u256_numeric_string {
-    use reth_primitives::U256;
+    use alloy_primitives::U256;
     use serde::{de, Deserialize, Serializer};
     use std::str::FromStr;
 
@@ -681,7 +682,7 @@ mod u256_numeric_string {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::Bytes;
+    use alloy_primitives::Bytes;
     use std::str::FromStr;
 
     #[test]

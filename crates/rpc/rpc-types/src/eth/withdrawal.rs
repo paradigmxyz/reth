@@ -1,5 +1,6 @@
+use alloy_primitives::{Address, U256};
 use alloy_rlp::RlpEncodable;
-use reth_primitives::{constants::GWEI_TO_WEI, serde_helper::u64_hex, Address, U256};
+use reth_primitives::{constants::GWEI_TO_WEI, serde_helper::u64_hex};
 use serde::{Deserialize, Serialize};
 /// Withdrawal represents a validator withdrawal from the consensus layer.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, Serialize, Deserialize)]

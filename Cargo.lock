@@ -6311,6 +6311,7 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0-alpha.10"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "itertools 0.11.0",
  "jsonrpsee-types",
