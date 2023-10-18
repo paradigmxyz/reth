@@ -17,9 +17,6 @@ pub struct MerkleCheckpoint {
     pub target_block: BlockNumber,
     /// The last hashed account key processed.
     pub last_account_key: B256,
-    // TODO: remove in the next breaking release.
-    /// The last walker key processed.
-    pub last_walker_key: Vec<u8>,
     /// Previously recorded walker stack.
     pub walker_stack: Vec<StoredSubNode>,
     /// The hash builder state.
@@ -34,13 +31,7 @@ impl MerkleCheckpoint {
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
     ) -> Self {
-        Self {
-            target_block,
-            last_account_key,
-            walker_stack,
-            state,
-            last_walker_key: Vec::default(),
-        }
+        Self { target_block, last_account_key, walker_stack, state }
     }
 }
 
@@ -56,10 +47,6 @@ impl Compact for MerkleCheckpoint {
 
         buf.put_slice(self.last_account_key.as_slice());
         len += self.last_account_key.len();
-
-        buf.put_u16(self.last_walker_key.len() as u16);
-        buf.put_slice(&self.last_walker_key[..]);
-        len += 2 + self.last_walker_key.len();
 
         buf.put_u16(self.walker_stack.len() as u16);
         len += 2;
@@ -80,10 +67,6 @@ impl Compact for MerkleCheckpoint {
         let last_account_key = B256::from_slice(&buf[..32]);
         buf.advance(32);
 
-        let last_walker_key_len = buf.get_u16() as usize;
-        let last_walker_key = Vec::from(&buf[..last_walker_key_len]);
-        buf.advance(last_walker_key_len);
-
         let walker_stack_len = buf.get_u16() as usize;
         let mut walker_stack = Vec::with_capacity(walker_stack_len);
         for _ in 0..walker_stack_len {
@@ -93,16 +76,7 @@ impl Compact for MerkleCheckpoint {
         }
 
         let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (
-            MerkleCheckpoint {
-                target_block,
-                last_account_key,
-                last_walker_key,
-                walker_stack,
-                state,
-            },
-            buf,
-        )
+        (MerkleCheckpoint { target_block, last_account_key, walker_stack, state }, buf)
     }
 }
 
@@ -402,7 +376,6 @@ mod tests {
         let checkpoint = MerkleCheckpoint {
             target_block: rng.gen(),
             last_account_key: rng.gen(),
-            last_walker_key: B256::random_with(&mut rng).to_vec(),
             walker_stack: vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),
                 nibble: Some(rng.gen()),
