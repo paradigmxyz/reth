@@ -80,6 +80,7 @@ test-utils = ["reth-interfaces/test-utils"]
 open_performance_dashboard = []
 open_revm_metrics_record = ["reth-provider/open_revm_metrics_record"]
 finish_after_execution_stage = []
+enable_execution_duration_record = []
 
 [[bench]]
 name = "criterion"

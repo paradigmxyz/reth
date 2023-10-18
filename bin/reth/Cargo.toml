@@ -20,7 +20,10 @@ normal = [
 # reth
 reth-config = { path = "../../crates/config" }
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
+reth-db = { path = "../../crates/storage/db", features = [
+    "mdbx",
+    "test-utils",
+] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { path = "../../crates/revm" }
@@ -40,7 +43,9 @@ reth-rpc-api = { path = "../../crates/rpc/rpc-api" }
 reth-rlp.workspace = true
 reth-network = { path = "../../crates/net/network", features = ["serde"] }
 reth-network-api.workspace = true
-reth-downloaders = { path = "../../crates/net/downloaders", features = ["test-utils"] }
+reth-downloaders = { path = "../../crates/net/downloaders", features = [
+    "test-utils",
+] }
 reth-tracing = { path = "../../crates/tracing" }
 reth-tasks.workspace = true
 reth-net-nat = { path = "../../crates/net/nat" }
@@ -51,7 +56,11 @@ reth-prune = { path = "../../crates/prune" }
 reth-trie = { path = "../../crates/trie" }
 
 # crypto
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # tracing
 tracing.workspace = true
@@ -83,7 +92,12 @@ tui = "0.19.0"
 human_bytes = "0.4.1"
 
 # async
-tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
+tokio = { workspace = true, features = [
+    "sync",
+    "macros",
+    "time",
+    "rt-multi-thread",
+] }
 futures.workspace = true
 pin-project.workspace = true
 
@@ -122,7 +136,11 @@ min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
-open_performance_dashboard = ["reth-stages/open_performance_dashboard", "revm-utils", "parking_lot"]
+open_performance_dashboard = [
+    "reth-stages/open_performance_dashboard",
+    "revm-utils",
+    "parking_lot",
+]
 open_revm_metrics_record = [
     "reth-revm/open_revm_metrics_record",
     "reth-revm-inspectors/open_revm_metrics_record",
@@ -130,9 +148,13 @@ open_revm_metrics_record = [
     "reth-basic-payload-builder/open_revm_metrics_record",
     "reth-provider/open_revm_metrics_record",
     "reth-stages/open_revm_metrics_record",
-    ]
+]
 open_revm_instruction_log = ["reth-revm/open_revm_instruction_log"]
 finish_after_execution_stage = ["reth-stages/finish_after_execution_stage"]
+enable_execution_duration_record = [
+    "reth-stages/enable_execution_duration_record",
+    "open_performance_dashboard",
+]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

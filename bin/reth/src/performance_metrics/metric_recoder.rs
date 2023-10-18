@@ -24,6 +24,11 @@ impl CounterFn for Handle {
                 let mut guard = self.storage.total_txs_processed.lock();
                 *guard = (*guard).checked_add(value).expect("counter txs_processed_total overflow");
             }
+            "sync.execution.execute_inner_time" => {
+                let mut guard = self.storage.execute_inner_time.lock();
+                *guard =
+                    (*guard).checked_add(value).expect("counter execute_inner_time overflow");
+            }
             "sync.execution.read_block_info_time" => {
                 let mut guard = self.storage.read_block_info_time.lock();
                 *guard =

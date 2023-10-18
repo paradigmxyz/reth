@@ -51,6 +51,10 @@ impl PerformanceDashboardMetricHandler {
                     self.cnt += 1;
 
                     // 3. total
+                    let execute_inner_time = snapshot.execute_inner_time;
+                    if execute_inner_time != 0 {
+                        info!(target: "performance_dashboard_metrics.sync_stage.execution", "execute inner time =====> {:?}", execute_inner_time);
+                    }
                     let read_block_info_time = snapshot.read_block_info_time;
                     if read_block_info_time != 0 {
                         info!(target: "performance_dashboard_metrics.sync_stage.execution", "total read block info time =====> {:?}", read_block_info_time);

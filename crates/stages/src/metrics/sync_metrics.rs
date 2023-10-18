@@ -40,16 +40,19 @@ pub(crate) struct ExecutionStageMetrics {
     #[cfg(feature = "open_performance_dashboard")]
     pub(crate) txs_processed_total: Counter,
     #[cfg(feature = "open_performance_dashboard")]
+    /// Time of execute inner.
+    #[cfg(feature = "enable_execution_duration_record")]
+    pub(crate) execute_inner_time: Counter,
     /// Time of read block info.
-    #[cfg(feature = "open_performance_dashboard")]
+    #[cfg(feature = "enable_execution_duration_record")]
     pub(crate) read_block_info_time: Counter,
     /// Time of revm execute tx.
-    #[cfg(feature = "open_performance_dashboard")]
+    #[cfg(feature = "enable_execution_duration_record")]
     pub(crate) revm_execute_time: Counter,
     /// Post process time.
-    #[cfg(feature = "open_performance_dashboard")]
+    #[cfg(feature = "enable_execution_duration_record")]
     pub(crate) post_process_time: Counter,
     /// Time of write to db.
-    #[cfg(feature = "open_performance_dashboard")]
+    #[cfg(feature = "enable_execution_duration_record")]
     pub(crate) write_to_db_time: Counter,
 }

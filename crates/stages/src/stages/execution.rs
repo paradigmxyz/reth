@@ -2,6 +2,8 @@ use crate::{
     stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
     MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
 };
+#[cfg(feature = "enable_execution_duration_record")]
+use crate::ExecutionDurationRecord;
 use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -24,8 +26,8 @@ use reth_provider::{
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
 
-#[cfg(feature = "open_performance_dashboard")]
-use revm_utils::time::{get_cpu_frequency, TimeRecorder};
+// #[cfg(feature = "open_performance_dashboard")]
+// use revm_utils::time::{get_cpu_frequency, TimeRecorder};
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -117,6 +119,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
+        #[cfg(feature = "enable_execution_duration_record")]
+        let mut duration_record = ExecutionDurationRecord::default();
+        #[cfg(feature = "enable_execution_duration_record")]
+        duration_record.start_inner_time_recorder();
+
         let start_block = input.next_block();
         let max_block = input.target();
         let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
@@ -142,8 +149,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut total_gas = 0u64;
         #[cfg(feature = "open_performance_dashboard")]
         const N: u64 = 1;
-        #[cfg(feature = "open_performance_dashboard")]
-        let cpu_frequency = get_cpu_frequency().expect("Get cpu frequency error!");
+        // #[cfg(feature = "open_performance_dashboard")]
+        // let cpu_frequency = get_cpu_frequency().expect("Get cpu frequency error!");
 
         #[cfg(feature = "open_revm_metrics_record")]
         let mut cnt1 = 0u64;
@@ -151,38 +158,32 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         const N1: u64 = 100;
 
         for block_number in start_block..=max_block {
-            #[cfg(feature = "open_performance_dashboard")]
-            let mut time_record = TimeRecorder::now();
+            #[cfg(feature = "enable_execution_duration_record")]
+            duration_record.start_time_recorder();
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
             let block = provider
                 .block_with_senders(block_number)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
-            #[cfg(feature = "open_performance_dashboard")]
-            if let Some(metrics_tx) = &mut self.metrics_tx {
-                let time = time_record.elapsed().to_nanoseconds(cpu_frequency);
-                let _ = metrics_tx.send(MetricEvent::ReadBlockInfoTime { time });
-            }
+            #[cfg(feature = "enable_execution_duration_record")]
+            duration_record.add_read_block();
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
 
             // Execute the block
             let (block, senders) = block.into_components();
-            #[cfg(feature = "open_performance_dashboard")]
-            let mut time_record = TimeRecorder::now();
+            #[cfg(feature = "enable_execution_duration_record")]
+            duration_record.start_time_recorder();
             let block_state = executor
                 .execute_and_verify_receipt(&block, td, Some(senders))
                 .map_err(|error| StageError::ExecutionError {
                     block: block.header.clone().seal_slow(),
                     error,
                 })?;
-            #[cfg(feature = "open_performance_dashboard")]
-            if let Some(metrics_tx) = &mut self.metrics_tx {
-                let time = time_record.elapsed().to_nanoseconds(cpu_frequency);
-                let _ = metrics_tx.send(MetricEvent::RevmExecuteTxTime { time });
-            }
+            #[cfg(feature = "enable_execution_duration_record")]
+            duration_record.add_execute_tx();
 
             // Gas and txs metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
@@ -196,8 +197,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                         let _ = metrics_tx.send(MetricEvent::ExecutionStageTxs { txs: total_txs });
 
                         println!(
-                            "cnt: {:?}, block_number: {:?}, txs: {:?}, gas: {:?}",
-                            cnt, block_number, total_txs, total_gas
+                        "cnt: {:?}, block_number: {:?}, txs: {:?}, gas: {:?}",
+                        cnt, block_number, total_txs, total_gas
                         );
 
                         total_txs = block.body.len() as u64;
@@ -226,16 +227,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             }
 
             // Merge state changes
-            #[cfg(feature = "open_performance_dashboard")]
-            let mut time_record = TimeRecorder::now();
+            #[cfg(feature = "enable_execution_duration_record")]
+            duration_record.start_time_recorder();
             state.extend(block_state);
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.gas_used;
-            #[cfg(feature = "open_performance_dashboard")]
-            if let Some(metrics_tx) = &mut self.metrics_tx {
-                let time = time_record.elapsed().to_nanoseconds(cpu_frequency);
-                let _ = metrics_tx.send(MetricEvent::PostProcessTime { time });
-            }
+            #[cfg(feature = "enable_execution_duration_record")]
+            duration_record.add_process_state();
 
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
@@ -248,20 +246,29 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Write remaining changes
         trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
         let start = Instant::now();
-        #[cfg(feature = "open_performance_dashboard")]
-        {
-            let mut time_record = TimeRecorder::now();
-            state.write_to_db(provider.tx_ref(), max_block)?;
-            let time = time_record.elapsed().to_nanoseconds(cpu_frequency);
-            if let Some(metrics_tx) = &mut self.metrics_tx {
-                let _ = metrics_tx.send(MetricEvent::WriteToDbTime { time });
-            }
-            println!("write_to_db ============ {:?} ns", time);
-        }
-
-        #[cfg(not(feature = "open_performance_dashboard"))]
+        #[cfg(feature = "enable_execution_duration_record")]
+        duration_record.start_time_recorder();
         state.write_to_db(provider.tx_ref(), max_block)?;
+        #[cfg(feature = "enable_execution_duration_record")]
+        duration_record.add_write_to_db();
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
+
+        #[cfg(feature = "enable_execution_duration_record")]
+        {
+            duration_record.add_execute_inner();
+
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let _ = metrics_tx.send(MetricEvent::ExecutionStageTime {
+                    execute_inner: duration_record.execute_inner,
+                    read_block: duration_record.read_block,
+                    execute_tx: duration_record.execute_tx,
+                    process_state: duration_record.process_state,
+                    write_to_db: duration_record.write_to_db,
+                });
+            }
+
+            println!("duration_record: {:?}", duration_record);
+        }
 
         let done = stage_progress == max_block;
         Ok(ExecOutput {

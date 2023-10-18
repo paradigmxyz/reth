@@ -945,7 +945,7 @@ fn start_performance_dashboard(task_executor: &TaskExecutor) {
     task_executor.spawn_critical(
         "performance dashboard",
         Box::pin(async move {
-            performance_dashboard_handler.run(300).await;
+            performance_dashboard_handler.run(3).await;
         }),
     );
 }
