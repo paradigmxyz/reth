@@ -65,11 +65,11 @@ where
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceRequest) -> EthResult<TraceResults> {
-        let at = trace_request.block_id().unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let at = trace_request.block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let config = tracing_config(&trace_request.trace_types);
         let overrides = EvmOverrides::new(
-            trace_request.state_overrides().clone(),
-            trace_request.block_overrides().clone(),
+            trace_request.state_overrides,
+            trace_request.block_overrides,
         );
         let mut inspector = TracingInspector::new(config);
         self.inner

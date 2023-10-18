@@ -3,7 +3,6 @@
 use crate::{state::StateOverride, trace::parity::TraceType, BlockOverrides, CallRequest};
 use reth_primitives::BlockId;
 use std::collections::HashSet;
-
 use serde::{Deserialize, Serialize};
 
 /// Trace Request builder style function implementation
@@ -13,15 +12,19 @@ pub struct TraceRequest {
     pub call: CallRequest,
     /// trace types
     pub trace_types: HashSet<TraceType>,
-    block_id: Option<BlockId>,
-    state_overrides: Option<StateOverride>,
-    block_overrides: Option<Box<BlockOverrides>>,
+    /// Optional: blockId
+    pub block_id: Option<BlockId>,
+    /// Optional: StateOverride
+    pub state_overrides: Option<StateOverride>,
+    /// Optional: BlockOverrides
+    pub block_overrides: Option<Box<BlockOverrides>>,
 }
 
 impl TraceRequest {
     /// Returns a new [`TraceRequest`] given a [`CallRequest`] and [`HashSet<TraceType>`]
-    pub fn new(call: CallRequest, trace_types: HashSet<TraceType>) -> Self {
-        Self { call, trace_types, block_id: None, state_overrides: None, block_overrides: None }
+    pub fn new(call: CallRequest) -> Self {
+        
+        Self { call, trace_types: HashSet::new(), block_id: None, state_overrides: None, block_overrides: None }
     }
 
     /// Sets the [`BlockId`]
@@ -45,18 +48,33 @@ impl TraceRequest {
         self
     }
 
-    /// Returns [`Option<BlockId>`]
-    pub fn block_id(&self) -> &Option<BlockId> {
-        &self.block_id
+    /// Inserts a single trace type.
+    pub fn with_trace_type(mut self, trace_type: TraceType) -> Self {
+        self.trace_types.insert(trace_type);
+        self
     }
 
-    ///  Returns [`Option<StateOverride>`]
-    pub fn state_overrides(&self) -> &Option<StateOverride> {
-        &self.state_overrides
+    /// Inserts multiple trace types from an iterator.
+    pub fn with_trace_types<I: IntoIterator<Item=TraceType>>(mut self, trace_types: I) -> Self {
+        self.trace_types.extend(trace_types);
+        self
     }
 
-    /// Returns [`Option<Box<BlockOverrides>>`]
-    pub fn block_overrides(&self) -> &Option<Box<BlockOverrides>> {
-        &self.block_overrides
+    /// Inserts [`TraceType::Trace`]
+    pub fn with_trace_trace(self) -> Self {
+        self.with_trace_type(TraceType::Trace)
     }
+
+    /// Inserts [`TraceType::VmTrace`]
+    pub fn with_trace_vmtrace(self) -> Self {
+        self.with_trace_type(TraceType::VmTrace)
+    }
+
+    /// Inserts [`TraceType::StateDiff`]
+    pub fn with_trace_statediff(self) -> Self {
+        self.with_trace_type(TraceType::StateDiff)
+    }
+
+
+
 }
