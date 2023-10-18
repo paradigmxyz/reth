@@ -17,7 +17,7 @@ use reth::{
         Cli,
     },
     primitives::{Address, IntoRecoveredTransaction},
-    rpc::{compat::transaction_to_call_request, types::trace::parity::TraceType},
+    rpc::{compat::transaction::transaction_to_call_request, types::trace::parity::TraceType},
     tasks::TaskSpawner,
     transaction_pool::TransactionPool,
 };
