@@ -76,7 +76,7 @@ pub struct BlockExecutorStats {
     /// Time needed to merge transitions and create reverts.
     /// It this time transitions are applies to revm bundle state.
     pub merge_transitions_duration: Duration,
-    /// Time needed to caclulate receipt roots.
+    /// Time needed to calculate receipt roots.
     pub receipt_root_duration: Duration,
     /// Time needed to recovere senders.
     pub sender_recovery_duration: Duration,

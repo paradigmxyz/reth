@@ -8,7 +8,7 @@ This crate can be thought of as having 2 components:
 1. Data structures which serialize and deserialize the eth protcol messages into Rust compatible types.
 2. Abstractions over Tokio Streams which operate on these types.
 
-(Note that ECIES is implemented in a  seperate `reth-ecies` crate.)
+(Note that ECIES is implemented in a  separate `reth-ecies` crate.)
 ## Types
 The most basic Eth-wire type is an `ProtocolMessage`. It describes all messages that reth can send/receive.
 

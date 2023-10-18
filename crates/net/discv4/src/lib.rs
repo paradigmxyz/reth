@@ -1058,7 +1058,7 @@ impl Discv4Service {
         } else if needs_bond {
             self.try_ping(record, PingReason::EstablishBond);
         } else if is_proven {
-            // if node has been proven, this means we've recieved a pong and verified its endpoint
+            // if node has been proven, this means we've received a pong and verified its endpoint
             // proof. We've also sent a pong above to verify our endpoint proof, so we can now
             // send our find_nodes request if PingReason::Lookup
             if let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
