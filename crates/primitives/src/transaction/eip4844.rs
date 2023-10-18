@@ -11,7 +11,7 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Error as RlpError, Header};
 use bytes::BytesMut;
-use reth_codecs::{derive_arbitrary, main_codec, Compact};
+use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
@@ -352,11 +352,6 @@ impl From<kzg::Error> for BlobTransactionValidationError {
 ///
 /// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
 /// of a `PooledTransactions` response.
-///
-/// NOTE: This contains a [TransactionSigned], which could be a non-4844 transaction type, even
-/// though that would not make sense. This type is meant to be constructed using decoding methods,
-/// which should always construct the [TransactionSigned] with an EIP-4844 transaction.
-#[derive_arbitrary]
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BlobTransaction {
     /// The transaction hash.
