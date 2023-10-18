@@ -15,14 +15,9 @@ Reth RPC types
 reth-primitives.workspace = true
 
 # # ethereum
-alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-sol-types.workspace = true
-ethers-core = { workspace = true, default-features = false, optional = true }
-
 
 # misc
-
 thiserror.workspace = true
 itertools.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -37,5 +32,3 @@ default = ["jsonrpsee-types"]
 # misc
 rand.workspace = true
 similar-asserts = "1.4"
-serde_json.workspace = true
-test-fuzz = "4"
