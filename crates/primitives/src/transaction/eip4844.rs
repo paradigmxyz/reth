@@ -15,6 +15,19 @@ use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::{
+    arbitrary::{any as proptest_any, ParamsFor},
+    collection::vec as proptest_vec,
+    strategy::{BoxedStrategy, Strategy},
+};
+
+#[cfg(any(test, feature = "arbitrary"))]
+use crate::{
+    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
+    kzg::BYTES_PER_FIELD_ELEMENT,
+};
+
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
 /// A transaction with blob hashes and max blob fee
@@ -678,19 +691,6 @@ impl BlobTransactionSidecarRlp {
         })
     }
 }
-
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{
-    arbitrary::{any as proptest_any, ParamsFor},
-    collection::vec as proptest_vec,
-    strategy::{BoxedStrategy, Strategy},
-};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use crate::{
-    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
-    kzg::BYTES_PER_FIELD_ELEMENT,
-};
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
