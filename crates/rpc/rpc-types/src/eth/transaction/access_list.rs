@@ -1,9 +1,8 @@
 use reth_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
-use std::mem;
+
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
-
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessListItem {
@@ -13,16 +12,7 @@ pub struct AccessListItem {
     pub storage_keys: Vec<B256>,
 }
 
-impl AccessListItem {
-    /// Calculates a heuristic for the in-memory size of the [AccessListItem].
-    #[inline]
-    pub fn size(&self) -> usize {
-        mem::size_of::<Address>() + self.storage_keys.capacity() * mem::size_of::<B256>()
-    }
-}
-
 /// AccessList as defined in EIP-2930
-
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct AccessList(pub Vec<AccessListItem>);
 
@@ -56,14 +46,6 @@ impl AccessList {
             )
         })
     }
-
-    /// Calculates a heuristic for the in-memory size of the [AccessList].
-    #[inline]
-    pub fn size(&self) -> usize {
-        // take into account capacity
-        self.0.iter().map(AccessListItem::size).sum::<usize>() +
-            self.0.capacity() * mem::size_of::<AccessListItem>()
-    }
 }
 
 /// Access list with gas used appended.
@@ -75,29 +57,3 @@ pub struct AccessListWithGasUsed {
     /// Estimated gas used with access list.
     pub gas_used: U256,
 }
-
-// impl From<reth_primitives::AccessList> for AccessList {
-//     fn from(list: reth_primitives::AccessList) -> Self {
-//         let converted_list: Vec<AccessListItem> = list
-//             .0
-//             .into_iter()
-//             .map(|item| AccessListItem { address: item.address, storage_keys: item.storage_keys
-// })             .collect();
-
-//         AccessList(converted_list)
-//     }
-// }
-// impl From<AccessList> for reth_primitives::AccessList {
-//     fn from(list: AccessList) -> Self {
-//         let converted_list: Vec<reth_primitives::AccessListItem> = list
-//             .0
-//             .into_iter()
-//             .map(|item| reth_primitives::AccessListItem {
-//                 address: item.address,
-//                 storage_keys: item.storage_keys,
-//             })
-//             .collect();
-
-//         reth_primitives::AccessList(converted_list)
-//     }
-// }

@@ -1,6 +1,7 @@
 //! Compatibility functions for rpc `Log` type.
 
 /// Creates a new rpc Log from a primitive log type from DB
+#[inline]
 pub fn from_primitive_log(log: reth_primitives::Log) -> reth_rpc_types::Log {
     reth_rpc_types::Log {
         address: log.address,
@@ -16,6 +17,7 @@ pub fn from_primitive_log(log: reth_primitives::Log) -> reth_rpc_types::Log {
 }
 /// Converts a primitive `AccessList` structure from the `reth_primitives` module into the
 /// corresponding RPC type.
+#[inline]
 pub fn from_primitive_access_list(
     list: reth_primitives::AccessList,
 ) -> reth_rpc_types::access_list::AccessList {
