@@ -39,7 +39,7 @@ mod sign;
 mod state;
 mod transactions;
 
-use crate::TracingCallPool;
+use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -91,7 +91,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
-        tracing_call_pool: TracingCallPool,
+        blocking_task_pool: BlockingTaskPool,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -101,7 +101,7 @@ where
             gas_oracle,
             gas_cap.into().into(),
             Box::<TokioTaskExecutor>::default(),
-            tracing_call_pool,
+            blocking_task_pool,
         )
     }
 
@@ -115,7 +115,7 @@ where
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
-        tracing_call_pool: TracingCallPool,
+        blocking_task_pool: BlockingTaskPool,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -136,7 +136,7 @@ where
             starting_block: U256::from(latest_block),
             task_spawner,
             pending_block: Default::default(),
-            tracing_call_pool,
+            blocking_task_pool,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -436,6 +436,6 @@ struct EthApiInner<Provider, Pool, Network> {
     task_spawner: Box<dyn TaskSpawner>,
     /// Cached pending block if any
     pending_block: Mutex<Option<PendingBlock>>,
-    /// A pool dedicated to tracing calls
-    tracing_call_pool: TracingCallPool,
+    /// A pool dedicated to blocking tasks.
+    blocking_task_pool: BlockingTaskPool,
 }

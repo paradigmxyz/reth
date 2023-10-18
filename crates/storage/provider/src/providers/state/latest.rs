@@ -9,7 +9,8 @@ use reth_db::{
 };
 use reth_interfaces::{provider::ProviderError, RethError, RethResult};
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
+    keccak256, trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey,
+    StorageValue, B256,
 };
 
 /// State provider over latest state that takes tx reference.
@@ -84,11 +85,7 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
         self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
-    fn proof(
-        &self,
-        address: Address,
-        _keys: &[B256],
-    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
+    fn proof(&self, address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
         let _hashed_address = keccak256(address);
         let _root = self
             .db

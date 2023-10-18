@@ -33,7 +33,7 @@ use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, PayloadAttributes, PayloadError, PayloadStatus,
     PayloadStatusEnum, PayloadValidationError,
 };
-use reth_rpc_types_compat::payload::{try_into_block, validate_block_hash};
+use reth_rpc_types_compat::engine::payload::{try_into_block, validate_block_hash};
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
 use std::{

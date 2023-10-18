@@ -13,17 +13,19 @@ use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 /// RPC Tracing call guard semaphore.
 ///
 /// This is used to restrict the number of concurrent RPC requests to tracing methods like
-/// `debug_traceTransaction` because they can consume a lot of memory and CPU.
+/// `debug_traceTransaction` as well as `eth_getProof` because they can consume a lot of
+/// memory and CPU.
 ///
-/// This types serves as an entry guard for the [TracingCallPool] and is used to rate limit parallel
-/// tracing calls on the pool.
+/// This types serves as an entry guard for the [BlockingTaskPool] and is used to rate limit
+/// parallel blocking tasks in the pool.
 #[derive(Clone, Debug)]
-pub struct TracingCallGuard(Arc<Semaphore>);
+pub struct BlockingTaskGuard(Arc<Semaphore>);
 
-impl TracingCallGuard {
-    /// Create a new `TracingCallGuard` with the given maximum number of tracing calls in parallel.
-    pub fn new(max_tracing_requests: u32) -> Self {
-        Self(Arc::new(Semaphore::new(max_tracing_requests as usize)))
+impl BlockingTaskGuard {
+    /// Create a new `BlockingTaskGuard` with the given maximum number of blocking tasks in
+    /// parallel.
+    pub fn new(max_blocking_tasks: u32) -> Self {
+        Self(Arc::new(Semaphore::new(max_blocking_tasks as usize)))
     }
 
     /// See also [Semaphore::acquire_owned]
@@ -37,24 +39,24 @@ impl TracingCallGuard {
     }
 }
 
-/// Used to execute tracing calls on a rayon threadpool from within a tokio runtime.
+/// Used to execute blocking tasks on a rayon threadpool from within a tokio runtime.
 ///
-/// This is a dedicated threadpool for tracing calls which are CPU bound.
+/// This is a dedicated threadpool for blocking tasks which are CPU bound.
 /// RPC calls that perform blocking IO (disk lookups) are not executed on this pool but on the tokio
 /// runtime's blocking pool, which performs poorly with CPU bound tasks. Once the tokio blocking
-/// pool is saturated it is converted into a queue, tracing calls could then interfere with the
+/// pool is saturated it is converted into a queue, blocking tasks could then interfere with the
 /// queue and block other RPC calls.
 ///
 /// See also [tokio-docs] for more information.
 ///
 /// [tokio-docs]: https://docs.rs/tokio/latest/tokio/index.html#cpu-bound-tasks-and-blocking-code
 #[derive(Clone, Debug)]
-pub struct TracingCallPool {
+pub struct BlockingTaskPool {
     pool: Arc<rayon::ThreadPool>,
 }
 
-impl TracingCallPool {
-    /// Create a new `TracingCallPool` with the given threadpool.
+impl BlockingTaskPool {
+    /// Create a new `BlockingTaskPool` with the given threadpool.
     pub fn new(pool: rayon::ThreadPool) -> Self {
         Self { pool: Arc::new(pool) }
     }
@@ -83,7 +85,7 @@ impl TracingCallPool {
     /// function's return value.
     ///
     /// If the function panics, the future will resolve to an error.
-    pub fn spawn<F, R>(&self, func: F) -> TracingCallHandle<R>
+    pub fn spawn<F, R>(&self, func: F) -> BlockingTaskHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -94,7 +96,7 @@ impl TracingCallPool {
             let _result = tx.send(catch_unwind(AssertUnwindSafe(func)));
         });
 
-        TracingCallHandle { rx }
+        BlockingTaskHandle { rx }
     }
 
     /// Asynchronous wrapper around Rayon's
@@ -104,7 +106,7 @@ impl TracingCallPool {
     /// function's return value.
     ///
     /// If the function panics, the future will resolve to an error.
-    pub fn spawn_fifo<F, R>(&self, func: F) -> TracingCallHandle<R>
+    pub fn spawn_fifo<F, R>(&self, func: F) -> BlockingTaskHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -115,11 +117,11 @@ impl TracingCallPool {
             let _result = tx.send(catch_unwind(AssertUnwindSafe(func)));
         });
 
-        TracingCallHandle { rx }
+        BlockingTaskHandle { rx }
     }
 }
 
-/// Async handle for a blocking tracing task running in a Rayon thread pool.
+/// Async handle for a blocking task running in a Rayon thread pool.
 ///
 /// ## Panics
 ///
@@ -127,18 +129,18 @@ impl TracingCallPool {
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 #[pin_project::pin_project]
-pub struct TracingCallHandle<T> {
+pub struct BlockingTaskHandle<T> {
     #[pin]
     pub(crate) rx: oneshot::Receiver<thread::Result<T>>,
 }
 
-impl<T> Future for TracingCallHandle<T> {
+impl<T> Future for BlockingTaskHandle<T> {
     type Output = thread::Result<T>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match ready!(self.project().rx.poll(cx)) {
             Ok(res) => Poll::Ready(res),
-            Err(_) => Poll::Ready(Err(Box::<TokioTracingCallError>::default())),
+            Err(_) => Poll::Ready(Err(Box::<TokioBlockingTaskError>::default())),
         }
     }
 }
@@ -149,23 +151,23 @@ impl<T> Future for TracingCallHandle<T> {
 #[derive(Debug, Default, thiserror::Error)]
 #[error("Tokio channel dropped while awaiting result")]
 #[non_exhaustive]
-pub struct TokioTracingCallError;
+pub struct TokioBlockingTaskError;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn tracing_pool() {
-        let pool = TracingCallPool::build().unwrap();
+    async fn blocking_pool() {
+        let pool = BlockingTaskPool::build().unwrap();
         let res = pool.spawn(move || 5);
         let res = res.await.unwrap();
         assert_eq!(res, 5);
     }
 
     #[tokio::test]
-    async fn tracing_pool_panic() {
-        let pool = TracingCallPool::build().unwrap();
+    async fn blocking_pool_panic() {
+        let pool = BlockingTaskPool::build().unwrap();
         let res = pool.spawn(move || -> i32 {
             panic!();
         });

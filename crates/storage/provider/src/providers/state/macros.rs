@@ -42,7 +42,7 @@ macro_rules! delegate_provider_impls {
             }
             StateProvider $(where [$($generics)*])?{
                 fn storage(&self, account: reth_primitives::Address, storage_key: reth_primitives::StorageKey) -> reth_interfaces::RethResult<Option<reth_primitives::StorageValue>>;
-                fn proof(&self, address: reth_primitives::Address, keys: &[reth_primitives::B256]) -> reth_interfaces::RethResult<(Vec<reth_primitives::Bytes>, reth_primitives::B256, Vec<Vec<reth_primitives::Bytes>>)>;
+                fn proof(&self, address: reth_primitives::Address, keys: &[reth_primitives::B256]) -> reth_interfaces::RethResult<reth_primitives::trie::AccountProof>;
                 fn bytecode_by_hash(&self, code_hash: reth_primitives::B256) -> reth_interfaces::RethResult<Option<reth_primitives::Bytecode>>;
             }
         );

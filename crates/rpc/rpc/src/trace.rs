@@ -5,7 +5,7 @@ use crate::{
         utils::recover_raw_transaction,
         EthTransactions,
     },
-    TracingCallGuard,
+    BlockingTaskGuard,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
@@ -44,8 +44,8 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
     }
 
     /// Create a new instance of the [TraceApi]
-    pub fn new(provider: Provider, eth_api: Eth, tracing_call_guard: TracingCallGuard) -> Self {
-        let inner = Arc::new(TraceApiInner { provider, eth_api, tracing_call_guard });
+    pub fn new(provider: Provider, eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
+        let inner = Arc::new(TraceApiInner { provider, eth_api, blocking_task_guard });
         Self { inner }
     }
 
@@ -53,7 +53,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
     async fn acquire_trace_permit(
         &self,
     ) -> std::result::Result<OwnedSemaphorePermit, AcquireError> {
-        self.inner.tracing_call_guard.clone().acquire_owned().await
+        self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 }
 
@@ -557,7 +557,7 @@ struct TraceApiInner<Provider, Eth> {
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
     // restrict the number of concurrent calls to `trace_*`
-    tracing_call_guard: TracingCallGuard,
+    blocking_task_guard: BlockingTaskGuard,
 }
 
 /// Returns the [TracingInspectorConfig] depending on the enabled [TraceType]s

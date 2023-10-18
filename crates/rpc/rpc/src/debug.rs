@@ -8,7 +8,7 @@ use crate::{
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
-    EthApiSpec, TracingCallGuard,
+    BlockingTaskGuard, EthApiSpec,
 };
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
@@ -61,10 +61,10 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
         provider: Provider,
         eth: Eth,
         task_spawner: Box<dyn TaskSpawner>,
-        tracing_call_guard: TracingCallGuard,
+        blocking_task_guard: BlockingTaskGuard,
     ) -> Self {
         let inner =
-            Arc::new(DebugApiInner { provider, eth_api: eth, task_spawner, tracing_call_guard });
+            Arc::new(DebugApiInner { provider, eth_api: eth, task_spawner, blocking_task_guard });
         Self { inner }
     }
 }
@@ -78,7 +78,7 @@ where
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
-        self.inner.tracing_call_guard.clone().acquire_owned().await
+        self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
     /// Trace the entire block asynchronously
@@ -1010,8 +1010,8 @@ struct DebugApiInner<Provider, Eth> {
     provider: Provider,
     /// The implementation of `eth` API
     eth_api: Eth,
-    // restrict the number of concurrent calls to tracing calls
-    tracing_call_guard: TracingCallGuard,
+    // restrict the number of concurrent calls to blocking calls
+    blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
 }
