@@ -1,4 +1,4 @@
-use crate::access_list::AccessListItem;
+pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 pub use common::TransactionInfo;
 pub use receipt::TransactionReceipt;
 pub use request::TransactionRequest;
@@ -6,8 +6,8 @@ use reth_primitives::{Address, Bytes, B256, U128, U256, U64};
 use serde::{Deserialize, Serialize};
 pub use signature::{Parity, Signature};
 pub use typed::*;
-///access list
-pub mod access_list;
+
+mod access_list;
 mod common;
 mod receipt;
 mod request;
