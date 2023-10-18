@@ -237,6 +237,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit();
+        // self.chain = self.build_chain_spec();
+        let custom_chain = self.build_chain_spec();
+        self.chain = custom_chain;
+        info!(target: "reth::cli", chain = ?self.chain);
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -555,6 +559,34 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
+/// Build custom chain spec.
+fn build_chain_spec(&self) -> Arc<ChainSpec> {
+    let chain = reth_primitives::Chain::Id(2600);
+    let genesis = self.build_genesis();
+    let mut chain_spec = reth_primitives::ChainSpecBuilder::default()
+        .chain(chain)
+        .cancun_activated()
+        .genesis(genesis)
+        .build();
+
+    let genesis_hash = chain_spec.genesis_hash();
+    chain_spec.genesis_hash = Some(genesis_hash);
+
+    Arc::new(chain_spec)
+}
+
+/// Build genesis for chain spec.
+fn build_genesis(&self) -> reth_primitives::Genesis {
+    // bob well-known private key: 0x99b3c12287537e38c90a9219d4cb074a89a16e9cdb20bf85728ebd97c343e342
+    let bob_address = reth_primitives::hex!("6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b").into();
+    let bob_account = reth_primitives::GenesisAccount::default().with_balance(reth_primitives::U256::from(10_000));
+
+    let accounts: std::collections::HashMap<reth_primitives::Address, reth_primitives::GenesisAccount> = std::collections::HashMap::from([
+        (bob_address, bob_account),
+    ]);
+
+    reth_primitives::Genesis::default().extend_accounts(accounts)
+}
     /// Constructs a [Pipeline] that's wired to the network
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
