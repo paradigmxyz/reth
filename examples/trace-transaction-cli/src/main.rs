@@ -80,7 +80,7 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
                         let callrequest =
                             transaction_to_call_request(tx.to_recovered_transaction());
                         let tracerequest =
-                            TraceRequest::new(callrequest).with_trace_type( TraceType::Trace);
+                            TraceRequest::new(callrequest).with_trace_type(TraceType::Trace);
                         if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {
                             println!(
                                 "trace result for transaction : {:?} is {:?}",

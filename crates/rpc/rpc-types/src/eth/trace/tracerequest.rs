@@ -2,8 +2,8 @@
 
 use crate::{state::StateOverride, trace::parity::TraceType, BlockOverrides, CallRequest};
 use reth_primitives::BlockId;
-use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Trace Request builder style function implementation
 #[derive(Debug, Serialize, Deserialize)]
@@ -23,8 +23,13 @@ pub struct TraceRequest {
 impl TraceRequest {
     /// Returns a new [`TraceRequest`] given a [`CallRequest`] and [`HashSet<TraceType>`]
     pub fn new(call: CallRequest) -> Self {
-        
-        Self { call, trace_types: HashSet::new(), block_id: None, state_overrides: None, block_overrides: None }
+        Self {
+            call,
+            trace_types: HashSet::new(),
+            block_id: None,
+            state_overrides: None,
+            block_overrides: None,
+        }
     }
 
     /// Sets the [`BlockId`]
@@ -55,7 +60,7 @@ impl TraceRequest {
     }
 
     /// Inserts multiple trace types from an iterator.
-    pub fn with_trace_types<I: IntoIterator<Item=TraceType>>(mut self, trace_types: I) -> Self {
+    pub fn with_trace_types<I: IntoIterator<Item = TraceType>>(mut self, trace_types: I) -> Self {
         self.trace_types.extend(trace_types);
         self
     }
@@ -74,7 +79,4 @@ impl TraceRequest {
     pub fn with_trace_statediff(self) -> Self {
         self.with_trace_type(TraceType::StateDiff)
     }
-
-
-
 }
