@@ -32,7 +32,7 @@ use reth_rpc_types::{
     BlockError, CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt,
     TransactionRequest, TypedTransactionRequest,
 };
-use reth_rpc_types_compat::from_recovered_with_block_context;
+use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,

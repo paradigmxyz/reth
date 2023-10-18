@@ -11,6 +11,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_rpc_types::EIP1186AccountProofResponse;
+use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
@@ -110,7 +111,7 @@ where
 
         let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
         let proof = state.proof(address, &storage_keys)?;
-        Ok(proof.into())
+        Ok(from_primitive_account_proof(proof))
     }
 }
 

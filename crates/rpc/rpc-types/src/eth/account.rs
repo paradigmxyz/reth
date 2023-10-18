@@ -1,9 +1,5 @@
 #![allow(missing_docs)]
-use reth_primitives::{
-    serde_helper::JsonStorageKey,
-    trie::{AccountProof, StorageProof},
-    Address, Bytes, B256, B512, U256, U64,
-};
+use reth_primitives::{serde_helper::JsonStorageKey, Address, Bytes, B256, B512, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// Account information.
@@ -25,12 +21,6 @@ pub struct EIP1186StorageProof {
     pub proof: Vec<Bytes>,
 }
 
-impl From<StorageProof> for EIP1186StorageProof {
-    fn from(value: StorageProof) -> Self {
-        Self { key: JsonStorageKey(value.key), value: value.value, proof: value.proof }
-    }
-}
-
 /// Response for EIP-1186 account proof `eth_getProof`
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,21 +32,6 @@ pub struct EIP1186AccountProofResponse {
     pub storage_hash: B256,
     pub account_proof: Vec<Bytes>,
     pub storage_proof: Vec<EIP1186StorageProof>,
-}
-
-impl From<AccountProof> for EIP1186AccountProofResponse {
-    fn from(value: AccountProof) -> Self {
-        let info = value.info.unwrap_or_default();
-        Self {
-            address: value.address,
-            balance: info.balance,
-            code_hash: info.get_bytecode_hash(),
-            nonce: U64::from(info.nonce),
-            storage_hash: value.storage_root,
-            account_proof: value.proof,
-            storage_proof: value.storage_proofs.into_iter().map(Into::into).collect(),
-        }
-    }
 }
 
 /// Extended account information (used by `parity_allAccountInfo`).
