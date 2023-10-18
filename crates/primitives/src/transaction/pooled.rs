@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
 /// non-4844 signed transaction.
-// TODO: redo arbitrary for this encoding - the previous encoding was incorrect
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PooledTransactionsElement {
     /// A legacy transaction
