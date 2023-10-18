@@ -4,7 +4,6 @@ use crate::eth::{
     cache::EthStateCache,
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
 };
-use alloy_primitives::FixedBytes;
 use derive_more::{Deref, DerefMut};
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
 use reth_provider::BlockReaderIdExt;
@@ -83,11 +82,16 @@ impl GasPriceOracleConfig {
     }
 }
 
-type BlockHash = FixedBytes<32>;
+/// Wrapper struct for LruMap
+#[derive(Debug)]
+pub struct GasPriceOracleInner {
+    last_price: GasPriceOracleResult,
+    lowest_effective_tip_cache: EffectiveTipLruCache,
+}
 
 /// Wrapper struct for LruMap
 #[derive(Deref, DerefMut)]
-pub struct EffectiveTipLruCache(LruMap<BlockHash, (BlockHash, Vec<U256>), ByLength>);
+pub struct EffectiveTipLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
 
 impl Debug for EffectiveTipLruCache {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -109,10 +113,9 @@ pub struct GasPriceOracle<Provider> {
     oracle_config: GasPriceOracleConfig,
     /// The price under which the sample will be ignored.
     ignore_price: Option<u128>,
-    /// The latest calculated price and its block hash
-    last_price: Mutex<GasPriceOracleResult>,
-    /// Cache storing the lowest effective tip values of recent blocks
-    lowest_effective_tip_cache: Mutex<EffectiveTipLruCache>,
+    /// Stores the latest calculated price and its block hash and Cache stores the lowest effective
+    /// tip values of recent blocks
+    inner: Mutex<GasPriceOracleInner>,
 }
 
 impl<Provider> GasPriceOracle<Provider>
@@ -132,17 +135,12 @@ where
         }
         let ignore_price = oracle_config.ignore_price.map(|price| price.saturating_to());
 
-        let lowest_effective_tip_cache =
-            Mutex::new(EffectiveTipLruCache(LruMap::new(ByLength::new(100))));
-
-        Self {
-            provider,
-            oracle_config,
+        let inner = Mutex::new(GasPriceOracleInner {
             last_price: Default::default(),
-            cache,
-            ignore_price,
-            lowest_effective_tip_cache,
-        }
+            lowest_effective_tip_cache: EffectiveTipLruCache(LruMap::new(ByLength::new(100))),
+        });
+
+        Self { provider, oracle_config, cache, ignore_price, inner }
     }
 
     /// Returns the configuration of the gas price oracle.
@@ -157,11 +155,11 @@ where
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
 
-        let mut last_price = self.last_price.lock().await;
+        let mut inner = self.inner.lock().await;
 
         // if we have stored a last price, then we check whether or not it was for the same head
-        if last_price.block_hash == header.hash {
-            return Ok(last_price.price)
+        if inner.last_price.block_hash == header.hash {
+            return Ok(inner.last_price.price)
         }
 
         // if all responses are empty, then we can return a maximum of 2*check_block blocks' worth
@@ -182,21 +180,23 @@ where
 
         for _ in 0..max_blocks {
             // Check if current hash is in cache
-            let mut cache = self.lowest_effective_tip_cache.lock().await;
-            let (parent_hash, block_values) = if let Some(vals) = cache.get(&current_hash) {
-                vals.to_owned()
-            } else {
-                // Otherwise we fetch it using get_block_values
-                let (parent_hash, block_values) = self
-                    .get_block_values(current_hash, SAMPLE_NUMBER)
-                    .await?
-                    .ok_or(EthApiError::UnknownBlockNumber)?;
-                cache.insert(current_hash, (parent_hash, block_values.clone()));
-                (parent_hash, block_values)
-            };
+            let (parent_hash, block_values) =
+                if let Some(vals) = inner.lowest_effective_tip_cache.get(&current_hash) {
+                    vals.to_owned()
+                } else {
+                    // Otherwise we fetch it using get_block_values
+                    let (parent_hash, block_values) = self
+                        .get_block_values(current_hash, SAMPLE_NUMBER)
+                        .await?
+                        .ok_or(EthApiError::UnknownBlockNumber)?;
+                    inner
+                        .lowest_effective_tip_cache
+                        .insert(current_hash, (parent_hash, block_values.clone()));
+                    (parent_hash, block_values)
+                };
 
             if block_values.is_empty() {
-                results.push(U256::from(last_price.price));
+                results.push(U256::from(inner.last_price.price));
             } else {
                 results.extend(block_values);
                 populated_blocks += 1;
@@ -211,7 +211,7 @@ where
         }
 
         // sort results then take the configured percentile result
-        let mut price = last_price.price;
+        let mut price = inner.last_price.price;
         if !results.is_empty() {
             results.sort_unstable();
             price = *results
@@ -226,7 +226,7 @@ where
             }
         }
 
-        *last_price = GasPriceOracleResult { block_hash: header.hash, price };
+        inner.last_price = GasPriceOracleResult { block_hash: header.hash, price };
 
         Ok(price)
     }
