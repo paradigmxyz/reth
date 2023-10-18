@@ -37,6 +37,7 @@ pub fn from_block_with_tx_hashes(
     let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
     from_block_with_transactions(
+        block.length(),
         block_hash,
         block,
         total_difficulty,
@@ -50,25 +51,33 @@ pub fn from_block_with_tx_hashes(
 /// This will populate the `transactions` field with the _full_
 /// [Transaction](reth_rpc_types::Transaction) objects: [BlockTransactions::Full]
 pub fn from_block_full(
-    block: PrimitiveBlock,
+    mut block: PrimitiveBlock,
     total_difficulty: U256,
     block_hash: Option<B256>,
 ) -> Result<Block, BlockError> {
     let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
     let block_number = block.number;
+    let base_fee_per_gas = block.base_fee_per_gas;
+
+    // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
+    // `from_block_with_transactions`, however we need to compute the length before
+    let block_length = block.length();
+    let body = std::mem::take(&mut block.body);
+
     let mut transactions = Vec::with_capacity(block.body.len());
-    for (idx, tx) in block.body.iter().enumerate() {
-        let signed_tx = tx.clone().into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+    for (idx, tx) in body.into_iter().enumerate() {
+        let signed_tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
         transactions.push(from_recovered_with_block_context(
             signed_tx,
             block_hash,
             block_number,
-            block.base_fee_per_gas,
+            base_fee_per_gas,
             U256::from(idx),
         ))
     }
 
     Ok(from_block_with_transactions(
+        block_length,
         block_hash,
         block,
         total_difficulty,
@@ -76,13 +85,14 @@ pub fn from_block_full(
     ))
 }
 
+#[inline]
 fn from_block_with_transactions(
+    block_length: usize,
     block_hash: B256,
     block: PrimitiveBlock,
     total_difficulty: U256,
     transactions: BlockTransactions,
 ) -> Block {
-    let block_length = block.length();
     let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
     let header = Header::from_primitive_with_hash(block.header.seal(block_hash));
     let withdrawals = if header.withdrawals_root.is_some() { block.withdrawals } else { None };
