@@ -83,7 +83,7 @@ body:
     id: prune-config
     attributes:
       label: What prune config do you use, if any?
-      description: `[prune]` section in `reth.toml` file
+      description: The `[prune]` section in `reth.toml` file
     validations:
       required: false
   - type: input

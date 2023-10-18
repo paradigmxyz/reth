@@ -114,11 +114,9 @@ where
     EthApiClient::submit_hashrate(client, U256::default(), B256::default()).await.unwrap();
     EthApiClient::gas_price(client).await.unwrap_err();
     EthApiClient::max_priority_fee_per_gas(client).await.unwrap_err();
+    EthApiClient::get_proof(client, address, vec![], None).await.unwrap();
 
     // Unimplemented
-    assert!(is_unimplemented(
-        EthApiClient::get_proof(client, address, vec![], None).await.err().unwrap()
-    ));
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::is_mining(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::get_work(client).await.err().unwrap()));

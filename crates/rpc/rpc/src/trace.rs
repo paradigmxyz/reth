@@ -5,7 +5,7 @@ use crate::{
         utils::recover_raw_transaction,
         EthTransactions,
     },
-    TracingCallGuard,
+    BlockingTaskGuard,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
@@ -19,9 +19,8 @@ use reth_revm::{
 };
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
-    state::StateOverride,
-    trace::{filter::TraceFilter, parity::*},
-    BlockError, BlockOverrides, CallRequest, Index,
+    trace::{filter::TraceFilter, parity::*, tracerequest::TraceRequest},
+    BlockError, CallRequest, Index,
 };
 use revm::{db::CacheDB, primitives::Env};
 use revm_primitives::db::DatabaseCommit;
@@ -44,8 +43,8 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
     }
 
     /// Create a new instance of the [TraceApi]
-    pub fn new(provider: Provider, eth_api: Eth, tracing_call_guard: TracingCallGuard) -> Self {
-        let inner = Arc::new(TraceApiInner { provider, eth_api, tracing_call_guard });
+    pub fn new(provider: Provider, eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
+        let inner = Arc::new(TraceApiInner { provider, eth_api, blocking_task_guard });
         Self { inner }
     }
 
@@ -53,7 +52,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
     async fn acquire_trace_permit(
         &self,
     ) -> std::result::Result<OwnedSemaphorePermit, AcquireError> {
-        self.inner.tracing_call_guard.clone().acquire_owned().await
+        self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 }
 
@@ -65,25 +64,19 @@ where
     Eth: EthTransactions + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
-    pub async fn trace_call(
-        &self,
-        call: CallRequest,
-        trace_types: HashSet<TraceType>,
-        block_id: Option<BlockId>,
-        state_overrides: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
-    ) -> EthResult<TraceResults> {
-        let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let config = tracing_config(&trace_types);
-        let overrides = EvmOverrides::new(state_overrides, block_overrides);
+    pub async fn trace_call(&self, trace_request: TraceRequest) -> EthResult<TraceResults> {
+        let at = trace_request.block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let config = tracing_config(&trace_request.trace_types);
+        let overrides =
+            EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
         let mut inspector = TracingInspector::new(config);
         self.inner
             .eth_api
-            .spawn_with_call_at(call, at, overrides, move |db, env| {
+            .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
                 let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     &res,
-                    &trace_types,
+                    &trace_request.trace_types,
                     &db,
                 )?;
                 Ok(trace_res)
@@ -439,24 +432,9 @@ where
     /// Executes the given call and returns a number of possible traces for it.
     ///
     /// Handler for `trace_call`
-    async fn trace_call(
-        &self,
-        call: CallRequest,
-        trace_types: HashSet<TraceType>,
-        block_id: Option<BlockId>,
-        state_overrides: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
-    ) -> Result<TraceResults> {
+    async fn trace_call(&self, trace_request: TraceRequest) -> Result<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_call(
-            self,
-            call,
-            trace_types,
-            block_id,
-            state_overrides,
-            block_overrides,
-        )
-        .await?)
+        Ok(TraceApi::trace_call(self, trace_request).await?)
     }
 
     /// Handler for `trace_callMany`
@@ -557,7 +535,7 @@ struct TraceApiInner<Provider, Eth> {
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
     // restrict the number of concurrent calls to `trace_*`
-    tracing_call_guard: TracingCallGuard,
+    blocking_task_guard: BlockingTaskGuard,
 }
 
 /// Returns the [TracingInspectorConfig] depending on the enabled [TraceType]s
