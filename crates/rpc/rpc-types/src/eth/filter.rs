@@ -1,8 +1,7 @@
 use crate::Log as RpcLog;
+use alloy_primitives::{keccak256, Address, Bloom, BloomInput, B256, U256, U64};
 use itertools::{EitherOrBoth::*, Itertools};
-use reth_primitives::{
-    keccak256, Address, BlockNumberOrTag, Bloom, BloomInput, Log, B256, U256, U64,
-};
+use reth_primitives::{BlockNumberOrTag, Log};
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
     ser::SerializeStruct,
@@ -294,7 +293,7 @@ impl Filter {
     /// Match a block by its hash
     ///
     /// ```rust
-    /// # use reth_primitives::B256;
+    /// # use alloy_primitives::B256;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
     /// let filter = Filter::new().select(B256::ZERO);
@@ -365,7 +364,7 @@ impl Filter {
     /// Match only a specific address `("0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF")`
     ///
     /// ```rust
-    /// # use reth_primitives::Address;
+    /// # use alloy_primitives::Address;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
     /// let filter = Filter::new().address("0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap());
@@ -376,7 +375,7 @@ impl Filter {
     /// "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8"])`
     ///
     /// ```rust
-    /// # use reth_primitives::Address;
+    /// # use alloy_primitives::Address;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
     /// let addresses = vec!["0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap(),"0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8".parse::<Address>().unwrap()];
@@ -914,7 +913,7 @@ impl From<jsonrpsee_types::SubscriptionId<'_>> for FilterId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::U256;
+    use alloy_primitives::U256;
     use serde_json::json;
 
     fn serialize<T: serde::Serialize>(t: &T) -> serde_json::Value {

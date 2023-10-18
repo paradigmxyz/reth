@@ -1,5 +1,6 @@
 use crate::BlockOverrides;
-use reth_primitives::{AccessList, Address, BlockId, Bytes, B256, U256, U64, U8};
+use alloy_primitives::{Address, Bytes, B256, U256, U64, U8};
+use reth_primitives::{AccessList, BlockId};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Bundle of transactions

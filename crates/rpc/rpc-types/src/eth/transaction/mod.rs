@@ -1,7 +1,8 @@
+use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 pub use common::TransactionInfo;
 pub use receipt::TransactionReceipt;
 pub use request::TransactionRequest;
-use reth_primitives::{AccessListItem, Address, Bytes, B256, U128, U256, U64};
+use reth_primitives::AccessListItem;
 use serde::{Deserialize, Serialize};
 pub use signature::{Parity, Signature};
 pub use typed::*;
