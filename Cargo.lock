@@ -6448,6 +6448,7 @@ name = "reth-trie"
 version = "0.1.0-alpha.10"
 dependencies = [
  "alloy-rlp",
+ "auto_impl",
  "criterion",
  "derive_more",
  "once_cell",

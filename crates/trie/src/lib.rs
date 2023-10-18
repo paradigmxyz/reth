@@ -34,6 +34,9 @@ pub mod walker;
 mod errors;
 pub use errors::*;
 
+// The iterators for traversing existing intermediate hashes and updated trie leaves.
+pub(crate) mod node_iter;
+
 /// Merkle proof generation.
 pub mod proof;
 
