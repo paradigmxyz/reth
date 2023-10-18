@@ -23,5 +23,3 @@ revm.workspace = true
 # common
 tracing.workspace = true
 
-[dev-dependencies]
-reth-db = { workspace = true, features = ["test-utils"] }

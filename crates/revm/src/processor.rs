@@ -549,7 +549,6 @@ pub fn verify_receipt<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::{database, test_utils::create_test_rw_db, DatabaseEnv};
     use reth_interfaces::RethResult;
     use reth_primitives::{
         bytes,
@@ -562,31 +561,11 @@ mod tests {
 
     static BEACON_ROOT_CONTRACT_CODE: Bytes = bytes!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
         contracts: HashMap<B256, Bytecode>,
         block_hash: HashMap<u64, B256>,
-        db: Arc<DatabaseEnv>,
-    }
-
-    impl Default for StateProviderTest {
-        fn default() -> Self {
-            Self {
-                accounts: HashMap::new(),
-                contracts: HashMap::new(),
-                block_hash: HashMap::new(),
-                db: create_test_rw_db(),
-            }
-        }
-    }
-
-    impl PartialEq for StateProviderTest {
-        fn eq(&self, other: &Self) -> bool {
-            self.accounts == other.accounts &&
-                self.contracts == other.contracts &&
-                self.block_hash == other.block_hash
-        }
     }
 
     impl StateProviderTest {
@@ -634,10 +613,8 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
-            bundle_state
-                .state_root_slow(&database::Database::tx(&self.db)?)
-                .map_err(|err| RethError::Database(err.into()))
+        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
+            unimplemented!("state root computation is not supported")
         }
     }
 

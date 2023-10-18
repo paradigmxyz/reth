@@ -6140,7 +6140,6 @@ name = "reth-revm"
 version = "0.1.0-alpha.10"
 dependencies = [
  "reth-consensus-common",
- "reth-db",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
