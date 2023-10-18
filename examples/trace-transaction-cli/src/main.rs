@@ -18,7 +18,7 @@ use reth::{
     },
     primitives::{Address, IntoRecoveredTransaction},
     rpc::{
-        compat::transaction_to_call_request,
+        compat::transaction::transaction_to_call_request,
         types::trace::{parity::TraceType, tracerequest::TraceRequest},
     },
     tasks::TaskSpawner,
