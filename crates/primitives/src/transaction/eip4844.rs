@@ -11,7 +11,7 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Error as RlpError, Header};
 use bytes::BytesMut;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
@@ -343,6 +343,7 @@ impl From<kzg::Error> for BlobTransactionValidationError {
 /// NOTE: This contains a [TransactionSigned], which could be a non-4844 transaction type, even
 /// though that would not make sense. This type is meant to be constructed using decoding methods,
 /// which should always construct the [TransactionSigned] with an EIP-4844 transaction.
+#[derive_arbitrary]
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BlobTransaction {
     /// The transaction hash.
@@ -688,7 +689,7 @@ use proptest::{
 #[cfg(any(test, feature = "arbitrary"))]
 use crate::{
     constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
-    kzg::{KzgCommitment, BYTES_PER_BLOB, BYTES_PER_FIELD_ELEMENT},
+    kzg::BYTES_PER_FIELD_ELEMENT,
 };
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -718,7 +719,7 @@ impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
     type Parameters = ParamsFor<String>;
     type Strategy = BoxedStrategy<BlobTransactionSidecar>;
 
-    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         proptest_vec(proptest_vec(proptest_any::<u8>(), BYTES_PER_BLOB), 1..=5)
             .prop_map(move |blobs| {
                 let blobs = blobs
