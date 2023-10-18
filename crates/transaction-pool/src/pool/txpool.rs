@@ -252,12 +252,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Gets the [BlockInfo] corresponding to the current pool settings
-    #[cfg(test)]
-    pub(crate) fn get_block_info(&self) -> BlockInfo {
-        self.all_transactions.get_block_info()
-    }
-
     /// Returns an iterator that yields transactions that are ready to be included in the block.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pending_pool.best()
@@ -932,17 +926,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.pending_basefee = pending_basefee;
         if let Some(pending_blob_fee) = pending_blob_fee {
             self.pending_blob_fee = pending_blob_fee;
-        }
-    }
-
-    /// Gets the [BlockInfo] corresponding to the current pool settings
-    #[cfg(test)]
-    pub(crate) fn get_block_info(&self) -> BlockInfo {
-        BlockInfo {
-            last_seen_block_hash: self.last_seen_block_hash,
-            last_seen_block_number: self.last_seen_block_number,
-            pending_basefee: self.pending_basefee,
-            pending_blob_fee: Some(self.pending_blob_fee),
         }
     }
 
@@ -1846,7 +1829,7 @@ mod tests {
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
 
         // set block info so the tx is initially underpriced w.r.t. blob fee
-        let mut block_info = pool.get_block_info();
+        let mut block_info = pool.block_info();
         block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap());
         pool.set_block_info(block_info);
 
@@ -1886,7 +1869,7 @@ mod tests {
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
 
         // set block info so the tx is initially underpriced w.r.t. blob fee
-        let mut block_info = pool.get_block_info();
+        let mut block_info = pool.block_info();
         block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap() + 1);
         pool.set_block_info(block_info);
 
