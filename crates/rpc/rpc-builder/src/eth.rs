@@ -5,7 +5,7 @@ use reth_rpc::{
         gas_oracle::GasPriceOracleConfig,
         RPC_DEFAULT_GAS_CAP,
     },
-    EthApi, EthFilter, EthPubSub, TracingCallPool,
+    BlockingTaskPool, EthApi, EthFilter, EthPubSub,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events> {
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
     pub pubsub: EthPubSub<Provider, Pool, Events, Network>,
     /// The configured tracing call pool
-    pub tracing_call_pool: TracingCallPool,
+    pub blocking_task_pool: BlockingTaskPool,
 }
 
 /// Additional config values for the eth namespace

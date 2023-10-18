@@ -12,7 +12,7 @@ use reth_db::{
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
+    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
 };
 
 /// State provider for a given block number which takes a tx reference.
@@ -240,11 +240,7 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
     }
 
     /// Get account and storage proofs.
-    fn proof(
-        &self,
-        _address: Address,
-        _keys: &[B256],
-    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
+    fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }

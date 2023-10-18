@@ -10,14 +10,15 @@ use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::RethResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
+    trie::AccountProof,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode,
     ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
     SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, B256, KECCAK_EMPTY, MAINNET, U256,
+    TransactionSignedNoHash, TxHash, TxNumber, B256, MAINNET, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
-    ops::{Range, RangeInclusive},
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -174,18 +175,18 @@ impl TransactionsProvider for NoopProvider {
 
     fn transactions_by_block_range(
         &self,
-        _range: Range<BlockNumber>,
+        _range: impl RangeBounds<BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         Ok(Vec::default())
     }
 
-    fn senders_by_tx_range(&self, _range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
         Ok(Vec::default())
     }
 
     fn transactions_by_tx_range(
         &self,
-        _range: RangeInclusive<TxNumber>,
+        _range: impl RangeBounds<TxNumber>,
     ) -> RethResult<Vec<reth_primitives::TransactionSignedNoHash>> {
         Ok(Vec::default())
     }
@@ -228,13 +229,13 @@ impl HeaderProvider for NoopProvider {
         Ok(None)
     }
 
-    fn headers_range(&self, _range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
         Ok(vec![])
     }
 
     fn sealed_headers_range(
         &self,
-        _range: RangeInclusive<BlockNumber>,
+        _range: impl RangeBounds<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         Ok(vec![])
     }
@@ -278,12 +279,8 @@ impl StateProvider for NoopProvider {
         Ok(None)
     }
 
-    fn proof(
-        &self,
-        _address: Address,
-        _keys: &[B256],
-    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
-        Ok((vec![], KECCAK_EMPTY, vec![]))
+    fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
+        Ok(AccountProof::default())
     }
 }
 
