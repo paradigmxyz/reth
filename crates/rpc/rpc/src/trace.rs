@@ -19,9 +19,8 @@ use reth_revm::{
 };
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
-    state::StateOverride,
-    trace::{filter::TraceFilter, parity::*},
-    BlockError, BlockOverrides, CallRequest, Index,
+    trace::{filter::TraceFilter, parity::*, tracerequest::TraceRequest},
+    BlockError, CallRequest, Index,
 };
 use revm::{db::CacheDB, primitives::Env};
 use revm_primitives::db::DatabaseCommit;
@@ -65,25 +64,19 @@ where
     Eth: EthTransactions + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
-    pub async fn trace_call(
-        &self,
-        call: CallRequest,
-        trace_types: HashSet<TraceType>,
-        block_id: Option<BlockId>,
-        state_overrides: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
-    ) -> EthResult<TraceResults> {
-        let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let config = tracing_config(&trace_types);
-        let overrides = EvmOverrides::new(state_overrides, block_overrides);
+    pub async fn trace_call(&self, trace_request: TraceRequest) -> EthResult<TraceResults> {
+        let at = trace_request.block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let config = tracing_config(&trace_request.trace_types);
+        let overrides =
+            EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
         let mut inspector = TracingInspector::new(config);
         self.inner
             .eth_api
-            .spawn_with_call_at(call, at, overrides, move |db, env| {
+            .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
                 let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     &res,
-                    &trace_types,
+                    &trace_request.trace_types,
                     &db,
                 )?;
                 Ok(trace_res)
@@ -439,24 +432,9 @@ where
     /// Executes the given call and returns a number of possible traces for it.
     ///
     /// Handler for `trace_call`
-    async fn trace_call(
-        &self,
-        call: CallRequest,
-        trace_types: HashSet<TraceType>,
-        block_id: Option<BlockId>,
-        state_overrides: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
-    ) -> Result<TraceResults> {
+    async fn trace_call(&self, trace_request: TraceRequest) -> Result<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_call(
-            self,
-            call,
-            trace_types,
-            block_id,
-            state_overrides,
-            block_overrides,
-        )
-        .await?)
+        Ok(TraceApi::trace_call(self, trace_request).await?)
     }
 
     /// Handler for `trace_callMany`
