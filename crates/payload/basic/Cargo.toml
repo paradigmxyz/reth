@@ -34,7 +34,7 @@ metrics.workspace = true
 tracing.workspace = true
 
 [features]
-open_revm_metrics_record = [
-    "revm/open_revm_metrics_record",
-    "reth-revm/open_revm_metrics_record",
+enable_opcode_metrics = [
+    "revm/enable_opcode_metrics",
+    "reth-revm/enable_opcode_metrics",
 ]

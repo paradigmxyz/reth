@@ -111,7 +111,7 @@ where
             .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
         let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
-        // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+        // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
         let env = Env { cfg, block, tx, cpu_frequency: 0f64 };
 
         let config = tracing_config(&trace_types);
@@ -162,10 +162,10 @@ where
                     let config = tracing_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
-                    #[cfg(not(feature = "open_revm_metrics_record"))]
+                    #[cfg(not(feature = "enable_opcode_metrics"))]
                     let ResultAndState { result, state } = res;
 
-                    #[cfg(feature = "open_revm_metrics_record")]
+                    #[cfg(feature = "enable_opcode_metrics")]
                     let ResultAndState { result, state, .. } = res;
 
                     let mut trace_res =
@@ -339,15 +339,15 @@ where
                     };
 
                     let tx = tx_env_with_recovered(&tx);
-                    // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+                    // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
                     let env =
                         Env { cfg: cfg.clone(), block: block_env.clone(), tx, cpu_frequency: 0f64 };
 
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
-                    #[cfg(not(feature = "open_revm_metrics_record"))]
+                    #[cfg(not(feature = "enable_opcode_metrics"))]
                     let ResultAndState { result, state } = res;
-                    #[cfg(feature = "open_revm_metrics_record")]
+                    #[cfg(feature = "enable_opcode_metrics")]
                     let ResultAndState { result, state, .. } = res;
                     results.push(f(tx_info, inspector, result, &state, &db)?);
 

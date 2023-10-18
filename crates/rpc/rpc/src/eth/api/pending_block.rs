@@ -66,7 +66,7 @@ impl PendingBlockEnv {
             let tx = pool_tx.to_recovered_transaction();
 
             // Configure the environment for the block.
-            // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+            // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
             let env = Env {
                 cfg: cfg.clone(),
                 block: block_env.clone(),
@@ -77,7 +77,7 @@ impl PendingBlockEnv {
             let mut evm = revm::EVM::with_env(env);
             evm.database(&mut db);
 
-            #[cfg(not(feature = "open_revm_metrics_record"))]
+            #[cfg(not(feature = "enable_opcode_metrics"))]
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
                 Err(err) => {
@@ -100,7 +100,7 @@ impl PendingBlockEnv {
                 }
             };
 
-            #[cfg(feature = "open_revm_metrics_record")]
+            #[cfg(feature = "enable_opcode_metrics")]
             let ResultAndState { result, state, .. } = match evm.transact() {
                 Ok(res) => res,
                 Err(err) => {

@@ -179,7 +179,7 @@ where
     I: IntoIterator<Item = Tx>,
     Tx: FillableTransaction,
 {
-    // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+    // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
     let env = Env { cfg, block: block_env, tx: TxEnv::default(), cpu_frequency: 0f64 };
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
@@ -267,7 +267,7 @@ pub(crate) fn build_call_evm_env(
     request: CallRequest,
 ) -> EthResult<Env> {
     let tx = create_txn_env(&block, request)?;
-    // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+    // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
     let env = Env { cfg, block, tx, cpu_frequency: 0f64 };
     Ok(env)
 }
@@ -518,13 +518,13 @@ where
         logs: db.logs.clone(),
         block_hashes: db.block_hashes.clone(),
         db: Default::default(),
-        #[cfg(feature = "open_revm_metrics_record")]
+        #[cfg(feature = "enable_opcode_metrics")]
         cache_hits: (0u64, 0u64, 0u64, 0u64),
-        #[cfg(feature = "open_revm_metrics_record")]
+        #[cfg(feature = "enable_opcode_metrics")]
         cache_misses: (0u64, 0u64, 0u64, 0u64),
-        #[cfg(feature = "open_revm_metrics_record")]
+        #[cfg(feature = "enable_opcode_metrics")]
         cache_misses_penalty: (0u128, 0u128, 0u128, 0u128),
-        #[cfg(feature = "open_revm_metrics_record")]
+        #[cfg(feature = "enable_opcode_metrics")]
         cpu_frequency: 0f64,
     }
 }

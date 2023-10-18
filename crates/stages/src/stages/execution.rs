@@ -1,9 +1,9 @@
+#[cfg(feature = "enable_execution_duration_record")]
+use crate::ExecutionDurationRecord;
 use crate::{
     stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
     MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
 };
-#[cfg(feature = "enable_execution_duration_record")]
-use crate::ExecutionDurationRecord;
 use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -141,22 +141,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut state = PostState::default();
         state.add_prune_modes(prune_modes);
 
-        #[cfg(feature = "open_performance_dashboard")]
-        let mut cnt = 0u64;
-        #[cfg(feature = "open_performance_dashboard")]
-        let mut total_txs = 0u64;
-        #[cfg(feature = "open_performance_dashboard")]
-        let mut total_gas = 0u64;
-        #[cfg(feature = "open_performance_dashboard")]
-        const N: u64 = 1;
-        // #[cfg(feature = "open_performance_dashboard")]
-        // let cpu_frequency = get_cpu_frequency().expect("Get cpu frequency error!");
-
-        #[cfg(feature = "open_revm_metrics_record")]
-        let mut cnt1 = 0u64;
-        #[cfg(feature = "open_revm_metrics_record")]
-        const N1: u64 = 100;
-
         for block_number in start_block..=max_block {
             #[cfg(feature = "enable_execution_duration_record")]
             duration_record.start_time_recorder();
@@ -189,41 +173,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             if let Some(metrics_tx) = &mut self.metrics_tx {
                 let _ =
                     metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
-
-                #[cfg(feature = "open_performance_dashboard")]
-                {
-                    if cnt % N == 0 {
-                        let _ = metrics_tx.send(MetricEvent::ExecutionStageGas { gas: total_gas });
-                        let _ = metrics_tx.send(MetricEvent::ExecutionStageTxs { txs: total_txs });
-
-                        println!(
-                        "cnt: {:?}, block_number: {:?}, txs: {:?}, gas: {:?}",
-                        cnt, block_number, total_txs, total_gas
-                        );
-
-                        total_txs = block.body.len() as u64;
-                        total_gas = block.header.gas_used;
-                    } else {
-                        total_txs += block.body.len() as u64;
-                        total_gas += block.header.gas_used;
-                    }
-
-                    cnt += 1;
-                }
-
-                #[cfg(feature = "open_revm_metrics_record")]
-                {
-                    if cnt1 % N1 == 0 {
-                        let record = executor.get_revm_metric_record();
-                        println!("");
-                        println!("block_number = {:?}", block_number);
-                        println!("revm_record = {:?}", record);
-                        let cachedb_size = executor.get_revm_metric_cachedb_size();
-                        println!("cachedb_size = {:?}", cachedb_size);
-                        println!("");
-                    }
-                    cnt1 += 1;
-                }
             }
 
             // Merge state changes
@@ -238,9 +187,19 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
             {
-                println!("break ===================, block_number: {:?}", block_number);
+                info!(target: "sync::stages::execution", number = block_number, "Execution batch end");
                 break
             }
+        }
+
+        #[cfg(feature = "enable_opcode_metrics")]
+        {
+            let record = executor.get_revm_metric_record();
+            println!("");
+            println!("===================================");
+            println!("revm_record = {:?}", serde_json::to_string(&record).unwrap());
+            println!("===================================");
+            println!("");
         }
 
         // Write remaining changes

@@ -35,7 +35,6 @@ reth-rlp = { workspace = true, optional = true }
 
 
 revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard", optional = true }
-# revm-utils = { path = "/home/andy/Source/work/revm/crates/utils", optional = true }
 
 
 [dev-dependencies]
@@ -50,4 +49,4 @@ assert_matches.workspace = true
 
 [features]
 test-utils = ["reth-rlp"]
-open_revm_metrics_record = ["reth-revm-primitives/open_revm_metrics_record", "revm-utils"]
+enable_opcode_metrics = ["reth-revm-primitives/enable_opcode_metrics", "revm-utils"]

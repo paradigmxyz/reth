@@ -15,7 +15,7 @@ use tracing::trace;
 #[cfg(feature = "enable_execution_duration_record")]
 use revm_utils::time::{convert_to_nanoseconds, get_cpu_frequency};
 
-// #[cfg(feature = "open_revm_metrics_record")]
+// #[cfg(feature = "enable_opcode_metrics")]
 // use revm_utils::types::RevmMetricRecord;
 
 /// Alias type for metric producers to use.
@@ -51,7 +51,7 @@ pub enum MetricEvent {
         txs: u64,
     },
     // /// Revm metric record.
-    // #[cfg(feature = "open_revm_metrics_record")]
+    // #[cfg(feature = "enable_opcode_metrics")]
     // RevmMetricRecord {
     //     /// Revm metric record.
     //     record: RevmMetricRecord,

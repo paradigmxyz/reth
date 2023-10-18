@@ -707,14 +707,14 @@ where
             cfg: initialized_cfg.clone(),
             block: initialized_block_env.clone(),
             tx: tx_env_with_recovered(&tx),
-            // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+            // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
             cpu_frequency: 0f64,
         };
 
         let mut evm = revm::EVM::with_env(env);
         evm.database(&mut db);
 
-        #[cfg(not(feature = "open_revm_metrics_record"))]
+        #[cfg(not(feature = "enable_opcode_metrics"))]
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
             Err(err) => {
@@ -739,7 +739,7 @@ where
             }
         };
 
-        #[cfg(feature = "open_revm_metrics_record")]
+        #[cfg(feature = "enable_opcode_metrics")]
         let ResultAndState { result, state, .. } = match evm.transact() {
             Ok(res) => res,
             Err(err) => {

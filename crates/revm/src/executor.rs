@@ -21,7 +21,7 @@ use revm::{
     },
     EVM,
 };
-#[cfg(feature = "open_revm_metrics_record")]
+#[cfg(feature = "enable_opcode_metrics")]
 use revm_utils::types::RevmMetricRecord;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -38,7 +38,7 @@ where
     evm: EVM<SubState<DB>>,
     stack: InspectorStack,
     /// Used for record duration of instruction.
-    #[cfg(feature = "open_revm_metrics_record")]
+    #[cfg(feature = "enable_opcode_metrics")]
     pub revm_metric_record: RevmMetricRecord,
 }
 
@@ -54,7 +54,7 @@ where
             chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            #[cfg(feature = "open_revm_metrics_record")]
+            #[cfg(feature = "enable_opcode_metrics")]
             // revm_metric_records: HashMap::new(),
             revm_metric_record: RevmMetricRecord::default(),
         }
@@ -74,7 +74,7 @@ where
             chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            #[cfg(feature = "open_revm_metrics_record")]
+            #[cfg(feature = "enable_opcode_metrics")]
             // revm_metric_records: HashMap::new(),
             revm_metric_record: RevmMetricRecord::default(),
         }
@@ -117,7 +117,7 @@ where
             header,
             total_difficulty,
         );
-        // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+        // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
         self.evm.env.cpu_frequency = revm_utils::time::get_cpu_frequency().unwrap_or_default();
     }
 
@@ -259,14 +259,14 @@ where
                 .into())
             }
             // Execute transaction.
-            #[cfg(not(feature = "open_revm_metrics_record"))]
+            #[cfg(not(feature = "enable_opcode_metrics"))]
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
-            #[cfg(feature = "open_revm_metrics_record")]
+            #[cfg(feature = "enable_opcode_metrics")]
             let ResultAndState { result, state, mut revm_metric_record } =
                 self.transact(transaction, sender)?;
 
-            #[cfg(feature = "open_revm_metrics_record")]
+            #[cfg(feature = "enable_opcode_metrics")]
             {
                 if revm_metric_record.not_empty() {
                     self.revm_metric_record.update(&mut revm_metric_record);
@@ -306,15 +306,11 @@ where
             );
         }
 
-        #[cfg(feature = "open_revm_metrics_record")]
+        #[cfg(feature = "enable_opcode_metrics")]
         {
             // println!("");
             // println!("block number: {:?}, =============================== ", block.number);
             // println!("revm result: {:?}", self.revm_metric_record);
-            // println!(
-            //     "cache_db size is {:?} bytes",
-            //     self.evm.db.as_ref().expect("db is empty").size()
-            // );
             // println!("====================================================");
             // println!("");
         }
@@ -393,13 +389,13 @@ where
     }
 
     /// Handle revm metric records.
-    #[cfg(feature = "open_revm_metrics_record")]
+    #[cfg(feature = "enable_opcode_metrics")]
     fn get_revm_metric_record(&self) -> RevmMetricRecord {
         self.revm_metric_record.clone()
     }
 
     /// Handle revm metric records.
-    #[cfg(feature = "open_revm_metrics_record")]
+    #[cfg(feature = "enable_opcode_metrics")]
     fn get_revm_metric_cachedb_size(&self) -> usize {
         self.evm.db.as_ref().expect("db is empty").size()
     }

@@ -52,6 +52,6 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true
 
 [features]
-open_revm_metrics_record = [
-    "reth-rpc/open_revm_metrics_record",
+enable_opcode_metrics = [
+    "reth-rpc/enable_opcode_metrics",
 ]

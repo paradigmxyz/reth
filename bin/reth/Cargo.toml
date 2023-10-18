@@ -119,7 +119,6 @@ boyer-moore-magiclen = "0.2.16"
 
 # performance-dashboard
 revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard", optional = true }
-# revm-utils = { path = "/home/andy/Source/work/revm/crates/utils", optional = true }
 
 parking_lot = { version = "0.12", optional = true }
 
@@ -141,15 +140,14 @@ open_performance_dashboard = [
     "revm-utils",
     "parking_lot",
 ]
-open_revm_metrics_record = [
-    "reth-revm/open_revm_metrics_record",
-    "reth-revm-inspectors/open_revm_metrics_record",
-    "reth-rpc-builder/open_revm_metrics_record",
-    "reth-basic-payload-builder/open_revm_metrics_record",
-    "reth-provider/open_revm_metrics_record",
-    "reth-stages/open_revm_metrics_record",
+enable_opcode_metrics = [
+    "reth-revm/enable_opcode_metrics",
+    "reth-revm-inspectors/enable_opcode_metrics",
+    "reth-rpc-builder/enable_opcode_metrics",
+    "reth-basic-payload-builder/enable_opcode_metrics",
+    "reth-provider/enable_opcode_metrics",
+    "reth-stages/enable_opcode_metrics",
 ]
-open_revm_instruction_log = ["reth-revm/open_revm_instruction_log"]
 finish_after_execution_stage = ["reth-stages/finish_after_execution_stage"]
 enable_execution_duration_record = [
     "reth-stages/enable_execution_duration_record",

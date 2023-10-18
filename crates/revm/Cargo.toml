@@ -20,7 +20,6 @@ reth-consensus-common = { path = "../consensus/common" }
 # revm
 revm.workspace = true
 revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard" }
-# revm-utils = { path = "/home/andy/Source/work/revm/crates/utils" }
 
 # common
 tracing.workspace = true
@@ -30,8 +29,7 @@ reth-rlp.workspace = true
 once_cell = "1.17.0"
 
 [features]
-open_revm_metrics_record = [
-    "revm/open_revm_metrics_record",
-    "reth-provider/open_revm_metrics_record",
+enable_opcode_metrics = [
+    "revm/enable_opcode_metrics",
+    "reth-provider/enable_opcode_metrics",
     ]
-open_revm_instruction_log = ["revm/open_revm_instruction_log"]

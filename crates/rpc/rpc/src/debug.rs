@@ -102,7 +102,7 @@ where
                 while let Some(tx) = transactions.next() {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx = tx_env_with_recovered(&tx);
-                    // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+                    // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
                     let env =
                         Env { cfg: cfg.clone(), block: block_env.clone(), tx, cpu_frequency: 0f64 };
                     let (result, state_changes) =
@@ -202,7 +202,7 @@ where
                     tx.hash,
                 )?;
 
-                // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+                // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
                 let env = Env {
                     cfg,
                     block: block_env,
@@ -398,7 +398,7 @@ where
                     for tx in transactions {
                         let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                         let tx = tx_env_with_recovered(&tx);
-                        // #[cfg(feature = "open_revm_metrics_record")]// Error: why this?
+                        // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
                         let env = Env {
                             cfg: cfg.clone(),
                             block: block_env.clone(),
@@ -605,13 +605,13 @@ where
                 logs,
                 block_hashes,
                 db: State::new(state),
-                #[cfg(feature = "open_revm_metrics_record")]
+                #[cfg(feature = "enable_opcode_metrics")]
                 cache_hits: (0u64, 0u64, 0u64, 0u64),
-                #[cfg(feature = "open_revm_metrics_record")]
+                #[cfg(feature = "enable_opcode_metrics")]
                 cache_misses: (0u64, 0u64, 0u64, 0u64),
-                #[cfg(feature = "open_revm_metrics_record")]
+                #[cfg(feature = "enable_opcode_metrics")]
                 cache_misses_penalty: (0u128, 0u128, 0u128, 0u128),
-                #[cfg(feature = "open_revm_metrics_record")]
+                #[cfg(feature = "enable_opcode_metrics")]
                 cpu_frequency: 0f64,
             }
         } else {

@@ -47,7 +47,7 @@ itertools.workspace = true
 rayon.workspace = true
 num-traits = "0.2.15"
 
-# revm-utils = { path = "/home/andy/Source/work/revm/crates/utils" }
+serde_json.workspace = true
 revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard" }
 
 [dev-dependencies]
@@ -78,7 +78,7 @@ serde_json.workspace = true
 [features]
 test-utils = ["reth-interfaces/test-utils"]
 open_performance_dashboard = []
-open_revm_metrics_record = ["reth-provider/open_revm_metrics_record"]
+enable_opcode_metrics = ["reth-provider/enable_opcode_metrics"]
 finish_after_execution_stage = []
 enable_execution_duration_record = []
 
