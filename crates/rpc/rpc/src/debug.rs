@@ -36,7 +36,7 @@ use reth_rpc_types::{
 use reth_tasks::TaskSpawner;
 use revm::{
     db::{CacheDB, EmptyDB},
-    primitives::{Env, ExecutionResult},
+    primitives::Env,
 };
 use revm_primitives::{
     db::{DatabaseCommit, DatabaseRef},
@@ -330,7 +330,7 @@ where
             })
             .await?;
         let gas_used = res.result.gas_used();
-        let return_value = ExecutionResult::into_output(res.result).unwrap_or_default();
+        let return_value = res.result.into_output().unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok(frame.into())
@@ -533,7 +533,7 @@ where
 
         let (res, _) = inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
-        let return_value = ExecutionResult::into_output(res.result).unwrap_or_default();
+        let return_value = res.result.into_output().unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))
