@@ -5,7 +5,6 @@ use crate::eth::transaction::typed::{
 use alloy_primitives::{Address, Bytes, U128, U256, U64, U8};
 use reth_primitives::AccessList;
 use serde::{Deserialize, Serialize};
-
 /// Represents _all_ transaction requests received from RPC
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -111,7 +110,156 @@ impl TransactionRequest {
                     access_list: access_list.unwrap_or_default(),
                 }))
             }
+            #[allow(unreachable_code)]
+            #[allow(unreachable_patterns)]
+            // EIP4844
+            (None, Some(_), access_list) | (None, None, access_list @ None) => {
+                Some(TypedTransactionRequest::EIP4844(crate::Eip4844TransactionRequest {
+                    chain_id: 0,
+                    nonce: nonce.unwrap_or_default(),
+                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
+                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
+                    gas_limit: gas.unwrap_or_default(),
+                    kind: match to {
+                        Some(to) => TransactionKind::Call(to),
+                        None => TransactionKind::Create,
+                    },
+                    value: value.unwrap_or_default(),
+                    gas_price: gas_price.unwrap_or_default(),
+                    access_list: access_list.unwrap_or_default(),
+                    input: data.unwrap_or_default(),
+                    blob_versioned_hashes: todo!(),
+                    max_fee_per_blob_gas: todo!(),
+                    sidecar: todo!(),
+                }))
+            }
             _ => None,
         }
     }
+
+    // fn signed(transaction: Transaction, signer: B256) -> TransactionSigned {
+    //   todo!()
+    //}
+    /// Sets the gas limit for the transaction.
+
+    pub fn gas_limit(mut self, gas_limit: u64) -> Self {
+        self.gas = Some(U256::from(gas_limit));
+        self
+    }
+    /// Sets the nonce for the transaction.
+
+    pub fn nonce(mut self, nonce: u64) -> Self {
+        self.nonce = Some(U64::from(nonce));
+        self
+    }
+    /// Increments the nonce for the transaction.
+
+    pub fn inc_nonce(mut self) -> Self {
+        if let Some(ref mut nonce_value) = self.nonce {
+            *nonce_value += U64::from(1);
+        } else {
+            self.nonce = Some(U64::from(1));
+        }
+        self
+    }
+    /// Decrements the nonce for the transaction.
+
+    pub fn dcr_nonce(mut self) -> Self {
+        if let Some(ref mut nonce_value) = self.nonce {
+            *nonce_value -= U64::from(1);
+        }
+        self
+    }
+    /// Sets the maximum fee per gas for the transaction.
+
+    pub fn max_fee_per_gas(mut self, max_fee_per_gas: u128) -> Self {
+        self.max_fee_per_gas = Some(U128::from(max_fee_per_gas));
+        self
+    }
+    /// Sets the maximum priority fee per gas for the transaction.
+
+    pub fn max_priority_fee_per_gas(mut self, max_priority_fee_per_gas: u128) -> Self {
+        self.max_priority_fee_per_gas = Some(U128::from(max_priority_fee_per_gas));
+        self
+    }
+    /// Sets the recipient address for the transaction.
+
+    pub fn to(mut self, to: Address) -> Self {
+        self.to = Some(to);
+        self
+    }
+    /// Sets the value (amount) for the transaction.
+
+    pub fn value(mut self, value: u128) -> Self {
+        self.value = Some(U256::from(value));
+        self
+    }
+    /// Sets the access list for the transaction.
+
+    pub fn access_list(mut self, access_list: AccessList) -> Self {
+        self.access_list = Some(access_list);
+        self
+    }
+    /// Sets the input data for the transaction.
+
+    pub fn input(mut self, input: Bytes) -> Self {
+        self.data = Some(input);
+        self
+    }
+
+    /// Sets the transactions type for the transactions.
+
+    pub fn transaction_type(mut self, transaction_type: u8) -> Self {
+        self.transaction_type = Some(U8::from(transaction_type));
+        self
+    }
+
+    // pub fn set_nonce(&mut self, nonce: u64) -> &mut Self {
+    //     self.nonce = Some(U64::from(nonce));
+    //     self
+    // }
+    // pub fn set_gas_limit(&mut self, gas_limit: u64) -> &mut Self {
+    //     self.gas = Some(U256::from(gas_limit));
+    //     self
+    // }
+
+    // pub fn set_max_fee_per_gas(&mut self, max_fee_per_gas: u128) -> &mut Self {
+    //     self.max_fee_per_gas = Some(U128::from(max_fee_per_gas));
+    //     self
+    // }
+
+    // pub fn set_max_priority_fee_per_gas(&mut self, max_priority_fee_per_gas: u128) -> &mut Self {
+    //     self.max_priority_fee_per_gas = Some(U128::from(max_priority_fee_per_gas));
+    //     self
+    // }
+    // pub fn set_to(&mut self, to: Address) -> &mut Self {
+    //     self.to = Some(to);
+    //     self
+    // }
+    // pub fn set_value(&mut self, value: u128) -> &mut Self {
+    //     self.value = Some(U256::from(value));
+    //     self
+    // }
+
+    // pub fn set_access_list(&mut self, access_list: AccessList) -> &mut Self {
+    //     self.access_list = Some(access_list);
+    //     self
+    // }
 }
+// impl Default for TransactionRequest {
+//     fn default() -> Self {
+//         Self {
+//             from: Default::default(),
+//             nonce: 0,
+//             gas_price: 0,
+//             gas: 0,
+//             max_fee_per_gas: 0,
+//             max_priority_fee_per_gas: 0,
+//             to: Default::default(),
+//             value: Default::default(),
+//             access_list: Default::default(),
+//             data: Default::default(),
+//             transaction_type: Default::default(),
+//         }
+//     }
+// }
