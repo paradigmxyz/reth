@@ -2,7 +2,7 @@
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
-    AccessList, Address, Bytes, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
+    AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
@@ -17,7 +17,7 @@ use revm::{
 };
 use revm_primitives::{
     db::{DatabaseCommit, DatabaseRef},
-    Bytecode, ExecutionResult,
+    Bytecode,
 };
 use tracing::trace;
 
@@ -577,18 +577,6 @@ where
         logs: db.logs.clone(),
         block_hashes: db.block_hashes.clone(),
         db: Default::default(),
-    }
-}
-
-/// Helper to get the output data from a result
-///
-/// TODO: Can be phased out when <https://github.com/bluealloy/revm/pull/509> is released
-#[inline]
-pub(crate) fn result_output(res: &ExecutionResult) -> Option<Bytes> {
-    match res {
-        ExecutionResult::Success { output, .. } => Some(output.clone().into_data()),
-        ExecutionResult::Revert { output, .. } => Some(output.clone()),
-        _ => None,
     }
 }
 
