@@ -68,17 +68,17 @@ where
             max_logs_per_response,
             eth_cache,
             max_headers_range: MAX_HEADERS_RANGE,
-            task_spawner: task_spawner.clone(),
+            task_spawner,
             stale_filter_ttl,
         };
 
         let eth_filter = Self { inner: Arc::new(inner) };
 
-        let eth_filter_clone = eth_filter.clone();
-        task_spawner.clone().spawn_critical(
+        let this = eth_filter.clone();
+        eth_filter.inner.task_spawner.clone().spawn_critical(
             "eth-filters_stale-filters-clean",
             Box::pin(async move {
-                eth_filter_clone.watch_and_clear_stale_filters().await;
+                this.watch_and_clear_stale_filters().await;
             }),
         );
 
@@ -297,7 +297,6 @@ impl<Provider, Pool> Clone for EthFilter<Provider, Pool> {
 #[derive(Debug)]
 struct EthFilterInner<Provider, Pool> {
     /// The transaction pool.
-    #[allow(unused)] // we need this for non standard full transactions eventually
     pool: Pool,
     /// The provider that can interact with the chain.
     provider: Provider,
@@ -312,10 +311,9 @@ struct EthFilterInner<Provider, Pool> {
     /// maximum number of headers to read at once for range filter
     max_headers_range: u64,
     /// The type that can spawn tasks.
-    #[allow(unused)]
     task_spawner: Box<dyn TaskSpawner>,
     /// Duration since the last filter poll, after which the filter is considered stale
-    stale_filter_ttl: std::time::Duration,
+    stale_filter_ttl: Duration,
 }
 
 impl<Provider, Pool> EthFilterInner<Provider, Pool>
