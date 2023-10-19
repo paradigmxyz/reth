@@ -1614,7 +1614,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
 
 /// Represents updated fees for the pending block.
 #[derive(Debug, Clone)]
-pub struct PendingFees {
+pub(crate) struct PendingFees {
     /// The pending base fee
     pub base_fee: u64,
     /// The pending blob fee
