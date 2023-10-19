@@ -12,9 +12,7 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    revm::env::tx_env_with_recovered, AccessListWithGasUsed, BlockId, BlockNumberOrTag, Bytes, U256,
-};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
