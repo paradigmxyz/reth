@@ -16,9 +16,9 @@ use std::ops::RangeInclusive;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TransactionKind {
     /// Indicates that transactions should be processed without including their hashes.
-    #[default]
     NoHash,
     /// Indicates that transactions should be processed along with their hashes.
+    #[default]
     WithHash,
 }
 
