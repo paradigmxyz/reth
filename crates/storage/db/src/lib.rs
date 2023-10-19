@@ -181,8 +181,10 @@ pub mod test_utils {
 
     impl<DB> Drop for TestTempDatabase<DB> {
         fn drop(&mut self) {
-            drop(self.db.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            if let Some(db) = self.db.take() {
+                drop(db);
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
         }
     }
 
@@ -193,8 +195,8 @@ pub mod test_utils {
         }
 
         /// retunrs the inner db
-        pub fn into_inner_db(self) -> DB {
-            self.db.unwrap()
+        pub fn into_inner_db(mut self) -> DB {
+            self.db.take().unwrap() // take out db to avoid clean path in drop fn
         }
     }
 
