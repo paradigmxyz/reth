@@ -505,12 +505,11 @@ where
             hashes.truncate(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES);
 
             // request the missing transactions
-            let egress_peer_channel_full_count = self.transaction_fetcher.request_from(hashes, peer);
+            let egress_peer_channel_full_count =
+                self.transaction_fetcher.request_from(hashes, peer);
             if egress_peer_channel_full_count > 0 {
-                self.metrics
-                    .egress_peer_channel_full
-                    .increment(egress_peer_channel_full_count);
-                return;
+                self.metrics.egress_peer_channel_full.increment(egress_peer_channel_full_count);
+                return
             }
 
             if num_already_seen > 0 {
@@ -1026,12 +1025,11 @@ struct TransactionFetcher {
 }
 
 impl TransactionFetcher {
-
     // request the missing transactions
     fn request_from(&mut self, hashes: Vec<TxHash>, peer: &Peer) -> u64 {
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
         let peer_id: PeerId = peer.request_tx.peer_id;
-        
+
         let mut missing_hashes: Vec<TxHash> = Vec::new();
 
         for hash in hashes {
@@ -1042,7 +1040,7 @@ impl TransactionFetcher {
                 let mut fallback_peers: Vec<PeerId> = Vec::new();
                 fallback_peers.push(peer_id);
                 self.inflight_hash_to_fallback_peers.insert(hash, fallback_peers);
-            } else { 
+            } else {
                 //has already inflight, add this peer as a backup
                 self.inflight_hash_to_fallback_peers.get_mut(&hash).unwrap().push(peer_id);
             }
@@ -1059,15 +1057,13 @@ impl TransactionFetcher {
         if peer.request_tx.try_send(req).is_ok() {
             //create a new request for it, from that peer
             self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
-            
         } else {
             //increment metrics egress_peer_channel_full
-            return 1;
+            return 1
         }
 
-        return 0;
+        return 0
     }
-
 }
 
 /// Commands to send to the [`TransactionsManager`]
