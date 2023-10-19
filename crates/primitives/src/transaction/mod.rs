@@ -13,7 +13,7 @@ use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 use std::mem;
 
-pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
+pub use access_list::{AccessList, AccessListItem};
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::{
