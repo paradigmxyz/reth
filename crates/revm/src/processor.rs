@@ -616,7 +616,7 @@ mod tests {
 
     impl StateRootProvider for StateProviderTest {
         fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
-            todo!()
+            unimplemented!("state root computation is not supported")
         }
     }
 
