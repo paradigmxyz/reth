@@ -9,13 +9,10 @@ use crate::{abstraction::cursor::DbCursorRO, transaction::DbTx, Transactions};
 impl Transactions {
     /// Recovers transaction hashes by walking through [`crate::tables::Transactions`] table and
     /// calculating them in a parallel manner. Returned unsorted.
-    pub fn recover_hashes<'a, 'b, TX: DbTx<'a>>(
-        tx: &'b TX,
+    pub fn recover_hashes<TX: DbTx>(
+        tx: &TX,
         tx_range: Range<TxNumber>,
-    ) -> RethResult<Vec<(TxHash, TxNumber)>>
-    where
-        'a: 'b,
-    {
+    ) -> RethResult<Vec<(TxHash, TxNumber)>> {
         let mut tx_cursor = tx.cursor_read::<Self>()?;
         let tx_range_size = tx_range.clone().count();
         let tx_walker = tx_cursor.walk_range(tx_range)?;

@@ -14,20 +14,22 @@ impl<C> AccountTrieCursor<C> {
     }
 }
 
-impl<'a, C> TrieCursor<StoredNibbles> for AccountTrieCursor<C>
+impl<C> TrieCursor for AccountTrieCursor<C>
 where
-    C: DbCursorRO<'a, tables::AccountsTrie>,
+    C: DbCursorRO<tables::AccountsTrie>,
 {
+    type Key = StoredNibbles;
+
     fn seek_exact(
         &mut self,
-        key: StoredNibbles,
+        key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self.0.seek_exact(key)?.map(|value| (value.0.inner.to_vec(), value.1)))
     }
 
     fn seek(
         &mut self,
-        key: StoredNibbles,
+        key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self.0.seek(key)?.map(|value| (value.0.inner.to_vec(), value.1)))
     }

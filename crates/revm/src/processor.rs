@@ -553,7 +553,9 @@ mod tests {
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
-        keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
+        keccak256,
+        trie::AccountProof,
+        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use revm::{Database, TransitionState};
@@ -614,7 +616,7 @@ mod tests {
 
     impl StateRootProvider for StateProviderTest {
         fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
-            todo!()
+            unimplemented!("state root computation is not supported")
         }
     }
 
@@ -634,12 +636,8 @@ mod tests {
             Ok(self.contracts.get(&code_hash).cloned())
         }
 
-        fn proof(
-            &self,
-            _address: Address,
-            _keys: &[B256],
-        ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
-            todo!()
+        fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
+            unimplemented!("proof generation is not supported")
         }
     }
 

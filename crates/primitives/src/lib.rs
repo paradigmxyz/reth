@@ -44,7 +44,7 @@ pub mod snapshot;
 pub mod stage;
 mod storage;
 /// Helpers for working with transactions
-mod transaction;
+pub mod transaction;
 pub mod trie;
 mod withdrawal;
 
@@ -86,7 +86,7 @@ pub use snapshot::SnapshotSegment;
 pub use storage::StorageEntry;
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer, sign_message},
-    AccessList, AccessListItem, AccessListWithGasUsed, BlobTransaction, BlobTransactionSidecar,
+    AccessList, AccessListItem, BlobTransaction, BlobTransactionSidecar,
     BlobTransactionValidationError, FromRecoveredPooledTransaction, FromRecoveredTransaction,
     IntoRecoveredTransaction, InvalidTransactionError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionKind, TransactionMeta,

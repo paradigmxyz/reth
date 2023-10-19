@@ -13,7 +13,7 @@ use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 use std::mem;
 
-pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
+pub use access_list::{AccessList, AccessListItem};
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::{
@@ -231,6 +231,21 @@ impl Transaction {
             Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
             Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 Some(*max_priority_fee_per_gas)
+            }
+        }
+    }
+
+    /// Blob versioned hashes for eip4844 transaction, for legacy,eip1559 and eip2930 transactions
+    /// this is `None`
+    ///
+    /// This is also commonly referred to as the "blob versioned hashes" (`BlobVersionedHashes`).
+    pub fn blob_versioned_hashes(&self) -> Option<Vec<B256>> {
+        match self {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(_) => None,
+            Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
+                Some(blob_versioned_hashes.to_vec())
             }
         }
     }

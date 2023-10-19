@@ -2,12 +2,10 @@ use super::tui::DbListTUI;
 use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
-use reth_db::{database::Database, table::Table, DatabaseEnvRO, TableType, TableViewer, Tables};
+use reth_db::{database::Database, table::Table, DatabaseEnvRO, TableViewer, Tables};
 use reth_primitives::hex;
 use std::cell::RefCell;
 use tracing::error;
-
-const DEFAULT_NUM_ITEMS: &str = "5";
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db list` command
@@ -15,13 +13,13 @@ pub struct Command {
     /// The table name
     table: Tables,
     /// Skip first N entries
-    #[arg(long, short, default_value = "0")]
+    #[arg(long, short, default_value_t = 0)]
     skip: usize,
     /// Reverse the order of the entries. If enabled last table entries are read.
-    #[arg(long, short, default_value = "false")]
+    #[arg(long, short, default_value_t = false)]
     reverse: bool,
     /// How many items to take from the walker
-    #[arg(long, short, default_value = DEFAULT_NUM_ITEMS)]
+    #[arg(long, short, default_value_t = 5)]
     len: usize,
     /// Search parameter for both keys and values. Prefix it with `0x` to search for binary data,
     /// and text otherwise.
@@ -41,13 +39,7 @@ pub struct Command {
 impl Command {
     /// Execute `db list` command
     pub fn execute(self, tool: &DbTool<'_, DatabaseEnvRO>) -> eyre::Result<()> {
-        if self.table.table_type() == TableType::DupSort {
-            error!(target: "reth::cli", "Unsupported table.");
-        }
-
-        self.table.view(&ListTableViewer { tool, args: &self })?;
-
-        Ok(())
+        self.table.view(&ListTableViewer { tool, args: &self })
     }
 
     /// Generate [`ListFilter`] from command.
@@ -105,7 +97,7 @@ impl TableViewer<()> for ListTableViewer<'_> {
 
                 if self.args.count {
                     println!("{count} entries found.")
-                }else {
+                } else {
                     println!("{}", serde_json::to_string_pretty(&list)?);
                 }
                 Ok(())

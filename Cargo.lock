@@ -6186,6 +6186,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "bytes",
+ "derive_more",
  "futures",
  "http",
  "http-body",
@@ -6312,6 +6313,7 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0-alpha.10"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "itertools 0.11.0",
  "jsonrpsee-types",
@@ -6449,14 +6451,17 @@ name = "reth-trie"
 version = "0.1.0-alpha.10"
 dependencies = [
  "alloy-rlp",
+ "auto_impl",
  "criterion",
  "derive_more",
+ "once_cell",
  "pretty_assertions",
  "proptest",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "serde_json",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -7988,6 +7993,18 @@ name = "tower-service"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6bc1c9ce2b5135ac7f93c72918fc37feb872bdc6a5533a8b85eb4b86bfdae52"
+
+[[package]]
+name = "trace-transaction-cli"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "futures-util",
+ "jsonrpsee",
+ "reth",
+ "tokio",
+]
 
 [[package]]
 name = "tracing"
