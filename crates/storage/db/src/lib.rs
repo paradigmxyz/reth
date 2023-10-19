@@ -187,9 +187,14 @@ pub mod test_utils {
     }
 
     impl<DB> TestTempDatabase<DB> {
-        /// retunrs the inner db
+        /// retunrs the ref of inner db
         pub fn db(&self) -> &DB {
             self.db.as_ref().unwrap()
+        }
+
+        /// retunrs the inner db
+        pub fn into_inner_db(self) -> DB {
+            self.db.unwrap()
         }
     }
 

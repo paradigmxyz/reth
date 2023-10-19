@@ -2,7 +2,7 @@
 use reth_db::{
     database::Database,
     table::*,
-    test_utils::{create_test_rw_db_with_path, TestTempDatabase},
+    test_utils::create_test_rw_db_with_path,
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
@@ -53,7 +53,7 @@ where
 fn set_up_db<T>(
     bench_db_path: &Path,
     pair: &Vec<(<T as Table>::Key, Bytes, <T as Table>::Value, Bytes)>,
-) -> TestTempDatabase<DatabaseEnv>
+) -> DatabaseEnv
 where
     T: Table + Default,
     T::Key: Default + Clone,
@@ -72,5 +72,5 @@ where
         tx.inner.commit().unwrap();
     }
 
-    db
+    db.into_inner_db()
 }
