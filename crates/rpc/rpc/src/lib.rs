@@ -36,9 +36,9 @@ mod otterscan;
 mod reth;
 mod rpc;
 mod trace;
+mod transactionvariant;
 mod txpool;
 mod web3;
-
 pub use admin::AdminApi;
 pub use blocking_pool::{BlockingTaskGuard, BlockingTaskPool};
 pub use debug::DebugApi;
@@ -50,8 +50,8 @@ pub use otterscan::OtterscanApi;
 pub use reth::RethApi;
 pub use rpc::RPCApi;
 pub use trace::TraceApi;
+pub use transactionvariant::TransactionVariant;
 pub use txpool::TxPoolApi;
 pub use web3::Web3Api;
-
 pub mod blocking_pool;
 pub mod result;
