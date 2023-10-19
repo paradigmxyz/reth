@@ -1044,6 +1044,7 @@ where
                 cache.clone(),
                 self.config.eth.max_logs_per_response,
                 executor.clone(),
+                self.config.eth.stale_filter_ttl,
             );
 
             let pubsub = EthPubSub::with_spawner(

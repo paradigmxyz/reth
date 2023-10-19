@@ -17,7 +17,13 @@ use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::{collections::HashMap, iter::StepBy, ops::RangeInclusive, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    iter::StepBy,
+    ops::RangeInclusive,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::{mpsc::Receiver, Mutex};
 use tracing::trace;
 
@@ -30,7 +36,7 @@ pub struct EthFilter<Provider, Pool> {
     inner: Arc<EthFilterInner<Provider, Pool>>,
 }
 
-impl<Provider, Pool> EthFilter<Provider, Pool> {
+impl<Provider: Send + Sync + 'static, Pool: Send + Sync + 'static> EthFilter<Provider, Pool> {
     /// Creates a new, shareable instance.
     ///
     /// This uses the given pool to get notified about new transactions, the provider to interact
@@ -43,6 +49,7 @@ impl<Provider, Pool> EthFilter<Provider, Pool> {
         eth_cache: EthStateCache,
         max_logs_per_response: usize,
         task_spawner: Box<dyn TaskSpawner>,
+        stale_filter_ttl: Duration,
     ) -> Self {
         let inner = EthFilterInner {
             provider,
@@ -52,14 +59,48 @@ impl<Provider, Pool> EthFilter<Provider, Pool> {
             max_logs_per_response,
             eth_cache,
             max_headers_range: MAX_HEADERS_RANGE,
-            task_spawner,
+            task_spawner: task_spawner.clone(),
+            stale_filter_ttl,
         };
-        Self { inner: Arc::new(inner) }
+
+        let eth_filter = Self { inner: Arc::new(inner) };
+
+        let eth_filter_clone = eth_filter.clone();
+        task_spawner.clone().spawn_critical(
+            "stale-filters-cleanr",
+            Box::pin(async move {
+                eth_filter_clone.clear_stale_filters().await;
+            }),
+        );
+
+        eth_filter
     }
 
     /// Returns all currently active filters
     pub fn active_filters(&self) -> &ActiveFilters {
         &self.inner.active_filters
+    }
+
+    async fn clear_stale_filters(&self) {
+        let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
+        let active_filters_arc = Arc::clone(&self.inner.active_filters.inner);
+        loop {
+            interval.tick().await;
+
+            trace!("clear stale filters tick...");
+            {
+                active_filters_arc.lock().await.retain(|id, filter| {
+                    let is_valid =
+                        filter.last_poll_timestamp.elapsed() < self.inner.stale_filter_ttl;
+
+                    if !is_valid {
+                        trace!("evict filter with id: {:?}", id);
+                    }
+
+                    is_valid
+                })
+            }
+        }
     }
 }
 
@@ -261,6 +302,8 @@ struct EthFilterInner<Provider, Pool> {
     /// The type that can spawn tasks.
     #[allow(unused)]
     task_spawner: Box<dyn TaskSpawner>,
+    /// Duration since the last filter poll, after which the filter is considered stale
+    stale_filter_ttl: std::time::Duration,
 }
 
 impl<Provider, Pool> EthFilterInner<Provider, Pool>
