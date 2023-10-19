@@ -510,6 +510,7 @@ where
                 self.metrics
                     .egress_peer_channel_full
                     .increment(egress_peer_channel_full_count);
+                return;
             }
 
             if num_already_seen > 0 {
@@ -976,12 +977,7 @@ impl GetPooledTxRequestFut {
         peer_id: PeerId,
         response: oneshot::Receiver<RequestResult<PooledTransactions>>,
     ) -> Self {
-        Self {
-            inner: Some(GetPooledTxRequest {
-                peer_id,
-                response,
-            }),
-        }
+        Self { inner: Some(GetPooledTxRequest { peer_id, response }) }
     }
 }
 
@@ -991,10 +987,9 @@ impl Future for GetPooledTxRequestFut {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut req = self.as_mut().project().inner.take().expect("polled after completion");
         match req.response.poll_unpin(cx) {
-            Poll::Ready(result) => Poll::Ready(GetPooledTxResponse {
-                peer_id: req.peer_id,
-                result,
-            }),
+            Poll::Ready(result) => {
+                Poll::Ready(GetPooledTxResponse { peer_id: req.peer_id, result })
+            }
             Poll::Pending => {
                 self.project().inner.set(Some(req));
                 Poll::Pending
