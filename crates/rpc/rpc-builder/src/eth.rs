@@ -39,7 +39,13 @@ pub struct EthConfig {
     ///
     /// Defaults to [RPC_DEFAULT_GAS_CAP]
     pub rpc_gas_cap: u64,
+    ///
+    /// Sets TTL for stale filters
+    pub stale_filter_ttl: std::time::Duration,
 }
+
+/// Default value for stale filter ttl
+const DEFAULT_STALE_FILTER_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 impl Default for EthConfig {
     fn default() -> Self {
@@ -49,6 +55,7 @@ impl Default for EthConfig {
             max_tracing_requests: DEFAULT_MAX_TRACING_REQUESTS,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
+            stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
         }
     }
 }
