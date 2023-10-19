@@ -145,7 +145,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
             let block = provider
-                .block_with_senders(block_number, TransactionKind::default())?
+                .block_with_senders(block_number, TransactionKind::NoHash)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             fetch_block_duration += time.elapsed();
