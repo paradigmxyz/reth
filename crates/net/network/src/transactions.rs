@@ -511,20 +511,11 @@ where
             hashes.truncate(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES);
 
             // request the missing transactions
-            for hash in hashes {
-                let (response, rx) = oneshot::channel();
-                let req = PeerRequest::GetPooledTransactions {
-                    request: GetPooledTransactions(vec![hash]), // request for a single hash
-                    response,
-                };
-
-                if peer.request_tx.try_send(req).is_ok() {
-                    self.transaction_fetcher
-                        .register_inflight(GetPooledTxRequestFut::new(peer_id, hash, rx));
-                } else {
-                    self.metrics.egress_peer_channel_full.increment(1);
-                    return
-                }
+            let egress_peer_channel_full_count = self.transaction_fetcher.request_from(hashes, peer);
+            if egress_peer_channel_full_count > 0 {
+                self.metrics
+                    .egress_peer_channel_full
+                    .increment(egress_peer_channel_full_count);
             }
 
             if num_already_seen > 0 {
@@ -1060,7 +1051,7 @@ struct TransactionFetcher {
 impl TransactionFetcher {
 
     // request the missing transactions
-    fn request_from(&mut self, hashes: Vec<TxHash>, peer: &Peer) -> i32 {
+    fn request_from(&mut self, hashes: Vec<TxHash>, peer: &Peer) -> u64 {
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
         let peer_id: PeerId = peer.request_tx.peer_id;
         
