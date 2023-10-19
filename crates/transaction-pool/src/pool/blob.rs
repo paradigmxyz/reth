@@ -9,6 +9,8 @@ use std::{
     sync::Arc,
 };
 
+use super::txpool::PendingFees;
+
 /// A set of validated blob transactions in the pool that are __not pending__.
 ///
 /// The purpose of this pool is keep track of blob transactions that are queued and to evict the
@@ -107,14 +109,18 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         self.by_id.is_empty()
     }
 
-    /// Returns all transactions that satisfy the given blob fee.
-    fn satisfy_blob_fee_ids(&self, blob_fee: u128) -> Vec<TransactionId> {
+    /// Returns all transactions which:
+    ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`
+    ///  * have a `max_fee_per_gas` greater than or equal to the given `base_fee`
+    fn satisfy_pending_fee_ids(&self, pending_fees: &PendingFees) -> Vec<TransactionId> {
         let mut transactions = Vec::new();
         {
             let mut iter = self.by_id.iter().peekable();
 
             while let Some((id, tx)) = iter.next() {
-                if tx.transaction.max_fee_per_blob_gas() < Some(blob_fee) {
+                if tx.transaction.max_fee_per_blob_gas() < Some(pending_fees.blob_fee) ||
+                    tx.transaction.max_fee_per_gas() < pending_fees.base_fee as u128
+                {
                     // still parked in blob pool -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
@@ -130,12 +136,16 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         transactions
     }
 
-    /// Removes all transactions and their dependent transaction from the subpool that no longer
-    /// satisfy the given blobfee.
+    /// Removes all transactions (and their descendants) which:
+    ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`
+    ///  * have a `max_fee_per_gas` greater than or equal to the given `base_fee`
     ///
     /// Note: the transactions are not returned in a particular order.
-    pub(crate) fn enforce_blob_fee(&mut self, blob_fee: u128) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let to_remove = self.satisfy_blob_fee_ids(blob_fee);
+    pub(crate) fn enforce_pending_fees(
+        &mut self,
+        pending_fees: &PendingFees,
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let to_remove = self.satisfy_pending_fee_ids(pending_fees);
 
         let mut removed = Vec::with_capacity(to_remove.len());
         for id in to_remove {
