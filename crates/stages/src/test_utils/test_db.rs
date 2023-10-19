@@ -33,9 +33,9 @@ use std::{
 #[derive(Debug)]
 pub struct TestTransaction {
     /// DB
-    pub tx: Arc<DatabaseEnv>,
+    pub tx: Arc<TestTempDatabase<DatabaseEnv>>,
     pub path: Option<PathBuf>,
-    pub factory: ProviderFactory<Arc<DatabaseEnv>>,
+    pub factory: ProviderFactory<Arc<TestTempDatabase<DatabaseEnv>>>,
 }
 
 impl Default for TestTransaction {
@@ -58,16 +58,16 @@ impl TestTransaction {
 
     /// Return a database wrapped in [DatabaseProviderRW].
     pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<DatabaseEnv>> {
-        self.factory.provider_rw().expect("failed to create db container")
+        self.factory.provider_rw().expect("failed to create db container").into()
     }
 
     /// Return a database wrapped in [DatabaseProviderRO].
     pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<DatabaseEnv>> {
-        self.factory.provider().expect("failed to create db container")
+        self.factory.provider().expect("failed to create db container").into()
     }
 
     /// Get a pointer to an internal database.
-    pub fn inner_raw(&self) -> Arc<DatabaseEnv> {
+    pub fn inner_raw(&self) -> Arc<TestTempDatabase<DatabaseEnv>> {
         self.tx.clone()
     }
 
