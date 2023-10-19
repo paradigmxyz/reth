@@ -1444,7 +1444,7 @@ Post-merge hard forks (timestamp based):
         // technically unecessary - but we include it here for thoroughness
         let fork_cond_block_only_case = ChainSpec::builder()
             .chain(Chain::mainnet())
-            .genesis(empty_genesis.clone())
+            .genesis(empty_genesis)
             .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
             .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
             .build();
@@ -1959,7 +1959,7 @@ Post-merge hard forks (timestamp based):
                 timestamp + 1,
             ),
             (
-                construct_chainspec(default_spec_builder.clone(), timestamp + 1, timestamp + 2),
+                construct_chainspec(default_spec_builder, timestamp + 1, timestamp + 2),
                 timestamp + 1,
             ),
         ];

@@ -379,7 +379,6 @@ mod tests {
         tables,
         test_utils::create_test_rw_db,
         transaction::DbTx,
-        DatabaseEnv,
     };
     use reth_primitives::{Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256};
     use reth_revm_primitives::into_reth_acc;
