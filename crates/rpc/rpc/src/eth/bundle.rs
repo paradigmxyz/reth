@@ -1,20 +1,20 @@
+//! `Eth` bundle implementation and helpers.
+
 use crate::{
     eth::{
-        error::{EthApiError, EthResult},
+        error::{EthApiError, EthResult, RpcInvalidTransactionError},
         revm_utils::FillableTransaction,
         utils::recover_raw_transaction,
         EthTransactions,
     },
     BlockingTaskGuard,
 };
-use reth_primitives::U256;
-use reth_revm::{database::StateProviderDatabase, env::tx_env_with_recovered};
+use reth_primitives::{keccak256, U256};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use revm::{
-    db::{CacheDB, EmptyDB},
-    precompile::Precompiles,
-    primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
-    Database, Inspector,
+    db::CacheDB,
+    primitives::{Env, ResultAndState, TxEnv},
 };
 use revm_primitives::db::{DatabaseCommit, DatabaseRef};
 use std::sync::Arc;
@@ -42,19 +42,22 @@ where
     /// transactions and using the correct nonce and ensuring validity
     pub async fn call_bundle(&self, bundle: EthCallBundle) -> EthResult<EthCallBundleResponse> {
         let EthCallBundle { txs, block_number, state_block_number, timestamp } = bundle;
+        if txs.is_empty() {
+            return Err(EthApiError::InvalidParams(
+                EthBundleError::EmptyBundleTransactions.to_string(),
+            ))
+        }
+        if block_number.to::<u64>() == 0 {
+            return Err(EthApiError::InvalidParams(
+                EthBundleError::BundleMissingBlockNumber.to_string(),
+            ))
+        }
 
         let transactions =
             txs.into_iter().map(recover_raw_transaction).collect::<Result<Vec<_>, _>>()?;
 
-        let ((cfg, mut block_env, at), block) = futures::try_join!(
-            self.inner.eth_api.evm_env_at(state_block_number.into()),
-            self.inner.eth_api.block_by_id(state_block_number.into())
-        )?;
-
-        let block = match block {
-            Some(block) => block,
-            None => return Err(EthApiError::UnknownBlockNumber),
-        };
+        let (cfg, mut block_env, at) =
+            self.inner.eth_api.evm_env_at(state_block_number.into()).await?;
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
@@ -69,48 +72,100 @@ where
         self.inner
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
-                let coinbase = block_env.beneficiary;
-                let basefee = block_env.basefee.map(|fee|fee.to::<u64>());
+                let coinbase = block_env.coinbase;
+                let basefee = Some(block_env.basefee.to::<u64>());
                 let env = Env { cfg, block: block_env, tx: TxEnv::default() };
-                let mut evm = revm::EVM::with_env(env);
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let db = CacheDB::new(StateProviderDatabase::new(state));
 
-                let initial_coinbase = DatabaseRef::basic(&db, coinbase)?.map(|acc|acc.balance)).unwrap_or_default();
+                let initial_coinbase =
+                    DatabaseRef::basic(&db, coinbase)?.map(|acc| acc.balance).unwrap_or_default();
+                let mut coinbasebalance_before_tx = initial_coinbase;
+                let mut coinbasebalance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;
+                let mut total_gas_fess = U256::ZERO;
+                let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
 
+                let mut evm = revm::EVM::with_env(env);
                 evm.database(db);
-                // let mut results = Vec::with_capacity(transactions.len());
 
+                let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
 
                 while let Some(tx) = transactions.next() {
                     let tx = tx.into_ecrecovered_transaction();
-                    let gas_price = tx.effective_gas_tip(basefee);
+                    hash_bytes.extend_from_slice(tx.hash().as_slice());
+                    let gas_price = tx
+                        .effective_gas_tip(basefee)
+                        .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)?;
                     tx.try_fill_tx_env(&mut evm.env.tx)?;
-                    let res = evm.transact()?;
+                    let ResultAndState { result, state } = evm.transact()?;
+
+                    let gas_used = result.gas_used();
+                    total_gas_used += gas_used;
+
+                    let gas_fees = U256::from(gas_used) * U256::from(gas_price);
+                    total_gas_fess += gas_fees;
+
+                    // coinbase is always present in the result state
+                    coinbasebalance_after_tx =
+                        state.get(&coinbase).map(|acc| acc.info.balance).unwrap_or_default();
+                    let coinbase_diff =
+                        coinbasebalance_after_tx.saturating_sub(coinbasebalance_before_tx);
+                    let eth_sent_to_coinbase = coinbase_diff.saturating_sub(gas_fees);
+
+                    // update the coinbase balance
+                    coinbasebalance_before_tx = coinbasebalance_after_tx;
+
+                    // set the return data for the response
+                    let (value, revert) = if result.is_success() {
+                        let value = result.into_output().unwrap_or_default();
+                        (Some(value), None)
+                    } else {
+                        let revert = result.into_output().unwrap_or_default();
+                        (None, Some(revert))
+                    };
 
                     let tx_res = EthCallBundleTransactionResult {
-                        coinbase_diff: todo!(),
-                        eth_sent_to_coinbase: todo!(),
-                        from_address: todo!(),
-                        gas_fees: todo!(),
-                        gas_price: todo!(),
-                        gas_used: todo!(),
-                        to_address: todo!(),
-                        tx_hash: todo!(),
-                        value: todo!(),
+                        coinbase_diff,
+                        eth_sent_to_coinbase,
+                        from_address: tx.signer(),
+                        gas_fees,
+                        gas_price: U256::from(gas_price),
+                        gas_used,
+                        to_address: tx.to(),
+                        tx_hash: tx.hash(),
+                        value,
+                        revert,
                     };
-                    
+                    results.push(tx_res);
+
                     // need to apply the state changes of this call before executing the
                     // next call
                     if transactions.peek().is_some() {
                         // need to apply the state changes of this call before executing
                         // the next call
-                        evm.db.as_mut().expect("is set").commit(res.state)
+                        evm.db.as_mut().expect("is set").commit(state)
                     }
                 }
 
-                todo!()
+                // populate the response
+
+                let coinbase_diff = initial_coinbase.saturating_sub(coinbasebalance_after_tx);
+                let eth_sent_to_coinbase = coinbase_diff.saturating_sub(total_gas_fess);
+                let bundle_gas_price =
+                    coinbase_diff.checked_div(U256::from(total_gas_used)).unwrap_or_default();
+                let res = EthCallBundleResponse {
+                    bundle_gas_price,
+                    bundle_hash: keccak256(&hash_bytes).to_string(),
+                    coinbase_diff,
+                    eth_sent_to_coinbase,
+                    gas_fees: total_gas_fess,
+                    results,
+                    state_block_number: evm.env.block.number.to(),
+                    total_gas_used,
+                };
+
+                Ok(res)
             })
             .await
     }
@@ -122,6 +177,7 @@ struct EthBundleInner<Eth> {
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
     // restrict the number of concurrent tracing calls.
+    #[allow(unused)]
     blocking_task_guard: BlockingTaskGuard,
 }
 
@@ -135,4 +191,15 @@ impl<Eth> Clone for EthBundle<Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
+}
+
+/// [EthBundle] specific errors.
+#[derive(Debug, thiserror::Error)]
+pub enum EthBundleError {
+    /// Thrown if the bundle does not contain any transactions.
+    #[error("bundle missing txs")]
+    EmptyBundleTransactions,
+    /// Thrown if the bundle does not contain a block number, or block number is 0.
+    #[error("bundle missing blockNumber")]
+    BundleMissingBlockNumber,
 }

@@ -1,7 +1,7 @@
 //! `eth` namespace handler implementation.
 
 mod api;
-mod bundle;
+pub mod bundle;
 pub mod cache;
 pub mod error;
 mod filter;
