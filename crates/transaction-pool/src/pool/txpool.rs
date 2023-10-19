@@ -168,8 +168,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         let tx =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
 
-                        // remove the blob fee cap block flag, this should set the subpool to
-                        // Blob instead of Pending
+                        // we unset the blob fee cap block flag, if the base fee is too high now
                         tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
                         tx.subpool = tx.state.into();
                         tx.subpool
@@ -187,6 +186,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         let tx =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
                         tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
                         tx.subpool = tx.state.into();
                         tx.subpool
                     };
@@ -1916,6 +1916,55 @@ mod tests {
         // check that the tx is promoted
         let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
         assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(internal_tx.subpool, SubPool::Pending);
+
+        // make sure the blob transaction was promoted into the pending pool
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert!(pool.blob_transactions.is_empty());
+    }
+
+    #[test]
+    fn test_promote_blob_tx_with_both_pending_fee_updates() {
+        // this test starts out with a high base and blobee.
+        //
+        // first the blobfee is increased, we make sure the tx stays in the blobpool.
+        // next the basefee is increased, we make sure the tx is promoted.
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let tx = MockTransaction::eip4844().inc_price().inc_limit();
+
+        // set block info so the tx is initially underpriced w.r.t. blob fee
+        let mut block_info = pool.block_info();
+        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap() + 1);
+        block_info.pending_basefee = (tx.max_fee_per_gas() + 1) as u64;
+        pool.set_block_info(block_info);
+
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, on_chain_balance, on_chain_nonce).unwrap();
+
+        // assert pool lengths
+        assert!(pool.pending_pool.is_empty());
+        assert_eq!(pool.blob_transactions.len(), 1);
+
+        // set block info with new base fee, expect no change
+        block_info.pending_basefee = tx.max_fee_per_gas() as u64;
+        pool.set_block_info(block_info);
+
+        // check tx state and derived subpool, it should not move into the blob pool
+        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+        assert_eq!(internal_tx.subpool, SubPool::Blob);
+
+        // set block info so the pools are updated
+        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap());
+        pool.set_block_info(block_info);
+
+        // check that the tx is promoted
+        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+        assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert!(internal_tx.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
         assert_eq!(internal_tx.subpool, SubPool::Pending);
 
         // make sure the blob transaction was promoted into the pending pool

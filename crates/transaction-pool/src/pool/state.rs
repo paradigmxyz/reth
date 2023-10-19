@@ -190,5 +190,10 @@ mod tests {
         state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
         assert!(state.is_blob());
         assert!(!state.is_pending());
+
+        state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+        state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
+        assert!(state.is_blob());
+        assert!(!state.is_pending());
     }
 }
