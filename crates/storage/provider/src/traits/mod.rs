@@ -7,7 +7,9 @@ mod storage;
 pub use storage::StorageReader;
 
 mod block;
-pub use block::{BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter};
+pub use block::{
+    BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter, TransactionKind,
+};
 
 mod block_hash;
 pub use block_hash::BlockHashReader;

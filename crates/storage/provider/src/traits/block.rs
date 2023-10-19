@@ -115,7 +115,11 @@ pub trait BlockReader:
     /// Returns the block with senders with matching number from database.
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>>;
+    fn block_with_senders(
+        &self,
+        number: BlockNumber,
+        transaction_kind: TransactionKind,
+    ) -> RethResult<Option<BlockWithSenders>>;
 
     /// Returns all blocks in the given inclusive range.
     ///

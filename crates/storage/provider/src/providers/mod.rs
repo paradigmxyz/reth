@@ -4,7 +4,7 @@ use crate::{
     CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
     ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    TransactionKind, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -266,8 +266,12 @@ where
     /// spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>> {
-        self.database.provider()?.block_with_senders(number)
+    fn block_with_senders(
+        &self,
+        number: BlockNumber,
+        transaction_kind: TransactionKind,
+    ) -> RethResult<Option<BlockWithSenders>> {
+        self.database.provider()?.block_with_senders(number, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
