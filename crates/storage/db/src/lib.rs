@@ -161,7 +161,7 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 pub mod test_utils {
     use super::*;
     use crate::database::{Database, DatabaseGAT};
-    use std::{ops::Deref, path::PathBuf, sync::Arc};
+    use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
@@ -193,14 +193,6 @@ pub mod test_utils {
         }
     }
 
-    impl<DB> Deref for TestTempDatabase<DB> {
-        type Target = DB;
-
-        fn deref(&self) -> &Self::Target {
-            self.db.as_ref().unwrap()
-        }
-    }
-
     impl<'a, DB: Database> DatabaseGAT<'a> for TestTempDatabase<DB> {
         type TX = <DB as DatabaseGAT<'a>>::TX;
         type TXMut = <DB as DatabaseGAT<'a>>::TXMut;
@@ -208,11 +200,11 @@ pub mod test_utils {
 
     impl<DB: Database> Database for TestTempDatabase<DB> {
         fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
-            self.deref().tx()
+            self.db().tx()
         }
 
         fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
-            self.deref().tx_mut()
+            self.db().tx_mut()
         }
     }
 

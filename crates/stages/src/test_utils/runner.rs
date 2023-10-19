@@ -5,7 +5,6 @@ use reth_interfaces::{db::DatabaseError, RethError};
 use reth_primitives::MAINNET;
 use reth_provider::ProviderFactory;
 use std::{borrow::Borrow, sync::Arc};
-use std::ops::Deref;
 use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]

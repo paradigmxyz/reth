@@ -2,7 +2,7 @@
 use reth_db::{
     database::Database,
     table::*,
-    test_utils::create_test_rw_db_with_path,
+    test_utils::{create_test_rw_db_with_path, TestTempDatabase},
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
@@ -53,7 +53,7 @@ where
 fn set_up_db<T>(
     bench_db_path: &Path,
     pair: &Vec<(<T as Table>::Key, Bytes, <T as Table>::Value, Bytes)>,
-) -> DatabaseEnv
+) -> TestTempDatabase<DatabaseEnv>
 where
     T: Table + Default,
     T::Key: Default + Clone,

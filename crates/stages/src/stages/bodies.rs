@@ -458,6 +458,7 @@ mod tests {
             database::Database,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             tables,
+            test_utils::TestTempDatabase,
             transaction::{DbTx, DbTxMut},
             DatabaseEnv,
         };
@@ -486,7 +487,6 @@ mod tests {
             sync::Arc,
             task::{Context, Poll},
         };
-        use reth_db::test_utils::TestTempDatabase;
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: B256 = B256::ZERO;
