@@ -12,6 +12,16 @@ use reth_primitives::{
 };
 use std::ops::RangeInclusive;
 
+/// Enum to control transaction hash inclusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TransactionKind {
+    /// Indicates that transactions should be processed without including their hashes.
+    #[default]
+    NoHash,
+    /// Indicates that transactions should be processed along with their hashes.
+    WithHash,
+}
+
 /// A helper enum that represents the origin of the requested block.
 ///
 /// This helper type's sole purpose is to give the caller more control over from where blocks can be
