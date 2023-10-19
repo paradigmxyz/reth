@@ -1031,15 +1031,16 @@ impl TransactionFetcher {
         let mut missing_hashes: Vec<TxHash> = Vec::new();
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
         for hash in hashes {
-            // if this is not already an inflight hash
-            if !self.inflight_hash_to_fallback_peers.contains_key(&hash) {
-                missing_hashes.push(hash);
-                //add it to the inflight hash set
-                let fallback_peers: Vec<PeerId> = vec![peer_id];
-                self.inflight_hash_to_fallback_peers.insert(hash, fallback_peers);
-            } else {
-                //has already inflight, add this peer as a backup
-                self.inflight_hash_to_fallback_peers.get_mut(&hash).unwrap().push(peer_id);
+            match self.inflight_hash_to_fallback_peers.entry(hash) {
+                Entry::Vacant(entry) => {
+                    // the hash is not in inflight hashes, insert it
+                    missing_hashes.push(entry.key().clone());
+                    entry.insert(vec![peer_id]);
+                },
+                Entry::Occupied(mut entry) => {
+                    // the hash is already in inflight, add this peer as a backup
+                    entry.get_mut().push(peer_id);
+                }
             }
         }
         // 2. request all missing from peer
