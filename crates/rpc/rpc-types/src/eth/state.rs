@@ -1,6 +1,6 @@
 //! bindings for state overrides in eth_call
 
-use reth_primitives::{Address, Bytes, B256, U256, U64};
+use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -34,7 +34,7 @@ pub struct AccountOverride {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::address;
+    use alloy_primitives::address;
 
     #[test]
     fn test_state_override() {

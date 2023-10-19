@@ -1040,9 +1040,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         &self,
         block_number: BlockNumber,
     ) -> RethResult<Option<BlockWithSenders>> {
-        let header = self
-            .header_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+        let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
 
         let ommers = self.ommers(block_number.into())?.unwrap_or_default();
         let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;

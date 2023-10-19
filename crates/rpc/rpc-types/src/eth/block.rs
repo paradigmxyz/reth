@@ -1,9 +1,7 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
-use reth_primitives::{
-    Address, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader, Withdrawal, B256, B64, U256,
-    U64,
-};
+use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
+use reth_primitives::{Header as PrimitiveHeader, SealedHeader, Withdrawal};
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
 use std::{collections::BTreeMap, ops::Deref};
 /// Block Transactions depending on the boolean attribute of `eth_getBlockBy*`,

@@ -20,8 +20,10 @@ use reth_provider::{
 };
 use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
 use reth_rpc_types::{
-    state::StateOverride, BlockError, Bundle, CallRequest, EthCallResponse, StateContext,
+    state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
+    StateContext,
 };
+use reth_rpc_types_compat::log::from_primitive_access_list;
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -406,7 +408,7 @@ where
         request.access_list = Some(access_list.clone());
         let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state())?;
 
-        Ok(AccessListWithGasUsed { access_list, gas_used })
+        Ok(AccessListWithGasUsed { access_list: from_primitive_access_list(access_list), gas_used })
     }
 }
 
