@@ -16,7 +16,7 @@ pub enum TransactionVariant {
 impl TransactionVariant {
     /// Returns `Transaction` type
     /// else None
-    pub fn as_regular(&self) -> Option<&Transaction> {
+    pub fn as_plain(&self) -> Option<&Transaction> {
         match self {
             TransactionVariant::Plain(tx) => Some(tx),
             _ => None,
@@ -42,7 +42,7 @@ impl TransactionVariant {
     }
 
     /// Returns true if the transaction is of `Transaction ` variant
-    pub fn is_regular(&self) -> bool {
+    pub fn is_plain(&self) -> bool {
         matches!(self, TransactionVariant::Plain(_))
     }
 
