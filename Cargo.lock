@@ -5589,7 +5589,6 @@ dependencies = [
 name = "reth-codecs"
 version = "0.1.0-alpha.10"
 dependencies = [
- "alloy-primitives",
  "arbitrary",
  "bytes",
  "codecs-derive",
