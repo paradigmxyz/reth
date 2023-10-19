@@ -397,11 +397,10 @@ mod tests {
         },
         CacheState, DatabaseCommit, State,
     };
-    use std::sync::Arc;
 
     #[test]
     fn write_to_db_account_info() {
-        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -544,7 +543,7 @@ mod tests {
 
     #[test]
     fn write_to_db_storage() {
-        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -737,7 +736,7 @@ mod tests {
 
     #[test]
     fn write_to_db_multiple_selfdestructs() {
-        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -1050,7 +1049,7 @@ mod tests {
 
     #[test]
     fn storage_change_after_selfdestruct_within_block() {
-        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
