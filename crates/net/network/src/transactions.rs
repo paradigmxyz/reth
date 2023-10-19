@@ -1034,7 +1034,7 @@ impl TransactionFetcher {
             match self.inflight_hash_to_fallback_peers.entry(hash) {
                 Entry::Vacant(entry) => {
                     // the hash is not in inflight hashes, insert it
-                    missing_hashes.push(entry.key().clone());
+                    missing_hashes.push(*entry.key());
                     entry.insert(vec![peer_id]);
                 }
                 Entry::Occupied(mut entry) => {
@@ -1057,7 +1057,7 @@ impl TransactionFetcher {
             //increment metrics egress_peer_channel_full
             return 1
         }
-        return 0
+        0
     }
 }
 
