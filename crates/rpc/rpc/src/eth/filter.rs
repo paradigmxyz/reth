@@ -453,6 +453,14 @@ where
 
         let is_multi_block_range = from_block != to_block;
 
+        // Since we know that there is at least one log per block, we can check whether the number
+        // of blocks exceeds the max logs response.
+        if let Some(Some(index)) = &log_index_filter.index {
+            if is_multi_block_range && index.len() > self.max_logs_per_response {
+                return Err(FilterError::QueryExceedsMaxResults(self.max_logs_per_response))
+            }
+        }
+
         // TODO: simplify
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         for block_number in log_index_filter.iter() {
@@ -558,11 +566,10 @@ impl LogIndexFilter {
     pub fn iter<'a>(&'a self) -> BlockNumberIterBox<'a> {
         match &self.index {
             Some(Some(indices)) => {
-                Box::new(indices.iter(0).into_iter().map(|num| num as BlockNumber))
-                    as BlockNumberIterBox<'a>
+                Box::new(indices.iter(0).map(|num| num as BlockNumber)) as BlockNumberIterBox<'a>
             }
             Some(None) => Box::new(std::iter::empty()) as BlockNumberIterBox<'a>,
-            None => Box::new(self.block_range().into_iter()) as BlockNumberIterBox<'a>,
+            None => Box::new(self.block_range()) as BlockNumberIterBox<'a>,
         }
     }
 
@@ -611,11 +618,9 @@ impl LogIndexFilter {
                 let mut address_position_union: Option<IntegerList> = None;
                 for address in addresses {
                     let topic_index = provider.log_address_index(*address, self.block_range())?;
-                    address_position_union = match (address_position_union, topic_index) {
-                        (Some(list1), Some(list2)) => Some(list1.union(&list2)),
-                        (Some(list1), None) => Some(list1),
-                        (None, Some(list2)) => Some(list2),
-                        (None, None) => None,
+                    address_position_union = match (&address_position_union, &topic_index) {
+                        (Some(list1), Some(list2)) => Some(list1.union(list2)),
+                        _ => address_position_union.or(topic_index),
                     };
                 }
                 address_position_union
@@ -647,11 +652,9 @@ impl LogIndexFilter {
                     let mut topic_position_union: Option<IntegerList> = None;
                     for topic in topics {
                         let topic_index = provider.log_topic_index(*topic, self.block_range())?;
-                        topic_position_union = match (topic_position_union, topic_index) {
-                            (Some(list1), Some(list2)) => Some(list1.union(&list2)),
-                            (Some(list1), None) => Some(list1),
-                            (None, Some(list2)) => Some(list2),
-                            (None, None) => None,
+                        topic_position_union = match (&topic_position_union, &topic_index) {
+                            (Some(list1), Some(list2)) => Some(list1.union(list2)),
+                            _ => topic_position_union.or(topic_index),
                         };
                     }
                     topic_position_union
