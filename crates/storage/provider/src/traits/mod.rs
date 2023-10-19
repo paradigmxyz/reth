@@ -8,7 +8,8 @@ pub use storage::StorageReader;
 
 mod block;
 pub use block::{
-    BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter, TransactionKind,
+    BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
+    TransactionVariant,
 };
 
 mod block_hash;

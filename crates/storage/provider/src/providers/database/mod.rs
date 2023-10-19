@@ -3,7 +3,7 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
     HeaderProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    TransactionKind, TransactionsProvider, WithdrawalsProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{db::LogLevel, RethError, RethResult};
@@ -249,7 +249,7 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
     fn block_with_senders(
         &self,
         number: BlockNumber,
-        transaction_kind: TransactionKind,
+        transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
         self.provider()?.block_with_senders(number, transaction_kind)
     }

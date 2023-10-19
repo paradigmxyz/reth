@@ -4,7 +4,7 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BundleStateDataProvider, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
     ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
-    TransactionKind, TransactionsProvider, WithdrawalsProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::StoredBlockBodyIndices;
@@ -440,7 +440,7 @@ impl BlockReader for MockEthProvider {
     fn block_with_senders(
         &self,
         _number: BlockNumber,
-        _transaction_kind: TransactionKind,
+        _transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
         Ok(None)
     }

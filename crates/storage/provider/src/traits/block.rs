@@ -14,7 +14,7 @@ use std::ops::RangeInclusive;
 
 /// Enum to control transaction hash inclusion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum TransactionKind {
+pub enum TransactionVariant {
     /// Indicates that transactions should be processed without including their hashes.
     NoHash,
     /// Indicates that transactions should be processed along with their hashes.
@@ -118,7 +118,7 @@ pub trait BlockReader:
     fn block_with_senders(
         &self,
         number: BlockNumber,
-        transaction_kind: TransactionKind,
+        transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>>;
 
     /// Returns all blocks in the given inclusive range.

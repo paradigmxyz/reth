@@ -4,7 +4,7 @@ use crate::{
     CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
     ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    TransactionKind, TransactionsProvider, WithdrawalsProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -269,7 +269,7 @@ where
     fn block_with_senders(
         &self,
         number: BlockNumber,
-        transaction_kind: TransactionKind,
+        transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
         self.database.provider()?.block_with_senders(number, transaction_kind)
     }
