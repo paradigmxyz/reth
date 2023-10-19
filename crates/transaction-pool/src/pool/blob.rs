@@ -110,7 +110,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     }
 
     /// Returns all transactions which:
-    ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`
+    ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`, _and_
     ///  * have a `max_fee_per_gas` greater than or equal to the given `base_fee`
     fn satisfy_pending_fee_ids(&self, pending_fees: &PendingFees) -> Vec<TransactionId> {
         let mut transactions = Vec::new();
@@ -137,7 +137,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     }
 
     /// Removes all transactions (and their descendants) which:
-    ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`
+    ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`, _and_
     ///  * have a `max_fee_per_gas` greater than or equal to the given `base_fee`
     ///
     /// Note: the transactions are not returned in a particular order.
