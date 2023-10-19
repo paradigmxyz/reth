@@ -12,6 +12,16 @@ use reth_primitives::{
 };
 use std::ops::RangeInclusive;
 
+/// Enum to control transaction hash inclusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TransactionVariant {
+    /// Indicates that transactions should be processed without including their hashes.
+    NoHash,
+    /// Indicates that transactions should be processed along with their hashes.
+    #[default]
+    WithHash,
+}
+
 /// A helper enum that represents the origin of the requested block.
 ///
 /// This helper type's sole purpose is to give the caller more control over from where blocks can be
@@ -104,8 +114,14 @@ pub trait BlockReader:
 
     /// Returns the block with senders with matching number from database.
     ///
+    /// Returns the block's transactions in the requested variant.
+    ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>>;
+    fn block_with_senders(
+        &self,
+        number: BlockNumber,
+        transaction_kind: TransactionVariant,
+    ) -> RethResult<Option<BlockWithSenders>>;
 
     /// Returns all blocks in the given inclusive range.
     ///

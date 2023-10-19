@@ -6,7 +6,7 @@ use crate::{
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader,
-    StorageReader, TransactionsProvider, WithdrawalsProvider,
+    StorageReader, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -1039,6 +1039,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     fn block_with_senders(
         &self,
         block_number: BlockNumber,
+        transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
         let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
 
@@ -1066,14 +1067,14 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
 
         let body = transactions
             .into_iter()
-            .map(|tx| {
-                TransactionSigned {
-                    // TODO: This is the fastest way right now to make everything just work with
-                    // a dummy transaction hash.
+            .map(|tx| match transaction_kind {
+                TransactionVariant::NoHash => TransactionSigned {
+                    // Caller explicitly asked for no hash, so we don't calculate it
                     hash: Default::default(),
                     signature: tx.signature,
                     transaction: tx.transaction,
-                }
+                },
+                TransactionVariant::WithHash => tx.with_hash(),
             })
             .collect();
 
