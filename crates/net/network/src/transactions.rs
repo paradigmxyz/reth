@@ -32,7 +32,6 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
@@ -189,16 +188,11 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         // the network
         let pending = pool.pending_transactions_listener();
 
-        let transaction_fetcher = TransactionFetcher {
-            inflight_requests: Default::default(),
-            missing_hashes: Default::default(),
-        };
-
         Self {
             pool,
             network,
             network_events,
-            transaction_fetcher,
+            transaction_fetcher: Default::default(),
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
             peers: Default::default(),
@@ -778,33 +772,21 @@ where
         this.update_request_metrics();
 
         // Advance all requests.
-        while let Poll::Ready(Some(response)) =
+        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
             this.transaction_fetcher.inflight_requests.poll_next_unpin(cx)
         {
-            // Adjusted this line to match the fields on `GetPooledTxResponse`
-            if let GetPooledTxResponse { peer_id, tx_hash: _, result } = response {
-                match &result {
-                    Ok(Ok(txs)) => this.import_transactions(
-                        peer_id,
-                        txs.0.clone(),
-                        TransactionSource::Response,
-                    ),
-                    Ok(Err(req_err)) => {
-                        this.on_request_error(peer_id.clone(), req_err.clone());
-                    }
-                    Err(_) => {
-                        // request channel closed/dropped
-                        this.on_request_error(peer_id.clone(), RequestError::ChannelClosed)
-                    }
+            match result {
+                Ok(Ok(txs)) => {
+                    this.import_transactions(peer_id, txs.0, TransactionSource::Response)
+                }
+                Ok(Err(req_err)) => {
+                    this.on_request_error(peer_id, req_err);
+                }
+                Err(_) => {
+                    // request channel closed/dropped
+                    this.on_request_error(peer_id, RequestError::ChannelClosed)
                 }
             }
-        }
-
-        // Check timed-out requests using the TransactionFetcher.
-        let now = Instant::now();
-        let dummy_timeout_value = Duration::from_secs(10); // Placeholder value for timeout
-        if this.transaction_fetcher.check_timed_out_requests(now, dummy_timeout_value) {
-            // Handle timed-out requests...
         }
 
         this.update_request_metrics();
@@ -1067,7 +1049,7 @@ impl TransactionFetcher {
                 self.inflight_hash_to_fallback_peers.insert(hash, fallback_peers);
             } else { 
                 //has already inflight, add this peer as a backup
-                self.inflight_hash_to_fallback_peers[&hash].push(peer_id);
+                self.inflight_hash_to_fallback_peers.get_mut(&hash).unwrap().push(peer_id);
             }
         }
 
@@ -1090,11 +1072,6 @@ impl TransactionFetcher {
 
         return 0;
     }
-
-  
-
-
-
 
 }
 
@@ -1146,45 +1123,6 @@ mod tests {
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::future::poll_fn;
-
-    use reth_primitives::TxHash;
-
-    fn create_request_from_hex(hex_string: &str, peer_id: PeerId) -> GetPooledTxRequestFut {
-        let (_, recv) = oneshot::channel::<RequestResult<PooledTransactions>>();
-
-        let bytes: Vec<u8> = hex::decode(hex_string).expect("Decoding failed");
-        let tx_hash: TxHash = TxHash::from_slice(&bytes);
-
-        let request =
-            GetPooledTxRequest { peer_id, tx_hash, init_timestamp: Instant::now(), response: recv };
-
-        GetPooledTxRequestFut { inner: Some(request) }
-    }
-
-    #[test]
-    fn so_la_la() {
-        println!("Hello, world!");
-
-        let peer_id_00: PeerId = PeerId::random();
-        let tx_request_00: GetPooledTxRequestFut = create_request_from_hex(
-            "00000000000000000000000000000000000000000000000000000000deadc0de",
-            peer_id_00,
-        );
-        let peer_id_01: PeerId = PeerId::random();
-        let tx_request_01: GetPooledTxRequestFut = create_request_from_hex(
-            "00000000000000000000000000000000000000000000000000000000feedbeef",
-            peer_id_01,
-        );
-        let inflight_requests: FuturesUnordered<GetPooledTxRequestFut> = FuturesUnordered::new();
-        inflight_requests.push(tx_request_00);
-        inflight_requests.push(tx_request_01);
-
-        let missing_hashes = HashMap::new();
-
-        let transaction_fetcher = TransactionFetcher { inflight_requests, missing_hashes };
-
-        assert_eq!(transaction_fetcher.missing_hashes.len(), 0);
-    }
 
     #[tokio::test(flavor = "multi_thread")]
     #[cfg_attr(not(feature = "geth-tests"), ignore)]
