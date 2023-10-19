@@ -1,6 +1,6 @@
 //!  Helper enum functions  for `Transaction`, `TransactionSigned` and
 //! `TransactionSignedEcRecovered`
-use crate::{Transaction, TransactionSigned, TransactionSignedEcRecovered,Signature};
+use crate::{Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered};
 
 /// Different transaction formats under one hood
 #[derive(Debug, Clone)]
@@ -62,42 +62,49 @@ impl TransactionVariant {
         match self {
             TransactionVariant::Plain(tx) => Some(tx),
             TransactionVariant::Signed(tx) => Some(tx.transaction),
-            TransactionVariant::SignedEcRecovered(tx)  =>  Some(tx.signed_transaction.transaction),
+            TransactionVariant::SignedEcRecovered(tx) => Some(tx.signed_transaction.transaction),
         }
     }
 
     /// Consumes the `TransactionVariant`
     /// Returns the consumed `TransactionSigned `
-    pub fn into_signed(self, signature:Signature) -> Option<TransactionSigned> {
+    pub fn into_signed(self, signature: Signature) -> Option<TransactionSigned> {
         match self {
             TransactionVariant::Signed(tx) => Some(tx),
             TransactionVariant::Plain(tx) => {
-                let mut  instance  = TransactionSigned{
-                    transaction:tx ,signature,hash:Default::default()
-                };
-                instance.hash  = instance.recalculate_hash();
+                let mut instance =
+                    TransactionSigned { transaction: tx, signature, hash: Default::default() };
+                instance.hash = instance.recalculate_hash();
                 Some(instance)
-            },
-            TransactionVariant::SignedEcRecovered(tx)  =>Some(tx.signed_transaction)
+            }
+            TransactionVariant::SignedEcRecovered(tx) => Some(tx.signed_transaction),
         }
     }
 
     /// Consumes the `TransactionVariant`
     /// Returns the consumed `TransactionSignedEcRecovered `
-    pub fn into_signed_ec_recovered(self,signature:Signature) -> Option<TransactionSignedEcRecovered> {
+    pub fn into_signed_ec_recovered(
+        self,
+        signature: Signature,
+    ) -> Option<TransactionSignedEcRecovered> {
         match self {
             TransactionVariant::SignedEcRecovered(tx) => Some(tx),
-            TransactionVariant::Signed(tx)=>{
+            TransactionVariant::Signed(tx) => {
                 let signer = tx.recover_signer();
-                Some(TransactionSignedEcRecovered { signer:signer.unwrap(),signed_transaction: tx })
+                Some(TransactionSignedEcRecovered {
+                    signer: signer.unwrap(),
+                    signed_transaction: tx,
+                })
             }
-            TransactionVariant::Plain(tx) =>{
-                let mut  instance  = TransactionSigned{
-                    transaction:tx ,signature,hash:Default::default()
-                };
-                instance.hash  = instance.recalculate_hash();
+            TransactionVariant::Plain(tx) => {
+                let mut instance =
+                    TransactionSigned { transaction: tx, signature, hash: Default::default() };
+                instance.hash = instance.recalculate_hash();
                 let signer = instance.recover_signer();
-                Some(TransactionSignedEcRecovered { signer: signer.unwrap(), signed_transaction: instance })
+                Some(TransactionSignedEcRecovered {
+                    signer: signer.unwrap(),
+                    signed_transaction: instance,
+                })
             }
         }
     }

@@ -24,11 +24,11 @@ pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 pub use signature::Signature;
+pub use transactionvariant::TransactionVariant;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 pub use tx_value::TxValue;
-pub use transactionvariant::TransactionVariant;
 
 mod access_list;
 mod eip1559;
@@ -39,9 +39,9 @@ mod legacy;
 mod meta;
 mod pooled;
 mod signature;
+mod transactionvariant;
 mod tx_type;
 mod tx_value;
-mod transactionvariant;
 pub(crate) mod util;
 
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
