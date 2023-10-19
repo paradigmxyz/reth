@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use serde::{
     de::{SeqAccess, Unexpected, Visitor},
     ser::SerializeSeq,
@@ -100,6 +101,13 @@ impl IntegerList {
         } else {
             Some(Self::new_pre_sorted(result))
         }
+    }
+
+    /// Iterates over two lists of integers and creates a union.
+    pub fn union(&self, other: &Self) -> Self {
+        Self::new_pre_sorted(Vec::from_iter(
+            self.0.iter(0).chain(other.iter(0)).sorted_unstable().dedup(),
+        ))
     }
 }
 
@@ -208,22 +216,45 @@ mod test {
     #[test]
     fn test_integer_list_intersection() {
         // Empty intersection of non-empty lists
-        let a = IntegerList::new([1, 2, 3]).unwrap();
-        let b = IntegerList::new([4, 5, 6]).unwrap();
+        let a = IntegerList::new_pre_sorted([1, 2, 3]);
+        let b = IntegerList::new_pre_sorted([4, 5, 6]);
         assert_eq!(a.intersection(&b), None);
 
-        let a = IntegerList::new([1]).unwrap();
-        let b = IntegerList::new([1]).unwrap();
+        let a = IntegerList::new_pre_sorted([1]);
+        let b = IntegerList::new_pre_sorted([1]);
         assert_eq!(a.intersection(&b), Some(a));
 
-        let a = IntegerList::new([2, 3, 4]).unwrap();
-        let b = IntegerList::new([3, 4, 5]).unwrap();
-        assert_eq!(a.intersection(&b), Some(IntegerList::new([3, 4]).unwrap()));
+        let a = IntegerList::new_pre_sorted([2, 3, 4]);
+        let b = IntegerList::new_pre_sorted([3, 4, 5]);
+        assert_eq!(a.intersection(&b), Some(IntegerList::new_pre_sorted([3, 4])));
 
         // Intersection of even numbers
-        let a = IntegerList::new((1..=50).map(|num| num * 2).collect::<Vec<usize>>()).unwrap();
-        let b = IntegerList::new((0..=100).collect::<Vec<usize>>()).unwrap();
+        let a = IntegerList::new_pre_sorted((1..=50).map(|num| num * 2).collect::<Vec<usize>>());
+        let b = IntegerList::new_pre_sorted((0..=100).collect::<Vec<usize>>());
         assert_eq!(a.intersection(&b), Some(a));
+    }
+
+    #[test]
+    fn test_integer_list_union() {
+        // Sequential
+        let a = IntegerList::new_pre_sorted([1, 2, 3]);
+        let b = IntegerList::new_pre_sorted([4, 5, 6]);
+        assert_eq!(a.union(&b), IntegerList::new_pre_sorted([1, 2, 3, 4, 5, 6]));
+
+        // Equivalent
+        let a = IntegerList::new_pre_sorted([1]);
+        let b = IntegerList::new_pre_sorted([1]);
+        assert_eq!(a.union(&b), IntegerList::new_pre_sorted([1]));
+
+        // Overlapping
+        let a = IntegerList::new_pre_sorted([2, 3, 4]);
+        let b = IntegerList::new_pre_sorted([3, 4, 5]);
+        assert_eq!(a.union(&b), IntegerList::new_pre_sorted([2, 3, 4, 5]));
+
+        // Union of a subset
+        let a = IntegerList::new_pre_sorted((1..=50).map(|num| num * 2).collect::<Vec<usize>>());
+        let b = IntegerList::new_pre_sorted((0..=100).collect::<Vec<usize>>());
+        assert_eq!(a.union(&b), b);
     }
 
     #[test]

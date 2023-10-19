@@ -536,52 +536,57 @@ type BlockNumberIterBox<'a> = Box<dyn Iterator<Item = BlockNumber> + Send + Sync
 pub struct LogIndexFilter {
     /// Full block range.
     block_range: RangeInclusive<BlockNumber>,
-    /// Represents the union of all block indices that match installed filters.
+    /// Represents the union of all block numbers that match installed filters.
     ///
     /// Since [IntegerList] cannot be empty, `Some(None)` represents an active filter with no
     /// matching block numbers.
-    indices: Option<Option<IntegerList>>,
+    index: Option<Option<IntegerList>>,
 }
 
 impl LogIndexFilter {
     /// Create new instance of [LogIndexFilter].
     pub fn new(block_range: RangeInclusive<BlockNumber>) -> Self {
-        Self { block_range, indices: None }
+        Self { block_range, index: None }
+    }
+
+    /// Return the block range for this filter.
+    pub fn block_range(&self) -> RangeInclusive<BlockNumber> {
+        self.block_range.clone()
     }
 
     /// Iterate over block numbers.
     pub fn iter<'a>(&'a self) -> BlockNumberIterBox<'a> {
-        match &self.indices {
+        match &self.index {
             Some(Some(indices)) => {
                 Box::new(indices.iter(0).into_iter().map(|num| num as BlockNumber))
                     as BlockNumberIterBox<'a>
             }
             Some(None) => Box::new(std::iter::empty()) as BlockNumberIterBox<'a>,
-            None => Box::new(self.block_range.clone().into_iter()) as BlockNumberIterBox<'a>,
+            None => Box::new(self.block_range().into_iter()) as BlockNumberIterBox<'a>,
         }
     }
 
     /// Returns `true` if the filter is active but has no matching block numbers.
     pub fn is_empty(&self) -> bool {
-        matches!(self.indices, Some(None))
+        matches!(self.index, Some(None))
     }
 
     /// Change the inner indices to be the union of itself and incoming.
-    pub fn intersection_indices(&mut self, new_indices: Option<IntegerList>) {
-        match (&mut self.indices, new_indices) {
+    pub fn index_intersection(&mut self, new_indices: Option<IntegerList>) {
+        match (&mut self.index, new_indices) {
             // Existing filter is already empty, no need to update.
             (Some(None), _) => (),
             // Incoming filter matched no block numbers, reset existing indices.
             (_, None) => {
-                self.indices = Some(None);
+                self.index = Some(None);
             }
             // Existing filter has not been yet activated, so set it to the incoming indices.
             (None, Some(new_indices)) => {
-                self.indices = Some(Some(new_indices));
+                self.index = Some(Some(new_indices));
             }
             // Both filters contain at least one block number, union them.
             (Some(Some(existing)), Some(new_indices)) => {
-                self.indices = Some(existing.intersection(&new_indices));
+                self.index = Some(existing.intersection(&new_indices));
             }
         }
     }
@@ -592,20 +597,32 @@ impl LogIndexFilter {
         provider: &impl LogHistoryReader,
         address_filter: &ValueOrArray<Address>,
     ) -> Result<(), FilterError> {
-        let addresses = match address_filter {
-            ValueOrArray::Value(address) => Vec::from([*address]),
-            ValueOrArray::Array(addresses) => addresses.clone(),
-        };
-        for address in addresses {
-            // Check if previous filter conditions already matched no blocks.
-            // Do this on each iteration to avoid unnecessary queries.
-            if self.is_empty() {
-                return Ok(())
-            }
-
-            let address_indices = provider.log_address_index(address, self.block_range.clone())?;
-            self.intersection_indices(address_indices);
+        // Check if previous filter conditions already matched no blocks.
+        // Do this on each iteration to avoid unnecessary queries.
+        if self.is_empty() {
+            return Ok(())
         }
+
+        let address_index = match address_filter {
+            ValueOrArray::Value(address) => {
+                provider.log_address_index(*address, self.block_range())?
+            }
+            ValueOrArray::Array(addresses) => {
+                let mut address_position_union: Option<IntegerList> = None;
+                for address in addresses {
+                    let topic_index = provider.log_address_index(*address, self.block_range())?;
+                    address_position_union = match (address_position_union, topic_index) {
+                        (Some(list1), Some(list2)) => Some(list1.union(&list2)),
+                        (Some(list1), None) => Some(list1),
+                        (None, Some(list2)) => Some(list2),
+                        (None, None) => None,
+                    };
+                }
+                address_position_union
+            }
+        };
+        self.index_intersection(address_index);
+
         Ok(())
     }
 
@@ -615,22 +632,32 @@ impl LogIndexFilter {
         provider: &impl LogHistoryReader,
         topic_filters: &[ValueOrArray<B256>],
     ) -> Result<(), FilterError> {
-        let topics = topic_filters
-            .iter()
-            .flat_map(|topic| match topic {
-                ValueOrArray::Value(topic) => Vec::from([*topic]),
-                ValueOrArray::Array(topics) => topics.iter().copied().collect(),
-            })
-            .collect::<Vec<B256>>();
-        for topic in topics {
+        for topic_filter in topic_filters {
             // Check if previous filter conditions already matched no blocks.
             // Do this on each iteration to avoid unnecessary queries.
             if self.is_empty() {
                 return Ok(())
             }
 
-            let topic_indices = provider.log_topic_index(topic, self.block_range.clone())?;
-            self.intersection_indices(topic_indices);
+            let topic_position_index = match topic_filter {
+                ValueOrArray::Value(topic) => {
+                    provider.log_topic_index(*topic, self.block_range())?
+                }
+                ValueOrArray::Array(topics) => {
+                    let mut topic_position_union: Option<IntegerList> = None;
+                    for topic in topics {
+                        let topic_index = provider.log_topic_index(*topic, self.block_range())?;
+                        topic_position_union = match (topic_position_union, topic_index) {
+                            (Some(list1), Some(list2)) => Some(list1.union(&list2)),
+                            (Some(list1), None) => Some(list1),
+                            (None, Some(list2)) => Some(list2),
+                            (None, None) => None,
+                        };
+                    }
+                    topic_position_union
+                }
+            };
+            self.index_intersection(topic_position_index);
         }
         Ok(())
     }
