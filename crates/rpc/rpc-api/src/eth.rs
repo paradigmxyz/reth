@@ -198,13 +198,13 @@ pub trait EthApi {
     #[method(name = "gasPrice")]
     async fn gas_price(&self) -> RpcResult<U256>;
 
-    /// Introduced in EIP-1159, returns suggestion for the priority for dynamic fee transactions.
+    /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
     /// Returns the Transaction fee history
     ///
-    /// Introduced in EIP-1159 for getting information on the appropriate priority fee to use.
+    /// Introduced in EIP-1559 for getting information on the appropriate priority fee to use.
     ///
     /// Returns transaction base fee per gas and effective priority fee per gas for the
     /// requested/supported block range. The returned Fee history for the returned block range
