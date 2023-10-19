@@ -5,7 +5,7 @@ use reth_db::{
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::{Table, TableRow},
     tables,
-    test_utils::{create_test_rw_db, create_test_rw_db_with_path},
+    test_utils::{create_test_rw_db, create_test_rw_db_with_path, TestTempDatabase},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseEnv, DatabaseError as DbError,
 };
@@ -57,13 +57,13 @@ impl TestTransaction {
     }
 
     /// Return a database wrapped in [DatabaseProviderRW].
-    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<DatabaseEnv>> {
-        self.factory.provider_rw().expect("failed to create db container").into()
+    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<TestTempDatabase<DatabaseEnv>>> {
+        self.factory.provider_rw().expect("failed to create db container")
     }
 
     /// Return a database wrapped in [DatabaseProviderRO].
-    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<DatabaseEnv>> {
-        self.factory.provider().expect("failed to create db container").into()
+    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<TestTempDatabase<DatabaseEnv>>> {
+        self.factory.provider().expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.

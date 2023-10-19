@@ -5,6 +5,7 @@ use reth_interfaces::{db::DatabaseError, RethError};
 use reth_primitives::MAINNET;
 use reth_provider::ProviderFactory;
 use std::{borrow::Borrow, sync::Arc};
+use std::ops::Deref;
 use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
@@ -48,7 +49,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+            let factory = ProviderFactory::new(db.db(), MAINNET.clone());
             let provider = factory.provider_rw().unwrap();
 
             let result = stage.execute(&provider, input).await;
@@ -74,7 +75,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+            let factory = ProviderFactory::new(db.db(), MAINNET.clone());
             let provider = factory.provider_rw().unwrap();
 
             let result = stage.unwind(&provider, input).await;

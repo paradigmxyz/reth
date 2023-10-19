@@ -486,6 +486,7 @@ mod tests {
             sync::Arc,
             task::{Context, Poll},
         };
+        use reth_db::test_utils::TestTempDatabase;
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: B256 = B256::ZERO;
@@ -740,7 +741,7 @@ mod tests {
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
-            db: Arc<DatabaseEnv>,
+            db: Arc<TestTempDatabase<DatabaseEnv>>,
             responses: HashMap<B256, BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
@@ -748,7 +749,7 @@ mod tests {
 
         impl TestBodyDownloader {
             pub(crate) fn new(
-                db: Arc<DatabaseEnv>,
+                db: Arc<TestTempDatabase<DatabaseEnv>>,
                 responses: HashMap<B256, BlockBody>,
                 batch_size: u64,
             ) -> Self {

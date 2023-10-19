@@ -174,19 +174,26 @@ pub mod test_utils {
 
     /// A database will delete the db dir when dropped.
     #[derive(Debug)]
-    pub struct TestTempDataBase<DB> {
+    pub struct TestTempDatabase<DB> {
         db: Option<DB>,
         path: PathBuf,
     }
 
-    impl<DB> Drop for TestTempDataBase<DB> {
+    impl<DB> Drop for TestTempDatabase<DB> {
         fn drop(&mut self) {
             drop(self.db.take());
             let _ = std::fs::remove_dir_all(&self.path);
         }
     }
 
-    impl<DB> Deref for TestTempDataBase<DB> {
+    impl<DB> TestTempDatabase<DB> {
+        /// retunrs the inner db
+        pub fn db(&self) -> &DB {
+            self.db.as_ref().unwrap()
+        }
+    }
+
+    impl<DB> Deref for TestTempDatabase<DB> {
         type Target = DB;
 
         fn deref(&self) -> &Self::Target {
@@ -194,12 +201,12 @@ pub mod test_utils {
         }
     }
 
-    impl<'a, DB: Database> DatabaseGAT<'a> for TestTempDataBase<DB> {
+    impl<'a, DB: Database> DatabaseGAT<'a> for TestTempDatabase<DB> {
         type TX = <DB as DatabaseGAT<'a>>::TX;
         type TXMut = <DB as DatabaseGAT<'a>>::TXMut;
     }
 
-    impl<DB: Database> Database for TestTempDataBase<DB> {
+    impl<DB: Database> Database for TestTempDatabase<DB> {
         fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
             self.deref().tx()
         }
@@ -210,32 +217,32 @@ pub mod test_utils {
     }
 
     /// Create read/write database for testing
-    pub fn create_test_rw_db() -> Arc<TestTempDataBase<DatabaseEnv>> {
+    pub fn create_test_rw_db() -> Arc<TestTempDatabase<DatabaseEnv>> {
         let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
         let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
 
         let db = init_db(&path, None).expect(&emsg);
 
-        Arc::new(TestTempDataBase { db: Some(db), path })
+        Arc::new(TestTempDatabase { db: Some(db), path })
     }
 
     /// Create read/write database for testing
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(
         path: P,
-    ) -> Arc<TestTempDataBase<DatabaseEnv>> {
+    ) -> Arc<TestTempDatabase<DatabaseEnv>> {
         let path = path.as_ref().to_path_buf();
         let db = init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
-        Arc::new(TestTempDataBase { db: Some(db), path })
+        Arc::new(TestTempDatabase { db: Some(db), path })
     }
 
     /// Create read only database for testing
-    pub fn create_test_ro_db() -> Arc<TestTempDataBase<DatabaseEnvRO>> {
+    pub fn create_test_ro_db() -> Arc<TestTempDatabase<DatabaseEnvRO>> {
         let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
         {
             init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
         }
         let db = open_db_read_only(path.as_path(), None).expect(ERROR_DB_OPEN);
-        Arc::new(TestTempDataBase { db: Some(db), path })
+        Arc::new(TestTempDatabase { db: Some(db), path })
     }
 }
 
