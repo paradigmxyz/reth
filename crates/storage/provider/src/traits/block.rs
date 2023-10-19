@@ -114,6 +114,8 @@ pub trait BlockReader:
 
     /// Returns the block with senders with matching number from database.
     ///
+    /// Returns the block's transactions in the requested variant.
+    ///
     /// Returns `None` if block is not found.
     fn block_with_senders(
         &self,

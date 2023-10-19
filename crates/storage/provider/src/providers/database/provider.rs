@@ -1071,15 +1071,12 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             .into_iter()
             .map(|tx| match transaction_kind {
                 TransactionVariant::NoHash => TransactionSigned {
+                    // Caller explicitly asked for no hash, so we don't calculate it
                     hash: Default::default(),
                     signature: tx.signature,
                     transaction: tx.transaction,
                 },
-                TransactionVariant::WithHash => TransactionSigned {
-                    hash: tx.hash(),
-                    signature: tx.signature,
-                    transaction: tx.transaction,
-                },
+                TransactionVariant::WithHash => tx.with_hash(),
             })
             .collect();
 

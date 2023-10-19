@@ -144,6 +144,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+            // we need the block's transactions but we don't need the transaction hashes
             let block = provider
                 .block_with_senders(block_number, TransactionVariant::NoHash)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
