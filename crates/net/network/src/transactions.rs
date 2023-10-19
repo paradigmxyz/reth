@@ -983,14 +983,11 @@ impl TransactionSource {
 /// An inflight request for `PooledTransactions` from a peer
 struct GetPooledTxRequest {
     peer_id: PeerId,
-    tx_hash: TxHash,
-    init_timestamp: Instant,
     response: oneshot::Receiver<RequestResult<PooledTransactions>>,
 }
 
 struct GetPooledTxResponse {
     peer_id: PeerId,
-    tx_hash: TxHash,
     result: Result<RequestResult<PooledTransactions>, RecvError>,
 }
 
@@ -1004,14 +1001,11 @@ struct GetPooledTxRequestFut {
 impl GetPooledTxRequestFut {
     fn new(
         peer_id: PeerId,
-        tx_hash: TxHash,
         response: oneshot::Receiver<RequestResult<PooledTransactions>>,
     ) -> Self {
         Self {
             inner: Some(GetPooledTxRequest {
                 peer_id,
-                tx_hash,
-                init_timestamp: Instant::now(),
                 response,
             }),
         }
@@ -1026,7 +1020,6 @@ impl Future for GetPooledTxRequestFut {
         match req.response.poll_unpin(cx) {
             Poll::Ready(result) => Poll::Ready(GetPooledTxResponse {
                 peer_id: req.peer_id,
-                tx_hash: req.tx_hash,
                 result,
             }),
             Poll::Pending => {
@@ -1067,14 +1060,44 @@ struct TransactionFetcher {
 impl TransactionFetcher {
 
     // request the missing transactions
-    fn request_from(&mut self, hashes: Vec<TxHash>, peer: &Peer) {
+    fn request_from(&mut self, hashes: Vec<TxHash>, peer: &Peer) -> i32 {
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
-        let missing_hashes: Vec<TxHash> =
-            hashes.iter().filter(|&&hash| !self.is_inflight(&hash)).cloned().collect();
-        // - you have the inflight requests, and the peer that they've been requested from
-        // - you create a fallback list, in case that inflight transaction timesout
+        let peer_id: PeerId = peer.request_tx.peer_id;
+        
+        let mut missing_hashes: Vec<TxHash> = Vec::new();
+
+        for hash in hashes {
+            // if this is not already an inflight hash
+            if !self.inflight_hash_to_fallback_peers.contains_key(&hash) {
+                missing_hashes.push(hash);
+                //add it to the inflight hash set
+                let mut fallback_peers: Vec<PeerId> = Vec::new();
+                fallback_peers.push(peer_id);
+                self.inflight_hash_to_fallback_peers.insert(hash, fallback_peers);
+            } else { 
+                //has already inflight, add this peer as a backup
+                self.inflight_hash_to_fallback_peers[&hash].push(peer_id);
+            }
+        }
+
         // 2. request all missing from peer
+        let (response, rx) = oneshot::channel();
+        let req: PeerRequest = PeerRequest::GetPooledTransactions {
+            request: GetPooledTransactions(missing_hashes),
+            response,
+        };
+
         // 3. insert hashes to inflight set
+        if peer.request_tx.try_send(req).is_ok() {
+            //create a new request for it, from that peer
+            self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
+            
+        } else {
+            //increment metrics egress_peer_channel_full
+            return 1;
+        }
+
+        return 0;
     }
 
   
@@ -1082,15 +1105,6 @@ impl TransactionFetcher {
 
 
 
-    fn is_inflight(&self, hash: &TxHash) -> bool {
-        self.inflight_requests.iter().any(|req_fut| {
-            if let Some(req) = &req_fut.inner {
-                &req.tx_hash == hash
-            } else {
-                false
-            }
-        })
-    }
 }
 
 /// Commands to send to the [`TransactionsManager`]
