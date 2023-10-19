@@ -24,7 +24,10 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{mpsc::Receiver, Mutex};
+use tokio::{
+    sync::{mpsc::Receiver, Mutex},
+    time::MissedTickBehavior,
+};
 use tracing::trace;
 
 /// The maximum number of headers we read at once when handling a range filter.
@@ -36,7 +39,11 @@ pub struct EthFilter<Provider, Pool> {
     inner: Arc<EthFilterInner<Provider, Pool>>,
 }
 
-impl<Provider: Send + Sync + 'static, Pool: Send + Sync + 'static> EthFilter<Provider, Pool> {
+impl<Provider, Pool> EthFilter<Provider, Pool>
+where
+    Provider: Send + Sync + 'static,
+    Pool: Send + Sync + 'static,
+{
     /// Creates a new, shareable instance.
     ///
     /// This uses the given pool to get notified about new transactions, the provider to interact
@@ -67,9 +74,9 @@ impl<Provider: Send + Sync + 'static, Pool: Send + Sync + 'static> EthFilter<Pro
 
         let eth_filter_clone = eth_filter.clone();
         task_spawner.clone().spawn_critical(
-            "stale-filters-cleanr",
+            "eth-filters_stale-filters-clean",
             Box::pin(async move {
-                eth_filter_clone.clear_stale_filters().await;
+                eth_filter_clone.watch_and_clear_stale_filters().await;
             }),
         );
 
@@ -81,26 +88,29 @@ impl<Provider: Send + Sync + 'static, Pool: Send + Sync + 'static> EthFilter<Pro
         &self.inner.active_filters
     }
 
-    async fn clear_stale_filters(&self) {
+    /// Endless future that [Self::clear_stale_filters] every `stale_filter_ttl` interval.
+    async fn watch_and_clear_stale_filters(&self) {
         let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
-        let active_filters_arc = Arc::clone(&self.inner.active_filters.inner);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-
-            trace!("clear stale filters tick...");
-            {
-                active_filters_arc.lock().await.retain(|id, filter| {
-                    let is_valid =
-                        filter.last_poll_timestamp.elapsed() < self.inner.stale_filter_ttl;
-
-                    if !is_valid {
-                        trace!("evict filter with id: {:?}", id);
-                    }
-
-                    is_valid
-                })
-            }
+            self.clear_stale_filters(Instant::now()).await;
         }
+    }
+
+    /// Clears all filters that have not been polled for longer than the configured
+    /// `stale_filter_ttl` at the given instant.
+    pub async fn clear_stale_filters(&self, now: Instant) {
+        trace!(target: "rpc::eth", "clear stale filters tick");
+        self.active_filters().inner.lock().await.retain(|id, filter| {
+            let is_valid = (now - filter.last_poll_timestamp) < self.inner.stale_filter_ttl;
+
+            if !is_valid {
+                trace!(target: "rpc::eth", "evict filter with id: {:?}", id);
+            }
+
+            is_valid
+        })
     }
 }
 
