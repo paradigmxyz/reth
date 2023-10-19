@@ -1056,73 +1056,40 @@ struct Peer {
 ///   we can check first if they're already being requested.
 /// * missing hashes and peers that send us these - so we can possibly re-request them
 
-#[derive(Debug,Default)]
+#[derive(Debug, Default)]
 struct TransactionFetcher {
     /// All currently active requests for pooled transactions.
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
-
-    /// Mapping of transaction hashes to the peers that have advertised them.
-    missing_hashes: HashMap<TxHash, Vec<PeerId>>,
+    /// Set that tracks all hashes that are currently being fetched.
+    inflight_hash_to_fallback_peers: HashMap<TxHash, Vec<PeerId>>,
 }
 
 impl TransactionFetcher {
 
-    /// Adds a request as inflight.
-    fn register_inflight(&mut self, request: GetPooledTxRequestFut) {
-        self.inflight_requests.push(request);
+    // request the missing transactions
+    fn request_from(&mut self, hashes: Vec<TxHash>, peer: &Peer) {
+        // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
+        let missing_hashes: Vec<TxHash> =
+            hashes.iter().filter(|&&hash| !self.is_inflight(&hash)).cloned().collect();
+        // - you have the inflight requests, and the peer that they've been requested from
+        // - you create a fallback list, in case that inflight transaction timesout
+        // 2. request all missing from peer
+        // 3. insert hashes to inflight set
     }
 
-    /// Check if a hash is in-flight.
+  
+
+
+
+
     fn is_inflight(&self, hash: &TxHash) -> bool {
-        self.inflight_requests.iter().any(|request| {
-            if let Some(inner_req) = &request.inner {
-                &inner_req.tx_hash == hash
+        self.inflight_requests.iter().any(|req_fut| {
+            if let Some(req) = &req_fut.inner {
+                &req.tx_hash == hash
             } else {
                 false
             }
         })
-    }
-
-    /// Adds missing transaction hashes and the peer that advertised them.
-    fn add_missing_hashes(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
-        for hash in hashes {
-            if !self.is_inflight(hash) {
-                self.missing_hashes.entry(hash.clone()).or_default().push(peer_id.clone());
-            }
-        }
-    }
-
-    /// Checks the inflight requests for any that have timed out.
-    fn check_timed_out_requests(
-        &mut self,
-        current_time: Instant,
-        timeout_duration: Duration,
-    ) -> bool {
-        let inflight_requests_temp = std::mem::take(&mut self.inflight_requests);
-
-        for request_fut in inflight_requests_temp {
-            if let Some(request) = &request_fut.inner {
-                if current_time.duration_since(request.init_timestamp) <= timeout_duration {
-                    self.inflight_requests.push(request_fut);
-                } else {
-                    // Handle the timeout
-                    eprintln!(
-                        "Request for tx_hash {:?} from peer {:?} has timed out",
-                        &request.tx_hash, &request.peer_id
-                    );
-
-                    // Add the hash back to the missing_hashes map
-                    self.missing_hashes
-                        .entry(request.tx_hash.clone())
-                        .or_default()
-                        .push(request.peer_id.clone());
-                }
-            } else {
-                self.inflight_requests.push(request_fut);
-            }
-        }
-
-        self.missing_hashes.len() > 0
     }
 }
 
@@ -1174,6 +1141,45 @@ mod tests {
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::future::poll_fn;
+
+    use reth_primitives::TxHash;
+
+    fn create_request_from_hex(hex_string: &str, peer_id: PeerId) -> GetPooledTxRequestFut {
+        let (_, recv) = oneshot::channel::<RequestResult<PooledTransactions>>();
+
+        let bytes: Vec<u8> = hex::decode(hex_string).expect("Decoding failed");
+        let tx_hash: TxHash = TxHash::from_slice(&bytes);
+
+        let request =
+            GetPooledTxRequest { peer_id, tx_hash, init_timestamp: Instant::now(), response: recv };
+
+        GetPooledTxRequestFut { inner: Some(request) }
+    }
+
+    #[test]
+    fn so_la_la() {
+        println!("Hello, world!");
+
+        let peer_id_00: PeerId = PeerId::random();
+        let tx_request_00: GetPooledTxRequestFut = create_request_from_hex(
+            "00000000000000000000000000000000000000000000000000000000deadc0de",
+            peer_id_00,
+        );
+        let peer_id_01: PeerId = PeerId::random();
+        let tx_request_01: GetPooledTxRequestFut = create_request_from_hex(
+            "00000000000000000000000000000000000000000000000000000000feedbeef",
+            peer_id_01,
+        );
+        let inflight_requests: FuturesUnordered<GetPooledTxRequestFut> = FuturesUnordered::new();
+        inflight_requests.push(tx_request_00);
+        inflight_requests.push(tx_request_01);
+
+        let missing_hashes = HashMap::new();
+
+        let transaction_fetcher = TransactionFetcher { inflight_requests, missing_hashes };
+
+        assert_eq!(transaction_fetcher.missing_hashes.len(), 0);
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     #[cfg_attr(not(feature = "geth-tests"), ignore)]
