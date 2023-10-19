@@ -50,6 +50,8 @@ where
     /// with the blockchain, the cache to fetch cacheable data, like the logs and the
     /// max_logs_per_response to limit the amount of logs returned in a single response
     /// `eth_getLogs`
+    ///
+    /// This also spawns a task that periodically clears stale filters.
     pub fn new(
         provider: Provider,
         pool: Pool,
@@ -101,7 +103,7 @@ where
     /// Clears all filters that have not been polled for longer than the configured
     /// `stale_filter_ttl` at the given instant.
     pub async fn clear_stale_filters(&self, now: Instant) {
-        trace!(target: "rpc::eth", "clear stale filters tick");
+        trace!(target: "rpc::eth", "clear stale filters");
         self.active_filters().inner.lock().await.retain(|id, filter| {
             let is_valid = (now - filter.last_poll_timestamp) < self.inner.stale_filter_ttl;
 
