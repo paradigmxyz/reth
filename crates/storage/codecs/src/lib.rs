@@ -8,11 +8,8 @@
 
 pub use codecs_derive::*;
 
+use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
 use bytes::Buf;
-use revm_primitives::{
-    alloy_primitives::{Bloom, B512},
-    Address, Bytes, B256, U256,
-};
 
 pub use codecs_derive::*;
 

@@ -1,6 +1,4 @@
-//! Reth block execution/validation configuration and constants
-
-use reth_primitives::{revm_primitives, ChainSpec, Hardfork, Head};
+use crate::{revm_primitives, ChainSpec, Hardfork, Head};
 
 /// Returns the spec id at the given timestamp.
 ///

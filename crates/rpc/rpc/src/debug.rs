@@ -14,12 +14,12 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
+    revm::env::tx_env_with_recovered, Account, Address, Block, BlockId, BlockNumberOrTag, Bytes,
+    TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::{StateProviderDatabase, SubState},
-    env::tx_env_with_recovered,
     tracing::{
         js::{JsDbRequest, JsInspector},
         FourByteInspector, TracingInspector, TracingInspectorConfig,

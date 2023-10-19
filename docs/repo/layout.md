@@ -4,13 +4,24 @@ This repository contains several Rust crates that implement the different buildi
 
 Generally reth is composed of a few components, with supporting crates. The main components can be defined as:
 
-- [Storage](#storage)
-- [Networking](#networking)
-- [Consensus](#consensus)
-- [Execution](#execution)
-- [Sync](#sync)
-- [RPC](#rpc)
-- [Payloads](#payloads)
+- [Project Layout](#project-layout)
+  - [Documentation](#documentation)
+  - [Binaries](#binaries)
+  - [Storage](#storage)
+  - [Networking](#networking)
+    - [Common](#common)
+    - [Discovery](#discovery)
+    - [Protocol](#protocol)
+    - [Downloaders](#downloaders)
+  - [Consensus](#consensus)
+  - [Execution](#execution)
+  - [Sync](#sync)
+  - [RPC](#rpc)
+    - [Transports](#transports)
+    - [Common](#common-1)
+  - [Payloads](#payloads)
+  - [Primitives](#primitives)
+  - [Misc](#misc)
 
 The supporting crates are split into two categories: [primitives](#primitives) and [miscellaneous](#misc).
 
@@ -78,7 +89,6 @@ Crates related to transaction execution.
 
 - [`revm`](../../crates/revm): An implementation of an executor using `revm`
 - [`revm/revm-inspectors`](../../crates/revm/revm-inspectors): Various revm inspectors for debugging and building traces for the trace-related RPC APIs.
-- [`revm/revm-primitives`](../../crates/revm/revm-primitives): A crate for handling revm-reth type conversion
 
 ### Sync
 

@@ -20,6 +20,7 @@ value-256 = ["codecs-derive/value-256"]
 bytes.workspace = true
 codecs-derive = { path = "./derive", default-features = false }
 revm-primitives = { workspace = true, features = ["serde"] }
+alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -28,7 +29,6 @@ proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 revm-primitives = { workspace = true, features = ["serde", "arbitrary"] }
-
 serde = "1.0"
 modular-bitfield = "0.11.2"
 test-fuzz = "4"
