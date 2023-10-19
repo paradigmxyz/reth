@@ -35,7 +35,7 @@ impl<T> AsRef<ShardedKey<T>> for ShardedKey<T> {
 impl<T> ShardedKey<T> {
     /// Creates a new `ShardedKey<T>`.
     pub fn new(key: T, highest_block_number: BlockNumber) -> Self {
-        ShardedKey { key, highest_block_number }
+        Self { key, highest_block_number }
     }
 
     /// Creates a new key with the highest block number set to maximum.

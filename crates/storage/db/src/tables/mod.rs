@@ -51,7 +51,7 @@ pub enum TableType {
 }
 
 /// Number of tables that should be present inside database.
-pub const NUM_TABLES: usize = 26;
+pub const NUM_TABLES: usize = 28;
 
 /// The general purpose of this is to use with a combination of Tables enum,
 /// by implementing a `TableViewer` trait you can operate on db tables in an abstract way.
@@ -182,6 +182,8 @@ tables!([
     (AccountsTrie, TableType::Table),
     (StoragesTrie, TableType::DupSort),
     (TxSenders, TableType::Table),
+    (LogAddressHistory, TableType::Table),
+    (LogTopicHistory, TableType::Table),
     (SyncStage, TableType::Table),
     (SyncStageProgress, TableType::Table),
     (PruneCheckpoints, TableType::Table)
@@ -312,7 +314,7 @@ table!(
     /// Stores pointers to block changeset with changes for each account key.
     ///
     /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
-    /// this would allows us small optimization on db access when change is in plain state.
+    /// this allows for a small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:
     /// * `Address | 100`
@@ -334,7 +336,7 @@ table!(
     /// Stores pointers to block number changeset with changes for each storage key.
     ///
     /// Last shard key of the storage will contain `u64::MAX` `BlockNumber`,
-    /// this would allows us small optimization on db access when change is in plain state.
+    /// this allows for a small optimization on db access when change is in plain state.
     ///
     /// Imagine having shards as:
     /// * `Address | StorageKey | 100`
@@ -350,6 +352,26 @@ table!(
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
     ( StorageHistory ) StorageShardedKey | BlockNumberList
+);
+
+table!(
+    /// Stores pointers to block numbers at which the particular address emitted the log.
+    ///
+    /// Last shard key will contain `u64::MAX` `BlockNumber`,
+    /// this allows small optimization on searching the last shard for a given address.
+    ///
+    /// The index allows us to only walk the blocks that contain logs emitted by a given address.
+    ( LogAddressHistory ) ShardedKey<Address> | BlockNumberList
+);
+
+table!(
+    /// Stores pointers to block numbers at which logs with particular topics occurred.
+    ///
+    /// Last shard key will contain `u64::MAX` `BlockNumber`,
+    /// this allows small optimization on searching the last shard for a given topic.
+    ///
+    /// The index allows us to only walk the blocks which contain logs with given topics.
+    ( LogTopicHistory ) ShardedKey<B256> | BlockNumberList
 );
 
 dupsort!(
@@ -443,6 +465,8 @@ mod tests {
         (TableType::Table, Bytecodes::NAME),
         (TableType::Table, AccountHistory::NAME),
         (TableType::Table, StorageHistory::NAME),
+        (TableType::Table, LogAddressHistory::NAME),
+        (TableType::Table, LogTopicHistory::NAME),
         (TableType::DupSort, AccountChangeSet::NAME),
         (TableType::DupSort, StorageChangeSet::NAME),
         (TableType::Table, HashedAccount::NAME),

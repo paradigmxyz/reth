@@ -5,7 +5,7 @@ use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::ChainSpec;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, StateProviderFactory,
+    EvmEnvProvider, LogHistoryReader, StateProviderFactory,
 };
 use reth_rpc_builder::{
     auth::AuthServerHandle, RethModuleRegistry, RpcServerHandle, TransportRpcModules,
@@ -22,6 +22,7 @@ pub trait FullProvider:
     + EvmEnvProvider
     + ChainSpecProvider
     + ChangeSetReader
+    + LogHistoryReader
     + Clone
     + Unpin
     + 'static
@@ -35,6 +36,7 @@ impl<T> FullProvider for T where
         + EvmEnvProvider
         + ChainSpecProvider
         + ChangeSetReader
+        + LogHistoryReader
         + Clone
         + Unpin
         + 'static

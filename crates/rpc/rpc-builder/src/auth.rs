@@ -12,8 +12,8 @@ use jsonrpsee::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
-    StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, LogHistoryReader,
+    ReceiptProviderIdExt, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -49,6 +49,7 @@ where
         + HeaderProvider
         + ReceiptProviderIdExt
         + StateProviderFactory
+        + LogHistoryReader
         + Clone
         + Unpin
         + 'static,
@@ -98,6 +99,7 @@ where
         + EvmEnvProvider
         + HeaderProvider
         + StateProviderFactory
+        + LogHistoryReader
         + Clone
         + Unpin
         + 'static,

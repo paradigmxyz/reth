@@ -15,5 +15,6 @@ pub enum StageEnum {
     TxLookup,
     AccountHistory,
     StorageHistory,
+    LogHistory,
     TotalDifficulty,
 }

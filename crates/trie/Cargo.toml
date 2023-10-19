@@ -49,7 +49,7 @@ pretty_assertions = "1.3.0"
 criterion.workspace = true
 
 [features]
-test-utils = ["triehash"]
+test-utils = ["reth-primitives/test-utils", "triehash"]
 
 [[bench]]
 name = "prefix_set"

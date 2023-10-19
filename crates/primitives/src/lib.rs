@@ -66,7 +66,7 @@ pub use error::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
-pub use log::{logs_bloom, Log};
+pub use log::{logs_bloom, Log, LogAddressIndex, LogTopicIndex};
 pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, GOERLI_BOOTNODES,
     HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,

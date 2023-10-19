@@ -1,5 +1,6 @@
 //! Storage sharded key
 
+use super::ShardedKey;
 use crate::{
     table::{Decode, Encode},
     DatabaseError,
@@ -7,8 +8,6 @@ use crate::{
 use derive_more::AsRef;
 use reth_primitives::{Address, BlockNumber, B256};
 use serde::{Deserialize, Serialize};
-
-use super::ShardedKey;
 
 /// Number of indices in one shard.
 pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;

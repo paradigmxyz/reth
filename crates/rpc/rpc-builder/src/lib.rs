@@ -163,7 +163,7 @@ pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, EvmEnvProvider, StateProviderFactory,
+    ChangeSetReader, EvmEnvProvider, LogHistoryReader, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -222,6 +222,7 @@ where
         + EvmEnvProvider
         + ChainSpecProvider
         + ChangeSetReader
+        + LogHistoryReader
         + Clone
         + Unpin
         + 'static,
@@ -368,6 +369,7 @@ where
         + EvmEnvProvider
         + ChainSpecProvider
         + ChangeSetReader
+        + LogHistoryReader
         + Clone
         + Unpin
         + 'static,
@@ -654,6 +656,7 @@ impl RpcModuleSelection {
             + EvmEnvProvider
             + ChainSpecProvider
             + ChangeSetReader
+            + LogHistoryReader
             + Clone
             + Unpin
             + 'static,
@@ -941,6 +944,7 @@ where
         + EvmEnvProvider
         + ChainSpecProvider
         + ChangeSetReader
+        + LogHistoryReader
         + Clone
         + Unpin
         + 'static,

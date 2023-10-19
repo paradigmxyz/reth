@@ -376,10 +376,10 @@ pub fn random_receipt<R: Rng>(
 /// Generate random log
 pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
     let data_byte_count = rng.gen::<u8>() as usize;
-    let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
+    let topics_count: u8 = topics_count.unwrap_or_else(|| rng.gen_range(0..=4));
     Log {
         address: address.unwrap_or_else(|| rng.gen()),
-        topics: std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
+        topics: std::iter::repeat_with(|| rng.gen()).take(topics_count as usize).collect(),
         data: std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
     }
 }

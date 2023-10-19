@@ -2,13 +2,14 @@ use crate::{
     bundle_state::{BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit},
     providers::{database::metrics, SnapshotProvider},
     traits::{
-        AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
+        AccountExtReader, BlockSource, ChangeSetReader, LogHistoryReader, ReceiptProvider,
+        StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+    HeaderSyncMode, HistoryWriter, LogHistoryWriter, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader, StorageReader,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -38,10 +39,11 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, IntegerList, LogAddressIndex,
+    LogTopicIndex, PruneCheckpoint, PruneModes, PruneSegment, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256,
+    U256,
 };
 use reth_trie::{
     hashed_cursor::HashedPostState, prefix_set::PrefixSetMut, updates::TrieUpdates, StateRoot,
@@ -196,6 +198,93 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             .cursor_read::<T>()?
             .walk(Some(T::Key::default()))?
             .collect::<Result<Vec<_>, DatabaseError>>()
+    }
+
+    /// Get history indices in block range.
+    ///
+    /// TODO: more docs
+    pub fn history_indices_in_block_range<K, T>(
+        &self,
+        key: K,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<IntegerList>>
+    where
+        K: PartialEq + Copy,
+        T: Table<Key = ShardedKey<K>, Value = BlockNumberList>,
+    {
+        if block_range.is_empty() {
+            return Ok(None)
+        }
+
+        // Acquire the cursor and position it the list entry that might contain the first block.
+        let mut cursor = self.tx.cursor_read::<T>()?;
+        let mut item = cursor.seek(ShardedKey::new(key, *block_range.start()))?;
+
+        let mut result = Vec::new();
+        'outer: while let Some((_, list)) = item.filter(|(sharded_key, _)| sharded_key.key == key) {
+            for block_number in list.0.iter(0) {
+                // If a block number is higher than the end of the block range, terminate.
+                if block_number as u64 > *block_range.end() {
+                    break 'outer
+                }
+
+                result.push(block_number);
+            }
+
+            item = cursor.next()?;
+        }
+
+        if result.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(IntegerList::new_pre_sorted(result)))
+        }
+    }
+
+    // TODO: move to reader
+    /// Get the mappings of log address and log topic to block numbers where they occurred.
+    /// This function walks over the receipts and constructs corresponding mappings for log fields.
+    ///
+    /// # Returns
+    ///
+    /// * Mapping of log address to block numbers where they occurred.
+    /// * Mapping of log topic to block numbers where they occurred.
+    /// * Number of receipts walked.
+    pub fn compute_log_indexes(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<(LogAddressIndex, LogTopicIndex, u64)> {
+        let mut block_indices_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut receipts_cursor = self.tx.cursor_read::<tables::Receipts>()?;
+
+        let mut receipts_walked = 0;
+        let mut log_addresses = LogAddressIndex::new();
+        let mut log_topics = LogTopicIndex::new();
+        for block_entry in block_indices_cursor.walk_range(range)? {
+            let (block_number, block_indices) = block_entry?;
+
+            // Aggregate all addresses and topics from logs
+            let mut block_log_addresses = BTreeSet::new();
+            let mut block_log_topics = BTreeSet::new();
+            for receipt_entry in receipts_cursor.walk_range(block_indices.tx_num_range())? {
+                let (_, receipt) = receipt_entry?;
+                for log in receipt.logs {
+                    block_log_addresses.insert(log.address);
+                    block_log_topics.extend(log.topics.iter());
+                }
+            }
+
+            // Insert block log addresses and topics into the mappings
+            for log_address in block_log_addresses {
+                log_addresses.entry(log_address).or_default().push(block_number);
+            }
+            for log_topic in block_log_topics {
+                log_topics.entry(log_topic).or_default().push(block_number);
+            }
+            receipts_walked += block_indices.tx_count();
+        }
+
+        Ok((log_addresses, log_topics, receipts_walked))
     }
 }
 
@@ -1459,6 +1548,110 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     }
 }
 
+impl<TX: DbTx> LogHistoryReader for DatabaseProvider<TX> {
+    fn log_address_index(
+        &self,
+        address: Address,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<IntegerList>> {
+        self.history_indices_in_block_range::<_, tables::LogAddressHistory>(address, block_range)
+    }
+
+    fn log_topic_index(
+        &self,
+        topic: B256,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<IntegerList>> {
+        self.history_indices_in_block_range::<_, tables::LogTopicHistory>(topic, block_range)
+    }
+}
+
+impl<TX: DbTxMut + DbTx> LogHistoryWriter for DatabaseProvider<TX> {
+    fn insert_log_address_history_index(&self, index: LogAddressIndex) -> ProviderResult<()> {
+        self.append_history_index::<_, tables::LogAddressHistory>(index, ShardedKey::new)
+    }
+
+    fn insert_log_topic_history_index(&self, index: LogTopicIndex) -> ProviderResult<()> {
+        self.append_history_index::<_, tables::LogTopicHistory>(index, ShardedKey::new)
+    }
+
+    fn write_log_history_indexes(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
+        let (log_address_indices, log_topic_indices, _) = self.compute_log_indexes(range)?;
+        self.insert_log_address_history_index(log_address_indices)?;
+        self.insert_log_topic_history_index(log_topic_indices)
+    }
+
+    fn unwind_log_history_indexes(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
+        let block_indices = self
+            .tx
+            .cursor_read::<tables::BlockBodyIndices>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut log_addresses = BTreeMap::<Address, u64>::new();
+        let mut log_topics = BTreeMap::<B256, u64>::new();
+
+        // Iterate over block indices in reverse since we only need the lowest block number for
+        // unwinding
+        let mut receipts_cursor = self.tx.cursor_read::<tables::Receipts>()?;
+        for (block_number, block_indices) in block_indices.into_iter().rev() {
+            // Overwrite any log addresses and topics observed in this block with now lowest block
+            // number
+            for receipt_entry in receipts_cursor.walk_range(block_indices.tx_num_range())? {
+                let (_, receipt) = receipt_entry?;
+                for log in receipt.logs {
+                    log_addresses.insert(log.address, block_number);
+                    for topic in log.topics {
+                        log_topics.insert(topic, block_number);
+                    }
+                }
+            }
+        }
+
+        // Unwind log address history indices
+        let mut log_address_history_cursor = self.tx.cursor_write::<tables::LogAddressHistory>()?;
+        for (address, rem_index) in log_addresses {
+            let partial_shard = unwind_history_shards(
+                &mut log_address_history_cursor,
+                ShardedKey::last(address),
+                rem_index,
+                |sharded_key| sharded_key.key == address,
+            )?;
+
+            // Check the last returned partial shard.
+            // If it's not empty, the shard needs to be reinserted.
+            if !partial_shard.is_empty() {
+                log_address_history_cursor.insert(
+                    ShardedKey::last(address),
+                    BlockNumberList::new_pre_sorted(partial_shard),
+                )?;
+            }
+        }
+
+        // Unwind log topic history indices
+        let mut log_topic_history_cursor = self.tx.cursor_write::<tables::LogTopicHistory>()?;
+        for (topic, rem_index) in log_topics {
+            let partial_shard = unwind_history_shards(
+                &mut log_topic_history_cursor,
+                ShardedKey::last(topic),
+                rem_index,
+                |sharded_key| sharded_key.key == topic,
+            )?;
+
+            // Check the last returned partial shard.
+            // If it's not empty, the shard needs to be reinserted.
+            if !partial_shard.is_empty() {
+                log_topic_history_cursor.insert(
+                    ShardedKey::last(topic),
+                    BlockNumberList::new_pre_sorted(partial_shard),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
     fn withdrawals_by_block(
         &self,
@@ -1919,7 +2112,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
-    fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
+    fn write_history_indexes(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         // account history stage
         {
             let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
@@ -1928,7 +2121,7 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
 
         // storage history stage
         {
-            let indices = self.changed_storages_and_blocks_with_range(range)?;
+            let indices = self.changed_storages_and_blocks_with_range(range.clone())?;
             self.insert_storage_history_index(indices)?;
         }
 
@@ -1954,7 +2147,7 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
         self.append_history_index::<_, tables::AccountHistory>(account_transitions, ShardedKey::new)
     }
 
-    fn unwind_storage_history_indices(
+    fn unwind_storage_history_index(
         &self,
         range: Range<BlockNumberAddress>,
     ) -> ProviderResult<usize> {
@@ -2004,7 +2197,7 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
         Ok(changesets)
     }
 
-    fn unwind_account_history_indices(
+    fn unwind_account_history_index(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<usize> {
@@ -2058,6 +2251,9 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain> {
         if TAKE {
+            // Unwind log history indexes.
+            self.unwind_log_history_indexes(range.clone())?;
+
             let storage_range = BlockNumberAddress::range(range.clone());
 
             // Initialize prefix sets.
@@ -2075,7 +2271,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             }
 
             // Unwind account history indices.
-            self.unwind_account_history_indices(range.clone())?;
+            self.unwind_account_history_index(range.clone())?;
 
             // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
             // sets.
@@ -2091,7 +2287,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             }
 
             // Unwind storage history indices.
-            self.unwind_storage_history_indices(storage_range)?;
+            self.unwind_storage_history_index(storage_range)?;
 
             // Calculate the reverted merkle root.
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
@@ -2335,8 +2531,10 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
-        self.update_history_indices(first_number..=last_block_number)?;
+        self.write_history_indexes(first_number..=last_block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
+
+        self.write_log_history_indexes(first_number..=last_block_number)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(new_tip_number, false)?;

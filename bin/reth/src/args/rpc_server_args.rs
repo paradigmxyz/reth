@@ -20,7 +20,7 @@ use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, HeaderProvider, StateProviderFactory,
+    EvmEnvProvider, HeaderProvider, LogHistoryReader, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP},
@@ -262,6 +262,7 @@ impl RpcServerArgs {
             + EvmEnvProvider
             + ChainSpecProvider
             + ChangeSetReader
+            + LogHistoryReader
             + Clone
             + Unpin
             + 'static,
@@ -298,6 +299,7 @@ impl RpcServerArgs {
             + EvmEnvProvider
             + HeaderProvider
             + StateProviderFactory
+            + LogHistoryReader
             + Clone
             + Unpin
             + 'static,

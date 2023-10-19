@@ -91,7 +91,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
+        provider.unwind_storage_history_index(BlockNumberAddress::range(range))?;
 
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }

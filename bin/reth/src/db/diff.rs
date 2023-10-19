@@ -20,7 +20,7 @@ use reth_db::{
     BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccount, HashedStorage,
     HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
     Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
-    TransactionBlock, Transactions, TxHashNumber, TxSenders,
+    TransactionBlock, Transactions, TxHashNumber, TxSenders,LogAddressHistory, LogTopicHistory
 };
 use tracing::info;
 
@@ -113,6 +113,12 @@ impl Command {
                 }
                 Tables::StorageHistory => {
                     find_diffs::<StorageHistory>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::LogAddressHistory => {
+                    find_diffs::<LogAddressHistory>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::LogTopicHistory => {
+                    find_diffs::<LogTopicHistory>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::AccountChangeSet => {
                     find_diffs::<AccountChangeSet>(primary_tx, secondary_tx, output_dir)?

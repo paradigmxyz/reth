@@ -1,3 +1,5 @@
+//! Implementation of `eth` filter RPC.
+
 use super::cache::EthStateCache;
 use crate::{
     eth::{
@@ -7,22 +9,23 @@ use crate::{
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
-use core::fmt;
-
+use alloy_primitives::{Address, BlockNumber, B256};
 use async_trait::async_trait;
+use core::fmt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, Receipt, SealedBlock, TxHash};
-use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
+use reth_primitives::{
+    BlockHashOrNumber, IntegerList, IntoRecoveredTransaction, Receipt, SealedBlock, TxHash,
+};
+use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, LogHistoryReader, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
     Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
-    PendingTransactionFilterKind,
+    PendingTransactionFilterKind, ValueOrArray,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
     collections::HashMap,
-    iter::StepBy,
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
@@ -32,9 +35,6 @@ use tokio::{
     time::MissedTickBehavior,
 };
 use tracing::trace;
-
-/// The maximum number of headers we read at once when handling a range filter.
-const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
 pub struct EthFilter<Provider, Pool> {
@@ -70,7 +70,6 @@ where
             pool,
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
             eth_cache,
-            max_headers_range: MAX_HEADERS_RANGE,
             task_spawner,
             stale_filter_ttl,
             // if not set, use the max value, which is effectively no limit
@@ -124,7 +123,7 @@ where
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + LogHistoryReader + 'static,
     Pool: TransactionPool + 'static,
     <Pool as TransactionPool>::Transaction: 'static,
 {
@@ -223,7 +222,7 @@ where
 #[async_trait]
 impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + LogHistoryReader + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Handler for `eth_newFilter`
@@ -332,8 +331,6 @@ struct EthFilterInner<Provider, Pool> {
     max_logs_per_response: usize,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
-    /// maximum number of headers to read at once for range filter
-    max_headers_range: u64,
     /// The type that can spawn tasks.
     task_spawner: Box<dyn TaskSpawner>,
     /// Duration since the last filter poll, after which the filter is considered stale
@@ -342,7 +339,7 @@ struct EthFilterInner<Provider, Pool> {
 
 impl<Provider, Pool> EthFilterInner<Provider, Pool>
 where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+    Provider: BlockReader + BlockIdReader + EvmEnvProvider + LogHistoryReader + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
@@ -436,50 +433,44 @@ where
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
         // derive bloom filters from filter input
-        let address_filter = FilteredParams::address_filter(&filter.address);
-        let topics_filter = FilteredParams::topics_filter(&filter.topics);
+        // let address_filter = FilteredParams::address_filter(&filter.address);
+        // let topics_filter = FilteredParams::topics_filter(&filter.topics);
 
+        // Create log index filter
+        let mut log_index_filter = LogIndexFilter::new(from_block..=to_block);
+        if let Some(filter_address) = filter.address.to_value_or_array() {
+            log_index_filter.install_address_filter(&self.provider, &filter_address)?;
+        }
+        let topics = filter
+            .topics
+            .clone()
+            .into_iter()
+            .filter_map(|t| t.to_value_or_array())
+            .collect::<Vec<_>>();
+        if !topics.is_empty() {
+            log_index_filter.install_topic_filter(&self.provider, &topics)?;
+        }
+
+        let is_multi_block_range = from_block != to_block;
+
+        // TODO: simplify
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
-        // filter
-        for (from, to) in
-            BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
-        {
-            let headers = self.provider.headers_range(from..=to)?;
+        for block_number in log_index_filter.iter() {
+            if let Some((block, receipts)) =
+                self.block_and_receipts_by_number(block_number.into()).await?
+            {
+                logs_utils::append_matching_block_logs(
+                    &mut all_logs,
+                    &filter_params,
+                    (block.number, block.hash).into(),
+                    block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
+                    false,
+                );
 
-            for (idx, header) in headers.iter().enumerate() {
-                // these are consecutive headers, so we can use the parent hash of the next block to
-                // get the current header's hash
-                let num_hash: BlockHashOrNumber = headers
-                    .get(idx + 1)
-                    .map(|h| h.parent_hash.into())
-                    .unwrap_or_else(|| header.number.into());
-
-                // only if filter matches
-                if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
-                    FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
-                {
-                    if let Some((block, receipts)) =
-                        self.block_and_receipts_by_number(num_hash).await?
-                    {
-                        let block_hash = block.hash;
-
-                        logs_utils::append_matching_block_logs(
-                            &mut all_logs,
-                            &filter_params,
-                            (block.number, block_hash).into(),
-                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
-                            false,
-                        );
-
-                        // size check but only if range is multiple blocks, so we always return all
-                        // logs of a single block
-                        let is_multi_block_range = from_block != to_block;
-                        if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
-                            return Err(FilterError::QueryExceedsMaxResults(
-                                self.max_logs_per_response,
-                            ))
-                        }
-                    }
+                // size check but only if range is multiple blocks, so we always return all
+                // logs of a single block
+                if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
+                    return Err(FilterError::QueryExceedsMaxResults(self.max_logs_per_response))
                 }
             }
         }
@@ -535,6 +526,113 @@ impl Default for EthFilterConfig {
             // 5min
             stale_filter_ttl: Duration::from_secs(5 * 60),
         }
+    }
+}
+
+type BlockNumberIterBox<'a> = Box<dyn Iterator<Item = BlockNumber> + Send + Sync + 'a>;
+
+/// TODO: docs
+#[derive(Debug)]
+pub struct LogIndexFilter {
+    /// Full block range.
+    block_range: RangeInclusive<BlockNumber>,
+    /// Represents the union of all block indices that match installed filters.
+    ///
+    /// Since [IntegerList] cannot be empty, `Some(None)` represents an active filter with no
+    /// matching block numbers.
+    indices: Option<Option<IntegerList>>,
+}
+
+impl LogIndexFilter {
+    /// Create new instance of [LogIndexFilter].
+    pub fn new(block_range: RangeInclusive<BlockNumber>) -> Self {
+        Self { block_range, indices: None }
+    }
+
+    /// Iterate over block numbers.
+    pub fn iter<'a>(&'a self) -> BlockNumberIterBox<'a> {
+        match &self.indices {
+            Some(Some(indices)) => {
+                Box::new(indices.iter(0).into_iter().map(|num| num as BlockNumber))
+                    as BlockNumberIterBox<'a>
+            }
+            Some(None) => Box::new(std::iter::empty()) as BlockNumberIterBox<'a>,
+            None => Box::new(self.block_range.clone().into_iter()) as BlockNumberIterBox<'a>,
+        }
+    }
+
+    /// Returns `true` if the filter is active but has no matching block numbers.
+    pub fn is_empty(&self) -> bool {
+        matches!(self.indices, Some(None))
+    }
+
+    /// Change the inner indices to be the union of itself and incoming.
+    pub fn intersection_indices(&mut self, new_indices: Option<IntegerList>) {
+        match (&mut self.indices, new_indices) {
+            // Existing filter is already empty, no need to update.
+            (Some(None), _) => (),
+            // Incoming filter matched no block numbers, reset existing indices.
+            (_, None) => {
+                self.indices = Some(None);
+            }
+            // Existing filter has not been yet activated, so set it to the incoming indices.
+            (None, Some(new_indices)) => {
+                self.indices = Some(Some(new_indices));
+            }
+            // Both filters contain at least one block number, union them.
+            (Some(Some(existing)), Some(new_indices)) => {
+                self.indices = Some(existing.intersection(&new_indices));
+            }
+        }
+    }
+
+    /// Intersect current filter with the new address filter.
+    pub fn install_address_filter(
+        &mut self,
+        provider: &impl LogHistoryReader,
+        address_filter: &ValueOrArray<Address>,
+    ) -> Result<(), FilterError> {
+        let addresses = match address_filter {
+            ValueOrArray::Value(address) => Vec::from([*address]),
+            ValueOrArray::Array(addresses) => addresses.clone(),
+        };
+        for address in addresses {
+            // Check if previous filter conditions already matched no blocks.
+            // Do this on each iteration to avoid unnecessary queries.
+            if self.is_empty() {
+                return Ok(())
+            }
+
+            let address_indices = provider.log_address_index(address, self.block_range.clone())?;
+            self.intersection_indices(address_indices);
+        }
+        Ok(())
+    }
+
+    /// Intersect current filter with the new topic filter.
+    pub fn install_topic_filter(
+        &mut self,
+        provider: &impl LogHistoryReader,
+        topic_filters: &[ValueOrArray<B256>],
+    ) -> Result<(), FilterError> {
+        let topics = topic_filters
+            .iter()
+            .flat_map(|topic| match topic {
+                ValueOrArray::Value(topic) => Vec::from([*topic]),
+                ValueOrArray::Array(topics) => topics.iter().copied().collect(),
+            })
+            .collect::<Vec<B256>>();
+        for topic in topics {
+            // Check if previous filter conditions already matched no blocks.
+            // Do this on each iteration to avoid unnecessary queries.
+            if self.is_empty() {
+                return Ok(())
+            }
+
+            let topic_indices = provider.log_topic_index(topic, self.block_range.clone())?;
+            self.intersection_indices(topic_indices);
+        }
+        Ok(())
     }
 }
 
@@ -654,12 +752,16 @@ enum FilterKind {
 /// Errors that can occur in the handler implementation
 #[derive(Debug, thiserror::Error)]
 pub enum FilterError {
+    /// Requested filter was not found.
     #[error("filter not found")]
     FilterNotFound(FilterId),
+    /// Query exceeds maximum allowed blocks per response.
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
+    /// Query exceeds maximum allowed results per response.
     #[error("query exceeds max results {0}")]
     QueryExceedsMaxResults(usize),
+    /// Wrapper around [EthApiError].
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
     /// Error thrown when a spawned task failed to deliver a response.
@@ -692,61 +794,5 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
 impl From<ProviderError> for FilterError {
     fn from(err: ProviderError) -> Self {
         FilterError::EthAPIError(err.into())
-    }
-}
-
-/// An iterator that yields _inclusive_ block ranges of a given step size
-#[derive(Debug)]
-struct BlockRangeInclusiveIter {
-    iter: StepBy<RangeInclusive<u64>>,
-    step: u64,
-    end: u64,
-}
-
-impl BlockRangeInclusiveIter {
-    fn new(range: RangeInclusive<u64>, step: u64) -> Self {
-        Self { end: *range.end(), iter: range.step_by(step as usize + 1), step }
-    }
-}
-
-impl Iterator for BlockRangeInclusiveIter {
-    type Item = (u64, u64);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let start = self.iter.next()?;
-        let end = (start + self.step).min(self.end);
-        if start > end {
-            return None
-        }
-        Some((start, end))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::{thread_rng, Rng};
-
-    #[test]
-    fn test_block_range_iter() {
-        for _ in 0..100 {
-            let mut rng = thread_rng();
-            let start = rng.gen::<u32>() as u64;
-            let end = start.saturating_add(rng.gen::<u32>() as u64);
-            let step = rng.gen::<u16>() as u64;
-            let range = start..=end;
-            let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
-            let (from, mut end) = iter.next().unwrap();
-            assert_eq!(from, start);
-            assert_eq!(end, (from + step).min(*range.end()));
-
-            for (next_from, next_end) in iter {
-                // ensure range starts with previous end + 1
-                assert_eq!(next_from, end + 1);
-                end = next_end;
-            }
-
-            assert_eq!(end, *range.end());
-        }
     }
 }

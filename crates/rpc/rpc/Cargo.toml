@@ -21,7 +21,7 @@ reth-revm.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-rpc-types-compat.workspace = true
-lazy_static = "*"
+reth-db = { workspace = true, optional = true }
 
 # eth
 alloy-rlp.workspace = true
@@ -76,6 +76,9 @@ jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+proptest.workspace = true
+criterion = "0.5"
+pretty_assertions = "1.3.0"
 
 [features]
 optimism = [
@@ -86,3 +89,9 @@ optimism = [
     "reth-provider/optimism",
     "reth-transaction-pool/optimism",
 ]
+bench = ["reth-primitives/arbitrary", "reth-db/mdbx", "reth-db/test-utils"]
+
+[[bench]]
+name = "log_filtering"
+required-features = ["bench"]
+harness = false

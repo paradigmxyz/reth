@@ -145,6 +145,14 @@ impl Command {
                         Default::default(),
                     )?;
                 }
+                StageEnum::LogHistory => {
+                    tx.clear::<tables::LogAddressHistory>()?;
+                    tx.clear::<tables::LogTopicHistory>()?;
+                    tx.put::<tables::SyncStage>(
+                        StageId::IndexLogHistory.to_string(),
+                        Default::default(),
+                    )?;
+                }
                 StageEnum::TotalDifficulty => {
                     tx.clear::<tables::HeaderTD>()?;
                     tx.put::<tables::SyncStage>(

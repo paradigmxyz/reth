@@ -16,13 +16,14 @@ pub enum StageId {
     TransactionLookup,
     IndexStorageHistory,
     IndexAccountHistory,
+    IndexLogHistory,
     Finish,
     Other(&'static str),
 }
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [StageId; 13] = [
+    pub const ALL: [StageId; 14] = [
         StageId::Headers,
         StageId::TotalDifficulty,
         StageId::Bodies,
@@ -35,6 +36,7 @@ impl StageId {
         StageId::TransactionLookup,
         StageId::IndexStorageHistory,
         StageId::IndexAccountHistory,
+        StageId::IndexLogHistory,
         StageId::Finish,
     ];
 
@@ -53,6 +55,7 @@ impl StageId {
             StageId::TransactionLookup => "TransactionLookup",
             StageId::IndexAccountHistory => "IndexAccountHistory",
             StageId::IndexStorageHistory => "IndexStorageHistory",
+            StageId::IndexLogHistory => "IndexLogHistory",
             StageId::Finish => "Finish",
             StageId::Other(s) => s,
         }
@@ -92,6 +95,7 @@ mod tests {
         assert_eq!(StageId::MerkleExecute.to_string(), "MerkleExecute");
         assert_eq!(StageId::IndexAccountHistory.to_string(), "IndexAccountHistory");
         assert_eq!(StageId::IndexStorageHistory.to_string(), "IndexStorageHistory");
+        assert_eq!(StageId::IndexLogHistory.to_string(), "IndexLogHistory");
         assert_eq!(StageId::TransactionLookup.to_string(), "TransactionLookup");
         assert_eq!(StageId::Finish.to_string(), "Finish");
 
