@@ -28,6 +28,10 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     keccak256,
+    revm::{
+        config::revm_spec,
+        env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
+    },
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
@@ -35,10 +39,6 @@ use reth_primitives::{
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, B256, U256,
-};
-use reth_revm_primitives::{
-    config::revm_spec,
-    env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
