@@ -1,8 +1,6 @@
 use crate::{
     database::StateProviderDatabase,
-    env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    into_reth_log,
     stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
@@ -11,6 +9,10 @@ use reth_interfaces::{
     RethError,
 };
 use reth_primitives::{
+    revm::{
+        compat::into_reth_log,
+        env::{fill_cfg_and_block_env, fill_tx_env},
+    },
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
     PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,

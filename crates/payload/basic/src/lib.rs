@@ -25,14 +25,14 @@ use reth_primitives::{
         eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
         EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
-    proofs, Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT, U256,
+    proofs,
+    revm::{compat::into_reth_log, env::tx_env_with_recovered},
+    Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts,
+    SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
-    env::tx_env_with_recovered,
-    into_reth_log,
     state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
 };
 use reth_tasks::TaskSpawner;

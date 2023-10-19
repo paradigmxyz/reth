@@ -28,7 +28,6 @@ proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 revm-primitives = { workspace = true, features = ["serde", "arbitrary"] }
-
 serde = "1.0"
 modular-bitfield = "0.11.2"
 test-fuzz = "4"

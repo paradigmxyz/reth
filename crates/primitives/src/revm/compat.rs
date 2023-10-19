@@ -1,4 +1,4 @@
-use reth_primitives::{
+use crate::{
     revm_primitives::{AccountInfo, Log},
     Account, Address, Log as RethLog, TransactionKind, KECCAK_EMPTY, U256,
 };
@@ -8,7 +8,7 @@ use revm::{
 };
 
 /// Check equality between Revm and Reth `Log`s.
-pub fn is_log_equal(revm_log: &Log, reth_log: &reth_primitives::Log) -> bool {
+pub fn is_log_equal(revm_log: &Log, reth_log: &crate::Log) -> bool {
     revm_log.address == reth_log.address &&
         revm_log.data == reth_log.data &&
         revm_log.topics == reth_log.topics

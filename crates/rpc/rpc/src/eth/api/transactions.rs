@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
+    revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
@@ -25,7 +26,6 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{

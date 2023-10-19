@@ -12,13 +12,11 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
-use reth_revm::{
-    access_list::AccessListInspector, database::StateProviderDatabase, env::tx_env_with_recovered,
-};
+use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
     StateContext,

@@ -6,10 +6,11 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    keccak256, logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts,
-    StorageEntry, B256, U256,
+    keccak256, logs_bloom,
+    revm::compat::{into_reth_acc, into_revm_acc},
+    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, B256,
+    U256,
 };
-use reth_revm_primitives::{into_reth_acc, into_revm_acc};
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
@@ -381,8 +382,9 @@ mod tests {
         transaction::DbTx,
         DatabaseEnv,
     };
-    use reth_primitives::{Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256};
-    use reth_revm_primitives::into_reth_acc;
+    use reth_primitives::{
+        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256,
+    };
     use revm::{
         db::{
             states::{

@@ -10,11 +10,12 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256};
+use reth_primitives::{
+    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
+};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
-    env::tx_env_with_recovered,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_api::TraceApiServer;

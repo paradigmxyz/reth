@@ -6026,7 +6026,6 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
- "reth-revm-primitives",
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-transaction-pool",
@@ -6069,6 +6068,7 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-primitives",
+ "revm",
  "revm-primitives",
  "secp256k1",
  "serde",
@@ -6105,7 +6105,6 @@ dependencies = [
  "reth-interfaces",
  "reth-nippy-jar",
  "reth-primitives",
- "reth-revm-primitives",
  "reth-trie",
  "revm",
  "tempfile",
@@ -6144,7 +6143,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm-inspectors",
- "reth-revm-primitives",
  "revm",
  "tracing",
 ]
@@ -6163,14 +6161,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
-]
-
-[[package]]
-name = "reth-revm-primitives"
-version = "0.1.0-alpha.10"
-dependencies = [
- "reth-primitives",
- "revm",
 ]
 
 [[package]]
@@ -6434,7 +6424,6 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
- "reth-revm-primitives",
  "reth-tasks",
  "revm",
  "serde",

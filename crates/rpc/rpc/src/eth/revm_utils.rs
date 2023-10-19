@@ -2,9 +2,9 @@
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
+    revm::env::{fill_tx_env, fill_tx_env_with_recovered},
     AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
 };
-use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides, CallRequest,

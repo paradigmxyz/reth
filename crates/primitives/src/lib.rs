@@ -39,6 +39,8 @@ mod precaution;
 pub mod proofs;
 mod prune;
 mod receipt;
+/// Helpers for working with revm
+pub mod revm;
 pub mod serde_helper;
 pub mod snapshot;
 pub mod stage;

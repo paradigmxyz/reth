@@ -1,6 +1,4 @@
-//! Reth block execution/validation configuration and constants
-
-use reth_primitives::{revm_primitives, ChainSpec, Hardfork, Head};
+use crate::{revm_primitives, ChainSpec, Hardfork, Head};
 
 /// Returns the spec id at the given timestamp.
 ///
@@ -56,7 +54,7 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{ChainSpecBuilder, Head, MAINNET, U256};
+    use crate::{ChainSpecBuilder, Head, MAINNET, U256};
 
     #[test]
     fn test_to_revm_spec() {
