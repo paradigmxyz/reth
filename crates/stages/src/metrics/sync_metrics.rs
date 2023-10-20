@@ -7,6 +7,7 @@ use std::collections::HashMap;
 #[derive(Debug, Default)]
 pub(crate) struct SyncMetrics {
     pub(crate) stages: HashMap<StageId, StageMetrics>,
+    #[cfg(feature = "open_performance_dashboard")]
     pub(crate) execution_stage: ExecutionStageMetrics,
 }
 
@@ -35,9 +36,10 @@ pub(crate) struct StageMetrics {
 #[metrics(scope = "sync.execution")]
 pub(crate) struct ExecutionStageMetrics {
     /// The total amount of gas processed (in millions).
+    #[cfg(feature = "enable_tps_gas_record")]
     pub(crate) mgas_processed_total: Gauge,
     /// The total amount of transactions processed.
-    #[cfg(feature = "open_performance_dashboard")]
+    #[cfg(feature = "enable_tps_gas_record")]
     pub(crate) txs_processed_total: Counter,
     #[cfg(feature = "open_performance_dashboard")]
     /// Time of execute inner.

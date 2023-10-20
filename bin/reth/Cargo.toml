@@ -154,6 +154,10 @@ enable_cache_record = [
     "reth-stages/enable_cache_record",
     "reth-rpc/enable_cache_record",
 ]
+enable_tps_gas_record = [
+    "reth-stages/enable_tps_gas_record",
+    "open_performance_dashboard",
+]
 finish_after_execution_stage = ["reth-stages/finish_after_execution_stage"]
 enable_execution_duration_record = [
     "reth-stages/enable_execution_duration_record",

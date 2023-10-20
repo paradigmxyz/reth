@@ -1,8 +1,10 @@
 #[cfg(feature = "enable_execution_duration_record")]
 use crate::ExecutionDurationRecord;
+#[cfg(feature = "open_performance_dashboard")]
+use crate::MetricEvent;
 use crate::{
-    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
-    MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
+    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEventsSender, Stage,
+    StageError, UnwindInput, UnwindOutput,
 };
 use num_traits::Zero;
 use reth_db::{
@@ -170,9 +172,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             duration_record.add_execute_tx();
 
             // Gas and txs metrics
+            #[cfg(feature = "enable_tps_gas_record")]
             if let Some(metrics_tx) = &mut self.metrics_tx {
-                let _ =
-                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
+                let _ = metrics_tx.send(MetricEvent::BlockTpsAndGas {
+                    txs: block.body.len() as u64,
+                    gas: block.header.gas_used,
+                });
             }
 
             // Merge state changes
