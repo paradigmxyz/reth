@@ -1025,8 +1025,29 @@ struct TransactionFetcher {
 }
 
 impl TransactionFetcher {
+
+    fn poll() {
+        // Advance all requests.
+        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
+            self.inflight_requests.poll_next_unpin(cx)
+        {
+            match result {
+                Ok(Ok(txs)) => {
+                    self.import_transactions(peer_id, txs.0, TransactionSource::Response)
+                }
+                Ok(Err(req_err)) => {
+                    self.on_request_error(peer_id, req_err);
+                }
+                Err(_) => {
+                    // request channel closed/dropped
+                    self.on_request_error(peer_id, RequestError::ChannelClosed)
+                }
+            }
+        }
+    }
+
     // request the missing transactions
-    fn request_from(&mut self, hashes: Vec<TxHash>, peer: &Peer) -> u64 {
+    fn request_from(&mut self, mut hashes: Vec<TxHash>, peer: &Peer) -> u64 {
         let peer_id: PeerId = peer.request_tx.peer_id;
         let mut missing_hashes: Vec<TxHash> = Vec::new();
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
