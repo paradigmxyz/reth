@@ -13,7 +13,9 @@ use crate::tracing::{
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
 use reth_primitives::{Account, Address, Bytes, B256, U256};
 use revm::{
-    interpreter::{CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter},
+    interpreter::{
+        return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
+    },
     precompile::Precompiles,
     primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo},
     Database, EVMData, Inspector,
@@ -327,31 +329,31 @@ where
 
     fn step_end(
         &mut self,
-        _interp: &mut Interpreter<'_>,
-        _data: &mut EVMData<'_, DB>,
+        interp: &mut Interpreter<'_>,
+        data: &mut EVMData<'_, DB>,
     ) -> InstructionResult {
         if self.step_fn.is_none() {
             return InstructionResult::Continue
         }
 
-        // if matches!(eval, return_revert!()) {
-        //     let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
-        //
-        //     let step = StepLog {
-        //         stack: StackObj(interp.stack.clone()),
-        //         op: interp.current_opcode().into(),
-        //         memory: MemoryObj(interp.shared_memory.clone()),
-        //         pc: interp.program_counter() as u64,
-        //         gas_remaining: interp.gas.remaining(),
-        //         cost: interp.gas.spend(),
-        //         depth: data.journaled_state.depth(),
-        //         refund: interp.gas.refunded() as u64,
-        //         error: Some(format!("{:?}", eval)),
-        //         contract: self.active_call().contract.clone(),
-        //     };
-        //
-        //     let _ = self.try_fault(step, db);
-        // }
+        if matches!(interp.instruction_result, return_revert!()) {
+            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+
+            let step = StepLog {
+                stack: StackObj(interp.stack.clone()),
+                op: interp.current_opcode().into(),
+                memory: MemoryObj(interp.shared_memory.clone()),
+                pc: interp.program_counter() as u64,
+                gas_remaining: interp.gas.remaining(),
+                cost: interp.gas.spend(),
+                depth: data.journaled_state.depth(),
+                refund: interp.gas.refunded() as u64,
+                error: Some(format!("{:?}", interp.instruction_result)),
+                contract: self.active_call().contract.clone(),
+            };
+
+            let _ = self.try_fault(step, db);
+        }
 
         InstructionResult::Continue
     }
