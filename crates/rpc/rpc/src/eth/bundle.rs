@@ -66,6 +66,7 @@ where
             block_env.timestamp += U256::from(12);
         }
 
+        let state_block_number = block_env.number;
         // use the block number of the request
         block_env.number = U256::from(block_number);
 
@@ -161,7 +162,7 @@ where
                     eth_sent_to_coinbase,
                     gas_fees: total_gas_fess,
                     results,
-                    state_block_number: evm.env.block.number.to(),
+                    state_block_number: state_block_number.to(),
                     total_gas_used,
                 };
 
