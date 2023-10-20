@@ -17,7 +17,7 @@ pub struct Command {
     pub key: String,
 
     /// Output bytes instead of human-readable decoded value
-    #[clap(long, short)]
+    #[clap(long)]
     pub raw: bool,
 }
 

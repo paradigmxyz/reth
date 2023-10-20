@@ -2,7 +2,10 @@ use super::tui::DbListTUI;
 use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
-use reth_db::{database::Database, table::Table, DatabaseEnvRO, TableViewer, Tables};
+use reth_db::{
+    database::Database, table::Table, DatabaseEnvRO, RawKey, RawValue, TableRawRow, TableViewer,
+    Tables,
+};
 use reth_primitives::hex;
 use std::cell::RefCell;
 use tracing::error;
@@ -34,6 +37,9 @@ pub struct Command {
     /// Dump as JSON instead of using TUI.
     #[arg(long, short)]
     json: bool,
+    /// Output bytes instead of human-readable decoded value
+    #[arg(long)]
+    raw: bool,
 }
 
 impl Command {
@@ -97,17 +103,19 @@ impl TableViewer<()> for ListTableViewer<'_> {
 
                 if self.args.count {
                     println!("{count} entries found.")
+                } else if self.args.raw {
+                    let list = list.into_iter().map(|row| (row.0, RawValue::new(row.1).into_value())).collect::<Vec<_>>();
+                    println!("{}", serde_json::to_string_pretty(&list)?);
                 } else {
                     println!("{}", serde_json::to_string_pretty(&list)?);
                 }
                 Ok(())
-
             } else {
                 let list_filter = RefCell::new(list_filter);
                 DbListTUI::<_, T>::new(|skip, len| {
                     list_filter.borrow_mut().update_page(skip, len);
                     self.tool.list::<T>(&list_filter.borrow()).unwrap().0
-                }, self.args.skip, self.args.len, total_entries).run()
+                }, self.args.skip, self.args.len, total_entries, self.args.raw).run()
             }
         })??;
 

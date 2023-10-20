@@ -3,7 +3,10 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use reth_db::table::{Table, TableRow};
+use reth_db::{
+    table::{Table, TableRow},
+    RawValue,
+};
 use std::{
     io,
     time::{Duration, Instant},
@@ -58,6 +61,8 @@ where
     count: usize,
     /// The total number of entries in the database
     total_entries: usize,
+    /// Output bytes instead of human-readable decoded value
+    raw: bool,
     /// The current view mode
     mode: ViewMode,
     /// The current state of the input buffer
@@ -73,12 +78,19 @@ where
     F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {
     /// Create a new database list TUI
-    pub(crate) fn new(fetch: F, skip: usize, count: usize, total_entries: usize) -> Self {
+    pub(crate) fn new(
+        fetch: F,
+        skip: usize,
+        count: usize,
+        total_entries: usize,
+        raw: bool,
+    ) -> Self {
         Self {
             fetch,
             skip,
             count,
             total_entries,
+            raw,
             mode: ViewMode::Normal,
             input: String::new(),
             list_state: ListState::default(),
