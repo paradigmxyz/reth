@@ -206,7 +206,6 @@ impl JsInspector {
         )?)
     }
 
-    #[allow(unused)]
     fn try_fault(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
         let step = step.into_js_object(&mut self.ctx)?;
         let db = db.into_js_object(&mut self.ctx)?;

@@ -373,7 +373,7 @@ impl TracingInspector {
         step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
 
         // set the status
-        step.status = InstructionResult::Continue;
+        step.status = interp.instruction_result;
     }
 }
 
