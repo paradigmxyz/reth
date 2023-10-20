@@ -8,7 +8,7 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
+use reth_primitives::{BlockId, TransactionMeta};
 
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
@@ -59,13 +59,13 @@ where
     /// Returns `None` if the block wasn't found.
     pub(crate) async fn block_receipts(
         &self,
-        number: BlockNumberOrTag,
+        block_id: BlockId,
     ) -> EthResult<Option<Vec<TransactionReceipt>>> {
         let mut block_and_receipts = None;
 
-        if number.is_pending() {
+        if block_id.is_pending() {
             block_and_receipts = self.provider().pending_block_and_receipts()?;
-        } else if let Some(block_hash) = self.provider().block_hash_for_id(number.into())? {
+        } else if let Some(block_hash) = self.provider().block_hash_for_id(block_id)? {
             block_and_receipts = self.cache().get_block_and_receipts(block_hash).await?;
         }
 

@@ -126,12 +126,9 @@ where
     }
 
     /// Handler for: `eth_getBlockReceipts`
-    async fn block_receipts(
-        &self,
-        number: BlockNumberOrTag,
-    ) -> Result<Option<Vec<TransactionReceipt>>> {
-        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockReceipts");
-        Ok(EthApi::block_receipts(self, number).await?)
+    async fn block_receipts(&self, block_id: BlockId) -> Result<Option<Vec<TransactionReceipt>>> {
+        trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
+        Ok(EthApi::block_receipts(self, block_id).await?)
     }
 
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
