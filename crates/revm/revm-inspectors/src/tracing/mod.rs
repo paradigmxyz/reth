@@ -133,7 +133,7 @@ impl TracingInspector {
     ) -> bool {
         if data.precompiles.contains(to) {
             // only if this is _not_ the root call
-            return self.is_deep() && value == U256::ZERO
+            return self.is_deep() && value == U256::ZERO;
         }
         false
     }
@@ -381,25 +381,15 @@ impl<DB> Inspector<DB> for TracingInspector
 where
     DB: Database,
 {
-    fn initialize_interp(
-        &mut self,
-        interp: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn initialize_interp(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         self.gas_inspector.initialize_interp(interp, data)
     }
 
-    fn step(
-        &mut self,
-        interp: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn step(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         if self.config.record_steps {
             self.gas_inspector.step(interp, data);
             self.start_step(interp, data);
         }
-
-        InstructionResult::Continue
     }
 
     fn log(
@@ -420,16 +410,11 @@ where
         }
     }
 
-    fn step_end(
-        &mut self,
-        interp: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn step_end(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         if self.config.record_steps {
             self.gas_inspector.step_end(interp, data);
             self.fill_step_on_step_end(interp, data);
         }
-        InstructionResult::Continue
     }
 
     fn call(

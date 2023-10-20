@@ -69,32 +69,18 @@ where
     DB: Database,
     INSP: Inspector<DB>,
 {
-    fn initialize_interp(
-        &mut self,
-        interp: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn initialize_interp(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         match self {
-            MaybeOwnedInspector::Owned(insp) => {
-                return insp.borrow_mut().initialize_interp(interp, data)
-            }
+            MaybeOwnedInspector::Owned(insp) => insp.borrow_mut().initialize_interp(interp, data),
             MaybeOwnedInspector::Stacked(_) => {}
         }
-
-        InstructionResult::Continue
     }
 
-    fn step(
-        &mut self,
-        interp: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn step(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         match self {
-            MaybeOwnedInspector::Owned(insp) => return insp.borrow_mut().step(interp, data),
+            MaybeOwnedInspector::Owned(insp) => insp.borrow_mut().step(interp, data),
             MaybeOwnedInspector::Stacked(_) => {}
         }
-
-        InstructionResult::Continue
     }
 
     fn log(
@@ -112,17 +98,11 @@ where
         }
     }
 
-    fn step_end(
-        &mut self,
-        interp: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn step_end(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         match self {
-            MaybeOwnedInspector::Owned(insp) => return insp.borrow_mut().step_end(interp, data),
+            MaybeOwnedInspector::Owned(insp) => insp.borrow_mut().step_end(interp, data),
             MaybeOwnedInspector::Stacked(_) => {}
         }
-
-        InstructionResult::Continue
     }
 
     fn call(

@@ -100,38 +100,16 @@ impl<DB> Inspector<DB> for InspectorStack
 where
     DB: Database,
 {
-    fn initialize_interp(
-        &mut self,
-        interpreter: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn initialize_interp(&mut self, interpreter: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.initialize_interp(interpreter, data);
-
-            // Allow inspectors to exit early
-            if status != InstructionResult::Continue {
-                return status
-            }
+            inspector.initialize_interp(interpreter, data);
         });
-
-        InstructionResult::Continue
     }
 
-    fn step(
-        &mut self,
-        interpreter: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn step(&mut self, interpreter: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step(interpreter, data);
-
-            // Allow inspectors to exit early
-            if status != InstructionResult::Continue {
-                return status
-            }
+            inspector.step(interpreter, data);
         });
-
-        InstructionResult::Continue
     }
 
     fn log(
@@ -146,21 +124,10 @@ where
         });
     }
 
-    fn step_end(
-        &mut self,
-        interpreter: &mut Interpreter<'_>,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn step_end(&mut self, interpreter: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step_end(interpreter, data);
-
-            // Allow inspectors to exit early
-            if status != InstructionResult::Continue {
-                return status
-            }
+            inspector.step_end(interpreter, data);
         });
-
-        InstructionResult::Continue
     }
 
     fn call(
@@ -173,7 +140,7 @@ where
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
-                return (status, gas, retdata)
+                return (status, gas, retdata);
             }
         });
 
@@ -195,7 +162,7 @@ where
             // If the inspector returns a different ret or a revert with a non-empty message,
             // we assume it wants to tell us something
             if new_ret != ret || (new_ret == InstructionResult::Revert && new_out != out) {
-                return (new_ret, new_gas, new_out)
+                return (new_ret, new_gas, new_out);
             }
         });
 
@@ -212,7 +179,7 @@ where
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
-                return (status, addr, gas, retdata)
+                return (status, addr, gas, retdata);
             }
         });
 
@@ -233,7 +200,7 @@ where
                 inspector.create_end(data, inputs, ret, address, remaining_gas, out.clone());
 
             if new_ret != ret {
-                return (new_ret, new_address, new_gas, new_retdata)
+                return (new_ret, new_address, new_gas, new_retdata);
             }
         });
 
