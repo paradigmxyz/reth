@@ -2,10 +2,7 @@ use super::tui::DbListTUI;
 use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
-use reth_db::{
-    database::Database, table::Table, DatabaseEnvRO, RawKey, RawValue, TableRawRow, TableViewer,
-    Tables,
-};
+use reth_db::{database::Database, table::Table, DatabaseEnvRO, RawValue, TableViewer, Tables};
 use reth_primitives::hex;
 use std::cell::RefCell;
 use tracing::error;
@@ -31,6 +28,10 @@ pub struct Command {
     /// missing results since the search uses the raw uncompressed value from the database.
     #[arg(long)]
     search: Option<String>,
+
+    /// Minimum size in bytes
+    #[arg(long, default_value_t = 0)]
+    min_size: usize,
     /// Returns the number of rows found.
     #[arg(long, short)]
     count: bool,
@@ -65,6 +66,7 @@ impl Command {
             skip: self.skip,
             len: self.len,
             search,
+            min_size: self.min_size,
             reverse: self.reverse,
             only_count: self.count,
         }
