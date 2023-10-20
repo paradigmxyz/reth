@@ -604,7 +604,7 @@ where
             match req {
                 JsDbRequest::Basic { address, resp } => {
                     let acc = db
-                        .basic(address)
+                        .basic_ref(address)
                         .map(|maybe_acc| {
                             maybe_acc.map(|acc| Account {
                                 nonce: acc.nonce,
@@ -617,13 +617,13 @@ where
                 }
                 JsDbRequest::Code { code_hash, resp } => {
                     let code = db
-                        .code_by_hash(code_hash)
+                        .code_by_hash_ref(code_hash)
                         .map(|code| code.bytecode)
                         .map_err(|err| err.to_string());
                     let _ = resp.send(code);
                 }
                 JsDbRequest::StorageAt { address, index, resp } => {
-                    let value = db.storage(address, index).map_err(|err| err.to_string());
+                    let value = db.storage_ref(address, index).map_err(|err| err.to_string());
                     let _ = resp.send(value);
                 }
             }

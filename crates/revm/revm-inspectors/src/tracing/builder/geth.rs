@@ -193,7 +193,7 @@ impl GethTraceBuilder {
         if !is_diff {
             let mut prestate = PreStateMode::default();
             for (addr, changed_acc) in account_diffs {
-                let db_acc = db.basic(addr)?.unwrap_or_default();
+                let db_acc = db.basic_ref(addr)?.unwrap_or_default();
                 let mut pre_state = AccountState::from_account_info(
                     db_acc.nonce,
                     db_acc.balance,
@@ -212,7 +212,7 @@ impl GethTraceBuilder {
             let mut state_diff = DiffMode::default();
             let mut account_change_kinds = HashMap::with_capacity(account_diffs.len());
             for (addr, changed_acc) in account_diffs {
-                let db_acc = db.basic(addr)?.unwrap_or_default();
+                let db_acc = db.basic_ref(addr)?.unwrap_or_default();
                 let db_code = db_acc.code.as_ref();
                 let db_code_hash = db_acc.code_hash;
 
@@ -225,7 +225,7 @@ impl GethTraceBuilder {
                         if db_code_hash == KECCAK_EMPTY {
                             None
                         } else {
-                            db.code_by_hash(db_code_hash).ok().map(|code| code.original_bytes())
+                            db.code_by_hash_ref(db_code_hash).ok().map(|code| code.original_bytes())
                         }
                     })
                     .map(Into::into);
