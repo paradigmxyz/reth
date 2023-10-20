@@ -28,10 +28,15 @@ pub struct Command {
     /// missing results since the search uses the raw uncompressed value from the database.
     #[arg(long)]
     search: Option<String>,
-
-    /// Minimum size in bytes
+    /// Minimum size of row in bytes
     #[arg(long, default_value_t = 0)]
-    min_size: usize,
+    min_row_size: usize,
+    /// Minimum size of key in bytes
+    #[arg(long, default_value_t = 0)]
+    min_key_size: usize,
+    /// Minimum size of value in bytes
+    #[arg(long, default_value_t = 0)]
+    min_value_size: usize,
     /// Returns the number of rows found.
     #[arg(long, short)]
     count: bool,
@@ -66,7 +71,9 @@ impl Command {
             skip: self.skip,
             len: self.len,
             search,
-            min_size: self.min_size,
+            min_row_size: self.min_row_size,
+            min_key_size: self.min_key_size,
+            min_value_size: self.min_value_size,
             reverse: self.reverse,
             only_count: self.count,
         }
