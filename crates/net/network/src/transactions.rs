@@ -773,7 +773,7 @@ where
 
         // Advance all requests.
         while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
-            this.transaction_fetcher.inflight_requests.poll_next_unpin(cx)
+            this.transaction_fetcher.poll(cx)
         {
             match result {
                 Ok(Ok(txs)) => {
@@ -1025,60 +1025,42 @@ struct TransactionFetcher {
 }
 
 impl TransactionFetcher {
-
-    fn poll() {
-        // Advance all requests.
-        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
-            self.inflight_requests.poll_next_unpin(cx)
-        {
-            match result {
-                Ok(Ok(txs)) => {
-                    self.import_transactions(peer_id, txs.0, TransactionSource::Response)
-                }
-                Ok(Err(req_err)) => {
-                    self.on_request_error(peer_id, req_err);
-                }
-                Err(_) => {
-                    // request channel closed/dropped
-                    self.on_request_error(peer_id, RequestError::ChannelClosed)
-                }
-            }
-        }
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<GetPooledTxResponse>> {
+        self.inflight_requests.poll_next_unpin(cx)
     }
 
     // request the missing transactions
-    fn request_from(&mut self, mut hashes: Vec<TxHash>, peer: &Peer) -> u64 {
+    fn request_from(&mut self, mut hashes: Vec<TxHash>, peer: &Peer) -> bool {
         let peer_id: PeerId = peer.request_tx.peer_id;
-        let mut missing_hashes: Vec<TxHash> = Vec::new();
         // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
-        for hash in hashes {
+        hashes.retain(|&hash| {
             match self.inflight_hash_to_fallback_peers.entry(hash) {
                 Entry::Vacant(entry) => {
-                    // the hash is not in inflight hashes, insert it
-                    missing_hashes.push(*entry.key());
+                    // the hash is not in inflight hashes, insert it and retain in the vector
                     entry.insert(vec![peer_id]);
+                    true
                 }
                 Entry::Occupied(mut entry) => {
-                    // the hash is already in inflight, add this peer as a backup
+                    // the hash is already in inflight, add this peer as a backup and discard from
+                    // the vector
                     entry.get_mut().push(peer_id);
+                    false
                 }
             }
-        }
+        });
         // 2. request all missing from peer
         let (response, rx) = oneshot::channel();
-        let req: PeerRequest = PeerRequest::GetPooledTransactions {
-            request: GetPooledTransactions(missing_hashes),
-            response,
-        };
+        let req: PeerRequest =
+            PeerRequest::GetPooledTransactions { request: GetPooledTransactions(hashes), response };
         // 3. insert hashes to inflight set
         if peer.request_tx.try_send(req).is_ok() {
             //create a new request for it, from that peer
             self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
         } else {
             //increment metrics egress_peer_channel_full
-            return 1
+            return false
         }
-        0
+        true
     }
 }
 
