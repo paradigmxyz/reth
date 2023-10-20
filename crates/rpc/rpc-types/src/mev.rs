@@ -1,7 +1,8 @@
-//! MEV-share bundle type bindings
+//! MEV bundle type bindings
+
 #![allow(missing_docs)]
-use alloy_primitives::{Address, BlockNumber, Bytes, TxHash, B256, U256, U64};
-use reth_primitives::{BlockId, Log};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256, U64};
+use reth_primitives::{BlockId, BlockNumberOrTag, Log};
 use serde::{
     ser::{SerializeSeq, Serializer},
     Deserialize, Deserializer, Serialize,
@@ -603,7 +604,7 @@ pub struct EthCallBundle {
     /// hex encoded block number for which this bundle is valid on
     pub block_number: U64,
     /// Either a hex encoded number or a block tag for which state to base this simulation on
-    pub state_block_number: BlockNumber,
+    pub state_block_number: BlockNumberOrTag,
     /// the timestamp to use for this bundle simulation, in seconds since the unix epoch
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<u64>,
@@ -613,9 +614,9 @@ pub struct EthCallBundle {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EthCallBundleResponse {
+    pub bundle_hash: B256,
     #[serde(with = "u256_numeric_string")]
     pub bundle_gas_price: U256,
-    pub bundle_hash: String,
     #[serde(with = "u256_numeric_string")]
     pub coinbase_diff: U256,
     #[serde(with = "u256_numeric_string")]
@@ -641,9 +642,16 @@ pub struct EthCallBundleTransactionResult {
     #[serde(with = "u256_numeric_string")]
     pub gas_price: U256,
     pub gas_used: u64,
-    pub to_address: Address,
+    pub to_address: Option<Address>,
     pub tx_hash: B256,
-    pub value: Bytes,
+    /// Contains the return data if the transaction succeeded
+    ///
+    /// Note: this is mutually exclusive with `revert`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Bytes>,
+    /// Contains the return data if the transaction reverted
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revert: Option<Bytes>,
 }
 
 mod u256_numeric_string {
