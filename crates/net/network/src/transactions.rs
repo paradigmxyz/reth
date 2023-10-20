@@ -770,22 +770,17 @@ where
 
         this.update_request_metrics();
 
-        // Advance all requests.
-        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
-            this.transaction_fetcher.poll(cx)
-        {
-            match result {
-                Ok(Ok(txs)) => {
-                    this.import_transactions(peer_id, txs.0, TransactionSource::Response)
-                }
-                Ok(Err(req_err)) => {
-                    this.on_request_error(peer_id, req_err);
-                }
-                Err(_) => {
-                    // request channel closed/dropped
-                    this.on_request_error(peer_id, RequestError::ChannelClosed)
-                }
+        let poll_result: (PeerId, Option<Vec<PooledTransactionsElement>>, Option<RequestError>) =
+            this.transaction_fetcher.poll(cx);
+        match poll_result.2 {
+            Some(req_err) => {
+                this.on_request_error(poll_result.0, req_err);
             }
+            None => this.import_transactions(
+                poll_result.0,
+                poll_result.1.unwrap(),
+                TransactionSource::Response,
+            ),
         }
 
         this.update_request_metrics();
@@ -1024,8 +1019,33 @@ struct TransactionFetcher {
 }
 
 impl TransactionFetcher {
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<GetPooledTxResponse>> {
-        self.inflight_requests.poll_next_unpin(cx)
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> (PeerId, Option<Vec<PooledTransactionsElement>>, Option<RequestError>) {
+        let mut final_peer_id: Option<PeerId> = None;
+        let mut final_txs: Option<Vec<PooledTransactionsElement>> = None;
+        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
+            self.inflight_requests.poll_next_unpin(cx)
+        {
+            final_peer_id = Some(peer_id);
+
+            match result {
+                Ok(Ok(txs)) => {
+                    self.inflight_requests.clear();
+                    for tx in txs.0.iter() {
+                        self.inflight_hash_to_fallback_peers.remove(tx.hash());
+                    }
+                    final_txs = Some(txs.0);
+                }
+                Ok(Err(req_err)) => return (peer_id, None, Some(req_err)),
+                Err(_) => {
+                    // request channel closed/dropped
+                    return (peer_id, None, Some(RequestError::ChannelClosed))
+                }
+            }
+        }
+        (final_peer_id.unwrap(), final_txs, None)
     }
 
     // request the missing transactions
