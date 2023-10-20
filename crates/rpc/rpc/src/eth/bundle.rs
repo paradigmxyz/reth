@@ -150,7 +150,7 @@ where
 
                 // populate the response
 
-                let coinbase_diff = initial_coinbase.saturating_sub(coinbase_balance_after_tx);
+                let coinbase_diff = coinbase_balance_after_tx.saturating_sub(initial_coinbase);
                 let eth_sent_to_coinbase = coinbase_diff.saturating_sub(total_gas_fess);
                 let bundle_gas_price =
                     coinbase_diff.checked_div(U256::from(total_gas_used)).unwrap_or_default();
