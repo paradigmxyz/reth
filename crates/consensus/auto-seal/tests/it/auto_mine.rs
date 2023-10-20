@@ -11,15 +11,6 @@ use reth_transaction_pool::TransactionPool;
 struct AutoMineConfig;
 
 impl RethNodeCommandConfig for AutoMineConfig {
-    fn on_components_initialized<Reth: RethNodeComponents>(
-        &mut self,
-        _components: &Reth,
-    ) -> eyre::Result<()> {
-        tokio::spawn(async move {
-            println!("All components initialized");
-        });
-        Ok(())
-    }
     fn on_node_started<Reth: RethNodeComponents>(
         &mut self,
         components: &Reth,
@@ -58,29 +49,10 @@ impl RethNodeCommandConfig for AutoMineConfig {
         }));
         Ok(())
     }
-
-    fn on_rpc_server_started<Conf, Reth>(
-        &mut self,
-        config: &Conf,
-        components: &Reth,
-        rpc_components: reth::cli::components::RethRpcComponents<'_, Reth>,
-        handles: reth::cli::components::RethRpcServerHandles,
-    ) -> eyre::Result<()>
-    where
-        Conf: reth::cli::config::RethRpcConfig,
-        Reth: RethNodeComponents,
-    {
-        let _ = config;
-        let _ = components;
-        let _ = rpc_components;
-        let _ = handles;
-        Ok(())
-    }
 }
 
 #[test]
 pub fn test_auto_mine() {
-    reth_tracing::init_test_tracing();
     let temp_path = tempfile::TempDir::new()
         .expect("tempdir is okay")
         .into_path();

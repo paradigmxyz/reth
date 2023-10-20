@@ -283,8 +283,6 @@ impl StorageInner {
             parent_beacon_block_root: None,
         };
 
-        tracing::debug!(target: "consensus::auto", ?header);
-
         header.transactions_root = if transactions.is_empty() {
             EMPTY_TRANSACTIONS
         } else {
@@ -306,15 +304,12 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
         // call the 4788 beacon contract
-        tracing::debug!(target: "consensus::auto", ?block, "\n\ncalling execute()\n\n");
-        tracing::debug!(target: "consensus::auto", block_number = ?block.number, "\n\ncalling execute()\n\n");
 
+        // set the first block to find the correct index in bundle state
         executor.set_first_block(block.number);
 
         let (receipts, gas_used) =
             executor.execute_transactions(block, U256::ZERO, Some(senders))?;
-        
-        tracing::debug!(target: "consensus::auto", ?receipts, "in auto execute()");
 
         // Save receipts.
         executor.save_receipts(receipts)?;
@@ -339,11 +334,8 @@ impl StorageInner {
         client: &S,
         gas_used: u64,
     ) -> Result<Header, BlockExecutionError> {
-        tracing::debug!(target: "consensus::auto", receipts = ?bundle_state.receipts(), "in auto complete_header()");
-        
         let receipts = bundle_state.receipts_by_block(header.number);
-        tracing::debug!(target: "consensus::auto", ?receipts, "in auto complete_header()");
-        
+
         header.receipts_root = if receipts.is_empty() {
             EMPTY_RECEIPTS
         } else {

@@ -133,7 +133,7 @@ impl<'a> EVMProcessor<'a> {
         self.stack = stack;
     }
 
-    /// Configure the executor with the give block.
+    /// Configure the executor with the given block.
     pub fn set_first_block(&mut self, num: BlockNumber) {
         self.first_block = Some(num);
     }
