@@ -1,7 +1,6 @@
 use super::metric_storage::{MetricsStorage, PerformanceDashboardMetricStorage};
 use std::sync::Arc;
 
-use revm_utils::time::*;
 use std::{
     ops::{Div, Mul},
     time::Duration,
@@ -13,33 +12,29 @@ pub(crate) struct PerformanceDashboardMetricHandler {
     storage: Arc<PerformanceDashboardMetricStorage>,
     pre_snapshot: Option<MetricsStorage>,
     cnt: u64,
-    cpu_frequency: f64,
 }
 
 impl PerformanceDashboardMetricHandler {
     pub(crate) fn new(storage: Arc<PerformanceDashboardMetricStorage>) -> Self {
-        Self {
-            storage,
-            cnt: 0,
-            pre_snapshot: None,
-            cpu_frequency: get_cpu_frequency().expect("Get cpu frequency error!"),
-        }
+        Self { storage, cnt: 0, pre_snapshot: None }
     }
 
     pub(crate) async fn run(&mut self, interval: u64) {
-        let mut duration_record_counter = TimeRecorder::now();
+        let mut pre = minstant::Instant::now();
         loop {
             {
                 let snapshot = self.storage.snapshot();
-                let elapsed_ns =
-                    duration_record_counter.record_next_time().to_nanoseconds(self.cpu_frequency);
+                let now = minstant::Instant::now();
+                let elapsed_ns = now.checked_duration_since(pre).expect("overflow").as_nanos();
+                pre = now;
 
                 if let Some(pre_snapshot) = self.pre_snapshot.take() {
                     // 1. calculate tps
-                    let delta_txs = snapshot
+                    let delta_txs: u128 = snapshot
                         .total_txs_processed
                         .checked_sub(pre_snapshot.total_txs_processed)
-                        .expect("overflow");
+                        .expect("overflow")
+                        .into();
                     let tps = delta_txs.mul(1000_000_000).div(elapsed_ns);
 
                     // 2. calculate mGas/s

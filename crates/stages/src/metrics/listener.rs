@@ -13,12 +13,6 @@ use std::{
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::trace;
 
-#[cfg(feature = "enable_execution_duration_record")]
-use revm_utils::time::{convert_to_nanoseconds, get_cpu_frequency};
-
-// #[cfg(feature = "enable_opcode_metrics")]
-// use revm_utils::types::RevmMetricRecord;
-
 /// Alias type for metric producers to use.
 pub type MetricEventsSender = UnboundedSender<MetricEvent>;
 
@@ -52,15 +46,15 @@ pub enum MetricEvent {
     #[cfg(feature = "enable_execution_duration_record")]
     ExecutionStageTime {
         /// total time of execute_inner
-        execute_inner: u64,
+        execute_inner: u128,
         /// total time of  get block td and block_with_senders
-        read_block: u64,
+        read_block: u128,
         /// time of revm execute tx(execute_and_verify_receipt)
-        execute_tx: u64,
+        execute_tx: u128,
         /// time of process state(state.extend)
-        process_state: u64,
+        process_state: u128,
         /// time of write to db
-        write_to_db: u64,
+        write_to_db: u128,
     },
     /// Execution stage processed some amount of txs and gas in a block.
     #[cfg(feature = "enable_tps_gas_record")]
@@ -126,28 +120,26 @@ impl MetricsListener {
                 process_state,
                 write_to_db,
             } => {
-                let cpu_frequency = get_cpu_frequency().expect("Get cpu frequency error!");
-
                 self.sync_metrics
                     .execution_stage
                     .execute_inner_time
-                    .increment(convert_to_nanoseconds(execute_inner, cpu_frequency));
+                    .increment(execute_inner.try_into().expect("truncation error"));
                 self.sync_metrics
                     .execution_stage
                     .read_block_info_time
-                    .increment(convert_to_nanoseconds(read_block, cpu_frequency));
+                    .increment(read_block.try_into().expect("truncation error"));
                 self.sync_metrics
                     .execution_stage
                     .revm_execute_time
-                    .increment(convert_to_nanoseconds(execute_tx, cpu_frequency));
+                    .increment(execute_tx.try_into().expect("truncation error"));
                 self.sync_metrics
                     .execution_stage
                     .post_process_time
-                    .increment(convert_to_nanoseconds(process_state, cpu_frequency));
+                    .increment(process_state.try_into().expect("truncation error"));
                 self.sync_metrics
                     .execution_stage
                     .write_to_db_time
-                    .increment(convert_to_nanoseconds(write_to_db, cpu_frequency));
+                    .increment(write_to_db.try_into().expect("truncation error"));
             }
             #[cfg(feature = "enable_tps_gas_record")]
             MetricEvent::BlockTpsAndGas { txs, gas } => {

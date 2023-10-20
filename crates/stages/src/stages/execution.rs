@@ -28,9 +28,6 @@ use reth_provider::{
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
 
-// #[cfg(feature = "open_performance_dashboard")]
-// use revm_utils::time::{get_cpu_frequency, TimeRecorder};
-
 /// The execution stage executes all transactions and
 /// update history indexes.
 ///
@@ -240,11 +237,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             if let Some(metrics_tx) = &mut self.metrics_tx {
                 let _ = metrics_tx.send(MetricEvent::ExecutionStageTime {
-                    execute_inner: duration_record.execute_inner,
-                    read_block: duration_record.read_block,
-                    execute_tx: duration_record.execute_tx,
-                    process_state: duration_record.process_state,
-                    write_to_db: duration_record.write_to_db,
+                    execute_inner: duration_record.execute_inner.as_nanos(),
+                    read_block: duration_record.read_block.as_nanos(),
+                    execute_tx: duration_record.execute_tx.as_nanos(),
+                    process_state: duration_record.process_state.as_nanos(),
+                    write_to_db: duration_record.write_to_db.as_nanos(),
                 });
             }
 
