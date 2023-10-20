@@ -505,10 +505,9 @@ where
             hashes.truncate(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES);
 
             // request the missing transactions
-            let egress_peer_channel_full_count =
-                self.transaction_fetcher.request_from(hashes, peer);
-            if egress_peer_channel_full_count > 0 {
-                self.metrics.egress_peer_channel_full.increment(egress_peer_channel_full_count);
+            let request_sent: bool = self.transaction_fetcher.request_from(hashes, peer);
+            if !request_sent {
+                self.metrics.egress_peer_channel_full.increment(1);
                 return
             }
 
@@ -1041,14 +1040,21 @@ impl TransactionFetcher {
                     true
                 }
                 Entry::Occupied(mut entry) => {
-                    // the hash is already in inflight, add this peer as a backup and discard from
-                    // the vector
-                    entry.get_mut().push(peer_id);
+                    // the hash is already in inflight, add this peer as a backup if not more than 3
+                    // backups already
+                    let backups = entry.get_mut();
+                    if backups.len() < 3 {
+                        backups.push(peer_id);
+                    }
                     false
                 }
             }
         });
         // 2. request all missing from peer
+        if hashes.is_empty() {
+            // nothing to request
+            return true
+        }
         let (response, rx) = oneshot::channel();
         let req: PeerRequest =
             PeerRequest::GetPooledTransactions { request: GetPooledTransactions(hashes), response };
