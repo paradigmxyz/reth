@@ -90,7 +90,7 @@ where
                         return Ok(Some(AccountNode::Branch(TrieBranchNode::new(
                             key,
                             self.walker.hash().unwrap(),
-                            self.walker.children_are_in_trie(),
+                            self.walker.child_in_trie(),
                         ))))
                     }
                 }
@@ -180,7 +180,7 @@ where
                         return Ok(Some(StorageNode::Branch(TrieBranchNode::new(
                             key,
                             self.walker.hash().unwrap(),
-                            self.walker.children_are_in_trie(),
+                            self.walker.child_in_trie(),
                         ))))
                     }
                 }

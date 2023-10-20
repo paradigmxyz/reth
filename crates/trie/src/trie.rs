@@ -1161,7 +1161,6 @@ mod tests {
     }
 
     #[test]
-
     fn account_trie_around_extension_node_with_dbtrie() {
         let db = create_test_rw_db();
         let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());

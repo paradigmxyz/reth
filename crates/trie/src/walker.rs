@@ -5,7 +5,7 @@ use crate::{
 };
 use reth_db::DatabaseError;
 use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles},
+    trie::{BranchNodeCompact, Nibbles, TrieMask},
     B256,
 };
 
@@ -28,22 +28,57 @@ pub struct TrieWalker<C> {
     trie_updates: Option<TrieUpdates>,
 }
 
+fn seek_node(
+    cursor: &mut impl TrieCursor,
+    key: &Nibbles,
+) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    let entry = cursor.seek(key.hex_data.to_vec().into())?;
+
+    if let Some((_, node)) = &entry {
+        assert!(!node.state_mask.is_empty());
+    }
+
+    Ok(entry.map(|(k, v)| (Nibbles::from_hex(k), v)))
+}
+
 impl<C: TrieCursor> TrieWalker<C> {
     /// Constructs a new TrieWalker, setting up the initial state of the stack and cursor.
-    pub fn new(cursor: C, changes: PrefixSet) -> Self {
+    pub fn new(mut cursor: C, changes: PrefixSet) -> Self {
         // Initialize the walker with a single empty stack element.
+
+        let mut node = CursorSubNode::new(
+            Nibbles::default(),
+            BranchNodeCompact::new(
+                // walker always start with key 0x0, it has the same effects as empty key.
+                TrieMask::from_nibble(0),
+                TrieMask::new(0),
+                TrieMask::new(0),
+                vec![],
+                None,
+            ),
+        );
+
+        if let Some((key, mut value)) = seek_node(&mut cursor, &Nibbles::default()).unwrap() {
+            if key.hex_data.is_empty() {
+                // root node is a branch node
+                // walker always start with key 0x0, it has the same effects as empty key.
+                value.state_mask |= TrieMask::from_nibble(0);
+                node = CursorSubNode::new(key, value);
+            } else {
+                // root node is an extension node
+                // extension node has only one child, add it into the mask.
+                node.node.state_mask |= TrieMask::from_nibble(key[0]);
+                node.node.tree_mask = TrieMask::from_nibble(key[0]);
+            }
+        }
+
         let mut this = Self {
             cursor,
             changes,
-            stack: vec![CursorSubNode::default()],
+            stack: vec![node],
             can_skip_current_node: false,
             trie_updates: None,
         };
-
-        // Set up the root node of the trie in the stack, if it exists.
-        if let Some((key, value)) = this.node(true).unwrap() {
-            this.stack[0] = CursorSubNode::new(key, Some(value));
-        }
 
         // Update the skip state for the root node.
         this.update_skip_node();
@@ -97,17 +132,14 @@ impl<C: TrieCursor> TrieWalker<C> {
     ///
     /// * `Result<Option<Nibbles>, Error>` - The next key in the trie or an error.
     pub fn advance(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        if let Some(last) = self.stack.last() {
-            if !self.can_skip_current_node && self.children_are_in_trie() {
+        if !self.stack.is_empty() {
+            if !self.can_skip_current_node && self.child_in_trie() {
                 // If we can't skip the current node and the children are in the trie,
                 // either consume the next node or move to the next sibling.
-                match last.nibble {
-                    -1 => self.move_to_next_sibling(true)?,
-                    _ => self.consume_node()?,
-                }
+                self.consume_node()?;
             } else {
                 // If we can skip the current node, move to the next sibling.
-                self.move_to_next_sibling(false)?;
+                self.move_to_next_sibling()?;
             }
 
             // Update the skip node flag based on the new position in the trie.
@@ -118,46 +150,23 @@ impl<C: TrieCursor> TrieWalker<C> {
         Ok(self.key())
     }
 
-    /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
-    fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let key = self.key().expect("key must exist");
-        let entry = if exact {
-            self.cursor.seek_exact(key.hex_data.to_vec().into())?
-        } else {
-            self.cursor.seek(key.hex_data.to_vec().into())?
-        };
-
-        if let Some((_, node)) = &entry {
-            assert!(!node.state_mask.is_empty());
-        }
-
-        Ok(entry.map(|(k, v)| (Nibbles::from_hex(k), v)))
-    }
-
     /// Consumes the next node in the trie, updating the stack.
     fn consume_node(&mut self) -> Result<(), DatabaseError> {
-        let Some((key, node)) = self.node(false)? else {
+        let curr_key = self.key().expect("key must exist");
+        let Some((key, node)) = seek_node(&mut self.cursor, &curr_key)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
             return Ok(())
         };
 
-        // Overwrite the root node's first nibble
-        // We need to sync the stack with the trie structure when consuming a new node. This is
-        // necessary for proper traversal and accurately representing the trie in the stack.
-        if !key.is_empty() && !self.stack.is_empty() {
-            self.stack[0].nibble = key[0] as i8;
-        }
-
         // Create a new CursorSubNode and push it to the stack.
-        let subnode = CursorSubNode::new(key, Some(node));
-        let nibble = subnode.nibble;
+        let subnode = CursorSubNode::new(key, node);
         self.stack.push(subnode);
         self.update_skip_node();
 
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
-        if !self.can_skip_current_node || nibble != -1 {
+        if !self.can_skip_current_node {
             if let Some((updates, key)) = self.trie_updates.as_mut().zip(self.cursor.current()?) {
                 updates.schedule_delete(key);
             }
@@ -167,29 +176,26 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Moves to the next sibling node in the trie, updating the stack.
-    fn move_to_next_sibling(
-        &mut self,
-        allow_root_to_child_nibble: bool,
-    ) -> Result<(), DatabaseError> {
+    fn move_to_next_sibling(&mut self) -> Result<(), DatabaseError> {
         let Some(subnode) = self.stack.last_mut() else { return Ok(()) };
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.nibble >= 15 || (subnode.nibble < 0 && !allow_root_to_child_nibble) {
+        if subnode.nibble >= 15 {
             self.stack.pop();
-            self.move_to_next_sibling(false)?;
-            return Ok(())
+            return self.move_to_next_sibling()
         }
 
         subnode.nibble += 1;
 
-        if subnode.node.is_none() {
-            return self.consume_node()
-        }
-
         // Find the next sibling with state.
         while subnode.nibble < 16 {
             if subnode.state_flag() {
+                // if we can not skip it then load it.
+                if !subnode.hash_flag() && subnode.tree_flag() {
+                    // check consistency: flag is set, but node loaded with different prefix?
+                    return self.consume_node()
+                }
                 return Ok(())
             }
             subnode.nibble += 1;
@@ -197,9 +203,7 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Pop the current node and move to the next sibling.
         self.stack.pop();
-        self.move_to_next_sibling(false)?;
-
-        Ok(())
+        self.move_to_next_sibling()
     }
 
     /// Returns the current key in the trie.
@@ -212,8 +216,8 @@ impl<C: TrieCursor> TrieWalker<C> {
         self.stack.last().and_then(|n| n.hash())
     }
 
-    /// Indicates whether the children of the current node are present in the trie.
-    pub fn children_are_in_trie(&self) -> bool {
+    /// Indicates whether the child of the current node are present in the trie.
+    pub fn child_in_trie(&self) -> bool {
         self.stack.last().map_or(false, |n| n.tree_flag())
     }
 
@@ -236,9 +240,8 @@ impl<C: TrieCursor> TrieWalker<C> {
 
     fn update_skip_node(&mut self) {
         self.can_skip_current_node = if let Some(key) = self.key() {
-            let contains_prefix = self.changes.contains(key);
             let hash_flag = self.stack.last().unwrap().hash_flag();
-            !contains_prefix && hash_flag
+            hash_flag && !self.changes.contains(key)
         } else {
             false
         };
@@ -263,7 +266,7 @@ mod tests {
         let inputs = vec![
             (vec![0x5u8], BranchNodeCompact::new(0b1_0000_0101, 0b1_0000_0100, 0, vec![], None)),
             (vec![0x5u8, 0x2, 0xC], BranchNodeCompact::new(0b1000_0111, 0, 0, vec![], None)),
-            (vec![0x5u8, 0x8], BranchNodeCompact::new(0b0110, 0b0100, 0, vec![], None)),
+            (vec![0x5u8, 0x8], BranchNodeCompact::new(0b0110, 0b0000, 0, vec![], None)),
         ];
         let expected = vec![
             vec![0x5, 0x0],
@@ -271,12 +274,10 @@ mod tests {
             // 1. 0x2 for the first node points to the child node path
             // 2. 0x2 for the second node is a key.
             // So to proceed to add 1 and 3, we need to push the sibling first (0xC).
-            vec![0x5, 0x2],
             vec![0x5, 0x2, 0xC, 0x0],
             vec![0x5, 0x2, 0xC, 0x1],
             vec![0x5, 0x2, 0xC, 0x2],
             vec![0x5, 0x2, 0xC, 0x7],
-            vec![0x5, 0x8],
             vec![0x5, 0x8, 0x1],
             vec![0x5, 0x8, 0x2],
         ];
@@ -312,7 +313,7 @@ mod tests {
         T: TrieCursor,
     {
         let mut walker = TrieWalker::new(&mut trie, Default::default());
-        assert!(walker.key().unwrap().is_empty());
+        assert_eq!(walker.key().unwrap(), Nibbles::from([0]));
 
         // We're traversing the path in lexigraphical order.
         for expected in expected {
@@ -363,25 +364,15 @@ mod tests {
         }
 
         let mut trie = StorageTrieCursor::new(cursor, hashed_address);
-
-        // No changes
-        let mut cursor = TrieWalker::new(&mut trie, Default::default());
-        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![]))); // root
-        assert!(cursor.can_skip_current_node); // due to root_hash
-        cursor.advance().unwrap(); // skips to the end of trie
-        assert_eq!(cursor.key(), None);
-
         // We insert something that's not part of the existing trie/prefix.
         let mut changed = PrefixSetMut::default();
-        changed.insert(&[0xF, 0x1]);
+        changed.insert([0xF, 0x1]);
         let mut cursor = TrieWalker::new(&mut trie, changed.freeze());
 
         // Root node
-        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![])));
+        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x0])));
         // Should not be able to skip state due to the changed values
         assert!(!cursor.can_skip_current_node);
-        cursor.advance().unwrap();
-        assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x2])));
         cursor.advance().unwrap();
         assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x2, 0x1])));
         cursor.advance().unwrap();
