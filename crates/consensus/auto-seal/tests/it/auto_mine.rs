@@ -62,7 +62,6 @@ pub fn test_auto_mine() {
     let no_args = NoArgs::with(AutoMineConfig);
     let chain = custom_chain();
     let mut command = NodeCommand::<NoArgsCliExt<AutoMineConfig>>::parse_from([
-    // let mut command = NodeCommand::<()>::parse_from([
         "reth",
         "--dev",
         "--datadir",
