@@ -74,6 +74,7 @@ where
         eth_cache.clone(),
         DEFAULT_MAX_LOGS_PER_RESPONSE,
         Box::new(executor.clone()),
+        EthConfig::default().stale_filter_ttl,
     );
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }

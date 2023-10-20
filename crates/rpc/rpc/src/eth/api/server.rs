@@ -14,7 +14,7 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
-    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
+    Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
@@ -22,9 +22,9 @@ use reth_provider::{
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Bundle, CallRequest, EIP1186AccountProofResponse,
-    EthCallResponse, FeeHistory, Index, RichBlock, StateContext, SyncStatus, TransactionReceipt,
-    TransactionRequest, Work,
+    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
+    SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -126,12 +126,9 @@ where
     }
 
     /// Handler for: `eth_getBlockReceipts`
-    async fn block_receipts(
-        &self,
-        number: BlockNumberOrTag,
-    ) -> Result<Option<Vec<TransactionReceipt>>> {
-        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockReceipts");
-        Ok(EthApi::block_receipts(self, number).await?)
+    async fn block_receipts(&self, block_id: BlockId) -> Result<Option<Vec<TransactionReceipt>>> {
+        trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
+        Ok(EthApi::block_receipts(self, block_id).await?)
     }
 
     /// Handler for: `eth_getUncleByBlockHashAndIndex`

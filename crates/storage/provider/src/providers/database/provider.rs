@@ -6,7 +6,7 @@ use crate::{
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader,
-    StorageReader, TransactionsProvider, WithdrawalsProvider,
+    StorageReader, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -28,6 +28,10 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     keccak256,
+    revm::{
+        config::revm_spec,
+        env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
+    },
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
@@ -35,10 +39,6 @@ use reth_primitives::{
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, B256, U256,
-};
-use reth_revm_primitives::{
-    config::revm_spec,
-    env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
@@ -1039,10 +1039,9 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     fn block_with_senders(
         &self,
         block_number: BlockNumber,
+        transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
-        let header = self
-            .header_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+        let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
 
         let ommers = self.ommers(block_number.into())?.unwrap_or_default();
         let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
@@ -1068,14 +1067,14 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
 
         let body = transactions
             .into_iter()
-            .map(|tx| {
-                TransactionSigned {
-                    // TODO: This is the fastest way right now to make everything just work with
-                    // a dummy transaction hash.
+            .map(|tx| match transaction_kind {
+                TransactionVariant::NoHash => TransactionSigned {
+                    // Caller explicitly asked for no hash, so we don't calculate it
                     hash: Default::default(),
                     signature: tx.signature,
                     transaction: tx.transaction,
-                }
+                },
+                TransactionVariant::WithHash => tx.with_hash(),
             })
             .collect();
 
