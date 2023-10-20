@@ -335,7 +335,6 @@ impl StorageInner {
         gas_used: u64,
     ) -> Result<Header, BlockExecutionError> {
         let receipts = bundle_state.receipts_by_block(header.number);
-
         header.receipts_root = if receipts.is_empty() {
             EMPTY_RECEIPTS
         } else {
