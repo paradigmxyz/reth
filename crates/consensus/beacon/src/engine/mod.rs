@@ -22,9 +22,10 @@ use reth_interfaces::{
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    constants::EPOCH_SLOTS, listener::EventListeners, stage::StageId, BlockNumHash, BlockNumber,
+    constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber,
     ChainSpec, Head, Header, SealedBlock, SealedHeader, B256, U256,
 };
+use reth_tokio_utils::EventListeners;
 use reth_provider::{
     BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
     StageCheckpointReader,

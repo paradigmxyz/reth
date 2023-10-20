@@ -7,8 +7,9 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_primitives::{
-    listener::EventListeners, BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment,
+    BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment,
 };
+use reth_tokio_utils::EventListeners;
 use reth_provider::{ProviderFactory, PruneCheckpointReader};
 use reth_snapshot::HighestSnapshotsTracker;
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
