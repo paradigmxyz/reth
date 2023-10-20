@@ -6,10 +6,11 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    keccak256, logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts,
-    StorageEntry, B256, U256,
+    keccak256, logs_bloom,
+    revm::compat::{into_reth_acc, into_revm_acc},
+    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, B256,
+    U256,
 };
-use reth_revm_primitives::{into_reth_acc, into_revm_acc};
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     StateRoot, StateRootError,
@@ -193,10 +194,7 @@ impl BundleStateWithReceipts {
     /// # Returns
     ///
     /// The state root for this [BundleState].
-    pub fn state_root_slow<'a, 'tx, TX: DbTx<'tx>>(
-        &self,
-        tx: &'a TX,
-    ) -> Result<B256, StateRootError> {
+    pub fn state_root_slow<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
         let hashed_post_state = self.hash_state_slow();
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
@@ -338,7 +336,7 @@ impl BundleStateWithReceipts {
     ///
     /// `omit_changed_check` should be set to true of bundle has some of it data
     /// detached, This would make some original values not known.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+    pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
         is_value_known: OriginalValuesKnown,
@@ -384,8 +382,9 @@ mod tests {
         transaction::DbTx,
         DatabaseEnv,
     };
-    use reth_primitives::{Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256};
-    use reth_revm_primitives::into_reth_acc;
+    use reth_primitives::{
+        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256,
+    };
     use revm::{
         db::{
             states::{

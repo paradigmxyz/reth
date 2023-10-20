@@ -6,8 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::db::DatabaseError;
-use reth_primitives::{BlockNumber, StorageEntry, B256, U256};
-use reth_revm_primitives::into_reth_acc;
+use reth_primitives::{revm::compat::into_reth_acc, BlockNumber, StorageEntry, B256, U256};
 use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
 use std::iter::Peekable;
 
@@ -25,7 +24,7 @@ impl StateReverts {
     /// Write reverts to database.
     ///
     /// Note:: Reverts will delete all wiped storage from plain state.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+    pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
         first_block: BlockNumber,

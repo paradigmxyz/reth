@@ -23,7 +23,6 @@ members = [
     "crates/primitives",
     "crates/prune",
     "crates/revm",
-    "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
     "crates/rpc/ipc",
     "crates/rpc/rpc",
@@ -51,6 +50,7 @@ members = [
     "examples/cli-extension-event-hooks",
     "examples/rpc-db",
     "examples/manual-p2p",
+    "examples/trace-transaction-cli"
 ]
 default-members = ["bin/reth"]
 
@@ -107,7 +107,6 @@ reth-discv4 = { path = "./crates/net/discv4" }
 reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
-
 # revm
 revm = { git = "https://github.com/bluealloy/revm", rev = "68f78ae0a4c2b351f2fe36236164d07933d0d4d5" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "68f78ae0a4c2b351f2fe36236164d07933d0d4d5" }

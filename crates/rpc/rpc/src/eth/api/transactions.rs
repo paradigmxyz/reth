@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
+    revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
@@ -25,14 +26,13 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
     BlockError, CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt,
     TransactionRequest, TypedTransactionRequest,
 };
-use reth_rpc_types_compat::from_recovered_with_block_context;
+use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
@@ -47,7 +47,7 @@ pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBo
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
 /// Async functions that are spawned onto the
-/// [TracingCallPool](crate::tracing_call::TracingCallPool) begin with `spawn_`
+/// [BlockingTaskPool](crate::blocking_pool::BlockingTaskPool) begin with `spawn_`
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
@@ -219,7 +219,7 @@ pub trait EthTransactions: Send + Sync {
     /// the database that points to the beginning of the transaction.
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
-    /// [TracingCallPool](crate::tracing_call::TracingCallPool).
+    /// [BlockingTaskPool](crate::blocking_pool::BlockingTaskPool).
     async fn spawn_trace_transaction_in_block<F, R>(
         &self,
         hash: B256,
@@ -322,13 +322,13 @@ where
     {
         let this = self.clone();
         self.inner
-            .tracing_call_pool
+            .blocking_task_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
                 f(state)
             })
             .await
-            .map_err(|_| EthApiError::InternalTracingError)?
+            .map_err(|_| EthApiError::InternalBlockingTaskError)?
     }
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
@@ -591,7 +591,7 @@ where
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let this = self.clone();
         self.inner
-            .tracing_call_pool
+            .blocking_task_pool
             .spawn(move || {
                 let state = this.state_at(at)?;
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
@@ -607,7 +607,7 @@ where
                 f(db, env)
             })
             .await
-            .map_err(|_| EthApiError::InternalTracingError)?
+            .map_err(|_| EthApiError::InternalBlockingTaskError)?
     }
 
     async fn transact_call_at(
@@ -1091,7 +1091,7 @@ mod tests {
     use super::*;
     use crate::{
         eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-        EthApi, TracingCallPool,
+        BlockingTaskPool, EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
@@ -1113,7 +1113,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
-            TracingCallPool::build().expect("failed to build tracing pool"),
+            BlockingTaskPool::build().expect("failed to build tracing pool"),
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

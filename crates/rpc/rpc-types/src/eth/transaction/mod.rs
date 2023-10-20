@@ -1,11 +1,13 @@
+pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
+use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 pub use common::TransactionInfo;
 pub use receipt::TransactionReceipt;
 pub use request::TransactionRequest;
-use reth_primitives::{AccessListItem, Address, Bytes, B256, U128, U256, U64};
 use serde::{Deserialize, Serialize};
 pub use signature::{Parity, Signature};
 pub use typed::*;
 
+mod access_list;
 mod common;
 mod receipt;
 mod request;

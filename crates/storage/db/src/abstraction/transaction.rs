@@ -11,9 +11,9 @@ use crate::{
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
-    type Cursor<T: Table>: DbCursorRO<'a, T> + Send + Sync;
+    type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
     /// DupCursor GAT
-    type DupCursor<T: DupSort>: DbDupCursorRO<'a, T> + DbCursorRO<'a, T> + Send + Sync;
+    type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
 }
 
 /// Implements the GAT method from:
@@ -22,18 +22,18 @@ pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync 
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DbTxMutGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
     /// Cursor GAT
-    type CursorMut<T: Table>: DbCursorRW<'a, T> + DbCursorRO<'a, T> + Send + Sync;
+    type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
     /// DupCursor GAT
-    type DupCursorMut<T: DupSort>: DbDupCursorRW<'a, T>
-        + DbCursorRW<'a, T>
-        + DbDupCursorRO<'a, T>
-        + DbCursorRO<'a, T>
+    type DupCursorMut<T: DupSort>: DbDupCursorRW<T>
+        + DbCursorRW<T>
+        + DbDupCursorRO<T>
+        + DbCursorRO<T>
         + Send
         + Sync;
 }
 
 /// Read only transaction
-pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
+pub trait DbTx: for<'a> DbTxGAT<'a> {
     /// Get value
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
     /// Commit for read only transaction will consume and free transaction and allows
@@ -52,7 +52,7 @@ pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
 }
 
 /// Read write transaction that allows writing to database
-pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
+pub trait DbTxMut: for<'a> DbTxMutGAT<'a> {
     /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
     /// Delete value from database

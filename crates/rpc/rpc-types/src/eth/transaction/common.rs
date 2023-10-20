@@ -1,7 +1,7 @@
 //! Commonly used additional types that are not part of the JSON RPC spec but are often required
 //! when working with RPC types, such as [Transaction](crate::Transaction)
 
-use reth_primitives::{TxHash, B256};
+use alloy_primitives::{TxHash, B256};
 
 /// Additional fields in the context of a block that contains this transaction.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]

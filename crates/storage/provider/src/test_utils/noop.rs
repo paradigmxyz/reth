@@ -4,16 +4,18 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
     ReceiptProviderIdExt, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
+    StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::RethResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Bytes,
+    trie::AccountProof,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode,
     ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
     SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, B256, KECCAK_EMPTY, MAINNET, U256,
+    TransactionSignedNoHash, TxHash, TxNumber, B256, MAINNET, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -93,6 +95,7 @@ impl BlockReader for NoopProvider {
     fn block_with_senders(
         &self,
         _number: BlockNumber,
+        _transaction_kind: TransactionVariant,
     ) -> RethResult<Option<reth_primitives::BlockWithSenders>> {
         Ok(None)
     }
@@ -278,12 +281,8 @@ impl StateProvider for NoopProvider {
         Ok(None)
     }
 
-    fn proof(
-        &self,
-        _address: Address,
-        _keys: &[B256],
-    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
-        Ok((vec![], KECCAK_EMPTY, vec![]))
+    fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
+        Ok(AccountProof::default())
     }
 }
 

@@ -3,7 +3,7 @@
 //!
 //! See <https://openethereum.github.io/JSONRPC-trace-module>
 
-use reth_primitives::{Address, Bytes, B256, U256, U64};
+use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -80,6 +80,35 @@ pub enum Delta<T> {
     Removed(T),
     #[serde(rename = "*")]
     Changed(ChangedType<T>),
+}
+
+// === impl Delta ===
+
+impl<T> Delta<T> {
+    /// Creates a new [Delta::Changed] variant
+    pub fn changed(from: T, to: T) -> Self {
+        Self::Changed(ChangedType { from, to })
+    }
+
+    /// Returns true if the value is unchanged
+    pub fn is_unchanged(&self) -> bool {
+        matches!(self, Delta::Unchanged)
+    }
+
+    /// Returns true if the value is added
+    pub fn is_added(&self) -> bool {
+        matches!(self, Delta::Added(_))
+    }
+
+    /// Returns true if the value is removed
+    pub fn is_removed(&self) -> bool {
+        matches!(self, Delta::Removed(_))
+    }
+
+    /// Returns true if the value is changed
+    pub fn is_changed(&self) -> bool {
+        matches!(self, Delta::Changed(_))
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
