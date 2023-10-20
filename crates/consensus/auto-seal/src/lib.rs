@@ -356,7 +356,6 @@ impl StorageInner {
             .map_err(|_| BlockExecutionError::ProviderError)?
             .state_root(bundle_state)
             .unwrap();
-        tracing::debug!(target: "consensus::auto", ?state_root);
         header.state_root = state_root;
         Ok(header)
     }
@@ -392,8 +391,6 @@ impl StorageInner {
         let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
 
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
-
-        tracing::debug!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 
         // fill in the rest of the fields
         let header = self.complete_header(header, &bundle_state, client, gas_used)?;
