@@ -1,6 +1,6 @@
 use crate::{
-    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
-    MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
+    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, BlockErrorKind, ExecInput, ExecOutput,
+    MetricEvent, MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use num_traits::Zero;
 use reth_db::{
@@ -159,7 +159,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Execute the block
             let (block, senders) = block.into_components();
             executor.execute_and_verify_receipt(&block, td, Some(senders)).map_err(|error| {
-                StageError::ExecutionError { block: block.header.clone().seal_slow(), error }
+                StageError::BlockError {
+                    block: block.header.clone().seal_slow(),
+                    error: BlockErrorKind::Execution(error),
+                }
             })?;
 
             execution_duration += time.elapsed();
