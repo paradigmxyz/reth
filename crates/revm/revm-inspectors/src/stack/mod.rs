@@ -140,7 +140,7 @@ where
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
-                return (status, gas, retdata);
+                return (status, gas, retdata)
             }
         });
 
@@ -162,7 +162,7 @@ where
             // If the inspector returns a different ret or a revert with a non-empty message,
             // we assume it wants to tell us something
             if new_ret != ret || (new_ret == InstructionResult::Revert && new_out != out) {
-                return (new_ret, new_gas, new_out);
+                return (new_ret, new_gas, new_out)
             }
         });
 
@@ -179,7 +179,7 @@ where
 
             // Allow inspectors to exit early
             if status != InstructionResult::Continue {
-                return (status, addr, gas, retdata);
+                return (status, addr, gas, retdata)
             }
         });
 
@@ -200,7 +200,7 @@ where
                 inspector.create_end(data, inputs, ret, address, remaining_gas, out.clone());
 
             if new_ret != ret {
-                return (new_ret, new_address, new_gas, new_retdata);
+                return (new_ret, new_address, new_gas, new_retdata)
             }
         });
 

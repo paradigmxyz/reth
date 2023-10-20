@@ -61,11 +61,7 @@ impl<DB> Inspector<DB> for AccessListInspector
 where
     DB: Database,
 {
-    fn step(
-        &mut self,
-        interpreter: &mut Interpreter<'_>,
-        _data: &mut EVMData<'_, DB>,
-    ) {
+    fn step(&mut self, interpreter: &mut Interpreter<'_>, _data: &mut EVMData<'_, DB>) {
         match interpreter.current_opcode() {
             opcode::SLOAD | opcode::SSTORE => {
                 if let Ok(slot) = interpreter.stack().peek(0) {
