@@ -1220,6 +1220,7 @@ where
                 cache.clone(),
                 self.config.eth.filter_config(),
                 executor.clone(),
+                blocking_task_pool.clone(),
             );
 
             let pubsub = EthPubSub::with_spawner(
