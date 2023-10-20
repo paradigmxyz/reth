@@ -1,20 +1,25 @@
 //! auto-mine consensus integration test
-use std::{sync::Arc, time::Duration};
-use jsonrpsee::{http_client::HttpClientBuilder, rpc_params, core::client::ClientT};
-use reth::{node::NodeCommand, runner::CliRunner, cli::{components::RethNodeComponents, ext::{RethNodeCommandConfig, NoArgs, NoArgsCliExt}}, tasks::TaskSpawner};
-use reth_primitives::{ChainSpec, Genesis, hex, revm_primitives::FixedBytes};
-use reth_provider::CanonStateSubscriptions;
 use clap::Parser;
+use jsonrpsee::{core::client::ClientT, http_client::HttpClientBuilder, rpc_params};
+use reth::{
+    cli::{
+        components::RethNodeComponents,
+        ext::{NoArgs, NoArgsCliExt, RethNodeCommandConfig},
+    },
+    node::NodeCommand,
+    runner::CliRunner,
+    tasks::TaskSpawner,
+};
+use reth_primitives::{hex, revm_primitives::FixedBytes, ChainSpec, Genesis};
+use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
+use std::{sync::Arc, time::Duration};
 
 #[derive(Debug)]
 struct AutoMineConfig;
 
 impl RethNodeCommandConfig for AutoMineConfig {
-    fn on_node_started<Reth: RethNodeComponents>(
-        &mut self,
-        components: &Reth,
-    ) -> eyre::Result<()> {
+    fn on_node_started<Reth: RethNodeComponents>(&mut self, components: &Reth) -> eyre::Result<()> {
         let pool = components.pool();
         let mut canon_events = components.events().subscribe_to_canonical_state();
 
@@ -53,9 +58,7 @@ impl RethNodeCommandConfig for AutoMineConfig {
 
 #[test]
 pub fn test_auto_mine() {
-    let temp_path = tempfile::TempDir::new()
-        .expect("tempdir is okay")
-        .into_path();
+    let temp_path = tempfile::TempDir::new().expect("tempdir is okay").into_path();
 
     let datadir = temp_path.to_str().expect("temp path is okay");
 
