@@ -6082,8 +6082,6 @@ dependencies = [
  "tempfile",
  "test-fuzz",
  "thiserror",
- "tokio",
- "tokio-stream",
  "toml 0.8.2",
  "tracing",
  "triehash",
