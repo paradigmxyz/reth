@@ -127,6 +127,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloc"
+version = "0.1.0"
+source = "git+https://github.com/anonymousGiga/use-alloc2#59f527bd25a252e891aea816359657b63c7b3981"
+dependencies = [
+ "allocator-api2",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -781,7 +789,7 @@ source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811
 dependencies = [
  "boa_macros",
  "boa_profiler",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.1",
  "thin-vec",
 ]
 
@@ -805,7 +813,7 @@ source = "git+https://github.com/boa-dev/boa#306709177bf742425a61d0205d6f25e7811
 dependencies = [
  "boa_gc",
  "boa_macros",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.1",
  "indexmap 2.0.0",
  "once_cell",
  "phf",
@@ -1637,7 +1645,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
 dependencies = [
  "cfg-if",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.1",
  "lock_api",
  "once_cell",
  "parking_lot_core 0.9.8",
@@ -2862,17 +2870,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
  "ahash 0.8.3",
- "serde",
 ]
 
 [[package]]
 name = "hashbrown"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
+checksum = "7dfda62a12f55daeae5015f81b0baea145391cb4520f86c248fc615d72640d12"
 dependencies = [
  "ahash 0.8.3",
  "allocator-api2",
+ "serde",
 ]
 
 [[package]]
@@ -3346,7 +3354,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.1",
 ]
 
 [[package]]
@@ -6216,9 +6224,11 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#7f0d391cf400a89486b0d1f84e523ef2b44afc46"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#b6bcc6160463e8f9d90584fd5efce06631112519"
 dependencies = [
+ "alloc",
  "auto_impl",
+ "minstant",
  "revm-interpreter",
  "revm-precompile",
  "revm-utils",
@@ -6227,7 +6237,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#7f0d391cf400a89486b0d1f84e523ef2b44afc46"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#b6bcc6160463e8f9d90584fd5efce06631112519"
 dependencies = [
  "derive_more",
  "enumn",
@@ -6241,7 +6251,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#7f0d391cf400a89486b0d1f84e523ef2b44afc46"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#b6bcc6160463e8f9d90584fd5efce06631112519"
 dependencies = [
  "k256",
  "num",
@@ -6257,7 +6267,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#7f0d391cf400a89486b0d1f84e523ef2b44afc46"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#b6bcc6160463e8f9d90584fd5efce06631112519"
 dependencies = [
  "arbitrary",
  "auto_impl",
@@ -6266,7 +6276,7 @@ dependencies = [
  "derive_more",
  "enumn",
  "fixed-hash",
- "hashbrown 0.13.2",
+ "hashbrown 0.14.1",
  "hex",
  "hex-literal 0.4.1",
  "primitive-types",
@@ -6282,7 +6292,7 @@ dependencies = [
 [[package]]
 name = "revm-utils"
 version = "0.1.0"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#7f0d391cf400a89486b0d1f84e523ef2b44afc46"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#b6bcc6160463e8f9d90584fd5efce06631112519"
 dependencies = [
  "serde",
  "serde_arrays",

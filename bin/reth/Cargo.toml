@@ -148,6 +148,12 @@ enable_opcode_metrics = [
     "reth-provider/enable_opcode_metrics",
     "reth-stages/enable_opcode_metrics",
 ]
+enable_cache_record = [
+    "reth-revm/enable_cache_record",
+    "reth-provider/enable_cache_record",
+    "reth-stages/enable_cache_record",
+    "reth-rpc/enable_cache_record",
+]
 finish_after_execution_stage = ["reth-stages/finish_after_execution_stage"]
 enable_execution_duration_record = [
     "reth-stages/enable_execution_duration_record",

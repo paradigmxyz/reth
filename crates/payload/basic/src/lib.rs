@@ -707,8 +707,6 @@ where
             cfg: initialized_cfg.clone(),
             block: initialized_block_env.clone(),
             tx: tx_env_with_recovered(&tx),
-            // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
-            cpu_frequency: 0f64,
         };
 
         let mut evm = revm::EVM::with_env(env);

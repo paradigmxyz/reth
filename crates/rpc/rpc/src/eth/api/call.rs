@@ -121,9 +121,7 @@ where
                 for tx in transactions {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx = tx_env_with_recovered(&tx);
-                    // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
-                    let env =
-                        Env { cfg: cfg.clone(), block: block_env.clone(), tx, cpu_frequency: 0f64 };
+                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (res, _) = transact(&mut db, env)?;
                     db.commit(res.state);
                 }

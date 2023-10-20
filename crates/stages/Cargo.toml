@@ -79,6 +79,7 @@ serde_json.workspace = true
 test-utils = ["reth-interfaces/test-utils"]
 open_performance_dashboard = []
 enable_opcode_metrics = ["reth-provider/enable_opcode_metrics"]
+enable_cache_record = ["reth-provider/enable_cache_record"]
 finish_after_execution_stage = []
 enable_execution_duration_record = []
 

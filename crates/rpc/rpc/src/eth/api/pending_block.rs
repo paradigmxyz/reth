@@ -66,13 +66,8 @@ impl PendingBlockEnv {
             let tx = pool_tx.to_recovered_transaction();
 
             // Configure the environment for the block.
-            // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
-            let env = Env {
-                cfg: cfg.clone(),
-                block: block_env.clone(),
-                tx: tx_env_with_recovered(&tx),
-                cpu_frequency: 0f64,
-            };
+            let env =
+                Env { cfg: cfg.clone(), block: block_env.clone(), tx: tx_env_with_recovered(&tx) };
 
             let mut evm = revm::EVM::with_env(env);
             evm.database(&mut db);

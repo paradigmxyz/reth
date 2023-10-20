@@ -80,3 +80,7 @@ enable_opcode_metrics = [
     "revm-primitives/enable_opcode_metrics",
     "reth-revm/enable_opcode_metrics",
 ]
+
+enable_cache_record = [
+    "reth-revm/enable_cache_record",
+]

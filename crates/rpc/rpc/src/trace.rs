@@ -111,8 +111,7 @@ where
             .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
         let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
-        // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
-        let env = Env { cfg, block, tx, cpu_frequency: 0f64 };
+        let env = Env { cfg, block, tx };
 
         let config = tracing_config(&trace_types);
 
@@ -339,9 +338,7 @@ where
                     };
 
                     let tx = tx_env_with_recovered(&tx);
-                    // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
-                    let env =
-                        Env { cfg: cfg.clone(), block: block_env.clone(), tx, cpu_frequency: 0f64 };
+                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
 
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;

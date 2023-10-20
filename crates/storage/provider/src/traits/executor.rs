@@ -3,6 +3,8 @@
 use crate::{post_state::PostState, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{Address, Block, ChainSpec, U256};
+#[cfg(feature = "enable_cache_record")]
+use revm_utils::types::CacheDbRecord;
 #[cfg(feature = "enable_opcode_metrics")]
 use revm_utils::types::RevmMetricRecord;
 
@@ -47,13 +49,19 @@ pub trait BlockExecutor<SP: StateProvider> {
 
     /// Handle revm metric records.
     #[cfg(feature = "enable_opcode_metrics")]
-    fn get_revm_metric_record(&self) -> RevmMetricRecord {
+    fn get_opcode_record(&self) -> RevmMetricRecord {
         RevmMetricRecord::default()
     }
 
-    /// Handle revm metric records.
-    #[cfg(feature = "enable_opcode_metrics")]
-    fn get_revm_metric_cachedb_size(&self) -> usize {
+    /// Get CacheDb metric size.
+    #[cfg(feature = "enable_cache_record")]
+    fn get_cachedb_size(&self) -> usize {
         0
+    }
+
+    /// Get CacheDb metric records.
+    #[cfg(feature = "enable_cache_record")]
+    fn get_cachedb_record(&self) -> CacheDbRecord {
+        CacheDbRecord::default()
     }
 }

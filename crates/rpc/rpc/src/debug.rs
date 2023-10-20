@@ -34,6 +34,8 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use reth_tasks::TaskSpawner;
+#[cfg(feature = "enable_cache_record")]
+use revm::db::CacheDbRecord;
 use revm::{
     db::{CacheDB, EmptyDB},
     primitives::Env,
@@ -102,9 +104,7 @@ where
                 while let Some(tx) = transactions.next() {
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx = tx_env_with_recovered(&tx);
-                    // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
-                    let env =
-                        Env { cfg: cfg.clone(), block: block_env.clone(), tx, cpu_frequency: 0f64 };
+                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (result, state_changes) =
                         this.trace_transaction(opts.clone(), env, at, &mut db)?;
                     results.push(TraceResult::Success { result });
@@ -202,13 +202,7 @@ where
                     tx.hash,
                 )?;
 
-                // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
-                let env = Env {
-                    cfg,
-                    block: block_env,
-                    tx: tx_env_with_recovered(&tx),
-                    cpu_frequency: 0f64,
-                };
+                let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
                 this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
             })
             .await
@@ -398,13 +392,7 @@ where
                     for tx in transactions {
                         let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                         let tx = tx_env_with_recovered(&tx);
-                        // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
-                        let env = Env {
-                            cfg: cfg.clone(),
-                            block: block_env.clone(),
-                            tx,
-                            cpu_frequency: 0f64,
-                        };
+                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
                     }
@@ -605,14 +593,8 @@ where
                 logs,
                 block_hashes,
                 db: State::new(state),
-                #[cfg(feature = "enable_opcode_metrics")]
-                cache_hits: (0u64, 0u64, 0u64, 0u64),
-                #[cfg(feature = "enable_opcode_metrics")]
-                cache_misses: (0u64, 0u64, 0u64, 0u64),
-                #[cfg(feature = "enable_opcode_metrics")]
-                cache_misses_penalty: (0u128, 0u128, 0u128, 0u128),
-                #[cfg(feature = "enable_opcode_metrics")]
-                cpu_frequency: 0f64,
+                #[cfg(feature = "enable_cache_record")]
+                cache_record: CacheDbRecord::default(),
             }
         } else {
             CacheDB::new(State::new(state))

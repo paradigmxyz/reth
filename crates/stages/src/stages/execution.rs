@@ -184,6 +184,14 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             #[cfg(feature = "enable_execution_duration_record")]
             duration_record.add_process_state();
 
+            #[cfg(feature = "enable_cache_record")]
+            {
+                println!("");
+                let cachedb_size = executor.get_cachedb_size();
+                println!("cachedb_size = {:?}", cachedb_size);
+                println!("");
+            }
+
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
             {
@@ -191,10 +199,19 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 break
             }
         }
+        #[cfg(feature = "enable_cache_record")]
+        {
+            println!("");
+            println!("===================================");
+            let cachedb_record = executor.get_cachedb_record();
+            println!("cachedb_record = {:?}", cachedb_record);
+            println!("===================================");
+            println!("");
+        }
 
         #[cfg(feature = "enable_opcode_metrics")]
         {
-            let record = executor.get_revm_metric_record();
+            let record = executor.get_opcode_record();
             println!("");
             println!("===================================");
             println!("revm_record = {:?}", serde_json::to_string(&record).unwrap());

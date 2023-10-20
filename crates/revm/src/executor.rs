@@ -21,6 +21,8 @@ use revm::{
     },
     EVM,
 };
+#[cfg(feature = "enable_cache_record")]
+use revm_utils::types::CacheDbRecord;
 #[cfg(feature = "enable_opcode_metrics")]
 use revm_utils::types::RevmMetricRecord;
 use std::{
@@ -117,8 +119,6 @@ where
             header,
             total_difficulty,
         );
-        // #[cfg(feature = "enable_opcode_metrics")]// Error: why this?
-        self.evm.env.cpu_frequency = revm_utils::time::get_cpu_frequency().unwrap_or_default();
     }
 
     /// Commit change to the run-time database, and update the given [PostState] with the changes
@@ -390,14 +390,20 @@ where
 
     /// Handle revm metric records.
     #[cfg(feature = "enable_opcode_metrics")]
-    fn get_revm_metric_record(&self) -> RevmMetricRecord {
+    fn get_opcode_record(&self) -> RevmMetricRecord {
         self.revm_metric_record.clone()
     }
 
-    /// Handle revm metric records.
-    #[cfg(feature = "enable_opcode_metrics")]
-    fn get_revm_metric_cachedb_size(&self) -> usize {
+    /// Get cachedb size.
+    #[cfg(feature = "enable_cache_record")]
+    fn get_cachedb_size(&self) -> usize {
         self.evm.db.as_ref().expect("db is empty").size()
+    }
+
+    /// Get cacheDb metric record.
+    #[cfg(feature = "enable_cache_record")]
+    fn get_cachedb_record(&self) -> CacheDbRecord {
+        self.evm.db.as_ref().expect("db is empty").get_metric()
     }
 }
 
