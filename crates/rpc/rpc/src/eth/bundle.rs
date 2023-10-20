@@ -78,8 +78,9 @@ where
                 let env = Env { cfg, block: block_env, tx: TxEnv::default() };
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
-                let initial_coinbase =
-                    DatabaseRef::basic(&db, coinbase)?.map(|acc| acc.balance).unwrap_or_default();
+                let initial_coinbase = DatabaseRef::basic_ref(&db, coinbase)?
+                    .map(|acc| acc.balance)
+                    .unwrap_or_default();
                 let mut coinbase_balance_before_tx = initial_coinbase;
                 let mut coinbase_balance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;

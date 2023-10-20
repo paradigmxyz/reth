@@ -206,7 +206,7 @@ where
                     if no_code_callee {
                         // simple transfer, check if caller has sufficient funds
                         let available_funds =
-                            db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
+                            db.basic_ref(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
                         if env.tx.value > available_funds {
                             return Err(
                                 RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
@@ -378,7 +378,7 @@ where
         let to = if let Some(to) = request.to {
             to
         } else {
-            let nonce = db.basic(from)?.unwrap_or_default().nonce;
+            let nonce = db.basic_ref(from)?.unwrap_or_default().nonce;
             from.create(nonce)
         };
 

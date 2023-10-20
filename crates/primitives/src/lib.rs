@@ -23,7 +23,6 @@ mod block;
 mod chain;
 mod compression;
 pub mod constants;
-pub mod contract;
 pub mod eip4844;
 mod forkid;
 pub mod fs;
