@@ -1045,7 +1045,11 @@ impl TransactionFetcher {
                 }
             }
         }
-        (final_peer_id.unwrap(), final_txs, None)
+        if let Some(peer_id) = final_peer_id {
+            (peer_id, final_txs, None)
+        } else {
+            (Default::default(), None, Some(RequestError::BadResponse))
+        }
     }
 
     // request the missing transactions
