@@ -1,9 +1,8 @@
 //! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
 //! response to `GetPooledTransactions`.
 use crate::{
-    Address, BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, B256,
-    EIP4844_TX_TYPE_ID,
+    Address, BlobTransaction, Bytes, Signature, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, B256, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
@@ -430,7 +429,7 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
 
         // generate a sidecar for blob txs
         if let PooledTransactionsElement::BlobTransaction(mut tx) = pooled_txs_element {
-            tx.sidecar = BlobTransactionSidecar::arbitrary(u)?;
+            tx.sidecar = crate::BlobTransactionSidecar::arbitrary(u)?;
             Ok(PooledTransactionsElement::BlobTransaction(tx))
         } else {
             Ok(pooled_txs_element)
@@ -441,12 +440,10 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for PooledTransactionsElement {
     type Parameters = ();
-    type Strategy = proptest::strategy::BoxedStrategy<PooledTransactionsElement>;
-
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
-        any::<(TransactionSigned, BlobTransactionSidecar)>()
+        any::<(TransactionSigned, crate::BlobTransactionSidecar)>()
             .prop_map(move |(transaction, sidecar)| {
                 // this will have an empty sidecar
                 let pooled_txs_element = PooledTransactionsElement::from(transaction);
@@ -461,6 +458,8 @@ impl proptest::arbitrary::Arbitrary for PooledTransactionsElement {
             })
             .boxed()
     }
+
+    type Strategy = proptest::strategy::BoxedStrategy<PooledTransactionsElement>;
 }
 
 /// A signed pooled transaction with recovered signer.
