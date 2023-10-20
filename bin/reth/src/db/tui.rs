@@ -46,9 +46,9 @@ pub(crate) enum ViewMode {
 }
 
 enum Entries<T: Table> {
-    /// Pairs [T::Key] and [RawValue<T::Value>]
+    /// Pairs of [Table::Key] and [RawValue<Table::Value>]
     RawValues(Vec<(T::Key, RawValue<T::Value>)>),
-    /// Pairs [T::Key] and [T::Value]
+    /// Pairs of [Table::Key] and [Table::Value]
     Values(Vec<TableRow<T>>),
 }
 
@@ -63,8 +63,8 @@ impl<T: Table> Entries<T> {
         }
     }
 
-    /// Sets the internal entries [Vec], converting the [T::Value] into [RawValue<T::Value>] if
-    /// needed.
+    /// Sets the internal entries [Vec], converting the [Table::Value] into [RawValue<Table::Value>]
+    /// if needed.
     fn set(&mut self, new_entries: Vec<TableRow<T>>) {
         match self {
             Entries::RawValues(old_entries) => {
@@ -84,7 +84,7 @@ impl<T: Table> Entries<T> {
     }
 
     /// Returns an iterator over keys of the internal [Vec]. For both [Entries::RawValues] and
-    /// [Entries::Values], this iterator will yield [T::Key].
+    /// [Entries::Values], this iterator will yield [Table::Key].
     fn iter_keys(&self) -> EntriesKeyIter<'_, T> {
         EntriesKeyIter { entries: self, index: 0 }
     }
