@@ -345,7 +345,6 @@ where
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
-        tracing::debug!("\n\n\n{tx:?}\n\n\n");
         Ok(EthTransactions::send_raw_transaction(self, tx).await?)
     }
 
