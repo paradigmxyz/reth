@@ -79,8 +79,8 @@ where
 
                 let initial_coinbase =
                     DatabaseRef::basic(&db, coinbase)?.map(|acc| acc.balance).unwrap_or_default();
-                let mut coinbasebalance_before_tx = initial_coinbase;
-                let mut coinbasebalance_after_tx = initial_coinbase;
+                let mut coinbase_balance_before_tx = initial_coinbase;
+                let mut coinbase_balance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;
                 let mut total_gas_fess = U256::ZERO;
                 let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
@@ -107,14 +107,14 @@ where
                     total_gas_fess += gas_fees;
 
                     // coinbase is always present in the result state
-                    coinbasebalance_after_tx =
+                    coinbase_balance_after_tx =
                         state.get(&coinbase).map(|acc| acc.info.balance).unwrap_or_default();
                     let coinbase_diff =
-                        coinbasebalance_after_tx.saturating_sub(coinbasebalance_before_tx);
+                        coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
                     let eth_sent_to_coinbase = coinbase_diff.saturating_sub(gas_fees);
 
                     // update the coinbase balance
-                    coinbasebalance_before_tx = coinbasebalance_after_tx;
+                    coinbase_balance_before_tx = coinbase_balance_after_tx;
 
                     // set the return data for the response
                     let (value, revert) = if result.is_success() {
@@ -150,13 +150,13 @@ where
 
                 // populate the response
 
-                let coinbase_diff = initial_coinbase.saturating_sub(coinbasebalance_after_tx);
+                let coinbase_diff = initial_coinbase.saturating_sub(coinbase_balance_after_tx);
                 let eth_sent_to_coinbase = coinbase_diff.saturating_sub(total_gas_fess);
                 let bundle_gas_price =
                     coinbase_diff.checked_div(U256::from(total_gas_used)).unwrap_or_default();
                 let res = EthCallBundleResponse {
                     bundle_gas_price,
-                    bundle_hash: keccak256(&hash_bytes).to_string(),
+                    bundle_hash: keccak256(&hash_bytes),
                     coinbase_diff,
                     eth_sent_to_coinbase,
                     gas_fees: total_gas_fess,

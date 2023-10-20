@@ -1,4 +1,5 @@
-//! MEV-share bundle type bindings
+//! MEV bundle type bindings
+
 #![allow(missing_docs)]
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256, U64};
 use reth_primitives::{BlockId, BlockNumberOrTag, Log};
@@ -613,7 +614,7 @@ pub struct EthCallBundle {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EthCallBundleResponse {
-    pub bundle_hash: String,
+    pub bundle_hash: B256,
     #[serde(with = "u256_numeric_string")]
     pub bundle_gas_price: U256,
     #[serde(with = "u256_numeric_string")]
