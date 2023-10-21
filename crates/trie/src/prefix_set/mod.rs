@@ -100,6 +100,7 @@ impl PrefixSetMut {
         if !self.sorted {
             self.keys.sort();
             self.keys.dedup();
+            self.sorted = true;
         }
 
         PrefixSet { keys: Rc::new(self.keys), index: self.index }
