@@ -87,6 +87,11 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
+#[cfg(feature = "optimism")]
+use reth_rpc_api::EngineApiClient;
+#[cfg(feature = "optimism")]
+use reth_rpc_types::engine::ForkchoiceState;
+
 pub mod cl_events;
 pub mod events;
 
@@ -550,6 +555,21 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         });
 
         self.ext.on_node_started(&components)?;
+
+        #[cfg(feature = "optimism")]
+        if self.chain.optimism && !self.rollup.enable_genesis_walkback {
+            let client = _rpc_server_handles.auth.http_client();
+            EngineApiClient::fork_choice_updated_v2(
+                &client,
+                ForkchoiceState {
+                    head_block_hash: head.hash,
+                    safe_block_hash: head.hash,
+                    finalized_block_hash: head.hash,
+                },
+                None,
+            )
+            .await?;
+        }
 
         rx.await??;
 

@@ -11,4 +11,9 @@ pub struct RollupArgs {
     /// Disable transaction pool gossip
     #[arg(long = "rollup.disable-tx-pool-gossip")]
     pub disable_txpool_gossip: bool,
+
+    /// Enable walkback to genesis on startup. This is useful for re-validating the existing DB
+    /// prior to beginning normal syncing.
+    #[arg(long = "rollup.enable-genesis-walkback")]
+    pub enable_genesis_walkback: bool,
 }
