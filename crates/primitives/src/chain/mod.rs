@@ -53,9 +53,8 @@ pub enum NamedChain {
     Kovan = 42,
     Holesky = 17000,
     Sepolia = 11155111,
-    Ephemery = 1638471600,
-    // TODO Ephemery: chain id calculation
-
+    Ephemery = 39438000,
+    
     Optimism = 10,
     OptimismKovan = 69,
     OptimismGoerli = 420,
@@ -118,7 +117,7 @@ impl Chain {
         Chain::Named(NamedChain::Holesky)
     }
 
-    /// Returns the ephemery chain.
+    /// Returns the ephemery chain (genesis 0 value).
     pub const fn ephemery() -> Self {
         Chain::Named(NamedChain::Ephemery)
     }
