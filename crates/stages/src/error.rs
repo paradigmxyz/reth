@@ -23,7 +23,7 @@ pub enum BlockErrorKind {
 pub enum StageError {
     /// The stage encountered an error related to a block.
     #[error("Stage encountered a block error in block {number}: {error}.", number = block.number)]
-    BlockError {
+    Block {
         /// The block that caused the error.
         block: SealedHeader,
         /// The specific error type, either consensus or execution error.

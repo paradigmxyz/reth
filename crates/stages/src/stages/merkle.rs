@@ -88,7 +88,7 @@ impl MerkleStage {
             Ok(())
         } else {
             warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root");
-            Err(StageError::BlockError {
+            Err(StageError::Block {
                 block: expected.clone(),
                 error: BlockErrorKind::Validation(consensus::ConsensusError::BodyStateRootDiff {
                     got,

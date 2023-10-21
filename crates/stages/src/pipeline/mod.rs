@@ -422,7 +422,7 @@ where
                             .saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH)
                             .max(1);
                         Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
-                    } else if let StageError::BlockError { block, error } = err {
+                    } else if let StageError::Block { block, error } = err {
                         match error {
                             BlockErrorKind::Validation(validation_error) => {
                                 error!(
@@ -823,7 +823,7 @@ mod tests {
             )
             .add_stage(
                 TestStage::new(StageId::Other("B"))
-                    .add_exec(Err(StageError::BlockError {
+                    .add_exec(Err(StageError::Block {
                         block: random_header(&mut generators::rng(), 5, Default::default()),
                         error: BlockErrorKind::Validation(
                             consensus::ConsensusError::BaseFeeMissing,

@@ -145,7 +145,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                                 let sealed_header = provider
                                     .sealed_header(block_number)?
                                     .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
-                                return Err(StageError::BlockError {
+                                return Err(StageError::Block {
                                     block: sealed_header,
                                     error: BlockErrorKind::Validation(
                                         consensus::ConsensusError::TransactionSignerRecoveryError,
