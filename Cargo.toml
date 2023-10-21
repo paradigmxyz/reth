@@ -45,6 +45,7 @@ members = [
     "crates/trie",
     "testing/ef-tests",
     "crates/rpc/rpc-types-compat",
+    "crates/tokio-util",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
     "examples/cli-extension-event-hooks",
@@ -107,6 +108,7 @@ reth-discv4 = { path = "./crates/net/discv4" }
 reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
+reth-tokio-util = { path = "crates/tokio-util" }
 # revm
 revm = { git = "https://github.com/bluealloy/revm", rev = "df44297bc3949dc9e0cec06594c62dd946708b2a" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "df44297bc3949dc9e0cec06594c62dd946708b2a" }

@@ -6,10 +6,10 @@ use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
-    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
-    BlockNumber, ChainSpec, B256,
+    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, stage::StageId, BlockNumber, ChainSpec, B256,
 };
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
+use reth_tokio_util::EventListeners;
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
