@@ -1,11 +1,10 @@
 use crate::eth::transaction::typed::{
-    EIP1559TransactionRequest, EIP2930TransactionRequest, LegacyTransactionRequest,
-    TransactionKind, TypedTransactionRequest,
+    BlobTransactionSidecar, EIP1559TransactionRequest, EIP2930TransactionRequest,
+    LegacyTransactionRequest, TransactionKind, TypedTransactionRequest,
 };
-use alloy_primitives::{Address, Bytes, U128, U256, U64, U8};
+use alloy_primitives::{Address, Bytes, B256, U128, U256, U64, U8};
 use reth_primitives::AccessList;
 use serde::{Deserialize, Serialize};
-
 /// Represents _all_ transaction requests received from RPC
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,6 +38,14 @@ pub struct TransactionRequest {
     /// EIP-2718 type
     #[serde(rename = "type")]
     pub transaction_type: Option<U8>,
+
+    /// Max Fee per Blob gas for EIP-4844 transactions
+    pub max_fee_per_blob_gas: Option<U128>,
+
+    ///
+    pub blob_versioned_hashes: Option<Vec<B256>>,
+    ///
+    pub sidecar: Option<BlobTransactionSidecar>,
 }
 
 // == impl TransactionRequest ==
@@ -59,6 +66,9 @@ impl TransactionRequest {
             data,
             nonce,
             mut access_list,
+            max_fee_per_blob_gas,
+            blob_versioned_hashes,
+            sidecar,
             ..
         } = self;
         match (gas_price, max_fee_per_gas, access_list.take()) {
@@ -94,7 +104,7 @@ impl TransactionRequest {
                 }))
             }
             // EIP1559
-            (None, Some(_), access_list) | (None, None, access_list @ None) => {
+            (None, Some(_), access_list) => {
                 // Empty fields fall back to the canonical transaction schema.
                 Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
                     nonce: nonce.unwrap_or_default(),
@@ -111,7 +121,91 @@ impl TransactionRequest {
                     access_list: access_list.unwrap_or_default(),
                 }))
             }
+            // EIP4844
+            (None, None, access_list) => {
+                Some(TypedTransactionRequest::EIP4844(crate::Eip4844TransactionRequest {
+                    chain_id: 0,
+                    nonce: nonce.unwrap_or_default(),
+                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
+                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
+                    gas_limit: gas.unwrap_or_default(),
+                    kind: match to {
+                        Some(to) => TransactionKind::Call(to),
+                        None => TransactionKind::Create,
+                    },
+                    value: value.unwrap_or_default(),
+                    input: data.unwrap_or_default(),
+                    access_list: access_list.unwrap_or_default(),
+                    blob_versioned_hashes: blob_versioned_hashes.unwrap_or_default(),
+                    gas_price: gas_price.unwrap_or_default(),
+                    max_fee_per_blob_gas: max_fee_per_blob_gas.unwrap_or_default(),
+                    sidecar: sidecar
+                        .map(|s| BlobTransactionSidecar {
+                            blobs: s.blobs,
+                            commitments: s.commitments,
+                            proofs: s.proofs,
+                        })
+                        .unwrap(),
+                }))
+            }
             _ => None,
         }
+    }
+
+    /// Sets the gas limit for the transaction.
+
+    pub fn gas_limit(mut self, gas_limit: u64) -> Self {
+        self.gas = Some(U256::from(gas_limit));
+        self
+    }
+    /// Sets the nonce for the transaction.
+
+    pub fn nonce(mut self, nonce: u64) -> Self {
+        self.nonce = Some(U64::from(nonce));
+        self
+    }
+
+    /// Sets the maximum fee per gas for the transaction.
+
+    pub fn max_fee_per_gas(mut self, max_fee_per_gas: u128) -> Self {
+        self.max_fee_per_gas = Some(U128::from(max_fee_per_gas));
+        self
+    }
+    /// Sets the maximum priority fee per gas for the transaction.
+
+    pub fn max_priority_fee_per_gas(mut self, max_priority_fee_per_gas: u128) -> Self {
+        self.max_priority_fee_per_gas = Some(U128::from(max_priority_fee_per_gas));
+        self
+    }
+    /// Sets the recipient address for the transaction.
+
+    pub fn to(mut self, to: Address) -> Self {
+        self.to = Some(to);
+        self
+    }
+    /// Sets the value (amount) for the transaction.
+
+    pub fn value(mut self, value: u128) -> Self {
+        self.value = Some(U256::from(value));
+        self
+    }
+    /// Sets the access list for the transaction.
+
+    pub fn access_list(mut self, access_list: AccessList) -> Self {
+        self.access_list = Some(access_list);
+        self
+    }
+    /// Sets the input data for the transaction.
+
+    pub fn input(mut self, input: Bytes) -> Self {
+        self.data = Some(input);
+        self
+    }
+
+    /// Sets the transactions type for the transactions.
+
+    pub fn transaction_type(mut self, transaction_type: u8) -> Self {
+        self.transaction_type = Some(U8::from(transaction_type));
+        self
     }
 }
