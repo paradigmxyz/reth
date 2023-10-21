@@ -111,10 +111,10 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO)
         }
 
-        if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
-            Ok(self.calculate_tx_l1_cost::<BedrockSpec>(input))
-        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+        if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             Ok(self.calculate_tx_l1_cost::<RegolithSpec>(input))
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
+            Ok(self.calculate_tx_l1_cost::<BedrockSpec>(input))
         } else {
             Err(reth_executor::BlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),
@@ -128,10 +128,10 @@ impl RethL1BlockInfo for L1BlockInfo {
         timestamp: u64,
         input: &Bytes,
     ) -> Result<U256, BlockExecutionError> {
-        if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
-            Ok(self.data_gas::<BedrockSpec>(input))
-        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+        if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             Ok(self.data_gas::<RegolithSpec>(input))
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
+            Ok(self.data_gas::<BedrockSpec>(input))
         } else {
             Err(reth_executor::BlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),

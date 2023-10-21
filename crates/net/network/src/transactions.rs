@@ -247,7 +247,6 @@ where
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
-            // TODO softResponseLimit 2 * 1024 * 1024
             let transactions = self
                 .pool
                 .get_pooled_transaction_elements(request.0, GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE);
