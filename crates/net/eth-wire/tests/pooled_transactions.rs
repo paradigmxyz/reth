@@ -3,21 +3,23 @@ use alloy_rlp::{Decodable, Encodable};
 use reth_eth_wire::{EthVersion, PooledTransactions, ProtocolMessage};
 use reth_primitives::{hex, Bytes, PooledTransactionsElement};
 use std::{fs, path::PathBuf};
+use test_fuzz::test_fuzz;
 
-#[test]
-fn decode_pooled_transactions_data() {
-    let network_data_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/pooled_transactions_with_blob");
-    let data = fs::read_to_string(network_data_path).expect("Unable to read file");
-    let hex_data = hex::decode(data.trim()).unwrap();
-    let txs = PooledTransactions::decode(&mut &hex_data[..]).unwrap();
+/// Helper function to ensure encode-decode roundtrip works for [`PooledTransactions`].
+#[test_fuzz]
+fn roundtrip_pooled_transactions(hex_data: Vec<u8>) {
+    let input_rlp = &mut &hex_data[..];
+    let Ok(txs) = PooledTransactions::decode(input_rlp) else { return };
+
+    // get the amount of bytes decoded in `decode` by subtracting the length of the original buf,
+    // from the length of the remaining bytes
+    let decoded_len = hex_data.len() - input_rlp.len();
+    let expected_encoding = hex_data[..decoded_len].to_vec();
 
     // do a roundtrip test
     let mut buf = Vec::new();
     txs.encode(&mut buf);
-    if hex_data != buf {
-        panic!("mixed pooled transaction roundtrip failed");
-    }
+    assert_eq!(expected_encoding, buf);
 
     // now do another decoding, on what we encoded - this should succeed
     let txs2 = PooledTransactions::decode(&mut &buf[..]).unwrap();
@@ -27,6 +29,15 @@ fn decode_pooled_transactions_data() {
 
     // ensure that the length is equal to the length of the encoded data
     assert_eq!(txs.length(), buf.len());
+}
+
+#[test]
+fn decode_pooled_transactions_data() {
+    let network_data_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/pooled_transactions_with_blob");
+    let data = fs::read_to_string(network_data_path).expect("Unable to read file");
+    let hex_data = hex::decode(data.trim()).unwrap();
+    roundtrip_pooled_transactions(hex_data);
 }
 
 #[test]
