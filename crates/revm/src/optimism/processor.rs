@@ -1,9 +1,11 @@
 use std::time::Instant;
 
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{revm_primitives::ResultAndState, Address, Block, Hardfork, Receipt, U256};
+use reth_primitives::{
+    revm::compat::into_reth_log, revm_primitives::ResultAndState, Address, Block, Hardfork,
+    Receipt, U256,
+};
 use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
-use reth_revm_primitives::into_reth_log;
 use revm::DatabaseCommit;
 use tracing::{debug, trace};
 

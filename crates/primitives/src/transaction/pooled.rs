@@ -117,6 +117,8 @@ impl PooledTransactionsElement {
             Self::Eip2930 { transaction, .. } => transaction.nonce,
             Self::Eip1559 { transaction, .. } => transaction.nonce,
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.nonce,
+            #[cfg(feature = "optimism")]
+            Self::Deposit { .. } => 0,
         }
     }
 

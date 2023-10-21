@@ -125,7 +125,7 @@ pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
 
     #[cfg(not(feature = "optimism"))]
     ordered_trie_root_with_encoder(receipts, |r, buf| {
-        ReceiptWithBloomRef::from(r).encode_inner(buf, false)
+        ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
     })
 }
 

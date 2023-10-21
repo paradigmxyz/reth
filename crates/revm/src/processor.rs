@@ -9,10 +9,7 @@ use reth_interfaces::{
     RethError,
 };
 use reth_primitives::{
-    revm::{
-        compat::into_reth_log,
-        env::{fill_cfg_and_block_env, fill_tx_env},
-    },
+    revm::env::{fill_cfg_and_block_env, fill_tx_env},
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
     PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
@@ -26,7 +23,7 @@ use revm::{
 use std::{sync::Arc, time::Instant};
 
 #[cfg(not(feature = "optimism"))]
-use crate::into_reth_log;
+use reth_primitives::revm::compat::into_reth_log;
 #[cfg(not(feature = "optimism"))]
 use reth_provider::BundleStateWithReceipts;
 #[cfg(not(feature = "optimism"))]

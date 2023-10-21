@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[cfg(feature = "optimism")]
-use reth_primitives::revm_primitives::OptimismFields;
+use revm_primitives::OptimismFields;
 
 /// Convenience function to call both [fill_cfg_env] and [fill_block_env]
 pub fn fill_cfg_and_block_env(

@@ -42,6 +42,5 @@ test-utils = []
 optimism = [
   "reth-primitives/optimism",
   "reth-rpc-types/optimism",
-  "reth-interfaces/optimism",
-  "reth-revm-primitives/optimism",
+  "reth-interfaces/optimism"
 ]

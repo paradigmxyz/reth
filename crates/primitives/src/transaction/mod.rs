@@ -288,6 +288,8 @@ impl Transaction {
             Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
                 Some(blob_versioned_hashes.to_vec())
             }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => None,
         }
     }
 
