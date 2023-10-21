@@ -18,16 +18,12 @@ pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 /// A segment represents a snapshotting of some portion of the data.
 pub trait Segment {
     /// Snapshot data using the provided range.
-    fn snapshot<'tx>(
-        &self,
-        tx: &impl DbTx<'tx>,
-        range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<()>;
+    fn snapshot(&self, tx: &impl DbTx, range: RangeInclusive<BlockNumber>) -> RethResult<()>;
 }
 
 /// Returns a [`NippyJar`] according to the desired configuration.
-pub(crate) fn prepare_jar<'tx, const COLUMNS: usize, T: Table>(
-    tx: &impl DbTx<'tx>,
+pub(crate) fn prepare_jar<const COLUMNS: usize, T: Table>(
+    tx: &impl DbTx,
     segment: SnapshotSegment,
     filters: Filters,
     compression: Compression,

@@ -1,10 +1,11 @@
 use crate::{
     account::EthAccount,
-    hashed_cursor::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
     prefix_set::PrefixSetMut,
     trie_cursor::{AccountTrieCursor, StorageTrieCursor},
     walker::TrieWalker,
-    StorageRootError,
+    StateRootError, StorageRootError,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::{tables, transaction::DbTx};
@@ -12,7 +13,7 @@ use reth_primitives::{
     keccak256,
     proofs::EMPTY_ROOT,
     trie::{AccountProof, HashBuilder, Nibbles, StorageProof},
-    Address, StorageEntry, B256,
+    Address, B256,
 };
 
 /// A struct for generating merkle proofs.
@@ -35,9 +36,9 @@ impl<'a, TX> Proof<'a, TX, &'a TX> {
     }
 }
 
-impl<'a, 'tx, TX, H> Proof<'a, TX, H>
+impl<'a, TX, H> Proof<'a, TX, H>
 where
-    TX: DbTx<'tx>,
+    TX: DbTx,
     H: HashedCursorFactory + Clone,
 {
     /// Generate an account proof from intermediate nodes.
@@ -45,65 +46,46 @@ where
         &self,
         address: Address,
         slots: &[B256],
-    ) -> Result<AccountProof, StorageRootError> {
+    ) -> Result<AccountProof, StateRootError> {
         let target_hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(target_hashed_address);
         let mut account_proof = AccountProof::new(address);
 
-        let mut trie_cursor =
-            AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
-        let mut hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
+        let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
+        let trie_cursor = AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
         // Create the walker.
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.insert(target_nibbles.clone());
-        let mut walker = TrieWalker::new(&mut trie_cursor, prefix_set.freeze());
+        let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let mut hash_builder =
             HashBuilder::default().with_proof_retainer(Vec::from([target_nibbles.clone()]));
 
         let mut account_rlp = Vec::with_capacity(128);
-        while let Some(key) = walker.key() {
-            if walker.can_skip_current_node {
-                let value = walker.hash().unwrap();
-                let is_in_db_trie = walker.children_are_in_trie();
-                hash_builder.add_branch(key.clone(), value, is_in_db_trie);
-            }
-
-            let seek_key = match walker.next_unprocessed_key() {
-                Some(key) => key,
-                None => break, // no more keys
-            };
-
-            let next_key = walker.advance()?;
-            let mut next_account_entry = hashed_account_cursor.seek(seek_key)?;
-            while let Some((hashed_address, account)) = next_account_entry {
-                let account_nibbles = Nibbles::unpack(hashed_address);
-
-                if let Some(ref key) = next_key {
-                    if key < &account_nibbles {
-                        break
-                    }
+        let mut account_node_iter = AccountNodeIter::new(walker, hashed_account_cursor);
+        while let Some(account_node) = account_node_iter.try_next()? {
+            match account_node {
+                AccountNode::Branch(node) => {
+                    hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
+                AccountNode::Leaf(hashed_address, account) => {
+                    let storage_root = if hashed_address == target_hashed_address {
+                        let (storage_root, storage_proofs) =
+                            self.storage_root_with_proofs(hashed_address, slots)?;
+                        account_proof.set_account(account, storage_root, storage_proofs);
+                        storage_root
+                    } else {
+                        self.storage_root(hashed_address)?
+                    };
 
-                let storage_root = if hashed_address == target_hashed_address {
-                    let (storage_root, storage_proofs) =
-                        self.storage_root_with_proofs(hashed_address, slots)?;
-                    account_proof.set_account(account, storage_root, storage_proofs);
-                    storage_root
-                } else {
-                    self.storage_root(hashed_address)?
-                };
+                    account_rlp.clear();
+                    let account = EthAccount::from(account).with_storage_root(storage_root);
+                    account.encode(&mut account_rlp as &mut dyn BufMut);
 
-                account_rlp.clear();
-                let account = EthAccount::from(account).with_storage_root(storage_root);
-                account.encode(&mut &mut account_rlp as &mut dyn BufMut);
-
-                hash_builder.add_leaf(account_nibbles, &account_rlp);
-
-                // Move the next account entry
-                next_account_entry = hashed_account_cursor.next()?;
+                    hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+                }
             }
         }
 
@@ -129,11 +111,6 @@ where
     ) -> Result<(B256, Vec<StorageProof>), StorageRootError> {
         let mut hashed_storage_cursor = self.hashed_cursor_factory.hashed_storage_cursor()?;
 
-        let mut trie_cursor = StorageTrieCursor::new(
-            self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
-            hashed_address,
-        );
-
         let mut proofs = slots.iter().copied().map(StorageProof::new).collect::<Vec<_>>();
 
         // short circuit on empty storage
@@ -143,52 +120,41 @@ where
 
         let target_nibbles = proofs.iter().map(|p| p.nibbles.clone()).collect::<Vec<_>>();
         let prefix_set = PrefixSetMut::from(target_nibbles.clone()).freeze();
-        let mut walker = TrieWalker::new(&mut trie_cursor, prefix_set);
+        let trie_cursor = StorageTrieCursor::new(
+            self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
+            hashed_address,
+        );
+        let walker = TrieWalker::new(trie_cursor, prefix_set);
 
         let mut hash_builder = HashBuilder::default().with_proof_retainer(target_nibbles);
-        while let Some(key) = walker.key() {
-            if walker.can_skip_current_node {
-                hash_builder.add_branch(key, walker.hash().unwrap(), walker.children_are_in_trie());
-            }
-
-            let seek_key = match walker.next_unprocessed_key() {
-                Some(key) => key,
-                None => break, // no more keys
-            };
-
-            let next_key = walker.advance()?;
-            let mut storage = hashed_storage_cursor.seek(hashed_address, seek_key)?;
-            while let Some(StorageEntry { key: hashed_key, value }) = storage {
-                let hashed_key_nibbles = Nibbles::unpack(hashed_key);
-                if let Some(ref key) = next_key {
-                    if key < &hashed_key_nibbles {
-                        break
+        let mut storage_node_iter =
+            StorageNodeIter::new(walker, hashed_storage_cursor, hashed_address);
+        while let Some(node) = storage_node_iter.try_next()? {
+            match node {
+                StorageNode::Branch(node) => {
+                    hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                }
+                StorageNode::Leaf(hashed_slot, value) => {
+                    let nibbles = Nibbles::unpack(hashed_slot);
+                    if let Some(proof) = proofs.iter_mut().find(|proof| proof.nibbles == nibbles) {
+                        proof.set_value(value);
                     }
+                    hash_builder.add_leaf(nibbles, alloy_rlp::encode_fixed_size(&value).as_ref());
                 }
-
-                if let Some(proof) =
-                    proofs.iter_mut().find(|proof| proof.nibbles == hashed_key_nibbles)
-                {
-                    proof.set_value(value);
-                }
-
-                hash_builder
-                    .add_leaf(hashed_key_nibbles, alloy_rlp::encode_fixed_size(&value).as_ref());
-                storage = hashed_storage_cursor.next()?;
             }
         }
 
         let root = hash_builder.root();
 
-        let proof_nodes = hash_builder.take_proofs();
+        let all_proof_nodes = hash_builder.take_proofs();
         for proof in proofs.iter_mut() {
-            proof.set_proof(
-                proof_nodes
-                    .iter()
-                    .filter(|(path, _)| proof.nibbles.starts_with(path))
-                    .map(|(_, node)| node.clone())
-                    .collect(),
-            );
+            // Iterate over all proof nodes and find the matching ones.
+            // The filtered results are guaranteed to be in order.
+            let matching_proof_nodes = all_proof_nodes
+                .iter()
+                .filter(|(path, _)| proof.nibbles.starts_with(path))
+                .map(|(_, node)| node.clone());
+            proof.set_proof(matching_proof_nodes.collect());
         }
 
         Ok((root, proofs))

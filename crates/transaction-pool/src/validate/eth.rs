@@ -14,11 +14,11 @@ use reth_primitives::{
         ETHEREUM_BLOCK_GAS_LIMIT,
     },
     kzg::KzgSettings,
+    revm::compat::calculate_intrinsic_gas_after_merge,
     ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, StateProviderFactory};
-use reth_revm_primitives::calculate_intrinsic_gas_after_merge;
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,

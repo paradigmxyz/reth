@@ -4,7 +4,7 @@ use crate::{
     CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
     ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
 use reth_interfaces::{
@@ -22,7 +22,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashSet},
-    ops::{Range, RangeInclusive},
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
@@ -136,13 +136,13 @@ where
         self.database.provider()?.header_td_by_number(number)
     }
 
-    fn headers_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
         self.database.provider()?.headers_range(range)
     }
 
     fn sealed_headers_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
         self.database.provider()?.sealed_headers_range(range)
     }
@@ -262,12 +262,16 @@ where
 
     /// Returns the block with senders with matching number from database.
     ///
-    /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
-    /// spot, and we want fast querying.**
+    /// **NOTE: If [TransactionVariant::NoHash] is provided then the transactions have invalid
+    /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>> {
-        self.database.provider()?.block_with_senders(number)
+    fn block_with_senders(
+        &self,
+        number: BlockNumber,
+        transaction_kind: TransactionVariant,
+    ) -> RethResult<Option<BlockWithSenders>> {
+        self.database.provider()?.block_with_senders(number, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
@@ -319,19 +323,19 @@ where
 
     fn transactions_by_block_range(
         &self,
-        range: Range<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> RethResult<Vec<Vec<TransactionSigned>>> {
         self.database.provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
-        range: RangeInclusive<TxNumber>,
+        range: impl RangeBounds<TxNumber>,
     ) -> RethResult<Vec<TransactionSignedNoHash>> {
         self.database.provider()?.transactions_by_tx_range(range)
     }
 
-    fn senders_by_tx_range(&self, range: RangeInclusive<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
         self.database.provider()?.senders_by_tx_range(range)
     }
 

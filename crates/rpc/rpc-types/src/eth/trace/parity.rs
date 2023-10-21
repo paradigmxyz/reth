@@ -3,7 +3,7 @@
 //!
 //! See <https://openethereum.github.io/JSONRPC-trace-module>
 
-use reth_primitives::{Address, Bytes, B256, U256, U64};
+use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,

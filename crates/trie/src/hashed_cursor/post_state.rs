@@ -169,7 +169,7 @@ impl<'a, 'b, TX> HashedPostStateCursorFactory<'a, 'b, TX> {
     }
 }
 
-impl<'a, 'b, 'tx, TX: DbTx<'tx>> HashedCursorFactory for HashedPostStateCursorFactory<'a, 'b, TX> {
+impl<'a, 'b, TX: DbTx> HashedCursorFactory for HashedPostStateCursorFactory<'a, 'b, TX> {
     type AccountCursor =
         HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>>;
     type StorageCursor =
@@ -246,9 +246,9 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
     }
 }
 
-impl<'b, 'tx, C> HashedAccountCursor for HashedPostStateAccountCursor<'b, C>
+impl<'b, C> HashedAccountCursor for HashedPostStateAccountCursor<'b, C>
 where
-    C: DbCursorRO<'tx, tables::HashedAccount>,
+    C: DbCursorRO<tables::HashedAccount>,
 {
     /// Seek the next entry for a given hashed account key.
     ///
@@ -408,9 +408,9 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     }
 }
 
-impl<'b, 'tx, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
+impl<'b, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
 where
-    C: DbCursorRO<'tx, tables::HashedStorage> + DbDupCursorRO<'tx, tables::HashedStorage>,
+    C: DbCursorRO<tables::HashedStorage> + DbDupCursorRO<tables::HashedStorage>,
 {
     /// Returns `true` if the account has no storage entries.
     ///

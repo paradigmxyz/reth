@@ -1,11 +1,10 @@
 //! Compatibility functions for rpc `Transaction` type.
 mod signature;
 use reth_primitives::{
-    AccessListItem, BlockNumber, Transaction as PrimitiveTransaction,
-    TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, B256, U128,
-    U256, U64,
+    BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
+    TransactionSignedEcRecovered, TxType, B256, U128, U256, U64,
 };
-use reth_rpc_types::Transaction;
+use reth_rpc_types::{AccessListItem, CallInput, CallRequest, Transaction};
 use signature::from_primitive_signature;
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.
@@ -130,5 +129,45 @@ fn fill(
         // EIP-4844 fields
         max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas().map(U128::from),
         blob_versioned_hashes,
+    }
+}
+
+/// Convert [TransactionSignedEcRecovered] to [CallRequest]
+pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequest {
+    let from = tx.signer();
+    let to = tx.transaction.to();
+    let gas = tx.transaction.gas_limit();
+    let value = tx.transaction.value();
+    let input = tx.transaction.input().clone();
+    let nonce = tx.transaction.nonce();
+    let chain_id = tx.transaction.chain_id();
+    let access_list = tx.transaction.access_list().cloned();
+    let max_fee_per_blob_gas = tx.transaction.max_fee_per_blob_gas();
+    let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
+    let tx_type = tx.transaction.tx_type();
+
+    // fees depending on the transaction type
+    let (gas_price, max_fee_per_gas) = if tx.is_dynamic_fee() {
+        (None, Some(tx.max_fee_per_gas()))
+    } else {
+        (Some(tx.max_fee_per_gas()), None)
+    };
+    let max_priority_fee_per_gas = tx.transaction.max_priority_fee_per_gas();
+
+    CallRequest {
+        from: Some(from),
+        to,
+        gas_price: gas_price.map(U256::from),
+        max_fee_per_gas: max_fee_per_gas.map(U256::from),
+        max_priority_fee_per_gas: max_priority_fee_per_gas.map(U256::from),
+        gas: Some(U256::from(gas)),
+        value: Some(value.into()),
+        input: CallInput::new(input),
+        nonce: Some(U64::from(nonce)),
+        chain_id: chain_id.map(U64::from),
+        access_list,
+        max_fee_per_blob_gas: max_fee_per_blob_gas.map(U256::from),
+        blob_versioned_hashes,
+        transaction_type: Some(tx_type.into()),
     }
 }

@@ -83,12 +83,12 @@ pub enum EthApiError {
     /// Percentile array is invalid
     #[error("invalid reward percentiles")]
     InvalidRewardPercentiles,
-    /// Error thrown when a spawned tracing task failed to deliver an anticipated response.
+    /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
     ///
-    /// This only happens if the tracing task panics and is aborted before it can return a response
-    /// back to the request handler.
-    #[error("internal error while tracing")]
-    InternalTracingError,
+    /// This only happens if the blocking task panics and is aborted before it can return a
+    /// response back to the request handler.
+    #[error("internal blocking task error")]
+    InternalBlockingTaskError,
     /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
     #[error("internal eth error")]
     InternalEthError,
@@ -133,7 +133,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             err @ EthApiError::ExecutionTimedOut(_) => {
                 rpc_error_with_code(CALL_EXECUTION_FAILED_CODE, err.to_string())
             }
-            err @ EthApiError::InternalTracingError => internal_rpc_err(err.to_string()),
+            err @ EthApiError::InternalBlockingTaskError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
             err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
         }

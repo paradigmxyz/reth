@@ -11,7 +11,7 @@ use reth_rpc_types::trace::{
     },
 };
 use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
+    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, SharedMemory, Stack,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -32,13 +32,21 @@ pub enum CallKind {
 
 impl CallKind {
     /// Returns true if the call is a create
+    #[inline]
     pub fn is_any_create(&self) -> bool {
         matches!(self, CallKind::Create | CallKind::Create2)
     }
 
     /// Returns true if the call is a delegate of some sorts
+    #[inline]
     pub fn is_delegate(&self) -> bool {
         matches!(self, CallKind::DelegateCall | CallKind::CallCode)
+    }
+
+    /// Returns true if the call is [CallKind::StaticCall].
+    #[inline]
+    pub fn is_static_call(&self) -> bool {
+        matches!(self, CallKind::StaticCall)
     }
 }
 
@@ -413,6 +421,11 @@ impl CallTraceNode {
             logs: Default::default(),
         };
 
+        if self.trace.kind.is_static_call() {
+            // STATICCALL frames don't have a value
+            call_frame.value = None;
+        }
+
         // we need to populate error and revert reason
         if !self.trace.success {
             call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref());
@@ -483,7 +496,7 @@ pub(crate) struct CallTraceStep {
     /// All allocated memory in a step
     ///
     /// This will be empty if memory capture is disabled
-    pub(crate) memory: Memory,
+    pub(crate) memory: SharedMemory,
     /// Size of memory at the beginning of the step
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
@@ -533,7 +546,7 @@ impl CallTraceStep {
         }
 
         if opts.is_memory_enabled() {
-            log.memory = Some(convert_memory(self.memory.data()));
+            log.memory = Some(convert_memory(self.memory.slice(0, self.memory.len())));
         }
 
         log

@@ -23,7 +23,6 @@ members = [
     "crates/primitives",
     "crates/prune",
     "crates/revm",
-    "crates/revm/revm-primitives",
     "crates/revm/revm-inspectors",
     "crates/rpc/ipc",
     "crates/rpc/rpc",
@@ -46,11 +45,13 @@ members = [
     "crates/trie",
     "testing/ef-tests",
     "crates/rpc/rpc-types-compat",
+    "crates/tokio-util",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
     "examples/cli-extension-event-hooks",
     "examples/rpc-db",
     "examples/manual-p2p",
+    "examples/trace-transaction-cli"
 ]
 default-members = ["bin/reth"]
 
@@ -107,10 +108,10 @@ reth-discv4 = { path = "./crates/net/discv4" }
 reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
-
+reth-tokio-util = { path = "crates/tokio-util" }
 # revm
-revm = "3.5.0"
-revm-primitives = "1.3.0"
+revm = { git = "https://github.com/bluealloy/revm", rev = "df44297bc3949dc9e0cec06594c62dd946708b2a" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "df44297bc3949dc9e0cec06594c62dd946708b2a" }
 
 ## eth
 alloy-primitives = "0.4"
@@ -131,7 +132,7 @@ boa_gc = "0.17"
 ## misc
 aquamarine = "0.3"
 bytes = "1.5"
-bitflags = "2.3"
+bitflags = "2.4"
 clap = "4"
 eyre = "0.6"
 tracing = "0.1.0"

@@ -12,9 +12,8 @@ use reth_db::{
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
+    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
 };
-use std::marker::PhantomData;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -28,15 +27,13 @@ use std::marker::PhantomData;
 /// - [tables::AccountChangeSet]
 /// - [tables::StorageChangeSet]
 #[derive(Debug)]
-pub struct HistoricalStateProviderRef<'a, 'b, TX: DbTx<'a>> {
+pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     /// Transaction
     tx: &'b TX,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
-    /// Phantom lifetime `'a`
-    _phantom: PhantomData<&'a TX>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -47,15 +44,10 @@ pub enum HistoryInfo {
     MaybeInPlainState,
 }
 
-impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
+impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
     /// Create new StateProvider for historical block number
     pub fn new(tx: &'b TX, block_number: BlockNumber) -> Self {
-        Self {
-            tx,
-            block_number,
-            lowest_available_blocks: Default::default(),
-            _phantom: PhantomData {},
-        }
+        Self { tx, block_number, lowest_available_blocks: Default::default() }
     }
 
     /// Create new StateProvider for historical block number and lowest block numbers at which
@@ -65,7 +57,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
     ) -> Self {
-        Self { tx, block_number, lowest_available_blocks, _phantom: PhantomData {} }
+        Self { tx, block_number, lowest_available_blocks }
     }
 
     /// Lookup an account in the AccountHistory table
@@ -159,7 +151,7 @@ impl<'a, 'b, TX: DbTx<'a>> HistoricalStateProviderRef<'a, 'b, TX> {
     }
 }
 
-impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, TX> {
+impl<'b, TX: DbTx> AccountReader for HistoricalStateProviderRef<'b, TX> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
         match self.account_history_lookup(address)? {
@@ -181,7 +173,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountReader for HistoricalStateProviderRef<'a, 'b, 
     }
 }
 
-impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b, TX> {
+impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
         self.tx.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
@@ -205,13 +197,13 @@ impl<'a, 'b, TX: DbTx<'a>> BlockHashReader for HistoricalStateProviderRef<'a, 'b
     }
 }
 
-impl<'a, 'b, TX: DbTx<'a>> StateRootProvider for HistoricalStateProviderRef<'a, 'b, TX> {
+impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     fn state_root(&self, _post_state: &BundleStateWithReceipts) -> RethResult<B256> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }
 
-impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, TX> {
+impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
     /// Get storage.
     fn storage(
         &self,
@@ -248,11 +240,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     }
 
     /// Get account and storage proofs.
-    fn proof(
-        &self,
-        _address: Address,
-        _keys: &[B256],
-    ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
+    fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
     }
 }
@@ -260,26 +248,19 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
 /// State provider for a given block number.
 /// For more detailed description, see [HistoricalStateProviderRef].
 #[derive(Debug)]
-pub struct HistoricalStateProvider<'a, TX: DbTx<'a>> {
+pub struct HistoricalStateProvider<TX: DbTx> {
     /// Database transaction
     tx: TX,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
-    /// Phantom lifetime `'a`
-    _phantom: PhantomData<&'a TX>,
 }
 
-impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
+impl<TX: DbTx> HistoricalStateProvider<TX> {
     /// Create new StateProvider for historical block number
     pub fn new(tx: TX, block_number: BlockNumber) -> Self {
-        Self {
-            tx,
-            block_number,
-            lowest_available_blocks: Default::default(),
-            _phantom: PhantomData {},
-        }
+        Self { tx, block_number, lowest_available_blocks: Default::default() }
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -302,7 +283,7 @@ impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    fn as_ref<'b>(&'b self) -> HistoricalStateProviderRef<'a, 'b, TX> {
+    fn as_ref(&self) -> HistoricalStateProviderRef<'_, TX> {
         HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &self.tx,
             self.block_number,
@@ -312,7 +293,7 @@ impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
+delegate_provider_impls!(HistoricalStateProvider<TX> where [TX: DbTx]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -365,8 +346,8 @@ mod tests {
 
     fn assert_state_provider<T: StateProvider>() {}
     #[allow(unused)]
-    fn assert_historical_state_provider<'txn, T: DbTx<'txn> + 'txn>() {
-        assert_state_provider::<HistoricalStateProvider<'txn, T>>();
+    fn assert_historical_state_provider<T: DbTx>() {
+        assert_state_provider::<HistoricalStateProvider<T>>();
     }
 
     #[test]
