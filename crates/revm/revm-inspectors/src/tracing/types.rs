@@ -32,13 +32,21 @@ pub enum CallKind {
 
 impl CallKind {
     /// Returns true if the call is a create
+    #[inline]
     pub fn is_any_create(&self) -> bool {
         matches!(self, CallKind::Create | CallKind::Create2)
     }
 
     /// Returns true if the call is a delegate of some sorts
+    #[inline]
     pub fn is_delegate(&self) -> bool {
         matches!(self, CallKind::DelegateCall | CallKind::CallCode)
+    }
+
+    /// Returns true if the call is [CallKind::StaticCall].
+    #[inline]
+    pub fn is_static_call(&self) -> bool {
+        matches!(self, CallKind::StaticCall)
     }
 }
 
@@ -412,6 +420,11 @@ impl CallTraceNode {
             calls: Default::default(),
             logs: Default::default(),
         };
+
+        if self.trace.kind.is_static_call() {
+            // STATICCALL frames don't have a value
+            call_frame.value = None;
+        }
 
         // we need to populate error and revert reason
         if !self.trace.success {
