@@ -372,12 +372,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         };
         self.ext.on_components_initialized(&components)?;
 
-        // Set the `compute_pending_block` flag within the payload builder configuration.
-        #[cfg(feature = "optimism")]
-        {
-            self.builder.set_compute_pending_block(self.rollup.compute_pending_block);
-        }
-
         debug!(target: "reth::cli", "Spawning payload builder service");
         let payload_builder = self.ext.spawn_payload_builder_service(&self.builder, &components)?;
 
