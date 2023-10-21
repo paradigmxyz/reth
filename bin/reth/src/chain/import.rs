@@ -18,7 +18,12 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
 use reth_interfaces::consensus::Consensus;
-use reth_primitives::{stage::StageId, ChainSpec, B256};
+use reth_primitives::{
+    stage::StageId, 
+    ChainSpec, 
+    B256,
+    ephemery::{get_current_id, get_iteration, is_ephemery},
+};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -94,6 +99,14 @@ impl ImportCommand {
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
+        if is_ephemery(self.chain.chain) {
+            info!(
+                target: "reth::cli", 
+                "The Ephemery testnet has been loaded. Current iteration: {} Current chain ID: {}", 
+                get_iteration()?,
+                get_current_id()
+            );
+        }
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 

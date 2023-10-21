@@ -54,7 +54,8 @@ use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
     stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256, 
+    ephemery::{get_current_id, get_iteration, is_ephemery},
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
@@ -252,6 +253,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
+        if is_ephemery(self.chain.chain) {
+            info!(
+                target: "reth::cli", 
+                "Launching the Ephemery testnet. Current iteration: {} Current chain ID: {}", 
+                get_iteration()?,
+                get_current_id(),
+            );
+        }
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;
 

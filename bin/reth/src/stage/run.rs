@@ -12,7 +12,10 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_primitives::ChainSpec;
+use reth_primitives::{
+    ChainSpec,
+    ephemery::{get_current_id, get_iteration, is_ephemery},
+};
 use reth_provider::{ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     stages::{
@@ -126,6 +129,14 @@ impl Command {
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
+        if is_ephemery(self.chain.chain) {
+            info!(
+                target: "reth::cli", 
+                "The Ephemery testnet has been loaded. Current iteration: {} Current chain ID: {}", 
+                get_iteration()?,
+                get_current_id()
+            );
+        }
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
         let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
