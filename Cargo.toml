@@ -45,7 +45,7 @@ members = [
     "crates/trie",
     "testing/ef-tests",
     "crates/rpc/rpc-types-compat",
-    "crates/reth-tokio-utils",
+    "crates/tokio-util",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
     "examples/cli-extension-event-hooks",
@@ -108,7 +108,7 @@ reth-discv4 = { path = "./crates/net/discv4" }
 reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
-reth-tokio-utils = { path = "./crates/reth-tokio-utils" }
+reth-tokio-util = { path = "crates/tokio-util" }
 # revm
 revm = "3.5.0"
 revm-primitives = "1.3.0"

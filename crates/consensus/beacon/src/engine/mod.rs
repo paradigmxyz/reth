@@ -36,7 +36,7 @@ use reth_rpc_types::engine::{
 use reth_rpc_types_compat::engine::payload::{try_into_block, validate_block_hash};
 use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
-use reth_tokio_utils::EventListeners;
+use reth_tokio_util::EventListeners;
 use std::{
     pin::Pin,
     sync::Arc,

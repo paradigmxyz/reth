@@ -5557,7 +5557,7 @@ dependencies = [
  "reth-snapshot",
  "reth-stages",
  "reth-tasks",
- "reth-tokio-utils",
+ "reth-tokio-util",
  "reth-tracing",
  "schnellru",
  "thiserror",
@@ -5967,7 +5967,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc-types",
  "reth-tasks",
- "reth-tokio-utils",
+ "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
@@ -6128,7 +6128,7 @@ dependencies = [
  "reth-provider",
  "reth-snapshot",
  "reth-stages",
- "reth-tokio-utils",
+ "reth-tokio-util",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -6368,7 +6368,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-tokio-utils",
+ "reth-tokio-util",
  "reth-trie",
  "revm",
  "serde",
@@ -6394,7 +6394,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-tokio-utils"
+name = "reth-tokio-util"
 version = "0.1.0-alpha.10"
 dependencies = [
  "tokio",
