@@ -42,9 +42,9 @@ use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{ForkId, NodeRecord, PeerId, B256};
-use reth_tokio_utils::EventListeners;
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_tokio_utils::EventListeners;
 use std::{
     net::SocketAddr,
     pin::Pin,
