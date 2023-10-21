@@ -79,7 +79,7 @@ impl FillableTransaction for TransactionSignedEcRecovered {
 
         #[cfg(feature = "optimism")]
         {
-            let mut envelope_buf = Vec::default();
+            let mut envelope_buf = Vec::with_capacity(self.length_without_header());
             self.encode_enveloped(&mut envelope_buf);
             fill_tx_env_with_recovered(tx_env, self, envelope_buf.into());
         }

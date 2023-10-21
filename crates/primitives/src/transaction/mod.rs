@@ -1181,7 +1181,7 @@ impl TransactionSigned {
             2 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
             3 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
-            DEPOSIT_TX_TYPE_ID => Transaction::Deposit(TxDeposit::decode_inner(data)?),
+            0x7E => Transaction::Deposit(TxDeposit::decode_inner(data)?),
             _ => return Err(RlpError::Custom("unsupported typed transaction type")),
         };
 

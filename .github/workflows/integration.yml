@@ -54,7 +54,7 @@ jobs:
       - name: Run tests
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info \
-            --locked --features "jemalloc-prof,${{ matrix.network }},min-error-logs,min-warn-logs,min-info-logs,min-debug-logs,min-trace-logs" \
+            --locked --features "jemalloc-prof,${{ matrix.network }}" \
             --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(test)'
