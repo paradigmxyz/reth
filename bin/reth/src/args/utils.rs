@@ -1,8 +1,8 @@
 //! Clap parser utilities
 
 use reth_primitives::{
-    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, EPHEMERY, GOERLI, HOLESKY, MAINNET,
-    SEPOLIA,
+    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, ephemery, DEV, EPHEMERY, GOERLI, HOLESKY,
+    MAINNET, SEPOLIA,
 };
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
@@ -26,7 +26,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
         "holesky" => HOLESKY.clone(),
-        "ephemery" => EPHEMERY.clone(),
+        "ephemery" => ephemery::check_update_spec(EPHEMERY.clone())?,
         "dev" => DEV.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
@@ -43,7 +43,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
         "holesky" => HOLESKY.clone(),
-        "ephemery" => EPHEMERY.clone(),
+        "ephemery" => ephemery::check_update_spec(EPHEMERY.clone())?,
         "dev" => DEV.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;

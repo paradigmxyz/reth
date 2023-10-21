@@ -24,6 +24,7 @@ mod chain;
 mod compression;
 pub mod constants;
 pub mod eip4844;
+pub mod ephemery;
 mod forkid;
 pub mod fs;
 mod genesis;

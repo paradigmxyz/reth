@@ -50,6 +50,8 @@ tempfile.workspace = true
 sha2 = "0.10.7"
 itertools = "0.11"
 num_enum = "0.7"
+lazy_static = "*"
+eyre.workspace = true
 
 # `test-utils` feature
 plain_hasher = { version = "0.2", optional = true }
