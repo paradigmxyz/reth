@@ -234,6 +234,7 @@ where
                     trie_cursor,
                     state.walker_stack,
                     self.changed_account_prefixes,
+                    retain_updates,
                 );
                 (
                     state.hash_builder,
@@ -242,12 +243,12 @@ where
                 )
             }
             None => {
-                let walker = TrieWalker::new(trie_cursor, self.changed_account_prefixes);
+                let walker =
+                    TrieWalker::new(trie_cursor, self.changed_account_prefixes, retain_updates);
                 (HashBuilder::default(), AccountNodeIter::new(walker, hashed_account_cursor))
             }
         };
 
-        account_node_iter.walker.set_updates(retain_updates);
         hash_builder.set_updates(retain_updates);
 
         let mut account_rlp = Vec::with_capacity(128);
@@ -448,8 +449,7 @@ where
             self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
             self.hashed_address,
         );
-        let walker = TrieWalker::new(trie_cursor, self.changed_prefixes.clone())
-            .with_updates(retain_updates);
+        let walker = TrieWalker::new(trie_cursor, self.changed_prefixes.clone(), retain_updates);
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 

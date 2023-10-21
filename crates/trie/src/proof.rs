@@ -57,7 +57,7 @@ where
         // Create the walker.
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.insert(target_nibbles.clone());
-        let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
+        let walker = TrieWalker::new(trie_cursor, prefix_set.freeze(), false);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let mut hash_builder =
@@ -124,7 +124,7 @@ where
             self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         );
-        let walker = TrieWalker::new(trie_cursor, prefix_set);
+        let walker = TrieWalker::new(trie_cursor, prefix_set, false);
 
         let mut hash_builder = HashBuilder::default().with_proof_retainer(target_nibbles);
         let mut storage_node_iter =

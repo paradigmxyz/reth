@@ -43,8 +43,9 @@ fn seek_node(
 
 impl<C: TrieCursor> TrieWalker<C> {
     /// Constructs a new TrieWalker, setting up the initial state of the stack and cursor.
-    pub fn new(mut cursor: C, changes: PrefixSet) -> Self {
+    pub fn new(mut cursor: C, changes: PrefixSet, retain_updates: bool) -> Self {
         // Initialize the walker with a single empty stack element.
+        let mut trie_updates = if retain_updates { Some(TrieUpdates::default()) } else { None };
 
         let mut node = CursorSubNode::new(
             Nibbles::default(),
@@ -70,15 +71,15 @@ impl<C: TrieCursor> TrieWalker<C> {
                 node.node.state_mask |= TrieMask::from_nibble(key[0]);
                 node.node.tree_mask = TrieMask::from_nibble(key[0]);
             }
+
+            // Delete the loaded node since hash builder will rebuild it.
+            if let Some((updates, key)) = trie_updates.as_mut().zip(cursor.current().unwrap()) {
+                updates.schedule_delete(key);
+            }
         }
 
-        let mut this = Self {
-            cursor,
-            changes,
-            stack: vec![node],
-            can_skip_current_node: false,
-            trie_updates: None,
-        };
+        let mut this =
+            Self { cursor, changes, stack: vec![node], can_skip_current_node: false, trie_updates };
 
         // Update the skip state for the root node.
         this.update_skip_node();
@@ -86,24 +87,16 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Constructs a new TrieWalker from existing stack and a cursor.
-    pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
-        let mut this =
-            Self { cursor, changes, stack, can_skip_current_node: false, trie_updates: None };
+    pub fn from_stack(
+        cursor: C,
+        stack: Vec<CursorSubNode>,
+        changes: PrefixSet,
+        retain_updates: bool,
+    ) -> Self {
+        let trie_updates = if retain_updates { Some(TrieUpdates::default()) } else { None };
+        let mut this = Self { cursor, changes, stack, can_skip_current_node: false, trie_updates };
         this.update_skip_node();
         this
-    }
-
-    /// Sets the flag whether the trie updates should be stored.
-    pub fn with_updates(mut self, retain_updates: bool) -> Self {
-        self.set_updates(retain_updates);
-        self
-    }
-
-    /// Sets the flag whether the trie updates should be stored.
-    pub fn set_updates(&mut self, retain_updates: bool) {
-        if retain_updates {
-            self.trie_updates = Some(TrieUpdates::default());
-        }
     }
 
     /// Split the walker into stack and trie updates.
@@ -164,12 +157,9 @@ impl<C: TrieCursor> TrieWalker<C> {
         self.stack.push(subnode);
         self.update_skip_node();
 
-        // Delete the current node if it's included in the prefix set or it doesn't contain the root
-        // hash.
-        if !self.can_skip_current_node {
-            if let Some((updates, key)) = self.trie_updates.as_mut().zip(self.cursor.current()?) {
-                updates.schedule_delete(key);
-            }
+        // Delete the loaded node since hash builder will rebuild it.
+        if let Some((updates, key)) = self.trie_updates.as_mut().zip(self.cursor.current()?) {
+            updates.schedule_delete(key);
         }
 
         Ok(())
