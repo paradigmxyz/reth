@@ -51,7 +51,7 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run --locked --workspace \
-            --features "jemalloc-prof,${{ matrix.network }},min-error-logs,min-warn-logs,min-info-logs,min-debug-logs,min-trace-logs" \
+            --features "jemalloc-prof,${{ matrix.network }}" \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 

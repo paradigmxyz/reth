@@ -42,7 +42,7 @@ jobs:
       - name: Run tests
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info \
-            --locked --features "jemalloc-prof,${{ matrix.network }},min-error-logs,min-warn-logs,min-info-logs,min-debug-logs,min-trace-logs" \
+            --locked --features "jemalloc-prof,${{ matrix.network }}" \
             --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
@@ -102,7 +102,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run doctests
-        run: cargo test --doc --all --features "jemalloc-prof,${{ matrix.network }},min-error-logs,min-warn-logs,min-info-logs,min-debug-logs,min-trace-logs"
+        run: cargo test --doc --all --features "jemalloc-prof,${{ matrix.network }}"
 
   unit-success:
     if: always()
