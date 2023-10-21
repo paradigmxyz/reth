@@ -22,6 +22,7 @@ reth-db.workspace = true
 reth-codecs = { path = "../storage/codecs" }
 reth-provider.workspace = true
 reth-trie = { path = "../trie" }
+reth-tokio-util.workspace = true
 
 # revm
 revm.workspace = true

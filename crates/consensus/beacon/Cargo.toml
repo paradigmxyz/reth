@@ -21,6 +21,7 @@ reth-payload-builder.workspace = true
 reth-prune = { path = "../../prune" }
 reth-snapshot = { path = "../../snapshot" }
 reth-rpc-types-compat.workspace = true
+reth-tokio-util.workspace = true
 # async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
