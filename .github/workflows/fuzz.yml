@@ -41,11 +41,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: install
-          args: cargo-test-fuzz afl
-      - name: Force install cargo-afl
-        run: |
-          cargo install --force afl
-          cargo afl --version
+          args: cargo-test-fuzz cargo-afl
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
