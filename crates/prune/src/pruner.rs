@@ -6,11 +6,10 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db::database::Database;
-use reth_primitives::{
-    listener::EventListeners, BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment,
-};
+use reth_primitives::{BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{ProviderFactory, PruneCheckpointReader};
 use reth_snapshot::HighestSnapshotsTracker;
+use reth_tokio_util::EventListeners;
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};

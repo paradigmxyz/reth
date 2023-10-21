@@ -30,7 +30,6 @@ mod genesis;
 mod hardfork;
 mod header;
 mod integer_list;
-pub mod listener;
 mod log;
 mod net;
 mod peer;

@@ -31,10 +31,6 @@ crc = "3"
 # tracing
 tracing.workspace = true
 
-# tokio
-tokio = { workspace = true, default-features = false, features = ["sync"] }
-tokio-stream.workspace = true
-
 # misc
 bytes.workspace = true
 byteorder = "1"
