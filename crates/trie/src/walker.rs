@@ -302,7 +302,7 @@ mod tests {
     where
         T: TrieCursor,
     {
-        let mut walker = TrieWalker::new(&mut trie, Default::default());
+        let mut walker = TrieWalker::new(&mut trie, Default::default(), false);
         assert_eq!(walker.key().unwrap(), Nibbles::from([0]));
 
         // We're traversing the path in lexigraphical order.
@@ -357,7 +357,7 @@ mod tests {
         // We insert something that's not part of the existing trie/prefix.
         let mut changed = PrefixSetMut::default();
         changed.insert([0xF, 0x1]);
-        let mut cursor = TrieWalker::new(&mut trie, changed.freeze());
+        let mut cursor = TrieWalker::new(&mut trie, changed.freeze(), false);
 
         // Root node
         assert_eq!(cursor.key(), Some(Nibbles::from_hex(vec![0x0])));
