@@ -59,8 +59,7 @@ impl Command {
         let block_range = self.from..=(self.from + self.block_interval - 1);
 
         let mut rng = rand::thread_rng();
-        let mut dictionaries = None;
-        let mut jar = NippyJar::load(&get_snapshot_segment_file_name(
+        let jar = NippyJar::load(&get_snapshot_segment_file_name(
             SnapshotSegment::Headers,
             filters,
             compression,
@@ -73,7 +72,7 @@ impl Command {
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
-        let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
+        let (provider, decompressors) = self.prepare_jar_provider(&jar)?;
         let mut cursor = if !decompressors.is_empty() {
             provider.cursor_with_decompressors(decompressors)
         } else {

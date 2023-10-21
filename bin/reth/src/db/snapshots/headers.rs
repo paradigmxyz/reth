@@ -54,15 +54,14 @@ impl Command {
 
         let mut row_indexes = range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
-        let mut dictionaries = None;
-        let mut jar = NippyJar::load(&get_snapshot_segment_file_name(
+        let jar = NippyJar::load(&get_snapshot_segment_file_name(
             SnapshotSegment::Headers,
             filters,
             compression,
             &range,
         ))?;
 
-        let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
+        let (provider, decompressors) = self.prepare_jar_provider(&jar)?;
         let mut cursor = if !decompressors.is_empty() {
             provider.cursor_with_decompressors(decompressors)
         } else {
