@@ -198,10 +198,7 @@ impl TestTransaction {
     }
 
     /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
-    fn insert_header<'a, TX: DbTxMut<'a> + DbTx<'a>>(
-        tx: &'a TX,
-        header: &SealedHeader,
-    ) -> Result<(), DbError> {
+    fn insert_header<TX: DbTxMut + DbTx>(tx: &TX, header: &SealedHeader) -> Result<(), DbError> {
         tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
         tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
         tx.put::<tables::Headers>(header.number, header.clone().unseal())

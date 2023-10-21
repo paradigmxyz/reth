@@ -5,7 +5,7 @@ use crate::{
     Log, RichHeader,
 };
 
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Subscription result.

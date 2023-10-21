@@ -4,14 +4,14 @@ use crate::eth::error::{EthApiError, EthResult};
 use core::fmt::Debug;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
-    proofs, Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
+    proofs,
+    revm::{compat::into_reth_log, env::tx_env_with_recovered},
+    Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     Receipts, SealedBlock, SealedHeader, B256, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
-    env::tx_env_with_recovered,
-    into_reth_log,
     state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
 };
 use reth_transaction_pool::TransactionPool;

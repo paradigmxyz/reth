@@ -117,9 +117,9 @@ use reth_rpc::{
         cache::{cache_new_blocks_task, EthStateCache},
         gas_oracle::GasPriceOracle,
     },
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TracingCallPool, TxPoolApi,
-    Web3Api,
+    AdminApi, BlockingTaskGuard, BlockingTaskPool, DebugApi, EngineEthApi, EthApi, EthFilter,
+    EthPubSub, EthSubscriptionIdProvider, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
+    TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -159,6 +159,7 @@ pub use crate::eth::{EthConfig, EthHandlers};
 pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::noop::NoopNetwork;
+use reth_rpc::eth::EthBundle;
 use reth_transaction_pool::noop::NoopTransactionPool;
 
 /// Convenience function for starting a server in one step.
@@ -719,7 +720,7 @@ pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
     /// Holds a clone of all the eth namespace handlers
     eth: Option<EthHandlers<Provider, Pool, Network, Events>>,
     /// to put trace calls behind semaphore
-    tracing_call_guard: TracingCallGuard,
+    blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
     modules: HashMap<RethRpcModule, Methods>,
 }
@@ -745,7 +746,7 @@ impl<Provider, Pool, Network, Tasks, Events>
             eth: None,
             executor,
             modules: Default::default(),
-            tracing_call_guard: TracingCallGuard::new(config.eth.max_tracing_requests),
+            blocking_pool_guard: BlockingTaskGuard::new(config.eth.max_tracing_requests),
             config,
             events,
         }
@@ -791,17 +792,27 @@ impl<Provider, Pool, Network, Tasks, Events>
 where
     Network: NetworkInfo + Peers + Clone + 'static,
 {
+    /// Instantiates AdminApi
+    pub fn admin_api(&mut self) -> AdminApi<Network> {
+        AdminApi::new(self.network.clone())
+    }
+
+    /// Instantiates Web3Api
+    pub fn web3_api(&mut self) -> Web3Api<Network> {
+        Web3Api::new(self.network.clone())
+    }
+
     /// Register Admin Namespace
     pub fn register_admin(&mut self) -> &mut Self {
-        self.modules
-            .insert(RethRpcModule::Admin, AdminApi::new(self.network.clone()).into_rpc().into());
+        let adminapi = self.admin_api();
+        self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc().into());
         self
     }
 
     /// Register Web3 Namespace
     pub fn register_web3(&mut self) -> &mut Self {
-        self.modules
-            .insert(RethRpcModule::Web3, Web3Api::new(self.network.clone()).into_rpc().into());
+        let web3api = self.web3_api();
+        self.modules.insert(RethRpcModule::Web3, web3api.into_rpc().into());
         self
     }
 }
@@ -832,37 +843,22 @@ where
 
     /// Register Otterscan Namespace
     pub fn register_ots(&mut self) -> &mut Self {
-        let eth_api = self.eth_api();
-        self.modules.insert(RethRpcModule::Ots, OtterscanApi::new(eth_api).into_rpc().into());
+        let otterscan_api = self.otterscan_api();
+        self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
         self
     }
 
     /// Register Debug Namespace
     pub fn register_debug(&mut self) -> &mut Self {
-        let eth_api = self.eth_api();
-        self.modules.insert(
-            RethRpcModule::Debug,
-            DebugApi::new(
-                self.provider.clone(),
-                eth_api,
-                Box::new(self.executor.clone()),
-                self.tracing_call_guard.clone(),
-            )
-            .into_rpc()
-            .into(),
-        );
+        let debug_api = self.debug_api();
+        self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
         self
     }
 
     /// Register Trace Namespace
     pub fn register_trace(&mut self) -> &mut Self {
-        let eth = self.eth_handlers();
-        self.modules.insert(
-            RethRpcModule::Trace,
-            TraceApi::new(self.provider.clone(), eth.api, self.tracing_call_guard.clone())
-                .into_rpc()
-                .into(),
-        );
+        let trace_api = self.trace_api();
+        self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
         self
     }
 
@@ -889,20 +885,15 @@ where
 
     /// Register Net Namespace
     pub fn register_net(&mut self) -> &mut Self {
-        let eth_api = self.eth_api();
-        self.modules.insert(
-            RethRpcModule::Net,
-            NetApi::new(self.network.clone(), eth_api).into_rpc().into(),
-        );
+        let netapi = self.net_api();
+        self.modules.insert(RethRpcModule::Net, netapi.into_rpc().into());
         self
     }
 
     /// Register Reth namespace
     pub fn register_reth(&mut self) -> &mut Self {
-        self.modules.insert(
-            RethRpcModule::Reth,
-            RethApi::new(self.provider.clone(), Box::new(self.executor.clone())).into_rpc().into(),
-        );
+        let rethapi = self.reth_api();
+        self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
         self
     }
 
@@ -937,12 +928,11 @@ where
             filter: eth_filter,
             pubsub: eth_pubsub,
             cache: _,
-            tracing_call_pool: _,
+            blocking_task_pool: _,
         } = self.with_eth(|eth| eth.clone());
 
         // Create a copy, so we can list out all the methods for rpc_ api
         let namespaces: Vec<_> = namespaces.collect();
-
         namespaces
             .iter()
             .copied()
@@ -957,7 +947,7 @@ where
                             self.provider.clone(),
                             eth_api.clone(),
                             Box::new(self.executor.clone()),
-                            self.tracing_call_guard.clone(),
+                            self.blocking_pool_guard.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -975,7 +965,7 @@ where
                         RethRpcModule::Trace => TraceApi::new(
                             self.provider.clone(),
                             eth_api.clone(),
-                            self.tracing_call_guard.clone(),
+                            self.blocking_pool_guard.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -1037,7 +1027,8 @@ where
             );
 
             let executor = Box::new(self.executor.clone());
-            let tracing_call_pool = TracingCallPool::build().expect("failed to build tracing pool");
+            let blocking_task_pool =
+                BlockingTaskPool::build().expect("failed to build tracing pool");
             let api = EthApi::with_spawner(
                 self.provider.clone(),
                 self.pool.clone(),
@@ -1046,7 +1037,7 @@ where
                 gas_oracle,
                 self.config.eth.rpc_gas_cap,
                 executor.clone(),
-                tracing_call_pool.clone(),
+                blocking_task_pool.clone(),
             );
             let filter = EthFilter::new(
                 self.provider.clone(),
@@ -1054,6 +1045,7 @@ where
                 cache.clone(),
                 self.config.eth.max_logs_per_response,
                 executor.clone(),
+                self.config.eth.stale_filter_ttl,
             );
 
             let pubsub = EthPubSub::with_spawner(
@@ -1064,7 +1056,7 @@ where
                 executor,
             );
 
-            let eth = EthHandlers { api, cache, filter, pubsub, tracing_call_pool };
+            let eth = EthHandlers { api, cache, filter, pubsub, blocking_task_pool };
             self.eth = Some(eth);
         }
         f(self.eth.as_ref().expect("exists; qed"))
@@ -1078,6 +1070,45 @@ where
     /// Returns the configured [EthApi] or creates it if it does not exist yet
     pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
         self.with_eth(|handlers| handlers.api.clone())
+    }
+    /// Instantiates TraceApi
+    pub fn trace_api(&mut self) -> TraceApi<Provider, EthApi<Provider, Pool, Network>> {
+        let eth = self.eth_handlers();
+        TraceApi::new(self.provider.clone(), eth.api, self.blocking_pool_guard.clone())
+    }
+
+    /// Instantiates [EthBundle] Api
+    pub fn bundle_api(&mut self) -> EthBundle<EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        EthBundle::new(eth_api, self.blocking_pool_guard.clone())
+    }
+
+    /// Instantiates OtterscanApi
+    pub fn otterscan_api(&mut self) -> OtterscanApi<EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        OtterscanApi::new(eth_api)
+    }
+
+    /// Instantiates DebugApi
+    pub fn debug_api(&mut self) -> DebugApi<Provider, EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        DebugApi::new(
+            self.provider.clone(),
+            eth_api,
+            Box::new(self.executor.clone()),
+            self.blocking_pool_guard.clone(),
+        )
+    }
+
+    /// Instantiates NetApi
+    pub fn net_api(&mut self) -> NetApi<Network, EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        NetApi::new(self.network.clone(), eth_api)
+    }
+
+    /// Instantiates RethApi
+    pub fn reth_api(&mut self) -> RethApi<Provider> {
+        RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
     }
 }
 

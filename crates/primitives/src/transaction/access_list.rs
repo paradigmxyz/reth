@@ -2,7 +2,6 @@ use crate::{Address, B256};
 use alloy_primitives::U256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
-use serde::{Deserialize, Serialize};
 use std::mem;
 
 /// A list of addresses and storage keys that the transaction plans to access.
@@ -82,14 +81,4 @@ impl AccessList {
         self.0.iter().map(AccessListItem::size).sum::<usize>() +
             self.0.capacity() * mem::size_of::<AccessListItem>()
     }
-}
-
-/// Access list with gas used appended.
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct AccessListWithGasUsed {
-    /// List with accounts accessed during transaction.
-    pub access_list: AccessList,
-    /// Estimated gas used with access list.
-    pub gas_used: U256,
 }

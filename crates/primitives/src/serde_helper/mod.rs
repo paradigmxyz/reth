@@ -4,7 +4,6 @@ use crate::{B256, U64};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod storage;
-
 pub use storage::*;
 
 mod jsonu256;

@@ -1,9 +1,8 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{BlockId, Bytes, B256};
 use reth_rpc_types::{
-    state::StateOverride,
-    trace::{filter::TraceFilter, parity::*},
-    BlockOverrides, CallRequest, Index,
+    trace::{filter::TraceFilter, parity::*, tracerequest::TraceRequest},
+    CallRequest, Index,
 };
 use std::collections::HashSet;
 
@@ -13,14 +12,7 @@ use std::collections::HashSet;
 pub trait TraceApi {
     /// Executes the given call and returns a number of possible traces for it.
     #[method(name = "call")]
-    async fn trace_call(
-        &self,
-        call: CallRequest,
-        trace_types: HashSet<TraceType>,
-        block_id: Option<BlockId>,
-        state_overrides: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
-    ) -> RpcResult<TraceResults>;
+    async fn trace_call(&self, trace_request: TraceRequest) -> RpcResult<TraceResults>;
 
     /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed
     /// on top of a pending block with all n-1 transactions applied (traced) first. Allows to trace

@@ -3,23 +3,23 @@ use crate::{
         error::{EthApiError, EthResult},
         revm_utils::{
             clone_into_empty_db, inspect, inspect_and_return_db, prepare_call_env,
-            replay_transactions_until, result_output, transact, EvmOverrides,
+            replay_transactions_until, transact, EvmOverrides,
         },
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
-    EthApiSpec, TracingCallGuard,
+    BlockingTaskGuard, EthApiSpec,
 };
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
+    revm::env::tx_env_with_recovered, Account, Address, Block, BlockId, BlockNumberOrTag, Bytes,
+    TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::{StateProviderDatabase, SubState},
-    env::tx_env_with_recovered,
     tracing::{
         js::{JsDbRequest, JsInspector},
         FourByteInspector, TracingInspector, TracingInspectorConfig,
@@ -61,10 +61,10 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
         provider: Provider,
         eth: Eth,
         task_spawner: Box<dyn TaskSpawner>,
-        tracing_call_guard: TracingCallGuard,
+        blocking_task_guard: BlockingTaskGuard,
     ) -> Self {
         let inner =
-            Arc::new(DebugApiInner { provider, eth_api: eth, task_spawner, tracing_call_guard });
+            Arc::new(DebugApiInner { provider, eth_api: eth, task_spawner, blocking_task_guard });
         Self { inner }
     }
 }
@@ -78,7 +78,7 @@ where
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
-        self.inner.tracing_call_guard.clone().acquire_owned().await
+        self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
     /// Trace the entire block asynchronously
@@ -330,7 +330,7 @@ where
             })
             .await?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default();
+        let return_value = res.result.into_output().unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok(frame.into())
@@ -533,7 +533,7 @@ where
 
         let (res, _) = inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default();
+        let return_value = res.result.into_output().unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))
@@ -604,7 +604,7 @@ where
             match req {
                 JsDbRequest::Basic { address, resp } => {
                     let acc = db
-                        .basic(address)
+                        .basic_ref(address)
                         .map(|maybe_acc| {
                             maybe_acc.map(|acc| Account {
                                 nonce: acc.nonce,
@@ -617,13 +617,13 @@ where
                 }
                 JsDbRequest::Code { code_hash, resp } => {
                     let code = db
-                        .code_by_hash(code_hash)
+                        .code_by_hash_ref(code_hash)
                         .map(|code| code.bytecode)
                         .map_err(|err| err.to_string());
                     let _ = resp.send(code);
                 }
                 JsDbRequest::StorageAt { address, index, resp } => {
-                    let value = db.storage(address, index).map_err(|err| err.to_string());
+                    let value = db.storage_ref(address, index).map_err(|err| err.to_string());
                     let _ = resp.send(value);
                 }
             }
@@ -1010,8 +1010,8 @@ struct DebugApiInner<Provider, Eth> {
     provider: Provider,
     /// The implementation of `eth` API
     eth_api: Eth,
-    // restrict the number of concurrent calls to tracing calls
-    tracing_call_guard: TracingCallGuard,
+    // restrict the number of concurrent calls to blocking calls
+    blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
 }

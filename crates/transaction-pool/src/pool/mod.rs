@@ -94,7 +94,6 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
-
 mod events;
 pub use events::{FullTransactionEvent, TransactionEvent};
 

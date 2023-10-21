@@ -1,7 +1,7 @@
-use crate::config::revm_spec;
-use reth_primitives::{
+use crate::{
     constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
     recover_signer,
+    revm::config::revm_spec,
     revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
     Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, B256, U256,

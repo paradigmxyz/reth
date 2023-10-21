@@ -1,6 +1,5 @@
 use crate::{
     database::StateProviderDatabase,
-    env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
@@ -10,6 +9,10 @@ use reth_interfaces::{
     RethError,
 };
 use reth_primitives::{
+    revm::{
+        compat::into_reth_log,
+        env::{fill_cfg_and_block_env, fill_tx_env},
+    },
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
     PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
@@ -560,7 +563,9 @@ mod tests {
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
-        keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
+        keccak256,
+        trie::AccountProof,
+        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
     use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use revm::{Database, TransitionState};
@@ -621,7 +626,7 @@ mod tests {
 
     impl StateRootProvider for StateProviderTest {
         fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
-            todo!()
+            unimplemented!("state root computation is not supported")
         }
     }
 
@@ -641,12 +646,8 @@ mod tests {
             Ok(self.contracts.get(&code_hash).cloned())
         }
 
-        fn proof(
-            &self,
-            _address: Address,
-            _keys: &[B256],
-        ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
-            todo!()
+        fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
+            unimplemented!("proof generation is not supported")
         }
     }
 

@@ -1,4 +1,4 @@
-use reth_primitives::{B256, U256, U64};
+use alloy_primitives::{B256, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// This structure contains configurable settings of the transition process.
