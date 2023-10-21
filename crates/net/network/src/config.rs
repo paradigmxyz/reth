@@ -74,7 +74,7 @@ pub struct NetworkConfig<C> {
     pub sequencer_endpoint: Option<String>,
     /// Whether to disable transaction gossip
     #[cfg(feature = "optimism")]
-    pub disable_tx_gossip: bool,
+    pub tx_gossip_disabled: bool,
 }
 
 // === impl NetworkConfig ===
@@ -159,7 +159,7 @@ pub struct NetworkConfigBuilder {
     sequencer_endpoint: Option<String>,
     /// Whether tx gossip is disabled
     #[cfg(feature = "optimism")]
-    disable_tx_gossip: bool,
+    tx_gossip_disabled: bool,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -184,7 +184,7 @@ impl NetworkConfigBuilder {
             #[cfg(feature = "optimism")]
             sequencer_endpoint: None,
             #[cfg(feature = "optimism")]
-            disable_tx_gossip: false,
+            tx_gossip_disabled: false,
         }
     }
 
@@ -375,7 +375,7 @@ impl NetworkConfigBuilder {
     /// Sets whether tx gossip is disabled.
     #[cfg(feature = "optimism")]
     pub fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
-        self.disable_tx_gossip = disable_tx_gossip;
+        self.tx_gossip_disabled = disable_tx_gossip;
         self
     }
 
@@ -404,7 +404,7 @@ impl NetworkConfigBuilder {
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
             #[cfg(feature = "optimism")]
-            disable_tx_gossip,
+            tx_gossip_disabled,
         } = self;
 
         let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
@@ -458,7 +458,7 @@ impl NetworkConfigBuilder {
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
             #[cfg(feature = "optimism")]
-            disable_tx_gossip,
+            tx_gossip_disabled,
         }
     }
 }

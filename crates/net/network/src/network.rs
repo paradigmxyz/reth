@@ -47,7 +47,7 @@ impl NetworkHandle {
         bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
         #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
-        #[cfg(feature = "optimism")] disable_tx_gossip: bool,
+        #[cfg(feature = "optimism")] tx_gossip_disabled: bool,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -63,7 +63,7 @@ impl NetworkHandle {
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
             #[cfg(feature = "optimism")]
-            disable_tx_gossip,
+            tx_gossip_disabled,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -180,8 +180,8 @@ impl NetworkHandle {
 
     /// Whether tx gossip is disabled
     #[cfg(feature = "optimism")]
-    pub fn disable_tx_gossip(&self) -> bool {
-        self.inner.disable_tx_gossip
+    pub fn tx_gossip_disabled(&self) -> bool {
+        self.inner.tx_gossip_disabled
     }
 }
 
@@ -339,7 +339,7 @@ struct NetworkInner {
     sequencer_endpoint: Option<String>,
     /// Whether to disable transaction gossip
     #[cfg(feature = "optimism")]
-    disable_tx_gossip: bool,
+    tx_gossip_disabled: bool,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).

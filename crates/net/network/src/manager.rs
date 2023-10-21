@@ -185,7 +185,7 @@ where
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
             #[cfg(feature = "optimism")]
-            disable_tx_gossip,
+            tx_gossip_disabled,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -246,7 +246,7 @@ where
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
             #[cfg(feature = "optimism")]
-            disable_tx_gossip,
+            tx_gossip_disabled,
         );
 
         Ok(Self {

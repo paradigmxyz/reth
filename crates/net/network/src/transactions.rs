@@ -243,7 +243,7 @@ where
     ) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             #[cfg(feature = "optimism")]
-            if self.network.disable_tx_gossip() {
+            if self.network.tx_gossip_disabled() {
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
@@ -278,7 +278,7 @@ where
             return
         }
         #[cfg(feature = "optimism")]
-        if self.network.disable_tx_gossip() {
+        if self.network.tx_gossip_disabled() {
             return
         }
 
@@ -306,7 +306,7 @@ where
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
         #[cfg(feature = "optimism")]
-        if self.network.disable_tx_gossip() {
+        if self.network.tx_gossip_disabled() {
             return propagated
         }
 
@@ -494,7 +494,7 @@ where
             return
         }
         #[cfg(feature = "optimism")]
-        if self.network.disable_tx_gossip() {
+        if self.network.tx_gossip_disabled() {
             return
         }
 
@@ -636,7 +636,7 @@ where
                 // pool
                 if !self.network.is_initially_syncing() {
                     #[cfg(feature = "optimism")]
-                    if self.network.disable_tx_gossip() {
+                    if self.network.tx_gossip_disabled() {
                         return
                     }
                     let peer = self.peers.get_mut(&peer_id).expect("is present; qed");
@@ -675,7 +675,7 @@ where
             return
         }
         #[cfg(feature = "optimism")]
-        if self.network.disable_tx_gossip() {
+        if self.network.tx_gossip_disabled() {
             return
         }
 
