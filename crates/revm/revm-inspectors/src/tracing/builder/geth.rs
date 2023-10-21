@@ -11,7 +11,7 @@ use reth_rpc_types::trace::geth::{
 };
 use revm::{
     db::DatabaseRef,
-    primitives::{ResultAndState, KECCAK_EMPTY},
+    primitives::{AccountInfo, ResultAndState, KECCAK_EMPTY},
 };
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
@@ -188,17 +188,35 @@ impl GethTraceBuilder {
     where
         DB: DatabaseRef,
     {
+        // loads the code from the account or the database
+        // Geth always includes the contract code in the prestate. However,
+        // the code hash will be KECCAK_EMPTY if the account is an EOA. Therefore
+        // we need to filter it out.
+        let load_account_code = |db_acc: &AccountInfo| {
+            db_acc
+                .code
+                .as_ref()
+                .map(|code| code.original_bytes())
+                .or_else(|| {
+                    if db_acc.code_hash == KECCAK_EMPTY {
+                        None
+                    } else {
+                        db.code_by_hash_ref(db_acc.code_hash).ok().map(|code| code.original_bytes())
+                    }
+                })
+                .map(Into::into)
+        };
+
         let account_diffs = state.into_iter().map(|(addr, acc)| (*addr, acc));
         let is_diff = prestate_config.is_diff_mode();
         if !is_diff {
             let mut prestate = PreStateMode::default();
             for (addr, changed_acc) in account_diffs {
                 let db_acc = db.basic_ref(addr)?.unwrap_or_default();
-                let mut pre_state = AccountState::from_account_info(
-                    db_acc.nonce,
-                    db_acc.balance,
-                    db_acc.code.as_ref().map(|code| code.original_bytes()),
-                );
+                let code = load_account_code(&db_acc);
+
+                let mut pre_state =
+                    AccountState::from_account_info(db_acc.nonce, db_acc.balance, code);
 
                 // handle _touched_ storage slots
                 for (key, slot) in changed_acc.storage.iter() {
@@ -213,22 +231,8 @@ impl GethTraceBuilder {
             let mut account_change_kinds = HashMap::with_capacity(account_diffs.len());
             for (addr, changed_acc) in account_diffs {
                 let db_acc = db.basic_ref(addr)?.unwrap_or_default();
-                let db_code = db_acc.code.as_ref();
-                let db_code_hash = db_acc.code_hash;
 
-                // Geth always includes the contract code in the prestate. However,
-                // the code hash will be KECCAK_EMPTY if the account is an EOA. Therefore
-                // we need to filter it out.
-                let pre_code = db_code
-                    .map(|code| code.original_bytes())
-                    .or_else(|| {
-                        if db_code_hash == KECCAK_EMPTY {
-                            None
-                        } else {
-                            db.code_by_hash_ref(db_code_hash).ok().map(|code| code.original_bytes())
-                        }
-                    })
-                    .map(Into::into);
+                let pre_code = load_account_code(&db_acc);
 
                 let mut pre_state =
                     AccountState::from_account_info(db_acc.nonce, db_acc.balance, pre_code);
