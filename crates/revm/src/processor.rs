@@ -553,7 +553,6 @@ pub fn verify_receipt<'a>(
 }
 
 #[cfg(test)]
-#[cfg(not(feature = "optimism"))]
 mod tests {
     use super::*;
     use reth_interfaces::RethResult;
@@ -564,7 +563,9 @@ mod tests {
         trie::AccountProof,
         Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
-    use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
+    use reth_provider::{
+        AccountReader, BlockHashReader, BundleStateWithReceipts, StateRootProvider,
+    };
     use revm::{Database, TransitionState};
     use std::collections::HashMap;
 

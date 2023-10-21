@@ -448,6 +448,10 @@ where
                 let _ = tx.send(res);
             }));
 
+            // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
+            // should not pull transactions from the tx pool. In this case, we build the payload
+            // upfront with the list of transactions sent in the attributes without caring about
+            // the results of the polling job, if a best payload has not already been built.
             #[cfg(feature = "optimism")]
             if self.config.chain_spec.optimism && self.config.attributes.no_tx_pool {
                 let args = BuildArguments {
@@ -462,7 +466,7 @@ where
                     self.builder.try_build(args)
                 {
                     self.cached_reads = Some(cached_reads);
-                    trace!("[OPTIMISM] Forced best payload");
+                    trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
                     let payload = Arc::new(payload);
                     return (
                         ResolveBestPayload {
