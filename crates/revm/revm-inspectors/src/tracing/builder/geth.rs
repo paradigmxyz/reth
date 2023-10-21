@@ -188,7 +188,10 @@ impl GethTraceBuilder {
     where
         DB: DatabaseRef,
     {
-        // loads the code from the database or the account
+        // loads the code from the account or the database
+        // Geth always includes the contract code in the prestate. However,
+        // the code hash will be KECCAK_EMPTY if the account is an EOA. Therefore
+        // we need to filter it out.
         let load_account_code = |db_acc: &AccountInfo| {
             db_acc
                 .code
@@ -229,9 +232,6 @@ impl GethTraceBuilder {
             for (addr, changed_acc) in account_diffs {
                 let db_acc = db.basic_ref(addr)?.unwrap_or_default();
 
-                // Geth always includes the contract code in the prestate. However,
-                // the code hash will be KECCAK_EMPTY if the account is an EOA. Therefore
-                // we need to filter it out.
                 let pre_code = load_account_code(&db_acc);
 
                 let mut pre_state =
