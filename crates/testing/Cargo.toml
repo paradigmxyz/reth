@@ -1,0 +1,33 @@
+[package]
+name = "testing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-revm = { path = "../revm" }
+reth-transaction-pool.workspace = true
+reth-interfaces = { workspace = true }
+reth-beacon-consensus = { path = "../consensus/beacon" }
+reth-blockchain-tree = { workspace = true }
+reth-payload-builder = {path  = "../payload/builder"}
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-rpc-types = { workspace = true }
+reth-basic-payload-builder = {path = "../payload/basic"}
+tokio = { workspace = true}
+revm.workspace = true
+
+[dev-dependencies]
+
+
+[features]
+default = ["test-utils"]
+test-utils = []

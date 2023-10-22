@@ -5772,16 +5772,12 @@ version = "0.1.0-alpha.7"
 dependencies = [
  "futures-util",
  "metrics",
- "reth-blockchain-tree",
- "reth-db",
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
- "reth-provider",
  "reth-revm-primitives",
  "reth-rlp",
  "reth-rpc-types",
- "reth-transaction-pool",
  "revm-primitives",
  "sha2 0.10.7",
  "thiserror",
@@ -7408,6 +7404,25 @@ dependencies = [
  "serde",
  "sha-1 0.10.1",
  "test-fuzz-internal",
+]
+
+[[package]]
+name = "testing"
+version = "0.1.0-alpha.7"
+dependencies = [
+ "reth-basic-payload-builder",
+ "reth-beacon-consensus",
+ "reth-blockchain-tree",
+ "reth-db",
+ "reth-interfaces",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc-types",
+ "reth-transaction-pool",
+ "revm",
+ "tokio",
 ]
 
 [[package]]

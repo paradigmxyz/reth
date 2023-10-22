@@ -510,7 +510,7 @@ impl Future for PendingPayload {
 ///
 /// If dropped, it will set the `cancelled` flag to true.
 #[derive(Default, Clone, Debug)]
-struct Cancelled(Arc<AtomicBool>);
+pub struct Cancelled(Arc<AtomicBool>);
 
 // === impl Cancelled ===
 
@@ -529,19 +529,19 @@ impl Drop for Cancelled {
 
 /// Static config for how to build a payload.
 #[derive(Clone)]
-struct PayloadConfig {
+pub struct PayloadConfig {
     /// Pre-configured block environment.
-    initialized_block_env: BlockEnv,
+    pub initialized_block_env: BlockEnv,
     /// Configuration for the environment.
-    initialized_cfg: CfgEnv,
+    pub initialized_cfg: CfgEnv,
     /// The parent block.
-    parent_block: Arc<SealedBlock>,
+    pub parent_block: Arc<SealedBlock>,
     /// Block extra data.
-    extra_data: Bytes,
+    pub extra_data: Bytes,
     /// Requested attributes for the payload.
-    attributes: PayloadBuilderAttributes,
+    pub attributes: PayloadBuilderAttributes,
     /// The chain spec.
-    chain_spec: Arc<ChainSpec>,
+    pub chain_spec: Arc<ChainSpec>,
 }
 
 /// The possible outcomes of a payload building attempt.
@@ -571,12 +571,12 @@ pub enum BuildOutcome {
 /// building process. It holds references to the Ethereum client, transaction pool, cached reads,
 /// payload configuration, cancellation status, and the best payload achieved so far.
 pub struct BuildArguments<Pool, Client> {
-    client: Client,
-    pool: Pool,
-    cached_reads: CachedReads,
-    config: PayloadConfig,
-    cancel: Cancelled,
-    best_payload: Option<Arc<BuiltPayload>>,
+    pub client: Client,
+    pub pool: Pool,
+    pub cached_reads: CachedReads,
+    pub config: PayloadConfig,
+    pub cancel: Cancelled,
+    pub best_payload: Option<Arc<BuiltPayload>>,
 }
 
 /// A trait for building payloads that encapsulate Ethereum transactions.
@@ -934,4 +934,3 @@ fn is_better_payload(best_payload: Option<&BuiltPayload>, new_fees: U256) -> boo
         true
     }
 }
-

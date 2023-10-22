@@ -15,13 +15,8 @@ reth-rpc-types.workspace = true
 reth-rlp.workspace = true
 reth-interfaces.workspace = true
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
-reth-db = { workspace = true, features = ["test-utils"] }
-reth-transaction-pool.workspace = true
-reth-beacon-consensus = { path = "../../consensus/beacon" }
-reth-blockchain-tree = { workspace = true }
 ## ethereum
 revm-primitives.workspace = true
-reth-provider.workspace = true
 ## async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
