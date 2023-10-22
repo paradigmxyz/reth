@@ -1,6 +1,5 @@
 use crate::PeerId;
-use reth_rlp::RlpDecodable;
-use reth_rlp_derive::RlpEncodable;
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
@@ -91,7 +90,7 @@ impl NodeRecord {
 impl fmt::Display for NodeRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("enode://")?;
-        hex::encode(self.id.as_bytes()).fmt(f)?;
+        crate::hex::encode(self.id.as_slice()).fmt(f)?;
         f.write_char('@')?;
         match self.address {
             IpAddr::V4(ip) => {
@@ -150,6 +149,12 @@ pub static GOERLI_BOOTNODES : [&str; 7] = [
     "enode://d2b720352e8216c9efc470091aa91ddafc53e222b32780f505c817ceef69e01d5b0b0797b69db254c586f493872352f5a022b4d8479a00fc92ec55f9ad46a27e@88.99.70.182:30303",
 ];
 
+/// Ethereum Foundation Holesky BOOTNODES
+pub static HOLESKY_BOOTNODES : [&str; 2] = [
+    "enode://ac906289e4b7f12df423d654c5a962b6ebe5b3a74cc9e06292a85221f9a64a6f1cfdd6b714ed6dacef51578f92b34c60ee91e9ede9c7f8fadc4d347326d95e2b@146.190.13.128:30303",
+    "enode://a3435a0155a3e837c02f5e7f5662a2f1fbc25b48e4dc232016e1c51b544cb5b4510ef633ea3278c0e970fa8ad8141e2d4d0f9f95456c537ff05fdf9b31c15072@178.128.136.233:30303",
+];
+
 /// Returns parsed mainnet nodes
 pub fn mainnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(&MAINNET_BOOTNODES[..])
@@ -163,6 +168,11 @@ pub fn goerli_nodes() -> Vec<NodeRecord> {
 /// Returns parsed sepolia nodes
 pub fn sepolia_nodes() -> Vec<NodeRecord> {
     parse_nodes(&SEPOLIA_BOOTNODES[..])
+}
+
+/// Returns parsed holesky nodes
+pub fn holesky_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&HOLESKY_BOOTNODES[..])
 }
 
 /// Parses all the nodes
@@ -221,9 +231,9 @@ impl FromStr for NodeRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
-    use reth_rlp::{Decodable, Encodable};
 
     #[test]
     fn test_mapped_ipv6() {
@@ -236,7 +246,7 @@ mod tests {
             address: v6.into(),
             tcp_port: rng.gen(),
             udp_port: rng.gen(),
-            id: PeerId::random(),
+            id: rng.gen(),
         };
 
         assert!(record.clone().convert_ipv4_mapped());
@@ -252,7 +262,7 @@ mod tests {
             address: v4.into(),
             tcp_port: rng.gen(),
             udp_port: rng.gen(),
-            id: PeerId::random(),
+            id: rng.gen(),
         };
 
         assert!(!record.clone().convert_ipv4_mapped());
@@ -269,7 +279,7 @@ mod tests {
                 address: IpAddr::V4(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
-                id: PeerId::random(),
+                id: rng.gen(),
             };
 
             let mut buf = BytesMut::new();
@@ -290,7 +300,7 @@ mod tests {
                 address: IpAddr::V6(ip.into()),
                 tcp_port: rng.gen(),
                 udp_port: rng.gen(),
-                id: PeerId::random(),
+                id: rng.gen(),
             };
 
             let mut buf = BytesMut::new();

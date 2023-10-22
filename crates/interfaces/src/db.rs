@@ -46,7 +46,7 @@ pub enum DatabaseError {
 }
 
 /// Database write operation type
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum DatabaseWriteOperation {
     CursorAppend,

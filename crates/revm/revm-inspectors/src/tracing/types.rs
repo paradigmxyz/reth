@@ -1,19 +1,20 @@
 //! Types for representing call trace items.
 
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
-use reth_primitives::{abi::decode_revert_reason, bytes::Bytes, Address, H256, U256};
+use alloy_sol_types::decode_revert_reason;
+use reth_primitives::{Address, Bytes, B256, U256, U64};
 use reth_rpc_types::trace::{
-    geth::{AccountState, CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
+    geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
-        Action, ActionType, CallAction, CallOutput, CallType, ChangedType, CreateAction,
-        CreateOutput, Delta, SelfdestructAction, StateDiff, TraceOutput, TransactionTrace,
+        Action, ActionType, CallAction, CallOutput, CallType, CreateAction, CreateOutput,
+        SelfdestructAction, TraceOutput, TransactionTrace,
     },
 };
 use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
+    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, SharedMemory, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -31,13 +32,21 @@ pub enum CallKind {
 
 impl CallKind {
     /// Returns true if the call is a create
+    #[inline]
     pub fn is_any_create(&self) -> bool {
         matches!(self, CallKind::Create | CallKind::Create2)
     }
 
     /// Returns true if the call is a delegate of some sorts
+    #[inline]
     pub fn is_delegate(&self) -> bool {
         matches!(self, CallKind::DelegateCall | CallKind::CallCode)
+    }
+
+    /// Returns true if the call is [CallKind::StaticCall].
+    #[inline]
+    pub fn is_static_call(&self) -> bool {
+        matches!(self, CallKind::StaticCall)
     }
 }
 
@@ -295,74 +304,6 @@ impl CallTraceNode {
         self.status() == InstructionResult::SelfDestruct
     }
 
-    /// Updates the values of the state diff
-    pub(crate) fn parity_update_state_diff(&self, diff: &mut StateDiff) {
-        let addr = self.trace.address;
-        let acc = diff.entry(addr).or_default();
-
-        if self.kind().is_any_create() {
-            let code = self.trace.output.clone();
-            if acc.code == Delta::Unchanged {
-                acc.code = Delta::Added(code.into())
-            }
-        }
-
-        // iterate over all storage diffs
-        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value } = change;
-            let h256_value = H256::from(value);
-            match acc.storage.entry(key.into()) {
-                Entry::Vacant(entry) => {
-                    if let Some(had_value) = had_value {
-                        if value != had_value {
-                            entry.insert(Delta::Changed(ChangedType {
-                                from: had_value.into(),
-                                to: h256_value,
-                            }));
-                        }
-                    } else {
-                        entry.insert(Delta::Added(h256_value));
-                    }
-                }
-                Entry::Occupied(mut entry) => {
-                    let value = match entry.get() {
-                        Delta::Unchanged => {
-                            if let Some(had_value) = had_value {
-                                if value != had_value {
-                                    Delta::Changed(ChangedType {
-                                        from: had_value.into(),
-                                        to: h256_value,
-                                    })
-                                } else {
-                                    Delta::Unchanged
-                                }
-                            } else {
-                                Delta::Added(h256_value)
-                            }
-                        }
-                        Delta::Added(added) => {
-                            if added == &h256_value {
-                                Delta::Added(*added)
-                            } else {
-                                Delta::Changed(ChangedType { from: *added, to: h256_value })
-                            }
-                        }
-                        Delta::Removed(_) => Delta::Added(h256_value),
-                        Delta::Changed(c) => {
-                            if c.from == h256_value {
-                                // remains unchanged if the value is the same
-                                Delta::Unchanged
-                            } else {
-                                Delta::Changed(ChangedType { from: c.from, to: h256_value })
-                            }
-                        }
-                    };
-                    entry.insert(value);
-                }
-            }
-        }
-    }
-
     /// Converts this node into a parity `TransactionTrace`
     pub(crate) fn parity_transaction_trace(&self, trace_address: Vec<usize>) -> TransactionTrace {
         let action = self.parity_action();
@@ -381,13 +322,13 @@ impl CallTraceNode {
         match self.kind() {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
                 TraceOutput::Call(CallOutput {
-                    gas_used: self.trace.gas_used.into(),
-                    output: self.trace.output.clone().into(),
+                    gas_used: U64::from(self.trace.gas_used),
+                    output: self.trace.output.clone(),
                 })
             }
             CallKind::Create | CallKind::Create2 => TraceOutput::Create(CreateOutput {
-                gas_used: self.trace.gas_used.into(),
-                code: self.trace.output.clone().into(),
+                gas_used: U64::from(self.trace.gas_used),
+                code: self.trace.output.clone(),
                 address: self.trace.address,
             }),
         }
@@ -447,16 +388,16 @@ impl CallTraceNode {
                     from: self.trace.caller,
                     to: self.trace.address,
                     value: self.trace.value,
-                    gas: self.trace.gas_limit.into(),
-                    input: self.trace.data.clone().into(),
+                    gas: U64::from(self.trace.gas_limit),
+                    input: self.trace.data.clone(),
                     call_type: self.kind().into(),
                 })
             }
             CallKind::Create | CallKind::Create2 => Action::Create(CreateAction {
                 from: self.trace.caller,
                 value: self.trace.value,
-                gas: self.trace.gas_limit.into(),
-                init: self.trace.data.clone().into(),
+                gas: U64::from(self.trace.gas_limit),
+                init: self.trace.data.clone(),
             }),
         }
     }
@@ -472,17 +413,22 @@ impl CallTraceNode {
             value: Some(self.trace.value),
             gas: U256::from(self.trace.gas_limit),
             gas_used: U256::from(self.trace.gas_used),
-            input: self.trace.data.clone().into(),
-            output: (!self.trace.output.is_empty()).then(|| self.trace.output.clone().into()),
+            input: self.trace.data.clone(),
+            output: (!self.trace.output.is_empty()).then(|| self.trace.output.clone()),
             error: None,
             revert_reason: None,
             calls: Default::default(),
             logs: Default::default(),
         };
 
+        if self.trace.kind.is_static_call() {
+            // STATICCALL frames don't have a value
+            call_frame.value = None;
+        }
+
         // we need to populate error and revert reason
         if !self.trace.success {
-            call_frame.revert_reason = decode_revert_reason(self.trace.output.clone());
+            call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref());
             // Note: the call tracer mimics parity's trace transaction and geth maps errors to parity style error messages, <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
             call_frame.error = self.trace.as_error(TraceStyle::Parity);
         }
@@ -494,40 +440,12 @@ impl CallTraceNode {
                 .map(|log| CallLogFrame {
                     address: Some(self.execution_address()),
                     topics: Some(log.topics.clone()),
-                    data: Some(log.data.clone().into()),
+                    data: Some(log.data.clone()),
                 })
                 .collect();
         }
 
         call_frame
-    }
-
-    /// Adds storage in-place to account state for all accounts that were touched in the trace
-    /// [CallTrace] execution.
-    ///
-    /// * `account_states` - the account map updated in place.
-    /// * `post_value` - if true, it adds storage values after trace transaction execution, if
-    ///   false, returns the storage values before trace execution.
-    pub(crate) fn geth_update_account_storage(
-        &self,
-        account_states: &mut BTreeMap<Address, AccountState>,
-        post_value: bool,
-    ) {
-        let addr = self.trace.address;
-        let acc_state = account_states.entry(addr).or_default();
-        for change in self.trace.steps.iter().filter_map(|s| s.storage_change) {
-            let StorageChange { key, value, had_value } = change;
-            let storage_map = acc_state.storage.get_or_insert_with(BTreeMap::new);
-            let value_to_insert = if post_value {
-                H256::from(value)
-            } else {
-                match had_value {
-                    Some(had_value) => H256::from(had_value),
-                    None => continue,
-                }
-            };
-            storage_map.insert(key.into(), value_to_insert);
-        }
     }
 }
 
@@ -554,7 +472,7 @@ pub(crate) enum LogCallOrder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RawLog {
     /// Indexed event params are represented as log topics.
-    pub(crate) topics: Vec<H256>,
+    pub(crate) topics: Vec<B256>,
     /// Others are just plain data.
     pub(crate) data: Bytes,
 }
@@ -578,7 +496,7 @@ pub(crate) struct CallTraceStep {
     /// All allocated memory in a step
     ///
     /// This will be empty if memory capture is disabled
-    pub(crate) memory: Memory,
+    pub(crate) memory: SharedMemory,
     /// Size of memory at the beginning of the step
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
@@ -628,7 +546,7 @@ impl CallTraceStep {
         }
 
         if opts.is_memory_enabled() {
-            log.memory = Some(convert_memory(self.memory.data()));
+            log.memory = Some(convert_memory(self.memory.slice(0, self.memory.len())));
         }
 
         log
@@ -637,7 +555,7 @@ impl CallTraceStep {
     /// Returns true if the step is a STOP opcode
     #[inline]
     pub(crate) fn is_stop(&self) -> bool {
-        matches!(self.op.u8(), opcode::STOP)
+        matches!(self.op.get(), opcode::STOP)
     }
 
     /// Returns true if the step is a call operation, any of
@@ -645,7 +563,7 @@ impl CallTraceStep {
     #[inline]
     pub(crate) fn is_calllike_op(&self) -> bool {
         matches!(
-            self.op.u8(),
+            self.op.get(),
             opcode::CALL |
                 opcode::DELEGATECALL |
                 opcode::STATICCALL |
@@ -666,10 +584,20 @@ impl CallTraceStep {
     }
 }
 
+/// Represents the source of a storage change - e.g., whether it came
+/// from an SSTORE or SLOAD instruction.
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StorageChangeReason {
+    SLOAD,
+    SSTORE,
+}
+
 /// Represents a storage change during execution
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct StorageChange {
     pub(crate) key: U256,
     pub(crate) value: U256,
     pub(crate) had_value: Option<U256>,
+    pub(crate) reason: StorageChangeReason,
 }

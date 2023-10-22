@@ -1,7 +1,10 @@
-use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use rand::Rng;
-use reth_primitives::{fs, fs::FsPathError};
+use reth_primitives::{
+    fs,
+    fs::FsPathError,
+    hex::{self, encode as hex_encode},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
@@ -9,7 +12,7 @@ use std::{
 };
 use thiserror::Error;
 
-/// Errors returned by the [`JwtSecret`][crate::layers::JwtSecret]
+/// Errors returned by the [`JwtSecret`]
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum JwtError {
@@ -56,7 +59,7 @@ const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 pub struct JwtSecret([u8; 32]);
 
 impl JwtSecret {
-    /// Creates an instance of [`JwtSecret`][crate::layers::JwtSecret].
+    /// Creates an instance of [`JwtSecret`].
     ///
     /// Returns an error if one of the following applies:
     /// - `hex` is not a valid hexadecimal string
@@ -138,8 +141,7 @@ impl JwtSecret {
         Ok(())
     }
 
-    /// Generates a random [`JwtSecret`][crate::layers::JwtSecret]
-    /// containing a hex-encoded 256 bit secret key.
+    /// Generates a random [`JwtSecret`] containing a hex-encoded 256 bit secret key.
     pub fn random() -> Self {
         let random_bytes: [u8; 32] = rand::thread_rng().gen();
         let secret = hex_encode(random_bytes);
@@ -196,10 +198,9 @@ impl Claims {
 
 #[cfg(test)]
 mod tests {
-    use super::{Claims, JwtError, JwtSecret};
+    use super::*;
     use crate::layers::jwt_secret::JWT_MAX_IAT_DIFF;
     use assert_matches::assert_matches;
-    use hex::encode as hex_encode;
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
     use reth_primitives::fs::FsPathError;
     use std::{

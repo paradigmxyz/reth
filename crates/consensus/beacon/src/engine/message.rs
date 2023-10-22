@@ -3,11 +3,11 @@ use crate::{
     BeaconConsensusEngineEvent,
 };
 use futures::{future::Either, FutureExt};
-use reth_interfaces::consensus::ForkchoiceState;
+use reth_interfaces::{consensus::ForkchoiceState, RethResult};
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceUpdateError, ForkchoiceUpdated,
-    PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
+    CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceUpdateError,
+    ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use std::{
     future::Future,
@@ -146,6 +146,8 @@ pub enum BeaconEngineMessage {
     NewPayload {
         /// The execution payload received by Engine API.
         payload: ExecutionPayload,
+        /// The cancun-related newPayload fields, if any.
+        cancun_fields: Option<CancunPayloadFields>,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
@@ -156,7 +158,7 @@ pub enum BeaconEngineMessage {
         /// The payload attributes for block building.
         payload_attrs: Option<PayloadAttributes>,
         /// The sender for returning forkchoice updated result.
-        tx: oneshot::Sender<Result<OnForkChoiceUpdated, reth_interfaces::Error>>,
+        tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
     /// Message with exchanged transition configuration.
     TransitionConfigurationExchanged,

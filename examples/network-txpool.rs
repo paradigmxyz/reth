@@ -11,8 +11,8 @@ use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, validate::ValidTransaction, CoinbaseTipOrdering,
-    EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool,
-    TransactionValidationOutcome, TransactionValidator,
+    EthPooledTransaction, PoolTransaction, TransactionListenerKind, TransactionOrigin,
+    TransactionPool, TransactionValidationOutcome, TransactionValidator,
 };
 
 #[tokio::main]
@@ -46,7 +46,7 @@ async fn main() -> eyre::Result<()> {
     tokio::task::spawn(txpool);
 
     // listen for new transactions
-    let mut txs = pool.pending_transactions_listener();
+    let mut txs = pool.pending_transactions_listener_for(TransactionListenerKind::All);
 
     while let Some(tx) = txs.recv().await {
         println!("Received new transaction: {:?}", tx);

@@ -1,7 +1,7 @@
 use crate::engine::forkchoice::ForkchoiceStatus;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::SealedBlock;
-use std::sync::Arc;
+use reth_primitives::{SealedBlock, SealedHeader};
+use std::{sync::Arc, time::Duration};
 
 /// Events emitted by [crate::BeaconConsensusEngine].
 #[derive(Clone, Debug)]
@@ -10,6 +10,8 @@ pub enum BeaconConsensusEngineEvent {
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the canonical chain.
     CanonicalBlockAdded(Arc<SealedBlock>),
+    /// A canonical chain was committed.
+    CanonicalChainCommitted(SealedHeader, Duration),
     /// A block was added to the fork chain.
     ForkBlockAdded(Arc<SealedBlock>),
 }

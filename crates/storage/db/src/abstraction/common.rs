@@ -21,6 +21,7 @@ use crate::{abstraction::table::*, DatabaseError};
 // Sealed trait helper to prevent misuse of the API.
 mod sealed {
     pub trait Sealed: Sized {}
+    #[allow(missing_debug_implementations)]
     pub struct Bounds<T>(T);
     impl<T> Sealed for Bounds<T> {}
 }

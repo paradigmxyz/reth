@@ -4,10 +4,16 @@ use std::{borrow::Cow, slice};
 
 /// Implement this to be able to decode data values
 pub trait TableObject<'tx> {
+    /// Decodes the object from the given bytes.
     fn decode(data_val: &[u8]) -> Result<Self, Error>
     where
         Self: Sized;
 
+    /// Decodes the value directly from the given MDBX_val pointer.
+    ///
+    /// # Safety
+    ///
+    /// This should only in the context of an MDBX transaction.
     #[doc(hidden)]
     unsafe fn decode_val<K: TransactionKind>(
         _: *const ffi::MDBX_txn,

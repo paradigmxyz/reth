@@ -22,6 +22,7 @@ jobs:
     strategy:
       matrix:
         partition: [1, 2]
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -71,6 +72,7 @@ jobs:
       group: Reth
     env:
       RUST_LOG: info,sync=error
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -92,6 +94,11 @@ jobs:
             --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 \
             --debug.max-block 100000 \
             --debug.terminate
+      
+      - name: Verify the target block hash
+        run: |
+          cargo run --profile release \
+            db get CanonicalHeaders 100000 | grep 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4
 
   integration-success:
     if: always()
@@ -99,6 +106,7 @@ jobs:
     runs-on:
       group: Reth
     needs: [test]
+    timeout-minutes: 60
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1

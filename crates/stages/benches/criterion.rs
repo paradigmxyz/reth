@@ -62,7 +62,7 @@ fn transaction_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
     // don't need to run each stage for that many times
     group.sample_size(10);
-    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS);
+    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS, None);
 
     measure_stage(
         &mut group,

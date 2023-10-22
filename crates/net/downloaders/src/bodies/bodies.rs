@@ -297,8 +297,7 @@ where
         self.into_task_with(&TokioTaskExecutor::default())
     }
 
-    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
-    /// it via the given spawner.
+    /// Convert the downloader into a [`TaskDownloader`] by spawning it via the given spawner.
     pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader
     where
         S: TaskSpawner,
@@ -606,7 +605,7 @@ mod tests {
     use futures_util::stream::StreamExt;
     use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
-    use reth_primitives::{BlockBody, H256};
+    use reth_primitives::{BlockBody, B256};
     use std::{collections::HashMap, sync::Arc};
 
     // Check that the blocks are emitted in order of block number, not in order of
@@ -643,7 +642,7 @@ mod tests {
         // Generate some random blocks
         let db = create_test_rw_db();
         let mut rng = generators::rng();
-        let blocks = random_block_range(&mut rng, 0..=199, H256::zero(), 1..2);
+        let blocks = random_block_range(&mut rng, 0..=199, B256::ZERO, 1..2);
 
         let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
         let bodies = blocks

@@ -1,22 +1,30 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! Compact codec.
+
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-use bytes::{Buf, Bytes};
+
 pub use codecs_derive::*;
-use revm_primitives::{B160 as H160, B256 as H256, U256};
+
+use bytes::Buf;
+use revm_primitives::{
+    alloy_primitives::{Bloom, B512},
+    Address, Bytes, B256, U256,
+};
+
+pub use codecs_derive::*;
 
 /// Trait that implements the `Compact` codec.
 ///
 /// When deriving the trait for custom structs, be aware of certain limitations/recommendations:
-/// * Works best with structs that only have native types (eg. u64, H256, U256).
-/// * Fixed array types (H256, Address, Bloom) are not compacted.
+/// * Works best with structs that only have native types (eg. u64, B256, U256).
+/// * Fixed array types (B256, Address, Bloom) are not compacted.
 /// * Max size of `T` in `Option<T>` or `Vec<T>` shouldn't exceed `0xffff`.
-/// * Any `bytes::Bytes` field **should be placed last**.
+/// * Any `Bytes` field **should be placed last**.
 /// * Any other type which is not known to the derive module **should be placed last** in they
-///   contain a `bytes::Bytes` field.
+///   contain a `Bytes` field.
 ///
 /// The last two points make it easier to decode the data without saving the length on the
 /// `StructFlags`. It will fail compilation if it's not respected. If they're alias to known types,
@@ -24,12 +32,13 @@ use revm_primitives::{B160 as H160, B256 as H256, U256};
 ///
 /// Regarding the `specialized_to/from_compact` methods: Mainly used as a workaround for not being
 /// able to specialize an impl over certain types like `Vec<T>`/`Option<T>` where `T` is a fixed
-/// size array like `Vec<H256>`.
+/// size array like `Vec<B256>`.
 pub trait Compact {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>;
+
     /// Takes a buffer which can be read from. Returns the object and `buf` with its internal cursor
     /// advanced (eg.`.advance(len)`).
     ///
@@ -132,7 +141,7 @@ where
         (list, buf)
     }
 
-    /// To be used by fixed sized types like `Vec<H256>`.
+    /// To be used by fixed sized types like `Vec<B256>`.
     fn specialized_to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -145,7 +154,7 @@ where
         0
     }
 
-    /// To be used by fixed sized types like `Vec<H256>`.
+    /// To be used by fixed sized types like `Vec<B256>`.
     fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (length, mut buf) = decode_varuint(buf);
         let mut list = Vec::with_capacity(length);
@@ -200,7 +209,7 @@ where
         (Some(element), buf)
     }
 
-    /// To be used by fixed sized types like `Option<H256>`.
+    /// To be used by fixed sized types like `Option<B256>`.
     fn specialized_to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -212,7 +221,7 @@ where
         0
     }
 
-    /// To be used by fixed sized types like `Option<H256>`.
+    /// To be used by fixed sized types like `Option<B256>`.
     fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
             return (None, buf)
@@ -253,22 +262,23 @@ impl Compact for Bytes {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let len = self.len();
-        buf.put(self);
+        buf.put(self.0);
         len
     }
+
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        (buf.copy_to_bytes(len), buf)
+        (buf.copy_to_bytes(len).into(), buf)
     }
 }
 
-/// Implements the [`Compact`] trait for fixed size hash types like [`H256`].
+/// Implements the [`Compact`] trait for fixed size hash types like [`B256`].
 #[macro_export]
 macro_rules! impl_hash_compact {
     ($($name:tt),+) => {
         $(
             impl Compact for $name {
                 fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
-                    buf.put_slice(&self.0);
+                    buf.put_slice(self.as_slice());
                     std::mem::size_of::<$name>()
                 }
 
@@ -298,7 +308,7 @@ macro_rules! impl_hash_compact {
     };
 }
 
-impl_hash_compact!(H256, H160);
+impl_hash_compact!(Address, B256, B512, Bloom);
 
 impl Compact for bool {
     /// `bool` vars go directly to the `StructFlags` and are not written to the buffer.
@@ -344,14 +354,12 @@ fn decode_varuint(mut buf: &[u8]) -> (usize, &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm_primitives::B160;
-
-    pub type Address = B160;
+    use revm_primitives::{Address, Bytes};
 
     #[test]
     fn compact_bytes() {
         let arr = [1, 2, 3, 4, 5];
-        let list = bytes::Bytes::copy_from_slice(&arr);
+        let list = Bytes::copy_from_slice(&arr);
         let mut buf = vec![];
         assert_eq!(list.clone().to_compact(&mut buf), list.len());
 
@@ -359,33 +367,33 @@ mod tests {
         buf.push(1);
 
         assert_eq!(&buf[..arr.len()], &arr);
-        assert_eq!(bytes::Bytes::from_compact(&buf, list.len()), (list, vec![1].as_slice()));
+        assert_eq!(Bytes::from_compact(&buf, list.len()), (list, vec![1].as_slice()));
     }
 
     #[test]
     fn compact_address() {
         let mut buf = vec![];
-        assert_eq!(Address::zero().to_compact(&mut buf), 20);
+        assert_eq!(Address::ZERO.to_compact(&mut buf), 20);
         assert_eq!(buf, vec![0; 20]);
 
         // Add some noise data.
         buf.push(1);
 
         // Address shouldn't care about the len passed, since it's not actually compacted.
-        assert_eq!(Address::from_compact(&buf, 1000), (Address::zero(), vec![1u8].as_slice()));
+        assert_eq!(Address::from_compact(&buf, 1000), (Address::ZERO, vec![1u8].as_slice()));
     }
 
     #[test]
-    fn compact_h256() {
+    fn compact_b256() {
         let mut buf = vec![];
-        assert_eq!(H256::zero().to_compact(&mut buf), 32);
+        assert_eq!(B256::ZERO.to_compact(&mut buf), 32);
         assert_eq!(buf, vec![0; 32]);
 
         // Add some noise data.
         buf.push(1);
 
-        // H256 shouldn't care about the len passed, since it's not actually compacted.
-        assert_eq!(H256::from_compact(&buf, 1000), (H256::zero(), vec![1u8].as_slice()));
+        // B256 shouldn't care about the len passed, since it's not actually compacted.
+        assert_eq!(B256::from_compact(&buf, 1000), (B256::ZERO, vec![1u8].as_slice()));
     }
 
     #[test]
@@ -409,27 +417,27 @@ mod tests {
 
     #[test]
     fn compact_option() {
-        let opt = Some(H256::zero());
+        let opt = Some(B256::ZERO);
         let mut buf = vec![];
 
-        assert_eq!(None::<H256>.to_compact(&mut buf), 0);
+        assert_eq!(None::<B256>.to_compact(&mut buf), 0);
         assert_eq!(opt.to_compact(&mut buf), 1);
         assert_eq!(buf.len(), 1 + 32);
 
-        assert_eq!(Option::<H256>::from_compact(&buf, 1), (opt, vec![].as_slice()));
+        assert_eq!(Option::<B256>::from_compact(&buf, 1), (opt, vec![].as_slice()));
 
         // If `None`, it returns the slice at the same cursor position.
-        assert_eq!(Option::<H256>::from_compact(&buf, 0), (None, buf.as_slice()));
+        assert_eq!(Option::<B256>::from_compact(&buf, 0), (None, buf.as_slice()));
 
         let mut buf = vec![];
         assert_eq!(opt.specialized_to_compact(&mut buf), 1);
         assert_eq!(buf.len(), 32);
-        assert_eq!(Option::<H256>::specialized_from_compact(&buf, 1), (opt, vec![].as_slice()));
+        assert_eq!(Option::<B256>::specialized_from_compact(&buf, 1), (opt, vec![].as_slice()));
     }
 
     #[test]
     fn compact_vec() {
-        let list = vec![H256::zero(), H256::zero()];
+        let list = vec![B256::ZERO, B256::ZERO];
         let mut buf = vec![];
 
         // Vec doesn't return a total length
@@ -441,7 +449,7 @@ mod tests {
         let mut remaining_buf = buf.as_slice();
         remaining_buf.advance(1 + 1 + 32 + 1 + 32);
 
-        assert_eq!(Vec::<H256>::from_compact(&buf, 0), (list, remaining_buf));
+        assert_eq!(Vec::<B256>::from_compact(&buf, 0), (list, remaining_buf));
         assert_eq!(remaining_buf, &[1u8, 2]);
     }
 
@@ -490,30 +498,30 @@ mod tests {
 
     #[main_codec]
     #[derive(Debug, PartialEq, Clone)]
-    pub struct TestStruct {
+    struct TestStruct {
         f_u64: u64,
         f_u256: U256,
         f_bool_t: bool,
         f_bool_f: bool,
-        f_option_none: Option<H256>,
-        f_option_some: Option<H256>,
+        f_option_none: Option<B256>,
+        f_option_some: Option<B256>,
         f_option_some_u64: Option<u64>,
-        f_vec_empty: Vec<H160>,
-        f_vec_some: Vec<H160>,
+        f_vec_empty: Vec<Address>,
+        f_vec_some: Vec<Address>,
     }
 
     impl Default for TestStruct {
         fn default() -> Self {
             TestStruct {
-                f_u64: 1u64,                                  // 4 bits | 1 byte
-                f_u256: U256::from(1u64),                     // 6 bits | 1 byte
-                f_bool_f: false,                              // 1 bit  | 0 bytes
-                f_bool_t: true,                               // 1 bit  | 0 bytes
-                f_option_none: None,                          // 1 bit  | 0 bytes
-                f_option_some: Some(H256::zero()),            // 1 bit  | 32 bytes
-                f_option_some_u64: Some(0xffffu64),           // 1 bit  | 1 + 2 bytes
-                f_vec_empty: vec![],                          // 0 bits | 1 bytes
-                f_vec_some: vec![H160::zero(), H160::zero()], // 0 bits | 1 + 20*2 bytes
+                f_u64: 1u64,                                    // 4 bits | 1 byte
+                f_u256: U256::from(1u64),                       // 6 bits | 1 byte
+                f_bool_f: false,                                // 1 bit  | 0 bytes
+                f_bool_t: true,                                 // 1 bit  | 0 bytes
+                f_option_none: None,                            // 1 bit  | 0 bytes
+                f_option_some: Some(B256::ZERO),                // 1 bit  | 32 bytes
+                f_option_some_u64: Some(0xffffu64),             // 1 bit  | 1 + 2 bytes
+                f_vec_empty: vec![],                            // 0 bits | 1 bytes
+                f_vec_some: vec![Address::ZERO, Address::ZERO], // 0 bits | 1 + 20*2 bytes
             }
         }
     }
@@ -542,7 +550,7 @@ mod tests {
 
     #[main_codec]
     #[derive(Debug, PartialEq, Clone, Default)]
-    pub enum TestEnum {
+    enum TestEnum {
         #[default]
         Var0,
         Var1(TestStruct),

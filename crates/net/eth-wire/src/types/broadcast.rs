@@ -1,11 +1,10 @@
 //! Types for broadcasting new data.
 use crate::{EthMessage, EthVersion};
-use bytes::Bytes;
-use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, TransactionSigned, H256, U128};
-use reth_rlp::{
+use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+use reth_codecs::derive_arbitrary;
+use reth_primitives::{Block, Bytes, TransactionSigned, B256, U128};
 use std::sync::Arc;
 
 #[cfg(feature = "serde")]
@@ -41,7 +40,7 @@ impl NewBlockHashes {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockHashNumber {
     /// The block hash
-    pub hash: H256,
+    pub hash: B256,
     /// The block number
     pub number: u64,
 }
@@ -137,7 +136,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns an iterator over all transaction hashes.
-    pub fn iter_hashes(&self) -> impl Iterator<Item = &H256> + '_ {
+    pub fn iter_hashes(&self) -> impl Iterator<Item = &B256> + '_ {
         match self {
             NewPooledTransactionHashes::Eth66(msg) => msg.0.iter(),
             NewPooledTransactionHashes::Eth68(msg) => msg.hashes.iter(),
@@ -145,7 +144,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Consumes the type and returns all hashes
-    pub fn into_hashes(self) -> Vec<H256> {
+    pub fn into_hashes(self) -> Vec<B256> {
         match self {
             NewPooledTransactionHashes::Eth66(msg) => msg.0,
             NewPooledTransactionHashes::Eth68(msg) => msg.hashes,
@@ -153,7 +152,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns an iterator over all transaction hashes.
-    pub fn into_iter_hashes(self) -> impl Iterator<Item = H256> {
+    pub fn into_iter_hashes(self) -> impl Iterator<Item = B256> {
         match self {
             NewPooledTransactionHashes::Eth66(msg) => msg.0.into_iter(),
             NewPooledTransactionHashes::Eth68(msg) => msg.hashes.into_iter(),
@@ -220,11 +219,11 @@ pub struct NewPooledTransactionHashes66(
     /// Transaction hashes for new transactions that have appeared on the network.
     /// Clients should request the transactions with the given hashes using a
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) message.
-    pub Vec<H256>,
+    pub Vec<B256>,
 );
 
-impl From<Vec<H256>> for NewPooledTransactionHashes66 {
-    fn from(v: Vec<H256>) -> Self {
+impl From<Vec<B256>> for NewPooledTransactionHashes66 {
+    fn from(v: Vec<B256>) -> Self {
         NewPooledTransactionHashes66(v)
     }
 }
@@ -243,8 +242,8 @@ pub struct NewPooledTransactionHashes68 {
     /// the following way:
     ///  * `[type_0: B_1, type_1: B_1, ...]`
     ///
-    /// This would make it seem like the [`Encodable`](reth_rlp::Encodable) and
-    /// [`Decodable`](reth_rlp::Decodable) implementations should directly use a `Vec<u8>` for
+    /// This would make it seem like the [`Encodable`](alloy_rlp::Encodable) and
+    /// [`Decodable`](alloy_rlp::Decodable) implementations should directly use a `Vec<u8>` for
     /// encoding and decoding, because it looks like this field should be encoded as a _list_ of
     /// bytes.
     ///
@@ -255,14 +254,14 @@ pub struct NewPooledTransactionHashes68 {
     /// **not** a RLP list.
     ///
     /// Because of this, we do not directly use the `Vec<u8>` when encoding and decoding, and
-    /// instead use the [`Encodable`](reth_rlp::Encodable) and [`Decodable`](reth_rlp::Decodable)
+    /// instead use the [`Encodable`](alloy_rlp::Encodable) and [`Decodable`](alloy_rlp::Decodable)
     /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
     /// string when decoding.
     pub types: Vec<u8>,
     /// Transaction sizes for new transactions that have appeared on the network.
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
-    pub hashes: Vec<H256>,
+    pub hashes: Vec<B256>,
 }
 
 impl Encodable for NewPooledTransactionHashes68 {
@@ -271,7 +270,7 @@ impl Encodable for NewPooledTransactionHashes68 {
         struct EncodableNewPooledTransactionHashes68<'a> {
             types: &'a [u8],
             sizes: &'a Vec<usize>,
-            hashes: &'a Vec<H256>,
+            hashes: &'a Vec<B256>,
         }
 
         let encodable = EncodableNewPooledTransactionHashes68 {
@@ -287,7 +286,7 @@ impl Encodable for NewPooledTransactionHashes68 {
         struct EncodableNewPooledTransactionHashes68<'a> {
             types: &'a [u8],
             sizes: &'a Vec<usize>,
-            hashes: &'a Vec<H256>,
+            hashes: &'a Vec<B256>,
         }
 
         let encodable = EncodableNewPooledTransactionHashes68 {
@@ -301,12 +300,12 @@ impl Encodable for NewPooledTransactionHashes68 {
 }
 
 impl Decodable for NewPooledTransactionHashes68 {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         #[derive(RlpDecodable)]
         struct EncodableNewPooledTransactionHashes68 {
             types: Bytes,
             sizes: Vec<usize>,
-            hashes: Vec<H256>,
+            hashes: Vec<B256>,
         }
 
         let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
@@ -316,13 +315,11 @@ impl Decodable for NewPooledTransactionHashes68 {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use bytes::BytesMut;
-    use hex_literal::hex;
-    use reth_rlp::{Decodable, Encodable};
-
     use super::*;
+    use alloy_rlp::{Decodable, Encodable};
+    use bytes::BytesMut;
+    use reth_primitives::hex;
+    use std::str::FromStr;
 
     /// Takes as input a struct / encoded hex message pair, ensuring that we encode to the exact hex
     /// message, and decode to the exact struct.
@@ -341,12 +338,12 @@ mod tests {
 
     #[test]
     fn can_return_latest_block() {
-        let mut blocks = NewBlockHashes(vec![BlockHashNumber { hash: H256::random(), number: 0 }]);
+        let mut blocks = NewBlockHashes(vec![BlockHashNumber { hash: B256::random(), number: 0 }]);
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 0);
 
-        blocks.0.push(BlockHashNumber { hash: H256::random(), number: 100 });
-        blocks.0.push(BlockHashNumber { hash: H256::random(), number: 2 });
+        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 100 });
+        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 2 });
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 100);
     }
@@ -362,7 +359,7 @@ mod tests {
             NewPooledTransactionHashes68 {
                 types: vec![0x00],
                 sizes: vec![0x00],
-                hashes: vec![H256::from_str(
+                hashes: vec![B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000000",
                 )
                 .unwrap()],
@@ -374,11 +371,11 @@ mod tests {
                 types: vec![0x00, 0x00],
                 sizes: vec![0x00, 0x00],
                 hashes: vec![
-                    H256::from_str(
+                    B256::from_str(
                         "0x0000000000000000000000000000000000000000000000000000000000000000",
                     )
                     .unwrap(),
-                    H256::from_str(
+                    B256::from_str(
                         "0x0000000000000000000000000000000000000000000000000000000000000000",
                     )
                     .unwrap(),
@@ -390,7 +387,7 @@ mod tests {
             NewPooledTransactionHashes68 {
                 types: vec![0x02],
                 sizes: vec![0xb6],
-                hashes: vec![H256::from_str(
+                hashes: vec![B256::from_str(
                     "0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124",
                 )
                 .unwrap()],
@@ -402,11 +399,11 @@ mod tests {
                 types: vec![0xff, 0xff],
                 sizes: vec![0xffffffff, 0xffffffff],
                 hashes: vec![
-                    H256::from_str(
+                    B256::from_str(
                         "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                     )
                     .unwrap(),
-                    H256::from_str(
+                    B256::from_str(
                         "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                     )
                     .unwrap(),
@@ -419,11 +416,11 @@ mod tests {
                 types: vec![0xff, 0xff],
                 sizes: vec![0xffffffff, 0xffffffff],
                 hashes: vec![
-                    H256::from_str(
+                    B256::from_str(
                         "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
                     )
                     .unwrap(),
-                    H256::from_str(
+                    B256::from_str(
                         "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
                     )
                     .unwrap(),
@@ -436,11 +433,11 @@ mod tests {
                 types: vec![0x10, 0x10],
                 sizes: vec![0xdeadc0de, 0xdeadc0de],
                 hashes: vec![
-                    H256::from_str(
+                    B256::from_str(
                         "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
                     )
                     .unwrap(),
-                    H256::from_str(
+                    B256::from_str(
                         "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
                     )
                     .unwrap(),
@@ -453,11 +450,11 @@ mod tests {
                 types: vec![0x6f, 0x6f],
                 sizes: vec![0x7fffffff, 0x7fffffff],
                 hashes: vec![
-                    H256::from_str(
+                    B256::from_str(
                         "0x0000000000000000000000000000000000000000000000000000000000000002",
                     )
                     .unwrap(),
-                    H256::from_str(
+                    B256::from_str(
                         "0x0000000000000000000000000000000000000000000000000000000000000002",
                     )
                     .unwrap(),

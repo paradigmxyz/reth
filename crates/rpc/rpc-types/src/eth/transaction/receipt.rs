@@ -1,5 +1,5 @@
 use crate::Log;
-use reth_primitives::{Address, Bloom, H256, U128, U256, U64, U8};
+use alloy_primitives::{Address, Bloom, B256, U128, U256, U64, U8};
 use serde::{Deserialize, Serialize};
 
 /// Transaction receipt
@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct TransactionReceipt {
     /// Transaction Hash.
-    pub transaction_hash: Option<H256>,
+    pub transaction_hash: Option<B256>,
     /// Index within the block.
     pub transaction_index: U64,
     /// Hash of the block this transaction was included within.
-    pub block_hash: Option<H256>,
+    pub block_hash: Option<B256>,
     /// Number of the block this transaction was included within.
     pub block_number: Option<U256>,
     /// Cumulative gas used within the block after this was executed.
@@ -22,6 +22,14 @@ pub struct TransactionReceipt {
     /// fields in 1559-style transactions are maximums (max fee + max priority fee), the amount
     /// that's actually paid by users can only be determined post-execution
     pub effective_gas_price: U128,
+    /// Blob gas used by the eip-4844 transaction
+    ///
+    /// This is None for non eip-4844 transactions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob_gas_used: Option<U128>,
+    /// The price paid by the eip-4844 transaction per blob gas.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob_gas_price: Option<U128>,
     /// Address of the sender
     pub from: Address,
     /// Address of the receiver. null when its a contract creation transaction.
@@ -36,7 +44,7 @@ pub struct TransactionReceipt {
     ///
     /// EIP98 makes this optional field, if it's missing then skip serializing it
     #[serde(skip_serializing_if = "Option::is_none", rename = "root")]
-    pub state_root: Option<H256>,
+    pub state_root: Option<B256>,
     /// Status: either 1 (success) or 0 (failure). Only present after activation of EIP-658
     #[serde(skip_serializing_if = "Option::is_none", rename = "status")]
     pub status_code: Option<U64>,

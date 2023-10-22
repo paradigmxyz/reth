@@ -1,10 +1,10 @@
 //! All capability related types
 
 use crate::{version::ParseVersionError, EthMessage, EthVersion};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::add_arbitrary_tests;
 use reth_primitives::bytes::{BufMut, Bytes};
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
-use smol_str::SmolStr;
+use std::fmt;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -42,14 +42,14 @@ pub enum CapabilityMessage {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Capability {
     /// The name of the subprotocol
-    pub name: SmolStr,
+    pub name: String,
     /// The version of the subprotocol
     pub version: usize,
 }
 
 impl Capability {
     /// Create a new `Capability` with the given name and version.
-    pub fn new(name: SmolStr, version: usize) -> Self {
+    pub fn new(name: String, version: usize) -> Self {
         Self { name, version }
     }
 
@@ -72,11 +72,17 @@ impl Capability {
     }
 }
 
+impl fmt::Display for Capability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.name, self.version)
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for Capability {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let version = u.int_in_range(0..=32)?; // TODO: What's the max?
-        let name: SmolStr = String::arbitrary(u)?.into(); // TODO: what possible values?
+        let name = String::arbitrary(u)?; // TODO: what possible values?
         Ok(Self { name, version })
     }
 }
@@ -88,7 +94,7 @@ impl proptest::arbitrary::Arbitrary for Capability {
         any_with::<String>(args) // TODO: what possible values?
             .prop_flat_map(move |name| {
                 any_with::<usize>(()) // TODO: What's the max?
-                    .prop_map(move |version| Capability { name: name.clone().into(), version })
+                    .prop_map(move |version| Capability { name: name.clone(), version })
             })
             .boxed()
     }
@@ -162,7 +168,7 @@ impl Encodable for Capabilities {
 }
 
 impl Decodable for Capabilities {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let inner = Vec::<Capability>::decode(buf)?;
 
         Ok(Self {
@@ -182,7 +188,7 @@ pub enum SharedCapability {
     Eth { version: EthVersion, offset: u8 },
 
     /// An unknown capability.
-    UnknownCapability { name: SmolStr, version: u8, offset: u8 },
+    UnknownCapability { name: String, version: u8, offset: u8 },
 }
 
 impl SharedCapability {

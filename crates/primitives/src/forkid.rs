@@ -4,10 +4,10 @@
 
 #![deny(missing_docs)]
 
-use crate::{BlockNumber, Head, H256};
+use crate::{hex, BlockNumber, Head, B256};
+use alloy_rlp::*;
 use crc::*;
 use reth_codecs::derive_arbitrary;
-use reth_rlp::*;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -41,8 +41,8 @@ impl fmt::Debug for ForkHash {
     }
 }
 
-impl From<H256> for ForkHash {
-    fn from(genesis: H256) -> Self {
+impl From<B256> for ForkHash {
+    fn from(genesis: B256) -> Self {
         Self(CRC_32_IEEE.checksum(&genesis[..]).to_be_bytes())
     }
 }
@@ -165,6 +165,7 @@ pub struct ForkFilter {
     /// [eip-6122]: https://eips.ethereum.org/EIPS/eip-6122
     forks: BTreeMap<ForkFilterKey, ForkHash>,
 
+    /// The current head, used to select forks that are active locally.
     head: Head,
 
     cache: Cache,
@@ -173,17 +174,22 @@ pub struct ForkFilter {
 impl ForkFilter {
     /// Create the filter from provided head, genesis block hash, past forks and expected future
     /// forks.
-    pub fn new<F>(head: Head, genesis: H256, forks: F) -> Self
+    pub fn new<F>(head: Head, genesis_hash: B256, genesis_timestamp: u64, forks: F) -> Self
     where
         F: IntoIterator<Item = ForkFilterKey>,
     {
-        let genesis_fork_hash = ForkHash::from(genesis);
+        let genesis_fork_hash = ForkHash::from(genesis_hash);
         let mut forks = forks.into_iter().collect::<BTreeSet<_>>();
         forks.remove(&ForkFilterKey::Time(0));
         forks.remove(&ForkFilterKey::Block(0));
 
         let forks = forks
             .into_iter()
+            // filter out forks that are pre-genesis by timestamp
+            .filter(|key| match key {
+                ForkFilterKey::Block(_) => true,
+                ForkFilterKey::Time(time) => *time > genesis_timestamp,
+            })
             .fold(
                 (BTreeMap::from([(ForkFilterKey::Block(0), genesis_fork_hash)]), genesis_fork_hash),
                 |(mut acc, base_hash), key| {
@@ -373,9 +379,11 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
-    const GENESIS_HASH: H256 =
-        H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));
+    use crate::hex_literal::hex;
+    use revm_primitives::b256;
+
+    const GENESIS_HASH: B256 =
+        b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 
     // EIP test vectors.
     #[test]
@@ -395,6 +403,7 @@ mod tests {
         let mut filter = ForkFilter::new(
             Head { number: 0, ..Default::default() },
             GENESIS_HASH,
+            0,
             vec![
                 ForkFilterKey::Block(1_150_000),
                 ForkFilterKey::Block(1_920_000),
@@ -568,6 +577,7 @@ mod tests {
         let mut fork_filter = ForkFilter::new(
             Head { number: 0, ..Default::default() },
             GENESIS_HASH,
+            0,
             vec![ForkFilterKey::Block(b1), ForkFilterKey::Block(b2)],
         );
 

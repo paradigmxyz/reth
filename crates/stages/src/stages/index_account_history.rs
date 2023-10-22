@@ -1,7 +1,13 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
-use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::{AccountExtReader, DatabaseProviderRW, HistoryWriter};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    PruneCheckpoint, PruneMode, PruneSegment,
+};
+use reth_provider::{
+    AccountExtReader, DatabaseProviderRW, HistoryWriter, PruneCheckpointReader,
+    PruneCheckpointWriter,
+};
 use std::fmt::Debug;
 
 /// Stage is indexing history the account changesets generated in
@@ -12,18 +18,20 @@ pub struct IndexAccountHistoryStage {
     /// Number of blocks after which the control
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
+    /// Pruning configuration.
+    pub prune_mode: Option<PruneMode>,
 }
 
 impl IndexAccountHistoryStage {
     /// Create new instance of [IndexAccountHistoryStage].
-    pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold }
+    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
+        Self { commit_threshold, prune_mode }
     }
 }
 
 impl Default for IndexAccountHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self { commit_threshold: 100_000, prune_mode: None }
     }
 }
 
@@ -38,8 +46,32 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     async fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
-        input: ExecInput,
+        mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        if let Some((target_prunable_block, prune_mode)) = self
+            .prune_mode
+            .map(|mode| mode.prune_target_block(input.target(), PruneSegment::AccountHistory))
+            .transpose()?
+            .flatten()
+        {
+            if target_prunable_block > input.checkpoint().block_number {
+                input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+
+                // Save prune checkpoint only if we don't have one already.
+                // Otherwise, pruner may skip the unpruned range of blocks.
+                if provider.get_prune_checkpoint(PruneSegment::AccountHistory)?.is_none() {
+                    provider.save_prune_checkpoint(
+                        PruneSegment::AccountHistory,
+                        PruneCheckpoint {
+                            block_number: Some(target_prunable_block),
+                            tx_number: None,
+                            prune_mode,
+                        },
+                    )?;
+                }
+            }
+        }
+
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -71,9 +103,6 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
 #[cfg(test)]
 mod tests {
-    use reth_provider::ProviderFactory;
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
@@ -94,16 +123,18 @@ mod tests {
         generators,
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
-    use reth_primitives::{hex_literal::hex, Address, BlockNumber, H160, H256, MAINNET};
+    use reth_primitives::{address, Address, BlockNumber, PruneMode, B256, MAINNET};
+    use reth_provider::ProviderFactory;
+    use std::collections::BTreeMap;
 
-    const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
+    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
 
     fn acc() -> AccountBeforeTx {
         AccountBeforeTx { address: ADDRESS, info: None }
     }
 
     /// Shard for account
-    fn shard(shard_index: u64) -> ShardedKey<H160> {
+    fn shard(shard_index: u64) -> ShardedKey<Address> {
         ShardedKey { key: ADDRESS, highest_block_number: shard_index }
     }
 
@@ -112,8 +143,8 @@ mod tests {
     }
 
     fn cast(
-        table: Vec<(ShardedKey<H160>, BlockNumberList)>,
-    ) -> BTreeMap<ShardedKey<H160>, Vec<usize>> {
+        table: Vec<(ShardedKey<Address>, BlockNumberList)>,
+    ) -> BTreeMap<ShardedKey<Address>, Vec<usize>> {
         table
             .into_iter()
             .map(|(k, v)| {
@@ -367,16 +398,69 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn insert_index_with_prune_mode() {
+        // init
+        let tx = TestTransaction::default();
+
+        // setup
+        tx.commit(|tx| {
+            // we just need first and last
+            tx.put::<tables::BlockBodyIndices>(
+                0,
+                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+            )
+            .unwrap();
+
+            tx.put::<tables::BlockBodyIndices>(
+                100,
+                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
+            )
+            .unwrap();
+
+            // setup changeset that are going to be applied to history index
+            tx.put::<tables::AccountChangeSet>(20, acc()).unwrap();
+            tx.put::<tables::AccountChangeSet>(36, acc()).unwrap();
+            tx.put::<tables::AccountChangeSet>(100, acc()).unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        // run
+        let input = ExecInput { target: Some(20000), ..Default::default() };
+        let mut stage = IndexAccountHistoryStage {
+            prune_mode: Some(PruneMode::Before(36)),
+            ..Default::default()
+        };
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+        let out = stage.execute(&provider, input).await.unwrap();
+        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
+        provider.commit().unwrap();
+
+        // verify
+        let table = cast(tx.table::<tables::AccountHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100])]));
+
+        // unwind
+        unwind(&tx, 20000, 0).await;
+
+        // verify initial state
+        let table = tx.table::<tables::AccountHistory>().unwrap();
+        assert!(table.is_empty());
+    }
+
     stage_test_suite_ext!(IndexAccountHistoryTestRunner, index_account_history);
 
     struct IndexAccountHistoryTestRunner {
         pub(crate) tx: TestTransaction,
         commit_threshold: u64,
+        prune_mode: Option<PruneMode>,
     }
 
     impl Default for IndexAccountHistoryTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), commit_threshold: 1000 }
+            Self { tx: TestTransaction::default(), commit_threshold: 1000, prune_mode: None }
         }
     }
 
@@ -388,7 +472,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { commit_threshold: self.commit_threshold }
+            Self::S { commit_threshold: self.commit_threshold, prune_mode: self.prune_mode }
         }
     }
 
@@ -406,7 +490,7 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let blocks = random_block_range(&mut rng, start..=end, H256::zero(), 0..3);
+            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3);
 
             let (transitions, _) = random_changeset_range(
                 &mut rng,
@@ -472,14 +556,14 @@ mod tests {
                                 address,
                                 *list.last().expect("Chuck does not return empty list")
                                     as BlockNumber,
-                            ) as ShardedKey<H160>,
+                            ) as ShardedKey<Address>,
                             list,
                         );
                     });
 
                     if let Some(last_list) = last_chunk {
                         result.insert(
-                            ShardedKey::new(address, u64::MAX) as ShardedKey<H160>,
+                            ShardedKey::new(address, u64::MAX) as ShardedKey<Address>,
                             last_list,
                         );
                     };

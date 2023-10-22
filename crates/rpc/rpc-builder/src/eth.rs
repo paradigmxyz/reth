@@ -1,18 +1,13 @@
+use crate::constants::{DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_TRACING_REQUESTS};
 use reth_rpc::{
     eth::{
         cache::{EthStateCache, EthStateCacheConfig},
         gas_oracle::GasPriceOracleConfig,
         RPC_DEFAULT_GAS_CAP,
     },
-    EthApi, EthFilter, EthPubSub, TracingCallPool,
+    BlockingTaskPool, EthApi, EthFilter, EthPubSub,
 };
 use serde::{Deserialize, Serialize};
-
-/// The default maximum of logs in a single response.
-pub(crate) const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
-
-/// The default maximum number of concurrently executed tracing calls
-pub(crate) const DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
 
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
@@ -26,7 +21,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events> {
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
     pub pubsub: EthPubSub<Provider, Pool, Events, Network>,
     /// The configured tracing call pool
-    pub tracing_call_pool: TracingCallPool,
+    pub blocking_task_pool: BlockingTaskPool,
 }
 
 /// Additional config values for the eth namespace
@@ -44,7 +39,13 @@ pub struct EthConfig {
     ///
     /// Defaults to [RPC_DEFAULT_GAS_CAP]
     pub rpc_gas_cap: u64,
+    ///
+    /// Sets TTL for stale filters
+    pub stale_filter_ttl: std::time::Duration,
 }
+
+/// Default value for stale filter ttl
+const DEFAULT_STALE_FILTER_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 impl Default for EthConfig {
     fn default() -> Self {
@@ -54,6 +55,7 @@ impl Default for EthConfig {
             max_tracing_requests: DEFAULT_MAX_TRACING_REQUESTS,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
+            stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
         }
     }
 }

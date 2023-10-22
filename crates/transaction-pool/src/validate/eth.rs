@@ -2,15 +2,19 @@
 
 use crate::{
     blobstore::BlobStore,
-    error::InvalidPoolTransactionError,
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_SIZE, TX_MAX_SIZE},
-    EthBlobTransactionSidecar, EthPoolTransaction, TransactionValidationOutcome,
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
     TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
-    constants::{eip4844::KZG_TRUSTED_SETUP, ETHEREUM_BLOCK_GAS_LIMIT},
+    constants::{
+        eip4844::{MAINNET_KZG_TRUSTED_SETUP, MAX_BLOBS_PER_BLOCK},
+        ETHEREUM_BLOCK_GAS_LIMIT,
+    },
     kzg::KzgSettings,
+    revm::compat::calculate_intrinsic_gas_after_merge,
     ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
@@ -29,6 +33,35 @@ pub struct EthTransactionValidator<Client, T> {
     inner: Arc<EthTransactionValidatorInner<Client, T>>,
 }
 
+impl<Client, Tx> EthTransactionValidator<Client, Tx>
+where
+    Client: StateProviderFactory,
+    Tx: EthPoolTransaction,
+{
+    /// Validates a single transaction.
+    ///
+    /// See also [TransactionValidator::validate_transaction]
+    pub fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        self.inner.validate_one(origin, transaction)
+    }
+
+    /// Validates all given transactions.
+    ///
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [Self::validate_one]
+    pub fn validate_all(
+        &self,
+        transactions: Vec<(TransactionOrigin, Tx)>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+    }
+}
+
 #[async_trait::async_trait]
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
@@ -42,7 +75,14 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.inner.validate_transaction(origin, transaction).await
+        self.validate_one(origin, transaction)
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_all(transactions)
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
@@ -74,7 +114,6 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Toggle to determine if a local transaction should be propagated
     propagate_local_transactions: bool,
     /// Stores the setup and parameters needed for validating KZG proofs.
-    #[allow(unused)]
     kzg_settings: Arc<KzgSettings>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
@@ -89,19 +128,17 @@ impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
     }
 }
 
-#[async_trait::async_trait]
-impl<Client, Tx> TransactionValidator for EthTransactionValidatorInner<Client, Tx>
+impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
 where
     Client: StateProviderFactory,
     Tx: EthPoolTransaction,
 {
-    type Transaction = Tx;
-
-    async fn validate_transaction(
+    /// Validates a single transaction.
+    fn validate_one(
         &self,
         origin: TransactionOrigin,
-        mut transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
+        mut transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
         // Checks for tx_type
         match transaction.tx_type() {
             LEGACY_TX_TYPE_ID => {
@@ -154,7 +191,7 @@ where
 
         // Check whether the init code size has been exceeded.
         if self.fork_tracker.is_shanghai_activated() {
-            if let Err(err) = self.ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
+            if let Err(err) = ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
@@ -198,7 +235,26 @@ where
             }
         }
 
-        let mut blob_sidecar = None;
+        // intrinsic gas checks
+        let access_list =
+            transaction.access_list().map(|list| list.flattened()).unwrap_or_default();
+        let is_shanghai = self.fork_tracker.is_shanghai_activated();
+
+        if transaction.gas_limit() <
+            calculate_intrinsic_gas_after_merge(
+                transaction.input(),
+                transaction.kind(),
+                &access_list,
+                is_shanghai,
+            )
+        {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::IntrinsicGasTooLow,
+            )
+        }
+
+        let mut maybe_blob_sidecar = None;
 
         // blob tx checks
         if transaction.is_eip4844() {
@@ -207,6 +263,30 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
+                )
+            }
+
+            let blob_count = transaction.blob_count();
+            if blob_count == 0 {
+                // no blobs
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::NoEip4844Blobs,
+                    ),
+                )
+            }
+
+            if blob_count > MAX_BLOBS_PER_BLOCK {
+                // too many blobs
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::TooManyEip4844Blobs {
+                            have: blob_count,
+                            permitted: MAX_BLOBS_PER_BLOCK,
+                        },
+                    ),
                 )
             }
 
@@ -225,13 +305,32 @@ where
                     } else {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
-                            InvalidPoolTransactionError::MissingEip4844Blob,
+                            InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                            ),
                         )
                     }
                 }
                 EthBlobTransactionSidecar::Present(blob) => {
-                    //TODO(mattsse): verify the blob
-                    blob_sidecar = Some(blob);
+                    if let Some(eip4844) = transaction.as_eip4844() {
+                        // validate the blob
+                        if let Err(err) = eip4844.validate_blob(&blob, &self.kzg_settings) {
+                            return TransactionValidationOutcome::Invalid(
+                                transaction,
+                                InvalidPoolTransactionError::Eip4844(
+                                    Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                                ),
+                            )
+                        }
+                        // store the extracted blob
+                        maybe_blob_sidecar = Some(blob);
+                    } else {
+                        // this should not happen
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidTransactionError::TxTypeNotSupported.into(),
+                        )
+                    }
                 }
             }
         }
@@ -281,7 +380,7 @@ where
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
-            transaction: ValidTransaction::new(transaction, blob_sidecar),
+            transaction: ValidTransaction::new(transaction, maybe_blob_sidecar),
             // by this point assume all external transactions should be propagated
             propagate: match origin {
                 TransactionOrigin::External => true,
@@ -293,11 +392,11 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
         // update all forks
-        if self.chain_spec.is_cancun_activated_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_shanghai_activated_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
@@ -335,6 +434,9 @@ pub struct EthTransactionValidatorBuilder {
 impl EthTransactionValidatorBuilder {
     /// Creates a new builder for the given [ChainSpec]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        // If cancun is enabled at genesis, enable it
+        let cancun = chain_spec.is_cancun_active_at_timestamp(chain_spec.genesis_timestamp());
+
         Self {
             chain_spec,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
@@ -342,7 +444,7 @@ impl EthTransactionValidatorBuilder {
             additional_tasks: 1,
             // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
-            kzg_settings: Arc::clone(&KZG_TRUSTED_SETUP),
+            kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
 
             // by default all transaction types are allowed
             eip2718: true,
@@ -353,7 +455,7 @@ impl EthTransactionValidatorBuilder {
             shanghai: true,
 
             // TODO: can hard enable by default once mainnet transitioned
-            cancun: false,
+            cancun,
         }
     }
 
@@ -434,6 +536,15 @@ impl EthTransactionValidatorBuilder {
     /// Sets the number of additional tasks to spawn.
     pub fn with_additional_tasks(mut self, additional_tasks: usize) -> Self {
         self.additional_tasks = additional_tasks;
+        self
+    }
+
+    /// Configures validation rules based on the head block's timestamp.
+    ///
+    /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
+    pub fn with_head_timestamp(mut self, timestamp: u64) -> Self {
+        self.cancun = self.chain_spec.is_cancun_active_at_timestamp(timestamp);
+        self.shanghai = self.chain_spec.is_shanghai_active_at_timestamp(timestamp);
         self
     }
 
@@ -529,5 +640,21 @@ impl ForkTracker {
     /// Returns true if the Shanghai fork is activated.
     pub(crate) fn is_cancun_activated(&self) -> bool {
         self.cancun.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Ensure that the code size is not greater than `max_init_code_size`.
+/// `max_init_code_size` should be configurable so this will take it as an argument.
+pub fn ensure_max_init_code_size<T: PoolTransaction>(
+    transaction: &T,
+    max_init_code_size: usize,
+) -> Result<(), InvalidPoolTransactionError> {
+    if transaction.kind().is_create() && transaction.input().len() > max_init_code_size {
+        Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
+            transaction.size(),
+            max_init_code_size,
+        ))
+    } else {
+        Ok(())
     }
 }

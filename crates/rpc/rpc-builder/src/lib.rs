@@ -1,17 +1,4 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs, unreachable_pub)]
-#![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
-//! Configure reth RPC
+//! Configure reth RPC.
 //!
 //! This crate contains several builder and config types that allow to configure the selection of
 //! [RethRpcModule] specific to transports (ws, http, ipc).
@@ -31,13 +18,13 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
+//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Provider, Pool, Network, Events>(provider: Provider, pool: Pool, network: Network, events: Events)
 //! where
-//!     Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -64,7 +51,7 @@
 //! ```
 //! use tokio::try_join;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
+//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
 //! use reth_rpc::JwtSecret;
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
@@ -73,7 +60,7 @@
 //! use reth_rpc_builder::auth::AuthServerConfig;
 //! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(provider: Provider, pool: Pool, network: Network, events: Events, engine_api: EngineApi)
 //! where
-//!     Provider: BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions +  Clone + 'static,
@@ -103,6 +90,15 @@
 //! }
 //! ```
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics};
 use constants::*;
 use error::{RpcError, ServerKind};
@@ -113,17 +109,17 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, StateProviderFactory,
+    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
         cache::{cache_new_blocks_task, EthStateCache},
         gas_oracle::GasPriceOracle,
     },
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TracingCallPool, TxPoolApi,
-    Web3Api,
+    AdminApi, BlockingTaskGuard, BlockingTaskPool, DebugApi, EngineEthApi, EthApi, EthFilter,
+    EthPubSub, EthSubscriptionIdProvider, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
+    TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -163,6 +159,7 @@ pub use crate::eth::{EthConfig, EthHandlers};
 pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::noop::NoopNetwork;
+use reth_rpc::eth::EthBundle;
 use reth_transaction_pool::noop::NoopTransactionPool;
 
 /// Convenience function for starting a server in one step.
@@ -177,6 +174,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events>(
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
+        + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
@@ -322,6 +320,7 @@ impl<Provider, Pool, Network, Tasks, Events>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events>
 where
     Provider: BlockReaderIdExt
+        + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
@@ -434,7 +433,7 @@ impl RpcModuleConfig {
 }
 
 /// Configures [RpcModuleConfig]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct RpcModuleConfigBuilder {
     eth: Option<EthConfig>,
 }
@@ -504,7 +503,11 @@ impl RpcModuleSelection {
         Self::all_modules()
     }
 
-    /// Creates a new [RpcModuleSelection::Selection] from the given items.
+    /// Creates a new _unique_ [RpcModuleSelection::Selection] from the given items.
+    ///
+    /// # Note
+    ///
+    /// This will dedupe the selection and remove duplicates while preserving the order.
     ///
     /// # Example
     ///
@@ -516,14 +519,30 @@ impl RpcModuleSelection {
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
     /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
     /// ```
+    ///
+    /// Create a unique selection from the [RethRpcModule] string identifiers
+    ///
+    /// ```
+    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// let selection = vec!["eth", "admin", "eth", "admin"];
+    /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
+    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// ```
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
         I: IntoIterator<Item = T>,
         T: TryInto<RethRpcModule>,
     {
-        let selection =
-            selection.into_iter().map(TryInto::try_into).collect::<Result<Vec<_>, _>>()?;
-        Ok(RpcModuleSelection::Selection(selection))
+        let mut unique = HashSet::new();
+
+        let mut s = Vec::new();
+        for item in selection.into_iter() {
+            let item = item.try_into()?;
+            if unique.insert(item) {
+                s.push(item);
+            }
+        }
+        Ok(RpcModuleSelection::Selection(s))
     }
 
     /// Returns true if no selection is configured
@@ -550,6 +569,7 @@ impl RpcModuleSelection {
     ) -> RpcModule<()>
     where
         Provider: BlockReaderIdExt
+            + AccountReader
             + StateProviderFactory
             + EvmEnvProvider
             + ChainSpecProvider
@@ -688,6 +708,7 @@ impl Serialize for RethRpcModule {
 }
 
 /// A Helper type the holds instances of the configured modules.
+#[derive(Debug)]
 pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
     provider: Provider,
     pool: Pool,
@@ -699,7 +720,7 @@ pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
     /// Holds a clone of all the eth namespace handlers
     eth: Option<EthHandlers<Provider, Pool, Network, Events>>,
     /// to put trace calls behind semaphore
-    tracing_call_guard: TracingCallGuard,
+    blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
     modules: HashMap<RethRpcModule, Methods>,
 }
@@ -725,7 +746,7 @@ impl<Provider, Pool, Network, Tasks, Events>
             eth: None,
             executor,
             modules: Default::default(),
-            tracing_call_guard: TracingCallGuard::new(config.eth.max_tracing_requests),
+            blocking_pool_guard: BlockingTaskGuard::new(config.eth.max_tracing_requests),
             config,
             events,
         }
@@ -771,17 +792,27 @@ impl<Provider, Pool, Network, Tasks, Events>
 where
     Network: NetworkInfo + Peers + Clone + 'static,
 {
+    /// Instantiates AdminApi
+    pub fn admin_api(&mut self) -> AdminApi<Network> {
+        AdminApi::new(self.network.clone())
+    }
+
+    /// Instantiates Web3Api
+    pub fn web3_api(&mut self) -> Web3Api<Network> {
+        Web3Api::new(self.network.clone())
+    }
+
     /// Register Admin Namespace
     pub fn register_admin(&mut self) -> &mut Self {
-        self.modules
-            .insert(RethRpcModule::Admin, AdminApi::new(self.network.clone()).into_rpc().into());
+        let adminapi = self.admin_api();
+        self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc().into());
         self
     }
 
     /// Register Web3 Namespace
     pub fn register_web3(&mut self) -> &mut Self {
-        self.modules
-            .insert(RethRpcModule::Web3, Web3Api::new(self.network.clone()).into_rpc().into());
+        let web3api = self.web3_api();
+        self.modules.insert(RethRpcModule::Web3, web3api.into_rpc().into());
         self
     }
 }
@@ -790,6 +821,7 @@ impl<Provider, Pool, Network, Tasks, Events>
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events>
 where
     Provider: BlockReaderIdExt
+        + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
         + ChainSpecProvider
@@ -811,37 +843,22 @@ where
 
     /// Register Otterscan Namespace
     pub fn register_ots(&mut self) -> &mut Self {
-        let eth_api = self.eth_api();
-        self.modules.insert(RethRpcModule::Ots, OtterscanApi::new(eth_api).into_rpc().into());
+        let otterscan_api = self.otterscan_api();
+        self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
         self
     }
 
     /// Register Debug Namespace
     pub fn register_debug(&mut self) -> &mut Self {
-        let eth_api = self.eth_api();
-        self.modules.insert(
-            RethRpcModule::Debug,
-            DebugApi::new(
-                self.provider.clone(),
-                eth_api,
-                Box::new(self.executor.clone()),
-                self.tracing_call_guard.clone(),
-            )
-            .into_rpc()
-            .into(),
-        );
+        let debug_api = self.debug_api();
+        self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
         self
     }
 
     /// Register Trace Namespace
     pub fn register_trace(&mut self) -> &mut Self {
-        let eth = self.eth_handlers();
-        self.modules.insert(
-            RethRpcModule::Trace,
-            TraceApi::new(self.provider.clone(), eth.api, self.tracing_call_guard.clone())
-                .into_rpc()
-                .into(),
-        );
+        let trace_api = self.trace_api();
+        self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
         self
     }
 
@@ -868,20 +885,15 @@ where
 
     /// Register Net Namespace
     pub fn register_net(&mut self) -> &mut Self {
-        let eth_api = self.eth_api();
-        self.modules.insert(
-            RethRpcModule::Net,
-            NetApi::new(self.network.clone(), eth_api).into_rpc().into(),
-        );
+        let netapi = self.net_api();
+        self.modules.insert(RethRpcModule::Net, netapi.into_rpc().into());
         self
     }
 
     /// Register Reth namespace
     pub fn register_reth(&mut self) -> &mut Self {
-        self.modules.insert(
-            RethRpcModule::Reth,
-            RethApi::new(self.provider.clone(), Box::new(self.executor.clone())).into_rpc().into(),
-        );
+        let rethapi = self.reth_api();
+        self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
         self
     }
 
@@ -916,12 +928,11 @@ where
             filter: eth_filter,
             pubsub: eth_pubsub,
             cache: _,
-            tracing_call_pool: _,
+            blocking_task_pool: _,
         } = self.with_eth(|eth| eth.clone());
 
         // Create a copy, so we can list out all the methods for rpc_ api
         let namespaces: Vec<_> = namespaces.collect();
-
         namespaces
             .iter()
             .copied()
@@ -936,7 +947,7 @@ where
                             self.provider.clone(),
                             eth_api.clone(),
                             Box::new(self.executor.clone()),
-                            self.tracing_call_guard.clone(),
+                            self.blocking_pool_guard.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -954,7 +965,7 @@ where
                         RethRpcModule::Trace => TraceApi::new(
                             self.provider.clone(),
                             eth_api.clone(),
-                            self.tracing_call_guard.clone(),
+                            self.blocking_pool_guard.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -1016,7 +1027,8 @@ where
             );
 
             let executor = Box::new(self.executor.clone());
-            let tracing_call_pool = TracingCallPool::build().expect("failed to build tracing pool");
+            let blocking_task_pool =
+                BlockingTaskPool::build().expect("failed to build tracing pool");
             let api = EthApi::with_spawner(
                 self.provider.clone(),
                 self.pool.clone(),
@@ -1025,7 +1037,7 @@ where
                 gas_oracle,
                 self.config.eth.rpc_gas_cap,
                 executor.clone(),
-                tracing_call_pool.clone(),
+                blocking_task_pool.clone(),
             );
             let filter = EthFilter::new(
                 self.provider.clone(),
@@ -1033,6 +1045,7 @@ where
                 cache.clone(),
                 self.config.eth.max_logs_per_response,
                 executor.clone(),
+                self.config.eth.stale_filter_ttl,
             );
 
             let pubsub = EthPubSub::with_spawner(
@@ -1043,7 +1056,7 @@ where
                 executor,
             );
 
-            let eth = EthHandlers { api, cache, filter, pubsub, tracing_call_pool };
+            let eth = EthHandlers { api, cache, filter, pubsub, blocking_task_pool };
             self.eth = Some(eth);
         }
         f(self.eth.as_ref().expect("exists; qed"))
@@ -1057,6 +1070,45 @@ where
     /// Returns the configured [EthApi] or creates it if it does not exist yet
     pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
         self.with_eth(|handlers| handlers.api.clone())
+    }
+    /// Instantiates TraceApi
+    pub fn trace_api(&mut self) -> TraceApi<Provider, EthApi<Provider, Pool, Network>> {
+        let eth = self.eth_handlers();
+        TraceApi::new(self.provider.clone(), eth.api, self.blocking_pool_guard.clone())
+    }
+
+    /// Instantiates [EthBundle] Api
+    pub fn bundle_api(&mut self) -> EthBundle<EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        EthBundle::new(eth_api, self.blocking_pool_guard.clone())
+    }
+
+    /// Instantiates OtterscanApi
+    pub fn otterscan_api(&mut self) -> OtterscanApi<EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        OtterscanApi::new(eth_api)
+    }
+
+    /// Instantiates DebugApi
+    pub fn debug_api(&mut self) -> DebugApi<Provider, EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        DebugApi::new(
+            self.provider.clone(),
+            eth_api,
+            Box::new(self.executor.clone()),
+            self.blocking_pool_guard.clone(),
+        )
+    }
+
+    /// Instantiates NetApi
+    pub fn net_api(&mut self) -> NetApi<Network, EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        NetApi::new(self.network.clone(), eth_api)
+    }
+
+    /// Instantiates RethApi
+    pub fn reth_api(&mut self) -> RethApi<Provider> {
+        RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
     }
 }
 
@@ -1457,7 +1509,7 @@ impl TransportRpcModuleConfig {
 }
 
 /// Holds installed modules per transport type.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TransportRpcModules<Context = ()> {
     /// The original config
     config: TransportRpcModuleConfig,
@@ -1832,6 +1884,19 @@ mod tests {
     fn parse_rpc_module_selection() {
         let selection = "all".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(selection, RpcModuleSelection::All);
+    }
+
+    #[test]
+    fn parse_rpc_unique_module_selection() {
+        let selection = "eth,admin,eth,net".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(
+            selection,
+            RpcModuleSelection::Selection(vec![
+                RethRpcModule::Eth,
+                RethRpcModule::Admin,
+                RethRpcModule::Net,
+            ])
+        );
     }
 
     #[test]

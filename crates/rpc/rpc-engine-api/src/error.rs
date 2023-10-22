@@ -1,7 +1,7 @@
 use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_builder::error::PayloadBuilderError;
-use reth_primitives::{H256, U256};
+use reth_primitives::{B256, U256};
 use thiserror::Error;
 
 /// The Engine API result type
@@ -73,9 +73,9 @@ pub enum EngineApiError {
     )]
     TerminalBlockHash {
         /// Execution terminal block hash. `None` if block number is not found in the database.
-        execution: Option<H256>,
+        execution: Option<B256>,
         /// Consensus terminal block hash.
-        consensus: H256,
+        consensus: B256,
     },
     /// An error occurred while processing the fork choice update in the beacon consensus engine.
     #[error(transparent)]
@@ -112,6 +112,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             },
             EngineApiError::NewPayload(ref err) => match err {
                 BeaconOnNewPayloadError::Internal(_) |
+                BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions => INVALID_PARAMS_CODE,
                 BeaconOnNewPayloadError::EngineUnavailable => INTERNAL_ERROR_CODE,
             },
             // Any other server error

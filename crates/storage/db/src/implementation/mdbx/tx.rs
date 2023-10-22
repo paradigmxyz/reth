@@ -79,9 +79,9 @@ impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxMutGAT<'a> for Tx<'_, K, E>
     type DupCursorMut<T: DupSort> = Cursor<'a, RW, T>;
 }
 
-impl<'a, E: EnvironmentKind> TableImporter<'a> for Tx<'_, RW, E> {}
+impl<E: EnvironmentKind> TableImporter for Tx<'_, RW, E> {}
 
-impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
+impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
         self.inner
             .get(self.get_dbi::<T>()?, key.encode().as_ref())
@@ -123,7 +123,7 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
     }
 }
 
-impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {
+impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         self.inner

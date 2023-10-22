@@ -1,20 +1,16 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! Reth task management.
+
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
-//! reth task management
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
-    metrics::TaskExecutorMetrics,
+    metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{signal, Shutdown, Signal},
 };
 use dyn_clone::DynClone;
@@ -138,6 +134,7 @@ impl TaskSpawner for TokioTaskExecutor {
 /// diagnostic purposes, since tokio task essentially fail silently. Therefore, this type is a
 /// Stream that yields the name of panicked task, See [`TaskExecutor::spawn_critical`]. In order to
 /// execute Tasks use the [`TaskExecutor`] type [`TaskManager::executor`].
+#[derive(Debug)]
 #[must_use = "TaskManager must be polled to monitor critical tasks"]
 pub struct TaskManager {
     /// Handle to the tokio runtime this task manager is associated with.
@@ -271,9 +268,16 @@ impl TaskExecutor {
     {
         let on_shutdown = self.on_shutdown.clone();
 
-        let task = async move {
-            pin_mut!(fut);
-            let _ = select(on_shutdown, fut).await;
+        // Clone only the specific counter that we need.
+        let finished_regular_tasks_metrics = self.metrics.finished_regular_tasks.clone();
+        // Wrap the original future to increment the finished tasks counter upon completion
+        let task = {
+            async move {
+                // Create an instance of IncCounterOnDrop with the counter to increment
+                let _inc_counter_on_drop = IncCounterOnDrop::new(finished_regular_tasks_metrics);
+                pin_mut!(fut);
+                let _ = select(on_shutdown, fut).await;
+            }
         }
         .in_current_span();
 
@@ -341,7 +345,11 @@ impl TaskExecutor {
             })
             .in_current_span();
 
+        // Clone only the specific counter that we need.
+        let finished_critical_tasks_metrics = self.metrics.finished_critical_tasks.clone();
         let task = async move {
+            // Create an instance of IncCounterOnDrop with the counter to increment
+            let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_metrics);
             pin_mut!(task);
             let _ = select(on_shutdown, task).await;
         };
@@ -403,7 +411,7 @@ impl TaskExecutor {
 
 impl TaskSpawner for TaskExecutor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.metrics.inc_regular_task();
+        self.metrics.inc_regular_tasks();
         self.spawn(fut)
     }
 

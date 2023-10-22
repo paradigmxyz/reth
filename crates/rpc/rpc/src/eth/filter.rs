@@ -7,16 +7,27 @@ use crate::{
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
+use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock};
+use reth_interfaces::RethError;
+use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::{collections::HashMap, iter::StepBy, ops::RangeInclusive, sync::Arc, time::Instant};
-use tokio::sync::Mutex;
+use std::{
+    collections::HashMap,
+    iter::StepBy,
+    ops::RangeInclusive,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::{
+    sync::{mpsc::Receiver, Mutex},
+    time::MissedTickBehavior,
+};
 use tracing::trace;
 
 /// The maximum number of headers we read at once when handling a range filter.
@@ -28,19 +39,26 @@ pub struct EthFilter<Provider, Pool> {
     inner: Arc<EthFilterInner<Provider, Pool>>,
 }
 
-impl<Provider, Pool> EthFilter<Provider, Pool> {
+impl<Provider, Pool> EthFilter<Provider, Pool>
+where
+    Provider: Send + Sync + 'static,
+    Pool: Send + Sync + 'static,
+{
     /// Creates a new, shareable instance.
     ///
     /// This uses the given pool to get notified about new transactions, the provider to interact
     /// with the blockchain, the cache to fetch cacheable data, like the logs and the
     /// max_logs_per_response to limit the amount of logs returned in a single response
     /// `eth_getLogs`
+    ///
+    /// This also spawns a task that periodically clears stale filters.
     pub fn new(
         provider: Provider,
         pool: Pool,
         eth_cache: EthStateCache,
         max_logs_per_response: usize,
         task_spawner: Box<dyn TaskSpawner>,
+        stale_filter_ttl: Duration,
     ) -> Self {
         let inner = EthFilterInner {
             provider,
@@ -51,13 +69,50 @@ impl<Provider, Pool> EthFilter<Provider, Pool> {
             eth_cache,
             max_headers_range: MAX_HEADERS_RANGE,
             task_spawner,
+            stale_filter_ttl,
         };
-        Self { inner: Arc::new(inner) }
+
+        let eth_filter = Self { inner: Arc::new(inner) };
+
+        let this = eth_filter.clone();
+        eth_filter.inner.task_spawner.clone().spawn_critical(
+            "eth-filters_stale-filters-clean",
+            Box::pin(async move {
+                this.watch_and_clear_stale_filters().await;
+            }),
+        );
+
+        eth_filter
     }
 
     /// Returns all currently active filters
     pub fn active_filters(&self) -> &ActiveFilters {
         &self.inner.active_filters
+    }
+
+    /// Endless future that [Self::clear_stale_filters] every `stale_filter_ttl` interval.
+    async fn watch_and_clear_stale_filters(&self) {
+        let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            self.clear_stale_filters(Instant::now()).await;
+        }
+    }
+
+    /// Clears all filters that have not been polled for longer than the configured
+    /// `stale_filter_ttl` at the given instant.
+    pub async fn clear_stale_filters(&self, now: Instant) {
+        trace!(target: "rpc::eth", "clear stale filters");
+        self.active_filters().inner.lock().await.retain(|id, filter| {
+            let is_valid = (now - filter.last_poll_timestamp) < self.inner.stale_filter_ttl;
+
+            if !is_valid {
+                trace!(target: "rpc::eth", "evict filter with id: {:?}", id);
+            }
+
+            is_valid
+        })
     }
 }
 
@@ -71,13 +126,20 @@ where
         let info = self.inner.provider.chain_info()?;
         let best_number = info.best_number;
 
+        // start_block is the block from which we should start fetching changes, the next block from
+        // the last time changes were polled, in other words the best block at last poll + 1
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
             let filter = filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id))?;
 
+            if filter.block > best_number {
+                // no new blocks since the last poll
+                return Ok(FilterChanges::Empty)
+            }
+
             // update filter
             // we fetch all changes from [filter.block..best_block], so we advance the filter's
-            // block to `best_block +1`
+            // block to `best_block +1`, the next from which we should start fetching changes again
             let mut block = best_number + 1;
             std::mem::swap(&mut filter.block, &mut block);
             filter.last_poll_timestamp = Instant::now();
@@ -86,19 +148,19 @@ where
         };
 
         match kind {
-            FilterKind::PendingTransaction => {
-                Err(EthApiError::Unsupported("pending transaction filter not supported").into())
+            FilterKind::PendingTransaction(receiver) => {
+                let pending_txs = receiver.drain().await;
+                Ok(FilterChanges::Hashes(pending_txs))
             }
             FilterKind::Block => {
-                let mut block_hashes = Vec::new();
-                for block_num in start_block..best_number {
-                    let block_hash = self
-                        .inner
-                        .provider
-                        .block_hash(block_num)?
-                        .ok_or(EthApiError::UnknownBlockNumber)?;
-                    block_hashes.push(block_hash);
-                }
+                // Note: we need to fetch the block hashes from inclusive range
+                // [start_block..best_block]
+                let end_block = best_number + 1;
+                let block_hashes = self
+                    .inner
+                    .provider
+                    .canonical_hashes_range(start_block, end_block)
+                    .map_err(|_| EthApiError::UnknownBlockNumber)?;
                 Ok(FilterChanges::Hashes(block_hashes))
             }
             FilterKind::Log(filter) => {
@@ -117,6 +179,7 @@ where
                     FilterBlockOption::AtBlockHash(_) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
                         // hash blockHash
+                        // get_logs_in_block_range is inclusive
                         (start_block, best_number)
                     }
                 };
@@ -174,7 +237,11 @@ where
     /// Handler for `eth_newPendingTransactionFilter`
     async fn new_pending_transaction_filter(&self) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newPendingTransactionFilter");
-        self.inner.install_filter(FilterKind::PendingTransaction).await
+        let receiver = self.inner.pool.pending_transactions_listener();
+
+        let pending_txs_receiver = PendingTransactionsReceiver::new(receiver);
+
+        self.inner.install_filter(FilterKind::PendingTransaction(pending_txs_receiver)).await
     }
 
     /// Handler for `eth_getFilterChanges`
@@ -230,7 +297,6 @@ impl<Provider, Pool> Clone for EthFilter<Provider, Pool> {
 #[derive(Debug)]
 struct EthFilterInner<Provider, Pool> {
     /// The transaction pool.
-    #[allow(unused)] // we need this for non standard full transactions eventually
     pool: Pool,
     /// The provider that can interact with the chain.
     provider: Provider,
@@ -245,8 +311,9 @@ struct EthFilterInner<Provider, Pool> {
     /// maximum number of headers to read at once for range filter
     max_headers_range: u64,
     /// The type that can spawn tasks.
-    #[allow(unused)]
     task_spawner: Box<dyn TaskSpawner>,
+    /// Duration since the last filter poll, after which the filter is considered stale
+    stale_filter_ttl: Duration,
 }
 
 impl<Provider, Pool> EthFilterInner<Provider, Pool>
@@ -411,11 +478,34 @@ struct ActiveFilter {
     kind: FilterKind,
 }
 
+/// A receiver for pending transactions that returns all new transactions since the last poll.
+#[derive(Debug, Clone)]
+struct PendingTransactionsReceiver {
+    txs_receiver: Arc<Mutex<Receiver<TxHash>>>,
+}
+
+impl PendingTransactionsReceiver {
+    fn new(receiver: Receiver<TxHash>) -> Self {
+        PendingTransactionsReceiver { txs_receiver: Arc::new(Mutex::new(receiver)) }
+    }
+
+    /// Returns all new pending transactions received since the last poll.
+    async fn drain(&self) -> Vec<B256> {
+        let mut pending_txs = Vec::new();
+        let mut prepared_stream = self.txs_receiver.lock().await;
+
+        while let Ok(tx_hash) = prepared_stream.try_recv() {
+            pending_txs.push(tx_hash);
+        }
+        pending_txs
+    }
+}
+
 #[derive(Clone, Debug)]
 enum FilterKind {
     Log(Box<Filter>),
     Block,
-    PendingTransaction,
+    PendingTransaction(PendingTransactionsReceiver),
 }
 
 /// Errors that can occur in the handler implementation
@@ -451,8 +541,8 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
     }
 }
 
-impl From<reth_interfaces::Error> for FilterError {
-    fn from(err: reth_interfaces::Error) -> Self {
+impl From<RethError> for FilterError {
+    fn from(err: RethError) -> Self {
         FilterError::EthAPIError(err.into())
     }
 }

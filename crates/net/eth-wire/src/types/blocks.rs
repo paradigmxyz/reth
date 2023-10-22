@@ -1,8 +1,8 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, H256};
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -57,11 +57,11 @@ impl From<Vec<Header>> for BlockHeaders {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
-    pub Vec<H256>,
+    pub Vec<B256>,
 );
 
-impl From<Vec<H256>> for GetBlockBodies {
-    fn from(hashes: Vec<H256>) -> Self {
+impl From<Vec<B256>> for GetBlockBodies {
+    fn from(hashes: Vec<B256>) -> Self {
         GetBlockBodies(hashes)
     }
 }
@@ -93,12 +93,11 @@ mod test {
     use crate::types::{
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     };
-    use hex_literal::hex;
+    use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
-        BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
+        hex, BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
         TransactionSigned, TxLegacy, U256,
     };
-    use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
     use super::BlockBody;
@@ -260,6 +259,7 @@ mod test {
                     withdrawals_root: None,
                     blob_gas_used: None,
                     excess_blob_gas: None,
+                    parent_beacon_block_root: None,
                 },
             ]),
         }.encode(&mut data);
@@ -293,6 +293,7 @@ mod test {
                     withdrawals_root: None,
                     blob_gas_used: None,
                     excess_blob_gas: None,
+                    parent_beacon_block_root: None,
                 },
             ]),
         };
@@ -407,6 +408,7 @@ mod test {
                             withdrawals_root: None,
                             blob_gas_used: None,
                             excess_blob_gas: None,
+                            parent_beacon_block_root: None,
                         },
                     ],
                     withdrawals: None,
@@ -493,6 +495,7 @@ mod test {
                             withdrawals_root: None,
                             blob_gas_used: None,
                             excess_blob_gas: None,
+                            parent_beacon_block_root: None,
                         },
                     ],
                     withdrawals: None,

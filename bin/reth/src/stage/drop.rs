@@ -32,6 +32,7 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
@@ -135,7 +136,7 @@ impl Command {
                         None,
                     )?;
                 }
-                StageEnum::History => {
+                StageEnum::AccountHistory | StageEnum::StorageHistory => {
                     tx.clear::<tables::AccountHistory>()?;
                     tx.clear::<tables::StorageHistory>()?;
                     tx.put::<tables::SyncStage>(

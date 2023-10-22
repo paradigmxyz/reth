@@ -1,0 +1,20 @@
+[package]
+name = "manual-p2p"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+once_cell.workspace = true
+eyre.workspace = true
+
+reth-primitives.workspace = true
+reth-network.workspace = true
+reth-discv4.workspace = true
+reth-eth-wire.workspace = true
+reth-ecies.workspace = true
+
+futures.workspace = true
+secp256k1.workspace = true
+tokio.workspace = true
