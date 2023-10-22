@@ -386,7 +386,7 @@ Dev testnet:
 
 Pruning:
       --full
-          Run full node. Only the most recent 128 block states are stored. This flag takes priority over pruning configuration in reth.toml
+          Run full node. Only the most recent 10064 block states are stored. This flag takes priority over pruning configuration in reth.toml
 
 Logging:
       --log.directory <PATH>
