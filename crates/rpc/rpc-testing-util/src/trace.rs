@@ -117,7 +117,7 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
             async move {
                 match self.replay_transaction(hash, trace_types_clone).await {
                     Ok(result) => Ok((result, hash)),
-                    Err(err) => Err((err.into(), hash)),
+                    Err(err) => Err((err, hash)),
                 }
             }
         }))
