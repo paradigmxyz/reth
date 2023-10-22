@@ -5,6 +5,7 @@ use crate::eth::transaction::typed::{
 use alloy_primitives::{Address, Bytes, U128, U256, U64, U8};
 use reth_primitives::AccessList;
 use serde::{Deserialize, Serialize};
+
 /// Represents _all_ transaction requests received from RPC
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -116,32 +117,30 @@ impl TransactionRequest {
     }
 
     /// Sets the gas limit for the transaction.
-
     pub fn gas_limit(mut self, gas_limit: u64) -> Self {
         self.gas = Some(U256::from(gas_limit));
         self
     }
-    /// Sets the nonce for the transaction.
 
+    /// Sets the nonce for the transaction.
     pub fn nonce(mut self, nonce: u64) -> Self {
         self.nonce = Some(U64::from(nonce));
         self
     }
 
     /// Sets the maximum fee per gas for the transaction.
-
     pub fn max_fee_per_gas(mut self, max_fee_per_gas: u128) -> Self {
         self.max_fee_per_gas = Some(U128::from(max_fee_per_gas));
         self
     }
-    /// Sets the maximum priority fee per gas for the transaction.
 
+    /// Sets the maximum priority fee per gas for the transaction.
     pub fn max_priority_fee_per_gas(mut self, max_priority_fee_per_gas: u128) -> Self {
         self.max_priority_fee_per_gas = Some(U128::from(max_priority_fee_per_gas));
         self
     }
-    /// Sets the recipient address for the transaction.
 
+    /// Sets the recipient address for the transaction.
     pub fn to(mut self, to: Address) -> Self {
         self.to = Some(to);
         self
@@ -152,21 +151,20 @@ impl TransactionRequest {
         self.value = Some(U256::from(value));
         self
     }
-    /// Sets the access list for the transaction.
 
+    /// Sets the access list for the transaction.
     pub fn access_list(mut self, access_list: AccessList) -> Self {
         self.access_list = Some(access_list);
         self
     }
-    /// Sets the input data for the transaction.
 
+    /// Sets the input data for the transaction.
     pub fn input(mut self, input: Bytes) -> Self {
         self.data = Some(input);
         self
     }
 
     /// Sets the transactions type for the transactions.
-
     pub fn transaction_type(mut self, transaction_type: u8) -> Self {
         self.transaction_type = Some(U8::from(transaction_type));
         self
