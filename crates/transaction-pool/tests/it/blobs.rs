@@ -6,8 +6,7 @@ use reth_transaction_pool::{
     TransactionOrigin, TransactionPool,
 };
 
-// #[tokio::test(flavor = "multi_thread")]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn blobs_exclusive() {
     let txpool = testing_pool();
     let mut mock_tx_factory = MockTransactionFactory::default();
