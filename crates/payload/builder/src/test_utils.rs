@@ -5,7 +5,7 @@ use crate::{
     PayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_primitives::{Block, ChainSpec, U256};
+use reth_primitives::{Block, U256};
 use std::{
     future::Future,
     pin::Pin,
