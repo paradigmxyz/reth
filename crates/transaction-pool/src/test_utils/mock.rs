@@ -13,11 +13,11 @@ use rand::{
 };
 use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
-    hex, AccessList, Address, Bytes, FromRecoveredPooledTransaction, FromRecoveredTransaction,
-    IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
-    TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
-    TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U128, U256,
+    hex, AccessList, Address, BlobTransactionSidecar, Bytes, FromRecoveredPooledTransaction,
+    FromRecoveredTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    Signature, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered,
+    TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, TxValue, B256, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
@@ -121,6 +121,7 @@ pub enum MockTransaction {
         value: U256,
         accesslist: AccessList,
         input: Bytes,
+        sidecar: BlobTransactionSidecar,
     },
     Eip2930 {
         hash: B256,
@@ -191,6 +192,7 @@ impl MockTransaction {
             value: Default::default(),
             input: Bytes::new(),
             accesslist: Default::default(),
+            sidecar: Default::default(),
         }
     }
 
@@ -642,6 +644,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 value: value.into(),
                 input,
                 accesslist: access_list,
+                sidecar: BlobTransactionSidecar::default(),
             },
             Transaction::Eip2930(TxEip2930 {
                 chain_id: _,
@@ -742,6 +745,7 @@ impl From<MockTransaction> for Transaction {
                 value,
                 accesslist,
                 input,
+                sidecar,
             } => Self::Eip4844(TxEip4844 {
                 chain_id: 1,
                 nonce,
@@ -785,8 +789,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
-        any::<(Transaction, Address, B256)>()
-            .prop_map(|(tx, sender, tx_hash)| match &tx {
+        any::<(Transaction, Address, B256, BlobTransactionSidecar)>()
+            .prop_map(|(tx, sender, tx_hash, sidecar)| match &tx {
                 Transaction::Legacy(TxLegacy {
                     nonce,
                     gas_price,
@@ -859,6 +863,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     value: (*value).into(),
                     input: (*input).clone(),
                     accesslist: (*access_list).clone(),
+                    sidecar,
                 },
             })
             .boxed()
