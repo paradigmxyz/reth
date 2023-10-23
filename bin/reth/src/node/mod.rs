@@ -72,7 +72,6 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
-    MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{
@@ -247,9 +246,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // always store reth.toml in the data dir, not the chain specific data dir
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
+        debug!(target: "reth::cli", "Spawning database metrics listener task");
+        let (db_metrics_tx, db_metrics_rx) = unbounded_channel();
+        let db_metrics_listener = reth_db::MetricsListener::new(db_metrics_rx);
+        ctx.task_executor.spawn_critical("database metrics listener task", db_metrics_listener);
+
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics_tx(db_metrics_tx));
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;
@@ -269,10 +273,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         self.init_trusted_nodes(&mut config);
 
-        debug!(target: "reth::cli", "Spawning metrics listener task");
-        let (metrics_tx, metrics_rx) = unbounded_channel();
-        let metrics_listener = MetricsListener::new(metrics_rx);
-        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
+        debug!(target: "reth::cli", "Spawning stages metrics listener task");
+        let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
+        let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
+        ctx.task_executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
         let prune_config =
             self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
@@ -289,7 +293,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             BlockchainTreeConfig::default(),
             prune_config.clone().map(|config| config.segments),
         )?
-        .with_sync_metrics_tx(metrics_tx.clone());
+        .with_sync_metrics_tx(sync_metrics_tx.clone());
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
 
@@ -408,7 +412,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
-                    metrics_tx,
+                    sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
                 )
@@ -428,7 +432,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
-                    metrics_tx,
+                    sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
                 )
@@ -564,7 +568,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         consensus: Arc<dyn Consensus>,
         db: DB,
         task_executor: &TaskExecutor,
-        metrics_tx: MetricEventsSender,
+        metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
     ) -> eyre::Result<Pipeline<DB>>
@@ -789,7 +793,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
-        metrics_tx: MetricEventsSender,
+        metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
     ) -> eyre::Result<Pipeline<DB>>
     where

@@ -2,6 +2,7 @@
 
 use super::cursor::Cursor;
 use crate::{
+    metrics::{MetricEvent, MetricEventsSender, Operation, TransactionOutcome},
     table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::{utils::decode_one, Tables, NUM_TABLES},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
@@ -10,16 +11,18 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::DatabaseWriteOperation;
 use reth_libmdbx::{ffi::DBI, EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use reth_metrics::metrics::histogram;
-use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
+use std::{str::FromStr, sync::Arc, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
 pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     /// Libmdbx-sys transaction.
     pub inner: Transaction<'a, K, E>,
-    /// Database table handle cache
-    pub db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
+    /// Cached internal transaction ID provided by libmdbx.
+    id: Option<u64>,
+    /// Database table handle cache.
+    pub(crate) db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
+    metrics_tx: Option<MetricEventsSender>,
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
@@ -28,12 +31,17 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     where
         'a: 'env,
     {
-        Self { inner, db_handles: Default::default() }
+        Self { inner, id: None, db_handles: Default::default(), metrics_tx: None }
+    }
+
+    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
+        self.metrics_tx = Some(metrics_tx);
+        self
     }
 
     /// Gets this transaction ID.
-    pub fn id(&self) -> u64 {
-        self.inner.id()
+    pub fn id(&mut self) -> u64 {
+        *self.id.get_or_insert_with(|| self.inner.id())
     }
 
     /// Gets a table database handle if it exists, otherwise creates it.
@@ -57,15 +65,25 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
 
     /// Create db Cursor
     pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'env, K, T>, DatabaseError> {
-        Ok(Cursor {
-            inner: self
-                .inner
+        Ok(Cursor::new(
+            self.inner
                 .cursor_with_dbi(self.get_dbi::<T>()?)
                 .map_err(|e| DatabaseError::InitCursor(e.into()))?,
-            table: T::NAME,
-            _dbi: PhantomData,
-            buf: vec![],
-        })
+        ))
+    }
+
+    fn execute_with_operation_metric<T>(
+        &self,
+        operation: Operation,
+        f: impl FnOnce(&Transaction<'_, K, E>) -> Result<T, DatabaseError>,
+    ) -> Result<T, DatabaseError> {
+        let start = Instant::now();
+        let result = f(&self.inner);
+        if let Some(metrics_tx) = &self.metrics_tx {
+            let _ =
+                metrics_tx.send(MetricEvent::Operation { operation, duration: start.elapsed() });
+        }
+        result
     }
 }
 
@@ -83,34 +101,59 @@ impl<E: EnvironmentKind> TableImporter for Tx<'_, RW, E> {}
 
 impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
-        self.inner
-            .get(self.get_dbi::<T>()?, key.encode().as_ref())
-            .map_err(|e| DatabaseError::Read(e.into()))?
-            .map(decode_one::<T>)
-            .transpose()
+        self.execute_with_operation_metric(Operation::Get, |tx| {
+            tx.get(self.get_dbi::<T>()?, key.encode().as_ref())
+                .map_err(|e| DatabaseError::Read(e.into()))?
+                .map(decode_one::<T>)
+                .transpose()
+        })
     }
 
-    fn commit(self) -> Result<bool, DatabaseError> {
+    fn commit(mut self) -> Result<bool, DatabaseError> {
         let start = Instant::now();
+        let metrics = self.metrics_tx.take().map(|metrics_tx| (self.id(), metrics_tx));
         let result = self.inner.commit().map_err(|e| DatabaseError::Commit(e.into()));
-        histogram!("tx.commit", start.elapsed());
+        if let Some((txn_id, metrics_tx)) = metrics {
+            let _ = metrics_tx.send(MetricEvent::CloseTransaction {
+                txn_id,
+                outcome: TransactionOutcome::Commit,
+                commit_duration: start.elapsed(),
+            });
+        }
         result
     }
 
-    fn drop(self) {
-        drop(self.inner)
+    fn drop(mut self) {
+        let start = Instant::now();
+        let metrics = self.metrics_tx.take().map(|metrics_tx| (self.id(), metrics_tx));
+        drop(self.inner);
+        if let Some((txn_id, metrics_tx)) = metrics {
+            let _ = metrics_tx.send(MetricEvent::CloseTransaction {
+                txn_id,
+                outcome: TransactionOutcome::Abort,
+                commit_duration: start.elapsed(),
+            });
+        }
     }
 
     // Iterate over read only values in database.
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
-        self.new_cursor()
+        let mut cursor = self.new_cursor()?;
+        if let Some(metrics_tx) = &self.metrics_tx {
+            cursor = cursor.with_metrics_tx(metrics_tx.clone());
+        }
+        Ok(cursor)
     }
 
     /// Iterate over read only values in database.
     fn cursor_dup_read<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
-        self.new_cursor()
+        let mut cursor = self.new_cursor()?;
+        if let Some(metrics_tx) = &self.metrics_tx {
+            cursor = cursor.with_metrics_tx(metrics_tx.clone());
+        }
+        Ok(cursor)
     }
 
     /// Returns number of entries in the table using cheap DB stats invocation.
@@ -126,14 +169,15 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
 impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.inner
-            .put(self.get_dbi::<T>()?, key.as_ref(), &value.compress(), WriteFlags::UPSERT)
-            .map_err(|e| DatabaseError::Write {
-                code: e.into(),
-                operation: DatabaseWriteOperation::Put,
-                table_name: T::NAME,
-                key: Box::from(key.as_ref()),
-            })
+        self.execute_with_operation_metric(Operation::Put, |tx| {
+            tx.put(self.get_dbi::<T>()?, key.as_ref(), &value.compress(), WriteFlags::UPSERT)
+                .map_err(|e| DatabaseError::Write {
+                    code: e.into(),
+                    operation: DatabaseWriteOperation::Put,
+                    table_name: T::NAME,
+                    key: Box::from(key.as_ref()),
+                })
+        })
     }
 
     fn delete<T: Table>(
@@ -148,9 +192,10 @@ impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
             data = Some(value.as_ref());
         };
 
-        self.inner
-            .del(self.get_dbi::<T>()?, key.encode(), data)
-            .map_err(|e| DatabaseError::Delete(e.into()))
+        self.execute_with_operation_metric(Operation::Delete, |tx| {
+            tx.del(self.get_dbi::<T>()?, key.encode(), data)
+                .map_err(|e| DatabaseError::Delete(e.into()))
+        })
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
@@ -162,12 +207,20 @@ impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
     fn cursor_write<T: Table>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, DatabaseError> {
-        self.new_cursor()
+        let mut cursor = self.new_cursor()?;
+        if let Some(metrics_tx) = &self.metrics_tx {
+            cursor = cursor.with_metrics_tx(metrics_tx.clone());
+        }
+        Ok(cursor)
     }
 
     fn cursor_dup_write<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, DatabaseError> {
-        self.new_cursor()
+        let mut cursor = self.new_cursor()?;
+        if let Some(metrics_tx) = &self.metrics_tx {
+            cursor = cursor.with_metrics_tx(metrics_tx.clone());
+        }
+        Ok(cursor)
     }
 }

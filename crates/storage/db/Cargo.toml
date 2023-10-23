@@ -45,6 +45,7 @@ parking_lot.workspace = true
 derive_more = "0.99"
 eyre.workspace = true
 paste = "1.0"
+tokio = { workspace = true, features = ["sync"] }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
