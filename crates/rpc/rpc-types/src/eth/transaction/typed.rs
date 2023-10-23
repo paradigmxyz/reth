@@ -73,7 +73,7 @@ impl TypedTransactionRequest {
                 value: tx.value.into(),
                 access_list: tx.access_list,
                 blob_versioned_hashes: tx.blob_versioned_hashes,
-                max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+                max_fee_per_blob_gas: tx.max_fee_per_blob_gas.to(),
                 input: tx.input,
             }),
         })
@@ -131,7 +131,7 @@ pub struct Eip4844TransactionRequest {
     pub value: U256,
     pub input: Bytes,
     pub access_list: AccessList,
-    pub max_fee_per_blob_gas: u128,
+    pub max_fee_per_blob_gas: U128,
     pub blob_versioned_hashes: Vec<B256>,
     pub gas_price: U128,
     pub sidecar: BlobTransactionSidecar,
