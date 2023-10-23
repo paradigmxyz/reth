@@ -237,6 +237,23 @@ impl GethTraceBuilder {
                     }
                 }
             }
+
+            // also need to check changed accounts for things like balance changes etc
+            for (addr, _) in account_diffs {
+                 match prestate.0.entry(addr) {
+                    Entry::Vacant(entry) => {
+                        let db_acc = db.basic_ref(addr)?.unwrap_or_default();
+                        let code = load_account_code(&db_acc);
+                        let acc_state =
+                            AccountState::from_account_info(db_acc.nonce, db_acc.balance, code);
+                        entry.insert(acc_state);
+                    }
+                    Entry::Occupied(_) => {
+                        // already recorded via touched accounts
+                    },
+                };
+            }
+
             Ok(PreStateFrame::Default(prestate))
         } else {
             let mut state_diff = DiffMode::default();
