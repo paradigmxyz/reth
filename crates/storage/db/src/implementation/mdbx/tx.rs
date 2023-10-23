@@ -73,11 +73,30 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         ))
     }
 
-    fn execute_with_operation_metric<T>(
+    fn execute_with_close_transaction_metric<R>(
+        mut self,
+        outcome: TransactionOutcome,
+        f: impl FnOnce(Self) -> R,
+    ) -> R {
+        let start = Instant::now();
+        let (txn_id, metrics_tx) =
+            self.metrics_tx.take().map(|metrics_tx| (self.id(), metrics_tx)).unzip();
+        let result = f(self);
+        if let (Some(txn_id), Some(metrics_tx)) = (txn_id, metrics_tx) {
+            let _ = metrics_tx.send(MetricEvent::CloseTransaction {
+                txn_id,
+                outcome,
+                commit_duration: start.elapsed(),
+            });
+        }
+        result
+    }
+
+    fn execute_with_operation_metric<R>(
         &self,
         operation: Operation,
-        f: impl FnOnce(&Transaction<'_, K, E>) -> Result<T, DatabaseError>,
-    ) -> Result<T, DatabaseError> {
+        f: impl FnOnce(&Transaction<'_, K, E>) -> R,
+    ) -> R {
         let start = Instant::now();
         let result = f(&self.inner);
         if let Some(metrics_tx) = &self.metrics_tx {
@@ -110,31 +129,16 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
         })
     }
 
-    fn commit(mut self) -> Result<bool, DatabaseError> {
-        let start = Instant::now();
-        let metrics = self.metrics_tx.take().map(|metrics_tx| (self.id(), metrics_tx));
-        let result = self.inner.commit().map_err(|e| DatabaseError::Commit(e.into()));
-        if let Some((txn_id, metrics_tx)) = metrics {
-            let _ = metrics_tx.send(MetricEvent::CloseTransaction {
-                txn_id,
-                outcome: TransactionOutcome::Commit,
-                commit_duration: start.elapsed(),
-            });
-        }
-        result
+    fn commit(self) -> Result<bool, DatabaseError> {
+        self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
+            this.inner.commit().map_err(|e| DatabaseError::Commit(e.into()))
+        })
     }
 
-    fn drop(mut self) {
-        let start = Instant::now();
-        let metrics = self.metrics_tx.take().map(|metrics_tx| (self.id(), metrics_tx));
-        drop(self.inner);
-        if let Some((txn_id, metrics_tx)) = metrics {
-            let _ = metrics_tx.send(MetricEvent::CloseTransaction {
-                txn_id,
-                outcome: TransactionOutcome::Abort,
-                commit_duration: start.elapsed(),
-            });
-        }
+    fn drop(self) {
+        self.execute_with_close_transaction_metric(TransactionOutcome::Abort, |this| {
+            drop(this.inner)
+        })
     }
 
     // Iterate over read only values in database.

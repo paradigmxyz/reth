@@ -43,11 +43,11 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         self
     }
 
-    fn execute_with_operation_metric(
+    fn execute_with_operation_metric<R>(
         &mut self,
         operation: Operation,
-        f: impl FnOnce(&mut Self) -> Result<(), DatabaseError>,
-    ) -> Result<(), DatabaseError> {
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
         let start = Instant::now();
         let result = f(self);
 
