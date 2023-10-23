@@ -1,4 +1,4 @@
-use crate::metrics::{metrics::Metrics, Operation, TransactionMode, TransactionOutcome};
+use crate::metrics::{Metrics, Operation, TransactionMode, TransactionOutcome};
 use reth_tracing::tracing::trace;
 use std::{
     future::Future,

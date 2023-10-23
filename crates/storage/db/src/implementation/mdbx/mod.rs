@@ -831,7 +831,7 @@ mod tests {
             assert!(result.expect(ERROR_RETURN_VALUE) == 200);
         }
 
-        let env = Env::<WriteMap>::open(&path, EnvKind::RO, None, None).expect(ERROR_DB_CREATION);
+        let env = Env::<WriteMap>::open(&path, EnvKind::RO, None).expect(ERROR_DB_CREATION);
 
         // GET
         let result =
