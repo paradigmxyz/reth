@@ -770,18 +770,6 @@ where
 
         this.update_request_metrics();
 
-        // let poll_result: (PeerId, Option<Vec<PooledTransactionsElement>>, Option<RequestError>) =
-        //     this.transaction_fetcher.poll(cx);
-        // match poll_result.2 {
-        //     Some(req_err) => {
-        //         this.on_request_error(poll_result.0, req_err);
-        //     }
-        //     None => this.import_transactions(
-        //         poll_result.0,
-        //         poll_result.1.unwrap(),
-        //         TransactionSource::Response,
-        //     ),
-        // }
         let fetch_event = this.transaction_fetcher.poll(cx);
         match fetch_event {
             Poll::Ready(FetchEvent::TransactionFetched { peer_id, transactions }) => {
@@ -1023,7 +1011,6 @@ struct Peer {
 /// * active requests - especially inflight hashes, so that whenever we receive new missing hashes
 ///   we can check first if they're already being requested.
 /// * missing hashes and peers that send us these - so we can possibly re-request them
-
 #[derive(Debug, Default)]
 struct TransactionFetcher {
     /// All currently active requests for pooled transactions.
@@ -1086,8 +1073,6 @@ impl TransactionFetcher {
                 }
             }
         }
-        // If you've exhausted all inflight requests and nothing else to process
-        // then you can return Poll::Pending indicating there's nothing to do right now
         Poll::Pending
     }
 
