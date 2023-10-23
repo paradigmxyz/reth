@@ -229,7 +229,7 @@ impl GethTraceBuilder {
                 for (key, value) in node.touched_slots() {
                     match acc_state.storage.entry(key.into()) {
                         Entry::Vacant(entry) => {
-                            entry.insert(value.unwrap_or_default().into());
+                            entry.insert(value.into());
                         }
                         Entry::Occupied(_) => {
                             // we've already recorded this slot
@@ -239,19 +239,33 @@ impl GethTraceBuilder {
             }
 
             // also need to check changed accounts for things like balance changes etc
-            for (addr, _) in account_diffs {
-                match prestate.0.entry(addr) {
+            for (addr, changed_acc) in account_diffs {
+                let acc_state = match prestate.0.entry(addr) {
                     Entry::Vacant(entry) => {
                         let db_acc = db.basic_ref(addr)?.unwrap_or_default();
                         let code = load_account_code(&db_acc);
                         let acc_state =
                             AccountState::from_account_info(db_acc.nonce, db_acc.balance, code);
-                        entry.insert(acc_state);
+                        entry.insert(acc_state)
                     }
-                    Entry::Occupied(_) => {
+                    Entry::Occupied(entry) => {
                         // already recorded via touched accounts
+                        entry.into_mut()
                     }
                 };
+
+                // in case we missed anything during the trace, we need to add the changed accounts
+                // storage
+                for (key, slot) in changed_acc.storage.iter() {
+                    match acc_state.storage.entry((*key).into()) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(slot.previous_or_original_value.into());
+                        }
+                        Entry::Occupied(_) => {
+                            // we've already recorded this slot
+                        }
+                    }
+                }
             }
 
             Ok(PreStateFrame::Default(prestate))
