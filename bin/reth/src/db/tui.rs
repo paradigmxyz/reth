@@ -3,7 +3,10 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use reth_db::table::{Table, TableRow};
+use reth_db::{
+    table::{Table, TableRow},
+    RawValue,
+};
 use std::{
     io,
     time::{Duration, Instant},
@@ -42,7 +45,70 @@ pub(crate) enum ViewMode {
     GoToPage,
 }
 
-#[derive(Default)]
+enum Entries<T: Table> {
+    /// Pairs of [Table::Key] and [RawValue<Table::Value>]
+    RawValues(Vec<(T::Key, RawValue<T::Value>)>),
+    /// Pairs of [Table::Key] and [Table::Value]
+    Values(Vec<TableRow<T>>),
+}
+
+impl<T: Table> Entries<T> {
+    /// Creates new empty [Entries] as [Entries::RawValues] if `raw_values == true` and as
+    /// [Entries::Values] if `raw == false`.
+    fn new_with_raw_values(raw_values: bool) -> Self {
+        if raw_values {
+            Self::RawValues(Vec::new())
+        } else {
+            Self::Values(Vec::new())
+        }
+    }
+
+    /// Sets the internal entries [Vec], converting the [Table::Value] into [RawValue<Table::Value>]
+    /// if needed.
+    fn set(&mut self, new_entries: Vec<TableRow<T>>) {
+        match self {
+            Entries::RawValues(old_entries) => {
+                *old_entries =
+                    new_entries.into_iter().map(|(key, value)| (key, value.into())).collect()
+            }
+            Entries::Values(old_entries) => *old_entries = new_entries,
+        }
+    }
+
+    /// Returns the length of internal [Vec].
+    fn len(&self) -> usize {
+        match self {
+            Entries::RawValues(entries) => entries.len(),
+            Entries::Values(entries) => entries.len(),
+        }
+    }
+
+    /// Returns an iterator over keys of the internal [Vec]. For both [Entries::RawValues] and
+    /// [Entries::Values], this iterator will yield [Table::Key].
+    fn iter_keys(&self) -> EntriesKeyIter<'_, T> {
+        EntriesKeyIter { entries: self, index: 0 }
+    }
+}
+
+struct EntriesKeyIter<'a, T: Table> {
+    entries: &'a Entries<T>,
+    index: usize,
+}
+
+impl<'a, T: Table> Iterator for EntriesKeyIter<'a, T> {
+    type Item = &'a T::Key;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = match self.entries {
+            Entries::RawValues(values) => values.get(self.index).map(|(key, _)| key),
+            Entries::Values(values) => values.get(self.index).map(|(key, _)| key),
+        };
+        self.index += 1;
+
+        item
+    }
+}
+
 pub(crate) struct DbListTUI<F, T: Table>
 where
     F: FnMut(usize, usize) -> Vec<TableRow<T>>,
@@ -65,7 +131,7 @@ where
     /// The state of the key list.
     list_state: ListState,
     /// Entries to show in the TUI.
-    entries: Vec<TableRow<T>>,
+    entries: Entries<T>,
 }
 
 impl<F, T: Table> DbListTUI<F, T>
@@ -73,7 +139,13 @@ where
     F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {
     /// Create a new database list TUI
-    pub(crate) fn new(fetch: F, skip: usize, count: usize, total_entries: usize) -> Self {
+    pub(crate) fn new(
+        fetch: F,
+        skip: usize,
+        count: usize,
+        total_entries: usize,
+        raw: bool,
+    ) -> Self {
         Self {
             fetch,
             skip,
@@ -82,7 +154,7 @@ where
             mode: ViewMode::Normal,
             input: String::new(),
             list_state: ListState::default(),
-            entries: Vec::new(),
+            entries: Entries::new_with_raw_values(raw),
         }
     }
 
@@ -148,7 +220,7 @@ where
 
     /// Fetch the current page
     fn fetch_page(&mut self) {
-        self.entries = (self.fetch)(self.skip, self.count);
+        self.entries.set((self.fetch)(self.skip, self.count));
         self.reset();
     }
 
@@ -298,10 +370,9 @@ where
 
         let key_length = format!("{}", (app.skip + app.count).saturating_sub(1)).len();
 
-        let entries: Vec<_> = app.entries.iter().map(|(k, _)| k).collect();
-
-        let formatted_keys = entries
-            .into_iter()
+        let formatted_keys = app
+            .entries
+            .iter_keys()
             .enumerate()
             .map(|(i, k)| {
                 ListItem::new(format!("[{:0>width$}]: {k:?}", i + app.skip, width = key_length))
@@ -321,7 +392,22 @@ where
             .start_corner(Corner::TopLeft);
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.list_state);
 
-        let values = app.entries.iter().map(|(_, v)| v).collect::<Vec<_>>();
+        let values: Vec<_> = match &app.entries {
+            Entries::RawValues(entries) => entries
+                .iter()
+                .map(|(_, v)| {
+                    serde_json::to_string_pretty(v)
+                        .unwrap_or(String::from("Error serializing value"))
+                })
+                .collect(),
+            Entries::Values(entries) => entries
+                .iter()
+                .map(|(_, v)| {
+                    serde_json::to_string_pretty(v)
+                        .unwrap_or(String::from("Error serializing value"))
+                })
+                .collect(),
+        };
 
         let value_display = Paragraph::new(
             app.list_state
