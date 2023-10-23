@@ -130,6 +130,16 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                 if let Ok((k, v)) = row {
                     let (key, value) = (k.into_key(), v.into_value());
 
+                    if key.len() + value.len() < filter.min_row_size {
+                        return None
+                    }
+                    if key.len() < filter.min_key_size {
+                        return None
+                    }
+                    if value.len() < filter.min_value_size {
+                        return None
+                    }
+
                     let result = || {
                         if filter.only_count {
                             return None
@@ -213,6 +223,12 @@ pub struct ListFilter {
     pub len: usize,
     /// Sequence of bytes that will be searched on values and keys from the database.
     pub search: Vec<u8>,
+    /// Minimum row size.
+    pub min_row_size: usize,
+    /// Minimum key size.
+    pub min_key_size: usize,
+    /// Minimum value size.
+    pub min_value_size: usize,
     /// Reverse order of entries.
     pub reverse: bool,
     /// Only counts the number of filtered entries without decoding and returning them.
@@ -220,11 +236,6 @@ pub struct ListFilter {
 }
 
 impl ListFilter {
-    /// Creates a new [`ListFilter`].
-    pub fn new(skip: usize, len: usize, search: Vec<u8>, reverse: bool, only_count: bool) -> Self {
-        ListFilter { skip, len, search, reverse, only_count }
-    }
-
     /// If `search` has a list of bytes, then filter for rows that have this sequence.
     pub fn has_search(&self) -> bool {
         !self.search.is_empty()
