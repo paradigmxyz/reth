@@ -1018,38 +1018,42 @@ struct TransactionFetcher {
     inflight_hash_to_fallback_peers: HashMap<TxHash, Vec<PeerId>>,
 }
 
+pub enum FetchEvent {
+    TransactionFetched { peer_id: PeerId, transactions: Option<Vec<PooledTransactionsElement>> },
+    FetchError { peer_id: PeerId, error: RequestError },
+}
+
 impl TransactionFetcher {
-    fn poll(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> (PeerId, Option<Vec<PooledTransactionsElement>>, Option<RequestError>) {
-        let mut final_peer_id: Option<PeerId> = None;
-        let mut final_txs: Option<Vec<PooledTransactionsElement>> = None;
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchEvent> {
         while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
             self.inflight_requests.poll_next_unpin(cx)
         {
-            final_peer_id = Some(peer_id);
-
             match result {
                 Ok(Ok(txs)) => {
                     self.inflight_requests.clear();
                     for tx in txs.0.iter() {
                         self.inflight_hash_to_fallback_peers.remove(tx.hash());
                     }
-                    final_txs = Some(txs.0);
+                    return Poll::Ready(FetchEvent::TransactionFetched {
+                        peer_id,
+                        transactions: Some(txs.0),
+                    })
                 }
-                Ok(Err(req_err)) => return (peer_id, None, Some(req_err)),
+                Ok(Err(req_err)) => {
+                    return Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
+                }
                 Err(_) => {
                     // request channel closed/dropped
-                    return (peer_id, None, Some(RequestError::ChannelClosed))
+                    return Poll::Ready(FetchEvent::FetchError {
+                        peer_id,
+                        error: RequestError::ChannelClosed,
+                    })
                 }
             }
         }
-        if let Some(peer_id) = final_peer_id {
-            (peer_id, final_txs, None)
-        } else {
-            (Default::default(), None, Some(RequestError::BadResponse))
-        }
+        // If you've exhausted all inflight requests and nothing else to process
+        // then you can return Poll::Pending indicating there's nothing to do right now
+        Poll::Pending
     }
 
     // request the missing transactions
@@ -1077,7 +1081,7 @@ impl TransactionFetcher {
         // 2. request all missing from peer
         if hashes.is_empty() {
             // nothing to request
-            return true
+            return false
         }
         let (response, rx) = oneshot::channel();
         let req: PeerRequest =
