@@ -46,7 +46,7 @@ impl<T: Clone> EventListeners<T> {
     }
 
     /// Returns the number of registered listeners.
-    pub fn listener_count(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.listeners.len()
     }
 
