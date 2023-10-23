@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -82,9 +82,12 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             let (block_number, header) = entry?;
             td += header.difficulty;
 
-            self.consensus
-                .validate_header_with_total_difficulty(&header, td)
-                .map_err(|error| StageError::Validation { block: header.seal_slow(), error })?;
+            self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
+                StageError::Block {
+                    block: header.seal_slow(),
+                    error: BlockErrorKind::Validation(error),
+                }
+            })?;
             cursor_td.append(block_number, td.into())?;
         }
 

@@ -7,17 +7,28 @@ use reth_primitives::SealedHeader;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
+/// Represents the specific error type within a block error.
+#[derive(Error, Debug)]
+pub enum BlockErrorKind {
+    /// The block encountered a validation error.
+    #[error("Validation error: {0}")]
+    Validation(#[source] consensus::ConsensusError),
+    /// The block encountered an execution error.
+    #[error("Execution error: {0}")]
+    Execution(#[source] executor::BlockExecutionError),
+}
+
 /// A stage execution error.
 #[derive(Error, Debug)]
 pub enum StageError {
-    /// The stage encountered a state validation error.
-    #[error("Stage encountered a validation error in block {number}: {error}.", number = block.number)]
-    Validation {
-        /// The block that failed validation.
+    /// The stage encountered an error related to a block.
+    #[error("Stage encountered a block error in block {number}: {error}.", number = block.number)]
+    Block {
+        /// The block that caused the error.
         block: SealedHeader,
-        /// The underlying consensus error.
+        /// The specific error type, either consensus or execution error.
         #[source]
-        error: consensus::ConsensusError,
+        error: BlockErrorKind,
     },
     /// The stage encountered a downloader error where the responses cannot be attached to the
     /// current head.
@@ -39,16 +50,6 @@ pub enum StageError {
     /// The stage encountered a database error.
     #[error("An internal database error occurred: {0}")]
     Database(#[from] DbError),
-    #[error("Stage encountered a execution error in block {number}: {error}.", number = block.number)]
-    /// The stage encountered a execution error
-    // TODO: Probably redundant, should be rolled into `Validation`
-    ExecutionError {
-        /// The block that failed execution.
-        block: SealedHeader,
-        /// The underlying execution error.
-        #[source]
-        error: executor::BlockExecutionError,
-    },
     /// Invalid pruning configuration
     #[error(transparent)]
     PruningConfiguration(#[from] reth_primitives::PruneSegmentError),
