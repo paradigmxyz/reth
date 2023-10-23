@@ -261,7 +261,7 @@ where
 
 #[cfg_attr(test, derive(PartialEq))]
 #[derive(Serialize, Deserialize)]
-pub struct ZstdDictionaries<'a>(Vec<ZstdDictionary<'a>>);
+pub struct ZstdDictionaries<'a>(pub Vec<ZstdDictionary<'a>>);
 
 impl<'a> std::fmt::Debug for ZstdDictionaries<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -309,14 +309,14 @@ pub enum ZstdDictionary<'a> {
 }
 
 impl<'a> ZstdDictionary<'a> {
-    fn raw(&self) -> &RawDictionary {
+    pub fn raw(&self) -> &RawDictionary {
         match self {
             ZstdDictionary::Raw(dict) => dict,
             ZstdDictionary::Loaded(_) => unreachable!(),
         }
     }
 
-    fn loaded(&self) -> &DecoderDictionary<'_> {
+    pub fn loaded(&self) -> &DecoderDictionary<'_> {
         match self {
             ZstdDictionary::Raw(_) => unreachable!(),
             ZstdDictionary::Loaded(dict) => dict,

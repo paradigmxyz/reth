@@ -663,8 +663,8 @@ mod tests {
         assert_eq!(nippy.path, loaded_nippy.path);
 
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
-            let mut cursor =
-                NippyJarCursor::new(&loaded_nippy, Some(zstd.decompressors().unwrap())).unwrap();
+            assert!(zstd.use_dict);
+            let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
@@ -675,6 +675,8 @@ mod tests {
                 );
                 row_index += 1;
             }
+        } else {
+            panic!("Expected Zstd compressor")
         }
     }
 
@@ -697,7 +699,7 @@ mod tests {
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Lz4(_)) = loaded_nippy.compressor() {
-            let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
+            let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
@@ -735,7 +737,7 @@ mod tests {
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
             assert!(!zstd.use_dict);
 
-            let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
+            let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
@@ -791,10 +793,8 @@ mod tests {
             assert!(loaded_nippy.phf.is_some());
             assert_eq!(loaded_nippy.user_header().block_start, block_start);
 
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
-                let mut cursor =
-                    NippyJarCursor::new(&loaded_nippy, Some(zstd.decompressors().unwrap()))
-                        .unwrap();
+            if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
+                let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
                 // Iterate over compressed values and compare
                 let mut row_num = 0usize;
@@ -858,10 +858,8 @@ mod tests {
         {
             let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
 
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
-                let mut cursor =
-                    NippyJarCursor::new(&loaded_nippy, Some(zstd.decompressors().unwrap()))
-                        .unwrap();
+            if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
+                let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
                 // Shuffled for chaos.
                 let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();

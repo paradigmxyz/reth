@@ -6098,6 +6098,7 @@ dependencies = [
  "alloy-rlp",
  "assert_matches",
  "auto_impl",
+ "dashmap",
  "itertools 0.11.0",
  "parking_lot 0.12.1",
  "pin-project",
