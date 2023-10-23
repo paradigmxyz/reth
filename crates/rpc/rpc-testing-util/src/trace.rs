@@ -174,4 +174,51 @@ mod tests {
         let stream = client.trace_block_buffered(block, 2);
         assert_is_stream(&stream);
     }
+
+    async fn compare_endpoints(endpoint1: &str, endpoint2: &str, block_ids: Vec<BlockId>) {
+        let client1 = HttpClientBuilder::default().build(endpoint1).unwrap();
+        let client2 = HttpClientBuilder::default().build(endpoint2).unwrap();
+
+        let stream1 = client1.trace_block_buffered(block_ids.clone(), 2);
+        let stream2 = client2.trace_block_buffered(block_ids, 2);
+
+        let traces1: Vec<_> = stream1.collect().await;
+        let traces2: Vec<_> = stream2.collect().await;
+
+        for (trace1, trace2) in traces1.iter().zip(traces2.iter()) {
+            match (trace1, trace2) {
+                (Ok((ref traces1_data, ref block1)), Ok((ref traces2_data, ref block2))) => {
+                    assert_eq!(
+                        traces1_data, traces2_data,
+                        "Mismatch in traces for block: {:?}",
+                        block1
+                    );
+                    assert_eq!(block1, block2, "Mismatch in block ids.");
+                }
+                (Err((ref err1, ref block1)), Err((ref err2, ref block2))) => {
+                    assert_eq!(
+                        format!("{:?}", err1),
+                        format!("{:?}", err2),
+                        "Different errors for block: {:?}",
+                        block1
+                    );
+                    assert_eq!(block1, block2, "Mismatch in block ids.");
+                }
+                _ => panic!(
+                    "One endpoint returned Ok while the other returned Err for block: {:?}",
+                    trace1
+                ),
+            }
+        }
+    }
+
+    //Let's compare between Reth and another client.
+    #[tokio::test]
+    async fn compare_trace_block_responses() {
+        let endpoint1 = "http://localhost:8545"; // I suppose this is Reth0
+        let endpoint2 = "https://eth.llamarpc.com"; // Any another client.
+        let block_ids = vec![BlockId::Number(5u64.into()), BlockNumberOrTag::Latest.into()];
+
+        compare_endpoints(endpoint1, endpoint2, block_ids).await;
+    }
 }
