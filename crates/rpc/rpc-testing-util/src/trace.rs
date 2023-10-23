@@ -38,6 +38,8 @@ pub trait TraceApiExt {
         B: Into<BlockId>;
 
     /// Returns a new stream that replays the transactions for the given transaction hashes.
+    ///
+    /// This returns all results in order.
     fn replay_transactions<I>(
         &self,
         tx_hashes: I,
@@ -49,7 +51,6 @@ pub trait TraceApiExt {
 
 /// A stream that replays the transactions for the requested hashes.
 #[must_use = "streams do nothing unless polled"]
-
 pub struct ReplayTransactionStream<'a> {
     stream: Pin<Box<dyn Stream<Item = ReplayTransactionResult> + 'a>>,
 }
@@ -121,7 +122,7 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
                 }
             }
         }))
-        .buffered(5);
+        .buffered(10);
         ReplayTransactionStream { stream: Box::pin(stream) }
     }
 }
