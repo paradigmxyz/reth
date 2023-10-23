@@ -129,7 +129,8 @@ impl TransactionsProvider for SnapshotProvider {
     fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
         // TODO `num` is provided after checking the index
         let block_num = num;
-        self.get_segment_provider(SnapshotSegment::Transactions, block_num, None)?.transaction_by_id(num)
+        self.get_segment_provider(SnapshotSegment::Transactions, block_num, None)?
+            .transaction_by_id(num)
     }
 
     fn transaction_by_id_no_hash(

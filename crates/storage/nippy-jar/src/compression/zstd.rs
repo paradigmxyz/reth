@@ -259,6 +259,7 @@ where
     Ok(dictionaries.map(|dicts| Arc::new(ZstdDictionaries::load(dicts))))
 }
 
+/// List of [`ZstdDictionary`]
 #[cfg_attr(test, derive(PartialEq))]
 #[derive(Serialize, Deserialize)]
 pub struct ZstdDictionaries<'a>(pub Vec<ZstdDictionary<'a>>);
@@ -270,10 +271,12 @@ impl<'a> std::fmt::Debug for ZstdDictionaries<'a> {
 }
 
 impl<'a> ZstdDictionaries<'a> {
+    /// Creates [`ZstdDictionaries`].
     pub fn new(raw: Vec<RawDictionary>) -> Self {
         Self(raw.into_iter().map(ZstdDictionary::Raw).collect())
     }
 
+    /// Loads a list [`RawDictionary`] into a list of [`ZstdDictionary::Loaded`].
     pub fn load(raw: Vec<RawDictionary>) -> Self {
         Self(
             raw.into_iter()
@@ -282,10 +285,12 @@ impl<'a> ZstdDictionaries<'a> {
         )
     }
 
+    /// Dictionary count.
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Creates a list of decompressors from a list of [`ZstdDictionary::Loaded`].
     pub fn decompressors(&self) -> Result<Vec<Decompressor<'_>>, NippyJarError> {
         Ok(self
             .0
@@ -294,6 +299,7 @@ impl<'a> ZstdDictionaries<'a> {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Creates a list of compressors from a list of [`ZstdDictionary::Raw`].
     pub fn compressors(&self) -> Result<Vec<Compressor<'_>>, NippyJarError> {
         Ok(self
             .0
@@ -303,12 +309,15 @@ impl<'a> ZstdDictionaries<'a> {
     }
 }
 
+/// A Zstd dictionary. It's created and serialized with [`ZstdDictionary::Raw`], and deserialized as
+/// [`ZstdDictionary::Loaded`].
 pub enum ZstdDictionary<'a> {
     Raw(RawDictionary),
     Loaded(DecoderDictionary<'a>),
 }
 
 impl<'a> ZstdDictionary<'a> {
+    /// Returns a reference to the expected `RawDictionary`
     pub fn raw(&self) -> &RawDictionary {
         match self {
             ZstdDictionary::Raw(dict) => dict,
@@ -316,6 +325,7 @@ impl<'a> ZstdDictionary<'a> {
         }
     }
 
+    /// Returns a reference to the expected `DecoderDictionary`
     pub fn loaded(&self) -> &DecoderDictionary<'_> {
         match self {
             ZstdDictionary::Raw(_) => unreachable!(),
