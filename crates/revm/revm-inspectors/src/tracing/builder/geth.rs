@@ -13,7 +13,7 @@ use revm::{
     db::DatabaseRef,
     primitives::{AccountInfo, ResultAndState, KECCAK_EMPTY},
 };
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{btree_map::Entry, BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces
 #[derive(Clone, Debug)]
@@ -208,22 +208,34 @@ impl GethTraceBuilder {
         };
 
         let account_diffs = state.into_iter().map(|(addr, acc)| (*addr, acc));
-        let is_diff = prestate_config.is_diff_mode();
-        if !is_diff {
+
+        if prestate_config.is_default_mode() {
             let mut prestate = PreStateMode::default();
-            for (addr, changed_acc) in account_diffs {
-                let db_acc = db.basic_ref(addr)?.unwrap_or_default();
-                let code = load_account_code(&db_acc);
+            // in default mode we __only__ return the touched state
+            for node in self.nodes.iter() {
+                let addr = node.trace.address;
 
-                let mut pre_state =
-                    AccountState::from_account_info(db_acc.nonce, db_acc.balance, code);
+                let acc_state = match prestate.0.entry(addr) {
+                    Entry::Vacant(entry) => {
+                        let db_acc = db.basic_ref(addr)?.unwrap_or_default();
+                        let code = load_account_code(&db_acc);
+                        let acc_state =
+                            AccountState::from_account_info(db_acc.nonce, db_acc.balance, code);
+                        entry.insert(acc_state)
+                    }
+                    Entry::Occupied(entry) => entry.into_mut(),
+                };
 
-                // handle _touched_ storage slots
-                for (key, slot) in changed_acc.storage.iter() {
-                    pre_state.storage.insert((*key).into(), slot.previous_or_original_value.into());
+                for (key, value) in node.touched_slots() {
+                    match acc_state.storage.entry(key.into()) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(value.unwrap_or_default().into());
+                        }
+                        Entry::Occupied(_) => {
+                            // we've already recorded this slot
+                        }
+                    }
                 }
-
-                prestate.0.insert(addr, pre_state);
             }
             Ok(PreStateFrame::Default(prestate))
         } else {

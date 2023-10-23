@@ -14,7 +14,7 @@ use revm::interpreter::{
     opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, SharedMemory, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -248,6 +248,29 @@ impl CallTraceNode {
         } else {
             self.trace.address
         }
+    }
+
+    /// Returns all storage slots touched by this trace and the value this storage had if any
+    pub(crate) fn touched_slots(&self) -> BTreeMap<U256, Option<U256>> {
+        let mut touched_slots = BTreeMap::new();
+        for change in self
+            .trace
+            .steps
+            .iter()
+            .filter_map(|s| s.storage_change.as_ref())
+            .filter(|c| c.is_sload())
+        {
+            match touched_slots.entry(change.key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(change.had_value);
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {
+                    // already touched
+                }
+            }
+        }
+
+        touched_slots
     }
 
     /// Pushes all steps onto the stack in reverse order
@@ -591,6 +614,13 @@ impl CallTraceStep {
 pub(crate) enum StorageChangeReason {
     SLOAD,
     SSTORE,
+}
+
+impl StorageChange {
+    /// Returns true if the storage change is an SLOAD
+    fn is_sload(&self) -> bool {
+        matches!(self.reason, StorageChangeReason::SLOAD)
+    }
 }
 
 /// Represents a storage change during execution

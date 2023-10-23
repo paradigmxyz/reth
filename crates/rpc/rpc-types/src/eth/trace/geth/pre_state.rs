@@ -204,8 +204,16 @@ pub struct PreStateConfig {
 }
 
 impl PreStateConfig {
+    /// Returns true if this trace was requested with diffmode.
+    #[inline]
     pub fn is_diff_mode(&self) -> bool {
         self.diff_mode.unwrap_or_default()
+    }
+
+    /// Is default mode if diff_mode is not set
+    #[inline]
+    pub fn is_default_mode(&self) -> bool {
+        !self.is_diff_mode()
     }
 }
 
