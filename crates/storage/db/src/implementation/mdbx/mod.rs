@@ -146,6 +146,8 @@ impl<E: EnvironmentKind> Env<E> {
         Ok(env)
     }
 
+    /// Sets the [MetricEventsSender] to report metrics about the database, transactions and
+    /// cursors.
     pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
         self.metrics_tx = Some(metrics_tx);
         self

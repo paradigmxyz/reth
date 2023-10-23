@@ -13,6 +13,7 @@ pub type MetricEventsSender = UnboundedSender<MetricEvent>;
 
 /// Collection of metric events.
 #[derive(Clone, Copy, Debug)]
+#[allow(missing_docs)]
 pub enum MetricEvent {
     OpenTransaction { txn_id: u64, mode: TransactionMode },
     CloseTransaction { txn_id: u64, outcome: TransactionOutcome, commit_duration: Duration },

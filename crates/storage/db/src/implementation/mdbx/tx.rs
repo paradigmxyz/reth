@@ -34,6 +34,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         Self { inner, id: None, db_handles: Default::default(), metrics_tx: None }
     }
 
+    /// Sets the [MetricEventsSender] to report metrics about the transaction and cursors.
     pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
         self.metrics_tx = Some(metrics_tx);
         self
