@@ -268,7 +268,7 @@ where
                                 // which we need to record steps and statediff
                                 .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
-
+                        dbg!(&call.access_list);
                         let frame =
                             self.inner
                                 .eth_api
