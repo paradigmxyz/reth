@@ -33,18 +33,7 @@ impl<T: Clone> EventListeners<T> {
     pub fn push_listener(&mut self, listener: mpsc::UnboundedSender<T>) {
         self.listeners.push(listener);
     }
-
-    /// Removes a listener if it exists.
-    pub fn remove_listener(&mut self, listener: &mpsc::UnboundedSender<T>) -> bool {
-        let listener_ptr = listener as *const _;
-        if let Some(pos) = self.listeners.iter().position(|l| l as *const _ == listener_ptr) {
-            self.listeners.remove(pos);
-            true
-        } else {
-            false
-        }
-    }
-
+    
     /// Returns the number of registered listeners.
     pub fn len(&self) -> usize {
         self.listeners.len()
