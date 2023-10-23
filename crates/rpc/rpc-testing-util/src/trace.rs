@@ -239,7 +239,7 @@ mod tests {
 
     #[tokio::test]
     async fn compare_trace_block_responses() {
-        let comparer = RpcComparer::new("The Reth rpc", "Another RPC here");
+        let comparer = RpcComparer::new("http://localhost:8545", "https://eth.llamarpc.com");
         let block_ids = vec![BlockId::Number(5u64.into()), BlockNumberOrTag::Latest.into()];
 
         comparer.compare_trace_block_responses(block_ids).await;
