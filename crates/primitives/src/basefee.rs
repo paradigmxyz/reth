@@ -1,32 +1,63 @@
 //! Helpers for working with EIP-1559 base fee
 
-/// Calculate base fee for next block. [EIP-1559](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1559.md) spec
+/// Calculate the base fee for the next block based on the EIP-1559 specification.
+///
+/// This function calculates the base fee for the next block according to the rules defined in the
+/// EIP-1559. EIP-1559 introduces a new transaction pricing mechanism that includes a
+/// fixed-per-block network fee that is burned and dynamically adjusts block sizes to handle
+/// transient congestion.
+///
+/// For each block, the base fee per gas is determined by the gas used in the parent block and the
+/// target gas (the block gas limit divided by the elasticity multiplier). The algorithm increases
+/// the base fee when blocks are congested and decreases it when they are under the target gas
+/// usage. The base fee per gas is always burned.
+///
+/// Parameters:
+/// - `gas_used`: The gas used in the current block.
+/// - `gas_limit`: The gas limit of the current block.
+/// - `base_fee`: The current base fee per gas.
+/// - `base_fee_params`: Base fee parameters such as elasticity multiplier and max change
+///   denominator.
+///
+/// Returns:
+/// The calculated base fee for the next block as a `u64`.
+///
+/// For more information, refer to the [EIP-1559 spec](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1559.md).
 pub fn calculate_next_block_base_fee(
     gas_used: u64,
     gas_limit: u64,
     base_fee: u64,
     base_fee_params: crate::BaseFeeParams,
 ) -> u64 {
+    // Calculate the target gas by dividing the gas limit by the elasticity multiplier.
     let gas_target = gas_limit / base_fee_params.elasticity_multiplier;
-    if gas_used == gas_target {
-        return base_fee
-    }
-    if gas_used > gas_target {
-        let gas_used_delta = gas_used - gas_target;
-        let base_fee_delta = std::cmp::max(
-            1,
-            base_fee as u128 * gas_used_delta as u128 /
-                gas_target as u128 /
-                base_fee_params.max_change_denominator as u128,
-        );
-        base_fee + (base_fee_delta as u64)
-    } else {
-        let gas_used_delta = gas_target - gas_used;
-        let base_fee_per_gas_delta = base_fee as u128 * gas_used_delta as u128 /
-            gas_target as u128 /
-            base_fee_params.max_change_denominator as u128;
 
-        base_fee.saturating_sub(base_fee_per_gas_delta as u64)
+    match gas_used.cmp(&gas_target) {
+        // If the gas used in the current block is equal to the gas target, the base fee remains the
+        // same (no increase).
+        std::cmp::Ordering::Equal => base_fee,
+        // If the gas used in the current block is greater than the gas target, calculate a new
+        // increased base fee.
+        std::cmp::Ordering::Greater => {
+            // Calculate the increase in base fee based on the formula defined by EIP-1559.
+            base_fee +
+                (std::cmp::max(
+                    // Ensure a minimum increase of 1.
+                    1,
+                    base_fee as u128 * (gas_used - gas_target) as u128 /
+                        (gas_target as u128 * base_fee_params.max_change_denominator as u128),
+                ) as u64)
+        }
+        // If the gas used in the current block is less than the gas target, calculate a new
+        // decreased base fee.
+        std::cmp::Ordering::Less => {
+            // Calculate the decrease in base fee based on the formula defined by EIP-1559.
+            base_fee.saturating_sub(
+                (base_fee as u128 * (gas_target - gas_used) as u128 /
+                    (gas_target as u128 * base_fee_params.max_change_denominator as u128))
+                    as u64,
+            )
+        }
     }
 }
 
