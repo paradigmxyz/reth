@@ -6,12 +6,15 @@ use crate::{
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    basefee::calculate_next_block_base_fee, BlockNumberOrTag, SealedHeader, U256,
+    basefee::calculate_next_block_base_fee, BlockNumberOrTag, SealedHeader, U256, B256 
 };
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 use tracing::debug;
+use derive_more::{Deref, DerefMut};
+use schnellru::{ByLength, LruMap};
+use std::fmt::{self, Debug, Formatter};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -47,6 +50,7 @@ where
         if block_count == 0 {
             return Ok(FeeHistory::default())
         }
+
 
         // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
         let max_fee_history = if reward_percentiles.is_none() {
@@ -195,5 +199,34 @@ where
         }
 
         Ok(rewards_in_block)
+    }
+}
+
+
+
+/// Wrapper struct for LruMap
+#[derive(Deref, DerefMut)]
+struct BaseFeePerGasLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
+
+impl Debug for BaseFeePerGasLruCache {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BaseFeePerGasLruCache")
+            .field("cache_length", &self.len())
+            .field("cache_memory_usage", &self.memory_usage())
+            .finish()
+    }
+}
+
+
+/// Wrapper struct for LruMap
+#[derive(Deref, DerefMut)]
+struct GasUsedRatioLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
+
+impl Debug for GasUsedRatioLruCache {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GasUsedRatioLruCache")
+            .field("cache_length", &self.len())
+            .field("cache_memory_usage", &self.memory_usage())
+            .finish()
     }
 }
