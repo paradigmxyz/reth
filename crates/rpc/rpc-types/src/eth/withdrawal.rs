@@ -29,7 +29,8 @@ impl Withdrawal {
     }
 }
 
-/// Same as [Withdrawal] but respects the Beacon API format which uses snake-case and
+/// Same as [Withdrawal] but respects the Beacon API format which uses snake-case and quoted
+/// decimals.
 #[serde_as]
 #[derive(Serialize, Deserialize)]
 pub(crate) struct BeaconAPIWithdrawal {
