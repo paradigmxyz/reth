@@ -604,9 +604,9 @@ where
                 self.peers.insert(
                     peer_id,
                     Peer {
-                        transactions: LruCache::new(
-                            NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
-                        ),
+                        transactions: LruCache::new(unsafe {
+                            NonZeroUsize::new_unchecked(PEER_TRANSACTION_CACHE_LIMIT)
+                        }),
                         request_tx: messages,
                         version,
                         client_version,

@@ -148,7 +148,9 @@ where
                 capabilities,
                 request_tx,
                 pending_response: None,
-                blocks: LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_LIMIT).unwrap()),
+                blocks: LruCache::new(unsafe {
+                    NonZeroUsize::new_unchecked(PEER_BLOCK_CACHE_LIMIT)
+                }),
             },
         );
     }
