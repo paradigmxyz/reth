@@ -1,10 +1,9 @@
 use crate::{
-    error::*, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
-    UnwindInput,
+    error::*, BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage,
+    StageError, UnwindInput,
 };
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, stage::StageId, BlockNumber, ChainSpec, B256,
 };
@@ -423,53 +422,60 @@ where
                             .saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH)
                             .max(1);
                         Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
-                    } else if let StageError::Validation { block, error } = err {
-                        error!(
-                            target: "sync::pipeline",
-                            stage = %stage_id,
-                            bad_block = %block.number,
-                            "Stage encountered a validation error: {error}"
-                        );
+                    } else if let StageError::Block { block, error } = err {
+                        match error {
+                            BlockErrorKind::Validation(validation_error) => {
+                                error!(
+                                    target: "sync::pipeline",
+                                    stage = %stage_id,
+                                    bad_block = %block.number,
+                                    "Stage encountered a validation error: {validation_error}"
+                                );
 
-                        // FIXME: When handling errors, we do not commit the database transaction.
-                        // This leads to the Merkle stage not clearing its
-                        // checkpoint, and restarting from an invalid place.
-                        drop(provider_rw);
-                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
-                        provider_rw
-                            .save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
-                        provider_rw.save_stage_checkpoint(
-                            StageId::MerkleExecute,
-                            prev_checkpoint.unwrap_or_default(),
-                        )?;
-                        provider_rw.commit()?;
+                                // FIXME: When handling errors, we do not commit the database
+                                // transaction. This leads to the Merkle
+                                // stage not clearing its checkpoint, and
+                                // restarting from an invalid place.
+                                drop(provider_rw);
+                                provider_rw =
+                                    factory.provider_rw().map_err(PipelineError::Interface)?;
+                                provider_rw.save_stage_checkpoint_progress(
+                                    StageId::MerkleExecute,
+                                    vec![],
+                                )?;
+                                provider_rw.save_stage_checkpoint(
+                                    StageId::MerkleExecute,
+                                    prev_checkpoint.unwrap_or_default(),
+                                )?;
+                                provider_rw.commit()?;
 
-                        // We unwind because of a validation error. If the unwind itself fails,
-                        // we bail entirely, otherwise we restart the execution loop from the
-                        // beginning.
-                        Ok(ControlFlow::Unwind {
-                            target: prev_checkpoint.unwrap_or_default().block_number,
-                            bad_block: block,
-                        })
-                    } else if let StageError::ExecutionError {
-                        block,
-                        error: BlockExecutionError::Validation(error),
-                    } = err
-                    {
-                        error!(
-                            target: "sync::pipeline",
-                            stage = %stage_id,
-                            bad_block = %block.number,
-                            "Stage encountered an execution error: {error}"
-                        );
+                                // We unwind because of a validation error. If the unwind itself
+                                // fails, we bail entirely,
+                                // otherwise we restart the execution loop from the
+                                // beginning.
+                                Ok(ControlFlow::Unwind {
+                                    target: prev_checkpoint.unwrap_or_default().block_number,
+                                    bad_block: block,
+                                })
+                            }
+                            BlockErrorKind::Execution(execution_error) => {
+                                error!(
+                                    target: "sync::pipeline",
+                                    stage = %stage_id,
+                                    bad_block = %block.number,
+                                    "Stage encountered an execution error: {execution_error}"
+                                );
 
-                        // We unwind because of an execution error. If the unwind itself fails, we
-                        // bail entirely, otherwise we restart the execution loop from the
-                        // beginning.
-                        Ok(ControlFlow::Unwind {
-                            target: prev_checkpoint.unwrap_or_default().block_number,
-                            bad_block: block,
-                        })
+                                // We unwind because of an execution error. If the unwind itself
+                                // fails, we bail entirely,
+                                // otherwise we restart
+                                // the execution loop from the beginning.
+                                Ok(ControlFlow::Unwind {
+                                    target: prev_checkpoint.unwrap_or_default().block_number,
+                                    bad_block: block,
+                                })
+                            }
+                        }
                     } else if err.is_fatal() {
                         error!(
                             target: "sync::pipeline",
@@ -817,9 +823,11 @@ mod tests {
             )
             .add_stage(
                 TestStage::new(StageId::Other("B"))
-                    .add_exec(Err(StageError::Validation {
+                    .add_exec(Err(StageError::Block {
                         block: random_header(&mut generators::rng(), 5, Default::default()),
-                        error: consensus::ConsensusError::BaseFeeMissing,
+                        error: BlockErrorKind::Validation(
+                            consensus::ConsensusError::BaseFeeMissing,
+                        ),
                     }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
