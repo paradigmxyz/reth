@@ -1,6 +1,6 @@
 //! Helpers for testing trace calls.
 use futures::{Stream, StreamExt};
-use jsonrpsee::core::Error as RpcError;
+use jsonrpsee::{core::Error as RpcError, http_client::HttpClientBuilder};
 use reth_primitives::{BlockId, TxHash};
 use reth_rpc_api::clients::TraceApiClient;
 use reth_rpc_types::trace::parity::{LocalizedTransactionTrace, TraceResults, TraceType};
@@ -159,34 +159,46 @@ impl<'a> std::fmt::Debug for TraceBlockStream<'a> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use jsonrpsee::http_client::HttpClientBuilder;
-    use reth_primitives::BlockNumberOrTag;
-
-    fn assert_is_stream<St: Stream>(_: &St) {}
-
-    #[tokio::test]
-    async fn can_create_block_stream() {
-        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
-        let block = vec![BlockId::Number(5u64.into()), BlockNumberOrTag::Latest.into()];
-        let stream = client.trace_block_buffered(block, 2);
-        assert_is_stream(&stream);
+//This part is for testing.
+//
+//------------------------
+/// A utility to compare RPC responses from two endpoints.
+#[derive(Debug)]
+pub struct RpcComparer<'a> {
+    endpoint1: &'a str,
+    endpoint2: &'a str,
+}
+impl<'a> RpcComparer<'a> {
+    /// Create a new `RpcComparer` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `endpoint1` - URL of the first RPC endpoint.
+    /// * `endpoint2` - URL of the second RPC endpoint.
+    pub fn new(endpoint1: &'a str, endpoint2: &'a str) -> Self {
+        RpcComparer { endpoint1, endpoint2 }
     }
-
-    async fn compare_endpoints(endpoint1: &str, endpoint2: &str, block_ids: Vec<BlockId>) {
-        let client1 = HttpClientBuilder::default().build(endpoint1).unwrap();
-        let client2 = HttpClientBuilder::default().build(endpoint2).unwrap();
+    /// Compare the `trace_block` responses of the two RPC endpoints(basically it should be Reth and
+    /// another Client (for our purpose.)).
+    ///
+    /// This method fetches the `trace_block` responses for the given `block_ids` from both
+    /// endpoints and compares them. If any inconsistencies are found, it asserts with the
+    /// relevant message.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_ids` - A vector of block IDs to compare.
+    pub async fn compare_trace_block_responses(&self, block_ids: Vec<BlockId>) {
+        let client1 = HttpClientBuilder::default().build(self.endpoint1).unwrap();
+        let client2 = HttpClientBuilder::default().build(self.endpoint2).unwrap();
 
         let stream1 = client1.trace_block_buffered(block_ids.clone(), 2);
         let stream2 = client2.trace_block_buffered(block_ids, 2);
 
-        let traces1: Vec<_> = stream1.collect().await;
-        let traces2: Vec<_> = stream2.collect().await;
+        let mut zipped_streams = stream1.zip(stream2);
 
-        for (trace1, trace2) in traces1.iter().zip(traces2.iter()) {
-            match (trace1, trace2) {
+        while let Some((result1, result2)) = zipped_streams.next().await {
+            match (result1, result2) {
                 (Ok((ref traces1_data, ref block1)), Ok((ref traces2_data, ref block2))) => {
                     assert_eq!(
                         traces1_data, traces2_data,
@@ -204,21 +216,32 @@ mod tests {
                     );
                     assert_eq!(block1, block2, "Mismatch in block ids.");
                 }
-                _ => panic!(
-                    "One endpoint returned Ok while the other returned Err for block: {:?}",
-                    trace1
-                ),
+                _ => panic!("One endpoint returned Ok while the other returned Err."),
             }
         }
     }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonrpsee::http_client::HttpClientBuilder;
+    use reth_primitives::BlockNumberOrTag;
 
-    //Let's compare between Reth and another client.
+    fn assert_is_stream<St: Stream>(_: &St) {}
+
+    #[tokio::test]
+    async fn can_create_block_stream() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let block = vec![BlockId::Number(5u64.into()), BlockNumberOrTag::Latest.into()];
+        let stream = client.trace_block_buffered(block, 2);
+        assert_is_stream(&stream);
+    }
+
     #[tokio::test]
     async fn compare_trace_block_responses() {
-        let endpoint1 = "http://localhost:8545"; // I suppose this is Reth0
-        let endpoint2 = "https://eth.llamarpc.com"; // Any another client.
+        let comparer = RpcComparer::new("The Reth rpc", "Another RPC here");
         let block_ids = vec![BlockId::Number(5u64.into()), BlockNumberOrTag::Latest.into()];
 
-        compare_endpoints(endpoint1, endpoint2, block_ids).await;
+        comparer.compare_trace_block_responses(block_ids).await;
     }
 }
