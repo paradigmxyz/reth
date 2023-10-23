@@ -8,6 +8,9 @@ pub mod payload;
 mod transition;
 pub use self::{cancun::*, forkchoice::*, payload::*, transition::*};
 
+/// Beacon API types
+pub mod beacon_api;
+
 /// The list of all supported Engine capabilities available over the engine endpoint.
 pub const CAPABILITIES: [&str; 12] = [
     "engine_forkchoiceUpdatedV1",

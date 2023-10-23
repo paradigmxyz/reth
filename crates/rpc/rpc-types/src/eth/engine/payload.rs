@@ -1,3 +1,4 @@
+use crate::eth::withdrawal::BeaconAPIWithdrawal;
 pub use crate::Withdrawal;
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
 use reth_primitives::{
@@ -5,6 +6,7 @@ use reth_primitives::{
     BlobTransactionSidecar, SealedBlock,
 };
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde_with::{serde_as, DisplayFromStr};
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
@@ -409,6 +411,63 @@ pub struct PayloadAttributes {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
+}
+
+#[serde_as]
+#[derive(Serialize, Deserialize)]
+struct BeaconAPIPayloadAttributes {
+    #[serde_as(as = "DisplayFromStr")]
+    timestamp: u64,
+    prev_randao: B256,
+    suggested_fee_recipient: Address,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<Vec<BeaconAPIWithdrawal>>")]
+    withdrawals: Option<Vec<Withdrawal>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_beacon_block_root: Option<B256>,
+}
+/// A helper module for serializing and deserializing the payload attributes for the beacon API.
+///
+/// The beacon API encoded object has equivalent fields to the [PayloadAttributes] with two
+/// differences:
+/// 1) `snake_case` identifiers must be used rather than `camelCase`;
+/// 2) integers must be encoded as quoted decimals rather than big-endian hex.
+pub mod beacon_api_payload_attributes {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Serialize the payload attributes for the beacon API.
+    pub fn serialize<S>(
+        payload_attributes: &PayloadAttributes,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let beacon_api_payload_attributes = BeaconAPIPayloadAttributes {
+            timestamp: payload_attributes.timestamp.to(),
+            prev_randao: payload_attributes.prev_randao,
+            suggested_fee_recipient: payload_attributes.suggested_fee_recipient,
+            withdrawals: payload_attributes.withdrawals.clone(),
+            parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
+        };
+        beacon_api_payload_attributes.serialize(serializer)
+    }
+
+    /// Deserialize the payload attributes for the beacon API.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<PayloadAttributes, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let beacon_api_payload_attributes = BeaconAPIPayloadAttributes::deserialize(deserializer)?;
+        Ok(PayloadAttributes {
+            timestamp: U64::from(beacon_api_payload_attributes.timestamp),
+            prev_randao: beacon_api_payload_attributes.prev_randao,
+            suggested_fee_recipient: beacon_api_payload_attributes.suggested_fee_recipient,
+            withdrawals: beacon_api_payload_attributes.withdrawals,
+            parent_beacon_block_root: beacon_api_payload_attributes.parent_beacon_block_root,
+        })
+    }
 }
 
 /// This structure contains the result of processing a payload or fork choice update.
@@ -861,5 +920,22 @@ mod tests {
         let payload_res: Result<ExecutionPayloadInputV2, serde_json::Error> =
             serde_json::from_str(input);
         assert!(payload_res.is_err());
+    }
+
+    #[test]
+    fn beacon_api_payload_serde() {
+        #[derive(Serialize, Deserialize)]
+        #[serde(transparent)]
+        struct Event {
+            #[serde(with = "beacon_api_payload_attributes")]
+            payload: PayloadAttributes,
+        }
+
+        let s = r#"{"timestamp":"1697981664","prev_randao":"0x739947d9f0aed15e32ed05a978e53b55cdcfe3db4a26165890fa45a80a06c996","suggested_fee_recipient":"0x0000000000000000000000000000000000000001","withdrawals":[{"index":"2460700","validator_index":"852657","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5268915"},{"index":"2460701","validator_index":"852658","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5253066"},{"index":"2460702","validator_index":"852659","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5266666"},{"index":"2460703","validator_index":"852660","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5239026"},{"index":"2460704","validator_index":"852661","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5273516"},{"index":"2460705","validator_index":"852662","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5260842"},{"index":"2460706","validator_index":"852663","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5238925"},{"index":"2460707","validator_index":"852664","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5253956"},{"index":"2460708","validator_index":"852665","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5284374"},{"index":"2460709","validator_index":"852666","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5276798"},{"index":"2460710","validator_index":"852667","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5239682"},{"index":"2460711","validator_index":"852668","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5261544"},{"index":"2460712","validator_index":"852669","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5247034"},{"index":"2460713","validator_index":"852670","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5256750"},{"index":"2460714","validator_index":"852671","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5261929"},{"index":"2460715","validator_index":"852672","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5243188"}]}"#;
+
+        let event: Event = serde_json::from_str(s).unwrap();
+        let input = serde_json::from_str::<serde_json::Value>(s).unwrap();
+        let json = serde_json::to_value(event).unwrap();
+        assert_eq!(input, json);
     }
 }

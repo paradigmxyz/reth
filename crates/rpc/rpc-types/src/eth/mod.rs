@@ -15,7 +15,7 @@ mod syncing;
 pub mod trace;
 mod transaction;
 pub mod txpool;
-mod withdrawal;
+pub mod withdrawal;
 mod work;
 
 pub use account::*;

@@ -51,6 +51,7 @@ members = [
     "examples/cli-extension-event-hooks",
     "examples/rpc-db",
     "examples/manual-p2p",
+    "examples/beacon-api-sse",
     "examples/trace-transaction-cli"
 ]
 default-members = ["bin/reth"]

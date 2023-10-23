@@ -21,6 +21,7 @@ alloy-rlp = { workspace = true, features = ["arrayvec"] }
 thiserror.workspace = true
 itertools.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde_with = "3.3"
 serde_json.workspace = true
 jsonrpsee-types = { workspace = true, optional = true }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
