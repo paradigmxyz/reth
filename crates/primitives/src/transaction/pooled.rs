@@ -72,8 +72,8 @@ impl PooledTransactionsElement {
     /// Reference to transaction hash. Used to identify transaction.
     pub fn hash(&self) -> &TxHash {
         match self {
-            PooledTransactionsElement::Legacy { hash, .. } => hash,
-            PooledTransactionsElement::Eip2930 { hash, .. } => hash,
+            PooledTransactionsElement::Legacy { hash, .. } |
+            PooledTransactionsElement::Eip2930 { hash, .. } |
             PooledTransactionsElement::Eip1559 { hash, .. } => hash,
             PooledTransactionsElement::BlobTransaction(tx) => &tx.hash,
         }
@@ -82,9 +82,9 @@ impl PooledTransactionsElement {
     /// Returns the signature of the transaction.
     pub fn signature(&self) -> &Signature {
         match self {
-            Self::Legacy { signature, .. } => signature,
-            Self::Eip2930 { signature, .. } => signature,
-            Self::Eip1559 { signature, .. } => signature,
+            Self::Legacy { signature, .. } |
+            Self::Eip2930 { signature, .. } |
+            Self::Eip1559 { signature, .. } |
             Self::BlobTransaction(blob_tx) => &blob_tx.signature,
         }
     }
