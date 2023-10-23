@@ -26,8 +26,8 @@ impl RethNodeCommandConfig for AutoMineConfig {
         components.task_executor().spawn_critical_blocking("rpc request", Box::pin(async move {
             // submit tx through rpc
             let raw_tx = "0x02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090";
-            let client = HttpClientBuilder::default().build("http://127.0.0.1:8545").expect("");
-            let response: String = client.request("eth_sendRawTransaction", rpc_params![raw_tx]).await.expect("");
+            let client = HttpClientBuilder::default().build("http://127.0.0.1:8545").expect("http client should bind to default rpc port");
+            let response: String = client.request("eth_sendRawTransaction", rpc_params![raw_tx]).await.expect("client request should be valid");
             let expected = "0xb1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398";
 
             assert_eq!(&response, expected);
@@ -39,7 +39,7 @@ impl RethNodeCommandConfig for AutoMineConfig {
             // wait for canon event or timeout
             tokio::select! {
                 _ = &mut sleep => {
-                    panic!("Canon update took too long to arrive")
+                    panic!("Canon state update took too long to arrive")
                 }
 
                 update = canon_events.recv() => {
@@ -58,8 +58,8 @@ impl RethNodeCommandConfig for AutoMineConfig {
 
 #[test]
 pub fn test_auto_mine() {
+    // create temp path for test
     let temp_path = tempfile::TempDir::new().expect("tempdir is okay").into_path();
-
     let datadir = temp_path.to_str().expect("temp path is okay");
 
     let no_args = NoArgs::with(AutoMineConfig);
