@@ -262,7 +262,8 @@ impl CallTraceNode {
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change.as_ref()) {
             match touched_slots.entry(change.key) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(change.had_value);
+                    dbg!(change);
+                    entry.insert(Some(change.value));
                 }
                 std::collections::btree_map::Entry::Occupied(_) => {
                     // already touched

@@ -196,6 +196,11 @@ impl AccountChangeKind {
     }
 }
 
+/// The config for the prestate tracer.
+///
+/// If `diffMode` is set to true, the response frame includes all the account and storage diffs for
+/// the transaction. If it's missing or set to false it only returns the accounts and storage
+/// necessary to execute the transaction.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreStateConfig {
