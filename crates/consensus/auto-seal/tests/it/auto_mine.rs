@@ -14,6 +14,7 @@ use reth_primitives::{hex, revm_primitives::FixedBytes, ChainSpec, Genesis};
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Duration};
+use tokio::time::timeout;
 
 #[derive(Debug)]
 struct AutoMineConfig;
@@ -33,24 +34,18 @@ impl RethNodeCommandConfig for AutoMineConfig {
             assert_eq!(&response, expected);
 
             // more than enough time for the next block
-            let sleep = tokio::time::sleep(Duration::from_secs(15));
-            tokio::pin!(sleep);
+            let duration = Duration::from_secs(15);
 
             // wait for canon event or timeout
-            tokio::select! {
-                _ = &mut sleep => {
-                    panic!("Canon state update took too long to arrive")
-                }
-
-                update = canon_events.recv() => {
-                    let event = update.expect("canon events stream is still open");
-                    let new_tip = event.tip();
-                    let expected_tx_root: FixedBytes<32> = hex!("c79b5383458e63fb20c6a49d9ec7917195a59003a2af4b28a01d7c6fbbcd7e35").into();
-                    assert_eq!(new_tip.transactions_root, expected_tx_root);
-                    assert_eq!(new_tip.number, 1);
-                    assert!(pool.pending_transactions().is_empty());
-                }
-            }
+            let update = timeout(duration, canon_events.recv())
+                .await
+                .expect("canon state should change before timeout")
+                .expect("canon events stream is still open");
+            let new_tip = update.tip();
+            let expected_tx_root: FixedBytes<32> = hex!("c79b5383458e63fb20c6a49d9ec7917195a59003a2af4b28a01d7c6fbbcd7e35").into();
+            assert_eq!(new_tip.transactions_root, expected_tx_root);
+            assert_eq!(new_tip.number, 1);
+            assert!(pool.pending_transactions().is_empty());
         }));
         Ok(())
     }
