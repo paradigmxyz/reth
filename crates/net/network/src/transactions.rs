@@ -1032,9 +1032,23 @@ struct TransactionFetcher {
     inflight_hash_to_fallback_peers: HashMap<TxHash, Vec<PeerId>>,
 }
 
+/// Represents possible events from fetching transactions.
+#[derive(Debug)]
 pub enum FetchEvent {
-    TransactionFetched { peer_id: PeerId, transactions: Option<Vec<PooledTransactionsElement>> },
-    FetchError { peer_id: PeerId, error: RequestError },
+    /// Triggered when transactions are successfully fetched.
+    TransactionFetched {
+        /// The ID of the peer from which transactions were fetched.
+        peer_id: PeerId,
+        /// The transactions that were fetched, if available.
+        transactions: Option<Vec<PooledTransactionsElement>>,
+    },
+    /// Triggered when there is an error in fetching transactions.
+    FetchError {
+        /// The ID of the peer from which an attempt to fetch transactions resulted in an error.
+        peer_id: PeerId,
+        /// The specific error that occurred while fetching.
+        error: RequestError,
+    },
 }
 
 impl TransactionFetcher {
