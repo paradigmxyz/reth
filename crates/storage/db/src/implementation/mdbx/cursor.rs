@@ -35,7 +35,7 @@ pub struct Cursor<'tx, K: TransactionKind, T: Table> {
 
 impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
     pub(crate) fn new(inner: reth_libmdbx::Cursor<'tx, K>) -> Self {
-        Self { inner, buf: Vec::new(), metrics_tx: None, _dbi: PhantomData::default() }
+        Self { inner, buf: Vec::new(), metrics_tx: None, _dbi: PhantomData }
     }
 
     pub(crate) fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
