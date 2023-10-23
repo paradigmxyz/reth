@@ -1038,6 +1038,7 @@ pub enum FetchEvent {
     },
 }
 
+#[allow(dead_code)]
 impl TransactionFetcher {
     /// Removes the provided transaction hashes from the inflight requests set.
     pub fn handle_broadcasted_transactions(&mut self, hashes: Vec<TxHash>) {
@@ -1047,7 +1048,7 @@ impl TransactionFetcher {
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchEvent> {
-        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
+        if let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
             self.inflight_requests.poll_next_unpin(cx)
         {
             match result {
