@@ -240,7 +240,7 @@ impl GethTraceBuilder {
 
             // also need to check changed accounts for things like balance changes etc
             for (addr, _) in account_diffs {
-                 match prestate.0.entry(addr) {
+                match prestate.0.entry(addr) {
                     Entry::Vacant(entry) => {
                         let db_acc = db.basic_ref(addr)?.unwrap_or_default();
                         let code = load_account_code(&db_acc);
@@ -250,7 +250,7 @@ impl GethTraceBuilder {
                     }
                     Entry::Occupied(_) => {
                         // already recorded via touched accounts
-                    },
+                    }
                 };
             }
 

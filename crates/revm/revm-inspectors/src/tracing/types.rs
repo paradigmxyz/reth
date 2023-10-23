@@ -251,15 +251,15 @@ impl CallTraceNode {
     }
 
     /// Returns all storage slots touched by this trace and the value this storage had if any
+    ///
+    /// A touched slot is either a slot that was written to or read from.
+    ///
+    /// If the slot is accessed more than once, the result only includes the first time it was
+    /// accessed, in other words in only returns the original value of the slot or `None` if it did
+    /// not yet have a value.
     pub(crate) fn touched_slots(&self) -> BTreeMap<U256, Option<U256>> {
         let mut touched_slots = BTreeMap::new();
-        for change in self
-            .trace
-            .steps
-            .iter()
-            .filter_map(|s| s.storage_change.as_ref())
-            .filter(|c| c.is_sload())
-        {
+        for change in self.trace.steps.iter().filter_map(|s| s.storage_change.as_ref()) {
             match touched_slots.entry(change.key) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert(change.had_value);
@@ -614,13 +614,6 @@ impl CallTraceStep {
 pub(crate) enum StorageChangeReason {
     SLOAD,
     SSTORE,
-}
-
-impl StorageChange {
-    /// Returns true if the storage change is an SLOAD
-    fn is_sload(&self) -> bool {
-        matches!(self.reason, StorageChangeReason::SLOAD)
-    }
 }
 
 /// Represents a storage change during execution
