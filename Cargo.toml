@@ -48,7 +48,7 @@ members = [
     "crates/tokio-util",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
-    "crates/testing"
+    "crates/testing",
     "examples/cli-extension-event-hooks",
     "examples/rpc-db",
     "examples/manual-p2p",

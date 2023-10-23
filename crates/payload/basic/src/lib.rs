@@ -593,11 +593,17 @@ pub enum BuildOutcome {
 /// payload configuration, cancellation status, and the best payload achieved so far.
 #[derive(Debug)]
 pub struct BuildArguments<Pool, Client> {
+    /// Client
     pub client: Client,
+    /// Pool
     pub pool: Pool,
+    /// Cached reads from database
     pub cached_reads: CachedReads,
+    /// Config to build Payload
     pub config: PayloadConfig,
+    /// A marker that is used to cancel a job
     pub cancel: Cancelled,
+    /// Contains the built payload
     pub best_payload: Option<Arc<BuiltPayload>>,
 }
 

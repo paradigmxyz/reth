@@ -25,9 +25,6 @@ reth-basic-payload-builder = {path = "../payload/basic"}
 tokio = { workspace = true}
 revm.workspace = true
 
-[dev-dependencies]
-
-
 [features]
 default = ["test-utils"]
 test-utils = []
