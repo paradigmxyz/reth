@@ -33,7 +33,7 @@ impl<T: Clone> EventListeners<T> {
     pub fn push_listener(&mut self, listener: mpsc::UnboundedSender<T>) {
         self.listeners.push(listener);
     }
-    
+
     /// Returns the number of registered listeners.
     pub fn len(&self) -> usize {
         self.listeners.len()
