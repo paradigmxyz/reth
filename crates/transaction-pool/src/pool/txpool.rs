@@ -1616,9 +1616,9 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
 #[derive(Debug, Clone)]
 pub(crate) struct PendingFees {
     /// The pending base fee
-    pub base_fee: u64,
+    pub(crate) base_fee: u64,
     /// The pending blob fee
-    pub blob_fee: u128,
+    pub(crate) blob_fee: u128,
 }
 
 impl Default for PendingFees {
@@ -1923,6 +1923,101 @@ mod tests {
         assert!(pool.blob_transactions.is_empty());
     }
 
+    /// A struct representing a txpool promotion test instance
+    #[derive(Debug, PartialEq, Eq, Clone, Hash)]
+    struct PromotionTest {
+        /// The basefee at the start of the test
+        basefee: u64,
+        /// The blobfee at the start of the test
+        blobfee: u128,
+        /// The subpool at the start of the test
+        subpool: SubPool,
+        /// The basefee update
+        basefee_update: u64,
+        /// The blobfee update
+        blobfee_update: u128,
+        /// The subpool after the update
+        new_subpool: SubPool,
+    }
+
+    impl PromotionTest {
+        /// Returns the test case for the opposite update
+        fn opposite(&self) -> Self {
+            Self {
+                basefee: self.basefee_update,
+                blobfee: self.blobfee_update,
+                subpool: self.new_subpool,
+                blobfee_update: self.blobfee,
+                basefee_update: self.basefee,
+                new_subpool: self.subpool,
+            }
+        }
+
+        /// Runs an assertion on the provided pool, ensuring that the transaction is in the correct
+        /// subpool based on the starting condition of the test, assuming the pool contains only a
+        /// single transaction.
+        fn assert_single_tx_starting_subpool<T: TransactionOrdering>(&self, pool: &TxPool<T>) {
+            match self.subpool {
+                SubPool::Blob => {
+                    assert_eq!(pool.blob_transactions.len(), 1);
+                    assert!(pool.pending_pool.is_empty());
+                    assert!(pool.basefee_pool.is_empty());
+                    assert!(pool.queued_pool.is_empty());
+                }
+                SubPool::Pending => {
+                    assert!(pool.blob_transactions.is_empty());
+                    assert_eq!(pool.pending_pool.len(), 1);
+                    assert!(pool.basefee_pool.is_empty());
+                    assert!(pool.queued_pool.is_empty());
+                }
+                SubPool::BaseFee => {
+                    assert!(pool.blob_transactions.is_empty());
+                    assert!(pool.pending_pool.is_empty());
+                    assert_eq!(pool.basefee_pool.len(), 1);
+                    assert!(pool.queued_pool.is_empty());
+                }
+                SubPool::Queued => {
+                    assert!(pool.blob_transactions.is_empty());
+                    assert!(pool.pending_pool.is_empty());
+                    assert!(pool.basefee_pool.is_empty());
+                    assert_eq!(pool.queued_pool.len(), 1);
+                }
+            }
+        }
+
+        /// Runs an assertion on the provided pool, ensuring that the transaction is in the correct
+        /// subpool based on the ending condition of the test, assuming the pool contains only a
+        /// single transaction.
+        fn assert_single_tx_ending_subpool<T: TransactionOrdering>(&self, pool: &TxPool<T>) {
+            match self.new_subpool {
+                SubPool::Blob => {
+                    assert_eq!(pool.blob_transactions.len(), 1);
+                    assert!(pool.pending_pool.is_empty());
+                    assert!(pool.basefee_pool.is_empty());
+                    assert!(pool.queued_pool.is_empty());
+                }
+                SubPool::Pending => {
+                    assert!(pool.blob_transactions.is_empty());
+                    assert_eq!(pool.pending_pool.len(), 1);
+                    assert!(pool.basefee_pool.is_empty());
+                    assert!(pool.queued_pool.is_empty());
+                }
+                SubPool::BaseFee => {
+                    assert!(pool.blob_transactions.is_empty());
+                    assert!(pool.pending_pool.is_empty());
+                    assert_eq!(pool.basefee_pool.len(), 1);
+                    assert!(pool.queued_pool.is_empty());
+                }
+                SubPool::Queued => {
+                    assert!(pool.blob_transactions.is_empty());
+                    assert!(pool.pending_pool.is_empty());
+                    assert!(pool.basefee_pool.is_empty());
+                    assert_eq!(pool.queued_pool.len(), 1);
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_promote_blob_tx_with_both_pending_fee_updates() {
         // this test starts out with a high base and blobee.
@@ -1932,44 +2027,111 @@ mod tests {
         let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
 
-        // set block info so the tx is initially underpriced w.r.t. blob fee
-        let mut block_info = pool.block_info();
-        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap() + 1);
-        block_info.pending_basefee = (tx.max_fee_per_gas() + 1) as u64;
-        pool.set_block_info(block_info);
+        let max_fee_per_blob_gas = tx.max_fee_per_blob_gas().unwrap();
+        let max_fee_per_gas = tx.max_fee_per_gas() as u64;
 
-        let validated = f.validated(tx.clone());
-        let id = *validated.id();
-        pool.add_transaction(validated, on_chain_balance, on_chain_nonce).unwrap();
+        // These are all _promotion_ tests or idempotent tests.
+        let mut expected_promotions = vec![
+            PromotionTest {
+                blobfee: max_fee_per_blob_gas + 1,
+                basefee: max_fee_per_gas + 1,
+                subpool: SubPool::Blob,
+                blobfee_update: max_fee_per_blob_gas + 1,
+                basefee_update: max_fee_per_gas + 1,
+                new_subpool: SubPool::Blob,
+            },
+            PromotionTest {
+                blobfee: max_fee_per_blob_gas + 1,
+                basefee: max_fee_per_gas + 1,
+                subpool: SubPool::Blob,
+                blobfee_update: max_fee_per_blob_gas,
+                basefee_update: max_fee_per_gas + 1,
+                new_subpool: SubPool::Blob,
+            },
+            PromotionTest {
+                blobfee: max_fee_per_blob_gas + 1,
+                basefee: max_fee_per_gas + 1,
+                subpool: SubPool::Blob,
+                blobfee_update: max_fee_per_blob_gas + 1,
+                basefee_update: max_fee_per_gas,
+                new_subpool: SubPool::Blob,
+            },
+            PromotionTest {
+                blobfee: max_fee_per_blob_gas + 1,
+                basefee: max_fee_per_gas + 1,
+                subpool: SubPool::Blob,
+                blobfee_update: max_fee_per_blob_gas,
+                basefee_update: max_fee_per_gas,
+                new_subpool: SubPool::Pending,
+            },
+            PromotionTest {
+                blobfee: max_fee_per_blob_gas,
+                basefee: max_fee_per_gas + 1,
+                subpool: SubPool::Blob,
+                blobfee_update: max_fee_per_blob_gas,
+                basefee_update: max_fee_per_gas,
+                new_subpool: SubPool::Pending,
+            },
+            PromotionTest {
+                blobfee: max_fee_per_blob_gas + 1,
+                basefee: max_fee_per_gas,
+                subpool: SubPool::Blob,
+                blobfee_update: max_fee_per_blob_gas,
+                basefee_update: max_fee_per_gas,
+                new_subpool: SubPool::Pending,
+            },
+            PromotionTest {
+                blobfee: max_fee_per_blob_gas,
+                basefee: max_fee_per_gas,
+                subpool: SubPool::Pending,
+                blobfee_update: max_fee_per_blob_gas,
+                basefee_update: max_fee_per_gas,
+                new_subpool: SubPool::Pending,
+            },
+        ];
 
-        // assert pool lengths
-        assert!(pool.pending_pool.is_empty());
-        assert_eq!(pool.blob_transactions.len(), 1);
+        // extend the test cases with reversed updates - this will add all _demotion_ tests
+        let reversed = expected_promotions.iter().map(|test| test.opposite()).collect::<Vec<_>>();
+        expected_promotions.extend(reversed);
 
-        // set block info with new base fee, expect no change
-        block_info.pending_basefee = tx.max_fee_per_gas() as u64;
-        pool.set_block_info(block_info);
+        // dedup the test cases
+        let expected_promotions = expected_promotions.into_iter().collect::<HashSet<_>>();
 
-        // check tx state and derived subpool, it should not move into the blob pool
-        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
-        assert_eq!(internal_tx.subpool, SubPool::Blob);
+        for promotion_test in expected_promotions.iter() {
+            let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
-        // set block info so the pools are updated
-        block_info.pending_blob_fee = Some(tx.max_fee_per_blob_gas().unwrap());
-        pool.set_block_info(block_info);
+            // set block info so the tx is initially underpriced w.r.t. blob fee
+            let mut block_info = pool.block_info();
 
-        // check that the tx is promoted
-        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
-        assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
-        assert!(internal_tx.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
-        assert_eq!(internal_tx.subpool, SubPool::Pending);
+            block_info.pending_blob_fee = Some(promotion_test.blobfee);
+            block_info.pending_basefee = promotion_test.basefee;
+            pool.set_block_info(block_info);
 
-        // make sure the blob transaction was promoted into the pending pool
-        assert_eq!(pool.pending_pool.len(), 1);
-        assert!(pool.blob_transactions.is_empty());
+            let validated = f.validated(tx.clone());
+            let id = *validated.id();
+            pool.add_transaction(validated, on_chain_balance, on_chain_nonce).unwrap();
+
+            // assert pool lengths
+            promotion_test.assert_single_tx_starting_subpool(&pool);
+
+            // check tx state and derived subpool, it should not move into the blob pool
+            let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+            assert_eq!(internal_tx.subpool, promotion_test.subpool);
+
+            // set block info with new base fee
+            block_info.pending_basefee = promotion_test.basefee_update;
+            block_info.pending_blob_fee = Some(promotion_test.blobfee_update);
+            pool.set_block_info(block_info);
+
+            // check tx state and derived subpool, it should not move into the blob pool
+            let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+            assert_eq!(internal_tx.subpool, promotion_test.new_subpool);
+
+            // assert new pool lengths
+            promotion_test.assert_single_tx_ending_subpool(&pool);
+        }
     }
 
     #[test]
