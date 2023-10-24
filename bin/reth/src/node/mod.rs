@@ -645,7 +645,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     ) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::initialize(
+            prometheus_exporter::serve(
                 listen_addr,
                 prometheus_handle,
                 db,

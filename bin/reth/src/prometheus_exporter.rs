@@ -15,6 +15,7 @@ use tracing::error;
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
 
+/// Installs Prometheus as the metrics recorder.
 pub(crate) fn install_recorder() -> eyre::Result<PrometheusHandle> {
     let recorder = PrometheusBuilder::new().build_recorder();
     let handle = recorder.handle();
@@ -28,11 +29,11 @@ pub(crate) fn install_recorder() -> eyre::Result<PrometheusHandle> {
     Ok(handle)
 }
 
-/// Installs Prometheus as the metrics recorder and serves it over HTTP with hooks.
+/// Serves Prometheus metrics over HTTP with hooks.
 ///
 /// The hooks are called every time the metrics are requested at the given endpoint, and can be used
 /// to record values for pull-style metrics, i.e. metrics that are not automatically updated.
-pub(crate) async fn initialize_with_hooks<F: Hook + 'static>(
+pub(crate) async fn serve_with_hooks<F: Hook + 'static>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     hooks: impl IntoIterator<Item = F>,
@@ -72,9 +73,8 @@ async fn start_endpoint<F: Hook + 'static>(
     Ok(())
 }
 
-/// Installs Prometheus as the metrics recorder and serves it over HTTP with database and process
-/// metrics.
-pub(crate) async fn initialize(
+/// Serves Prometheus metrics over HTTP with database and process metrics.
+pub(crate) async fn serve(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     db: Arc<DatabaseEnv>,
@@ -125,7 +125,7 @@ pub(crate) async fn initialize(
         Box::new(move || cloned_process.collect()),
         Box::new(collect_memory_stats),
     ];
-    initialize_with_hooks(listen_addr, handle, hooks).await?;
+    serve_with_hooks(listen_addr, handle, hooks).await?;
 
     // We describe the metrics after the recorder is installed, otherwise this information is not
     // registered
