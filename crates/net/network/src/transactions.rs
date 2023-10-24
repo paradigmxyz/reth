@@ -996,7 +996,7 @@ impl Future for GetPooledTxRequestFut {
             Poll::Ready(result) => {
                 let request_hashes: Vec<TxHash> = match &result {
                     Ok(Ok(pooled_txs)) => {
-                        pooled_txs.0.iter().map(|tx_elem| tx_elem.hash().clone()).collect()
+                        pooled_txs.0.iter().map(|tx_elem| *tx_elem.hash()).collect()
                     }
                     _ => Vec::new(),
                 };
@@ -1047,7 +1047,7 @@ impl TransactionFetcher {
         for hash in &hashes {
             if let Some(peers) = self.inflight_hash_to_fallback_peers.get_mut(hash) {
                 peers.retain(|&peer| peer != failed_peer); // Remove the failed peer from fallback peers for this hash.
-                if let Some(next_peer) = peers.pop() {
+                if let Some(_next_peer) = peers.pop() {
                     // Schedule a re-request using next_peer.
                 }
             }
@@ -1069,8 +1069,7 @@ impl TransactionFetcher {
             return match result {
                 Ok(Ok(txs)) => {
                     // clear received hashes
-                    let received_hashes: Vec<TxHash> =
-                        txs.0.iter().map(|tx| tx.hash().clone()).collect();
+                    let received_hashes: Vec<TxHash> = txs.0.iter().map(|tx| *tx.hash()).collect();
                     self.remove_inflight_hashes(&received_hashes);
 
                     // check if we need to re-request any of the hashes missing from the
