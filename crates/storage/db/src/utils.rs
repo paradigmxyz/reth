@@ -11,7 +11,7 @@ pub(crate) fn default_page_size() -> usize {
 
     // May lead to errors if it's reduced further because of the potential size of the
     // data.
-    let min_page_size = 4096;
+    let min_page_size = 8192;
 
     os_page_size.clamp(min_page_size, libmdbx_max_page_size)
 }
