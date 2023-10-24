@@ -79,24 +79,25 @@ impl Display for Operation {
     }
 }
 
-#[derive(Metrics)]
-#[metrics(scope = "database")]
+#[derive(Debug, Default)]
 struct Metrics {
-    /// Total number of currently open database transactions
-    open_transactions_total: Gauge,
-
-    #[metric(skip)]
+    open_transactions: HashMap<TransactionMode, OpenTransactionMetrics>,
     transactions: HashMap<u64, Transaction>,
-    #[metric(skip)]
     transaction_metrics: HashMap<(TransactionMode, TransactionOutcome), TransactionMetrics>,
-    #[metric(skip)]
     operation_metrics: HashMap<Operation, OperationMetrics>,
 }
 
 impl Metrics {
     pub(crate) fn record_open_transaction(&mut self, txn_id: u64, mode: TransactionMode) {
         self.transactions.insert(txn_id, Transaction { begin: Instant::now(), mode });
-        self.open_transactions_total.set(self.transactions.len() as f64)
+
+        self.open_transactions
+            .entry(mode)
+            .or_insert_with(|| {
+                OpenTransactionMetrics::new_with_labels(&[("mode", mode.to_string())])
+            })
+            .total
+            .increment(1.0)
     }
 
     pub(crate) fn record_close_transaction(
@@ -106,17 +107,23 @@ impl Metrics {
         commit_duration: Duration,
     ) {
         if let Some(transaction) = self.transactions.remove(&txn_id) {
-            let metrics =
-                self.transaction_metrics.entry((transaction.mode, outcome)).or_insert_with(|| {
-                    TransactionMetrics::new_with_labels(&[
-                        ("mode", transaction.mode.to_string()),
-                        ("outcome", outcome.to_string()),
-                    ])
-                });
+            let mode = transaction.mode;
+            let metrics = self.transaction_metrics.entry((mode, outcome)).or_insert_with(|| {
+                TransactionMetrics::new_with_labels(&[
+                    ("mode", mode.to_string()),
+                    ("outcome", outcome.to_string()),
+                ])
+            });
             metrics.open_duration_seconds.record(transaction.begin.elapsed());
             metrics.commit_duration_seconds.record(commit_duration);
 
-            self.open_transactions_total.set(self.transactions.len() as f64)
+            self.open_transactions
+                .entry(mode)
+                .or_insert_with(|| {
+                    OpenTransactionMetrics::new_with_labels(&[("mode", mode.to_string())])
+                })
+                .total
+                .decrement(1.0)
         }
     }
 
@@ -131,19 +138,26 @@ impl Metrics {
 }
 
 #[derive(Metrics)]
+#[metrics(scope = "database.open_transactions")]
+struct OpenTransactionMetrics {
+    /// Total number of currently open database transactions
+    total: Gauge,
+}
+
+#[derive(Metrics)]
 #[metrics(scope = "database.transaction")]
 struct TransactionMetrics {
     /// The time a database transaction has been open
-    pub(crate) open_duration_seconds: Histogram,
+    open_duration_seconds: Histogram,
     /// Database transaction commit duration
-    pub(crate) commit_duration_seconds: Histogram,
+    commit_duration_seconds: Histogram,
 }
 
 #[derive(Metrics)]
 #[metrics(scope = "database.operation")]
 struct OperationMetrics {
     /// Total number of database operations made
-    pub(crate) calls_total: Counter,
+    calls_total: Counter,
     /// Database operation duration
-    pub(crate) duration_seconds: Histogram,
+    duration_seconds: Histogram,
 }
