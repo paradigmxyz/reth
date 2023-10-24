@@ -61,7 +61,7 @@ impl Command {
         let mut rng = rand::thread_rng();
         let mut dictionaries = None;
         let mut jar = NippyJar::load(&get_snapshot_segment_file_name(
-            SnapshotSegment::Headers,
+            SnapshotSegment::Transactions,
             filters,
             compression,
             &block_range,
