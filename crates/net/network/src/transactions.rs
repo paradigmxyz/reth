@@ -966,8 +966,8 @@ struct GetPooledTxRequest {
 
 struct GetPooledTxResponse {
     peer_id: PeerId,
-    /// Request object so we know what hashes were requested and can do cleanup
-    request: GetPooledTxRequest,
+    /// Transaction hashes that were requested, for cleanup purposes
+    request: Vec<TxHash>,
     result: Result<RequestResult<PooledTransactions>, RecvError>,
 }
 
@@ -994,7 +994,18 @@ impl Future for GetPooledTxRequestFut {
         let mut req = self.as_mut().project().inner.take().expect("polled after completion");
         match req.response.poll_unpin(cx) {
             Poll::Ready(result) => {
-                Poll::Ready(GetPooledTxResponse { peer_id: req.peer_id, result })
+                let request_hashes: Vec<TxHash> = match &result {
+                    Ok(Ok(pooled_txs)) => {
+                        pooled_txs.0.iter().map(|tx_elem| tx_elem.hash().clone()).collect()
+                    }
+                    _ => Vec::new(),
+                };
+
+                Poll::Ready(GetPooledTxResponse {
+                    peer_id: req.peer_id,
+                    request: request_hashes,
+                    result,
+                })
             }
             Poll::Pending => {
                 self.project().inner.set(Some(req));
@@ -1032,7 +1043,7 @@ struct TransactionFetcher {
 impl TransactionFetcher {
     /// Advances all inflight requests and returns the next event.
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchEvent> {
-        if let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
+        if let Poll::Ready(Some(GetPooledTxResponse { peer_id, request, result })) =
             self.inflight_requests.poll_next_unpin(cx)
         {
             return match result {
