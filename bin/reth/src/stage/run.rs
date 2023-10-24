@@ -133,6 +133,7 @@ impl Command {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(
                 listen_addr,
+                prometheus_exporter::install_recorder()?,
                 Arc::clone(&db),
                 metrics_process::Collector::default(),
             )

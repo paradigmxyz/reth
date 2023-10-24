@@ -15,29 +15,34 @@ use tracing::error;
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
 
-/// Installs Prometheus as the metrics recorder and serves it over HTTP with hooks.
-///
-/// The hooks are called every time the metrics are requested at the given endpoint, and can be used
-/// to record values for pull-style metrics, i.e. metrics that are not automatically updated.
-pub(crate) async fn initialize_with_hooks<F: Hook + 'static>(
-    listen_addr: SocketAddr,
-    hooks: impl IntoIterator<Item = F>,
-) -> eyre::Result<()> {
+pub(crate) fn install_recorder() -> eyre::Result<PrometheusHandle> {
     let recorder = PrometheusBuilder::new().build_recorder();
     let handle = recorder.handle();
-
-    let hooks: Vec<_> = hooks.into_iter().collect();
-
-    // Start endpoint
-    start_endpoint(listen_addr, handle, Arc::new(move || hooks.iter().for_each(|hook| hook())))
-        .await
-        .wrap_err("Could not start Prometheus endpoint")?;
 
     // Build metrics stack
     Stack::new(recorder)
         .push(PrefixLayer::new("reth"))
         .install()
         .wrap_err("Couldn't set metrics recorder.")?;
+
+    Ok(handle)
+}
+
+/// Installs Prometheus as the metrics recorder and serves it over HTTP with hooks.
+///
+/// The hooks are called every time the metrics are requested at the given endpoint, and can be used
+/// to record values for pull-style metrics, i.e. metrics that are not automatically updated.
+pub(crate) async fn initialize_with_hooks<F: Hook + 'static>(
+    listen_addr: SocketAddr,
+    handle: PrometheusHandle,
+    hooks: impl IntoIterator<Item = F>,
+) -> eyre::Result<()> {
+    let hooks: Vec<_> = hooks.into_iter().collect();
+
+    // Start endpoint
+    start_endpoint(listen_addr, handle, Arc::new(move || hooks.iter().for_each(|hook| hook())))
+        .await
+        .wrap_err("Could not start Prometheus endpoint")?;
 
     Ok(())
 }
@@ -71,6 +76,7 @@ async fn start_endpoint<F: Hook + 'static>(
 /// metrics.
 pub(crate) async fn initialize(
     listen_addr: SocketAddr,
+    handle: PrometheusHandle,
     db: Arc<DatabaseEnv>,
     process: metrics_process::Collector,
 ) -> eyre::Result<()> {
@@ -119,7 +125,7 @@ pub(crate) async fn initialize(
         Box::new(move || cloned_process.collect()),
         Box::new(collect_memory_stats),
     ];
-    initialize_with_hooks(listen_addr, hooks).await?;
+    initialize_with_hooks(listen_addr, handle, hooks).await?;
 
     // We describe the metrics after the recorder is installed, otherwise this information is not
     // registered

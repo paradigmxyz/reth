@@ -25,6 +25,7 @@ use clap::{value_parser, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
+use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
@@ -246,6 +247,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // always store reth.toml in the data dir, not the chain specific data dir
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
+        let prometheus_handle = self.install_prometheus_recorder()?;
+
         debug!(target: "reth::cli", "Spawning database metrics listener task");
         let (db_metrics_tx, db_metrics_rx) = unbounded_channel();
         let db_metrics_listener = reth_db::MetricsListener::new(db_metrics_rx);
@@ -256,7 +259,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics_tx(db_metrics_tx));
         info!(target: "reth::cli", "Database opened");
 
-        self.start_metrics_endpoint(Arc::clone(&db)).await?;
+        self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -631,11 +634,24 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
-    async fn start_metrics_endpoint(&self, db: Arc<DatabaseEnv>) -> eyre::Result<()> {
+    fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
+        prometheus_exporter::install_recorder()
+    }
+
+    async fn start_metrics_endpoint(
+        &self,
+        prometheus_handle: PrometheusHandle,
+        db: Arc<DatabaseEnv>,
+    ) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::initialize(listen_addr, db, metrics_process::Collector::default())
-                .await?;
+            prometheus_exporter::initialize(
+                listen_addr,
+                prometheus_handle,
+                db,
+                metrics_process::Collector::default(),
+            )
+            .await?;
         }
 
         Ok(())
