@@ -206,7 +206,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             println!("");
             println!("===================================");
             let cachedb_record = executor.get_cachedb_record();
-            println!("cachedb_record = {:?}", cachedb_record);
+            println!("cachedb_record = {}", serde_json::to_string(&cachedb_record).unwrap());
             println!("===================================");
             println!("");
         }
@@ -216,7 +216,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             let record = executor.get_opcode_record();
             println!("");
             println!("===================================");
-            println!("revm_record = {:?}", serde_json::to_string(&record).unwrap());
+            println!("revm_record = {}", serde_json::to_string(&record).unwrap());
             println!("===================================");
             println!("");
         }
