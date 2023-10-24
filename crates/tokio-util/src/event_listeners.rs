@@ -43,4 +43,49 @@ impl<T: Clone> EventListeners<T> {
     pub fn is_empty(&self) -> bool {
         self.listeners.is_empty()
     }
+    /// Retrieves a reference to a listener at the specified index.
+
+    /// An Option containing a reference to the listener if it exists, or `None` otherwise.
+    pub fn get(&self, index: usize) -> Option<&mpsc::UnboundedSender<T>> {
+        self.listeners.get(index)
+    }
+    /// Checks if a specific listener is still available.
+    /// Returns `true` if the listener is available and `false` otherwise.
+
+    pub fn is_listener_available(&self, index: usize) -> bool {
+        if let Some(listener) = self.listeners.get(index) {
+            !listener.is_closed()
+        } else {
+            false
+        }
+    }
+    /// Finds a listener based on a given predicate.
+    /// Returns an `Option` containing a reference to the first listener satisfying the predicate,
+    /// or `None` if no listener matches.
+    pub fn find<P>(&self, predicate: P) -> Option<&mpsc::UnboundedSender<T>>
+    where
+        P: Fn(&mpsc::UnboundedSender<T>) -> bool,
+    {
+        self.listeners.iter().find(|&listener| predicate(listener))
+    }
+    /// Returns an iterator over the listeners.
+
+    pub fn iter(&self) -> impl Iterator<Item = &mpsc::UnboundedSender<T>> {
+        self.listeners.iter()
+    }
+
+    /// Retain only the listeners that satisfy the specified predicate.
+
+    pub fn filter<P>(&mut self, predicate: P)
+    where
+        P: Fn(&mpsc::UnboundedSender<T>) -> bool,
+    {
+        self.listeners.retain(predicate);
+    }
+
+    /// Returns the total capacity of the internal listener vector.
+
+    pub fn capacity(&self) -> usize {
+        self.listeners.capacity()
+    }
 }
