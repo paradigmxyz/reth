@@ -153,13 +153,16 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Updates the tracked blob fee
-    fn update_blob_fee(&mut self, mut pending_blob_fee: u128) {
+    fn update_blob_fee(&mut self, mut pending_blob_fee: u128, base_fee_update: Ordering) {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
-        match self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee) {
-            Ordering::Equal => {
+        match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
+        {
+            (Ordering::Equal, Ordering::Equal) => {
                 // fee unchanged, nothing to update
             }
-            Ordering::Greater => {
+            (Ordering::Greater, Ordering::Equal) |
+            (Ordering::Equal, Ordering::Greater) |
+            (Ordering::Greater, Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
                 let removed =
                     self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
@@ -175,9 +178,52 @@ impl<T: TransactionOrdering> TxPool<T> {
                     };
                     self.add_transaction_to_subpool(to, tx);
                 }
+
+                // TODO: base fee demotions should have happened in update_base_fee, would it make
+                // sense to combine the methods and do it here?
             }
-            Ordering::Less => {
-                // decreased blob fee: recheck blob pool and promote all that are now valid
+            (Ordering::Less, Ordering::Equal) |
+            (Ordering::Equal, Ordering::Less) |
+            (Ordering::Less, Ordering::Less) => {
+                // decreased blob fee or base fee: recheck blob pool and promote all that are now
+                // valid
+                let removed = self
+                    .blob_transactions
+                    .enforce_pending_fees(&self.all_transactions.pending_fees);
+                for tx in removed {
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
+                }
+            }
+            (Ordering::Less, Ordering::Greater) | (Ordering::Greater, Ordering::Less) => {
+                // increased blob fee: recheck pending pool and remove all that are no longer valid
+                let removed =
+                    self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
+                for tx in removed {
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+
+                        // we unset the blob fee cap block flag, if the base fee is too high now
+                        tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
+                }
+
+                // TODO: base fee demotions should have happened in update_base_fee, would it make
+                // sense to combine the methods and do it here?
+
+                // decreased blob fee or base fee: recheck blob pool and promote all that are now
+                // valid
                 let removed = self
                     .blob_transactions
                     .enforce_pending_fees(&self.all_transactions.pending_fees);
@@ -200,11 +246,12 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// Depending on the change in direction of the basefee, this will promote or demote
     /// transactions from the basefee pool.
-    fn update_basefee(&mut self, mut pending_basefee: u64) {
+    fn update_basefee(&mut self, mut pending_basefee: u64) -> Ordering {
         std::mem::swap(&mut self.all_transactions.pending_fees.base_fee, &mut pending_basefee);
         match self.all_transactions.pending_fees.base_fee.cmp(&pending_basefee) {
             Ordering::Equal => {
                 // fee unchanged, nothing to update
+                Ordering::Equal
             }
             Ordering::Greater => {
                 // increased base fee: recheck pending pool and remove all that are no longer valid
@@ -220,6 +267,8 @@ impl<T: TransactionOrdering> TxPool<T> {
                     };
                     self.add_transaction_to_subpool(to, tx);
                 }
+
+                Ordering::Greater
             }
             Ordering::Less => {
                 // decreased base fee: recheck basefee pool and promote all that are now valid
@@ -235,6 +284,8 @@ impl<T: TransactionOrdering> TxPool<T> {
                     };
                     self.add_transaction_to_subpool(to, tx);
                 }
+
+                Ordering::Less
             }
         }
     }
@@ -251,10 +302,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         } = info;
         self.all_transactions.last_seen_block_hash = last_seen_block_hash;
         self.all_transactions.last_seen_block_number = last_seen_block_number;
-        self.update_basefee(pending_basefee);
+        let basefee_ordering = self.update_basefee(pending_basefee);
 
         if let Some(blob_fee) = pending_blob_fee {
-            self.update_blob_fee(blob_fee)
+            self.update_blob_fee(blob_fee, basefee_ordering)
         }
     }
 
