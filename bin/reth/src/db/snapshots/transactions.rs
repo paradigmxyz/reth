@@ -142,7 +142,7 @@ impl Command {
             )?;
         }
 
-        // BENCHMARK QUERYING A RANDOM HEADER BY HASH
+        // BENCHMARK QUERYING A RANDOM TRANSACTION BY HASH
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
             let transaction_hash =
