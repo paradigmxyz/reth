@@ -23,7 +23,7 @@ type NippyJarRef<'a> =
 pub struct SnapshotProvider {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
-    pub map: DashMap<(BlockNumber, SnapshotSegment), NippyJar<SegmentHeader>>,
+    map: DashMap<(BlockNumber, SnapshotSegment), NippyJar<SegmentHeader>>,
 }
 
 impl SnapshotProvider {

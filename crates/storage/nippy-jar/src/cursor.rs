@@ -218,9 +218,14 @@ where
             let from = self.internal_buffer.len();
             match compression {
                 Compressors::Zstd(z) if z.use_dict => {
-                    let mut decompressor = Decompressor::with_prepared_dictionary(
-                        z.dictionaries.as_ref().expect("qed").0[column].loaded(),
-                    )?;
+                    // If we are here, then for sure we have the necessary dictionaries and they're
+                    // loaded (happens during deserialization). Otherwise, there's an issue
+                    // somewhere else and we can't recover here anyway.
+                    let dictionaries = z.dictionaries.as_ref().expect("dictionaries to exist")
+                        [column]
+                        .loaded()
+                        .expect("dictionary to be loaded");
+                    let mut decompressor = Decompressor::with_prepared_dictionary(dictionaries)?;
                     Zstd::decompress_with_dictionary(
                         &self.mmap_handle[column_offset_range],
                         &mut self.internal_buffer,

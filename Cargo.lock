@@ -6195,6 +6195,7 @@ dependencies = [
  "bincode",
  "bytes",
  "cuckoofilter",
+ "derive_more",
  "hex",
  "lz4_flex",
  "memmap2 0.7.1",

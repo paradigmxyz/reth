@@ -1,4 +1,5 @@
 use crate::{compression::Compression, NippyJarError};
+use derive_more::Deref;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     fs::File,
@@ -261,8 +262,8 @@ where
 
 /// List of [`ZstdDictionary`]
 #[cfg_attr(test, derive(PartialEq))]
-#[derive(Serialize, Deserialize)]
-pub struct ZstdDictionaries<'a>(pub Vec<ZstdDictionary<'a>>);
+#[derive(Serialize, Deserialize, Deref)]
+pub struct ZstdDictionaries<'a>(Vec<ZstdDictionary<'a>>);
 
 impl<'a> std::fmt::Debug for ZstdDictionaries<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -285,26 +286,27 @@ impl<'a> ZstdDictionaries<'a> {
         )
     }
 
-    /// Dictionary count.
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
     /// Creates a list of decompressors from a list of [`ZstdDictionary::Loaded`].
     pub fn decompressors(&self) -> Result<Vec<Decompressor<'_>>, NippyJarError> {
         Ok(self
-            .0
             .iter()
-            .map(|a| Decompressor::with_prepared_dictionary(a.loaded()))
+            .flat_map(|dict| {
+                dict.loaded()
+                    .ok_or(NippyJarError::DictionaryNotLoaded)
+                    .map(Decompressor::with_prepared_dictionary)
+            })
             .collect::<Result<Vec<_>, _>>()?)
     }
 
     /// Creates a list of compressors from a list of [`ZstdDictionary::Raw`].
     pub fn compressors(&self) -> Result<Vec<Compressor<'_>>, NippyJarError> {
         Ok(self
-            .0
             .iter()
-            .map(|a| Compressor::with_dictionary(0, a.raw()))
+            .flat_map(|dict| {
+                dict.raw()
+                    .ok_or(NippyJarError::CompressorNotAllowed)
+                    .map(|dict| Compressor::with_dictionary(0, dict))
+            })
             .collect::<Result<Vec<_>, _>>()?)
     }
 }
@@ -318,18 +320,18 @@ pub enum ZstdDictionary<'a> {
 
 impl<'a> ZstdDictionary<'a> {
     /// Returns a reference to the expected `RawDictionary`
-    pub fn raw(&self) -> &RawDictionary {
+    pub fn raw(&self) -> Option<&RawDictionary> {
         match self {
-            ZstdDictionary::Raw(dict) => dict,
-            ZstdDictionary::Loaded(_) => unreachable!(),
+            ZstdDictionary::Raw(dict) => Some(dict),
+            ZstdDictionary::Loaded(_) => None,
         }
     }
 
     /// Returns a reference to the expected `DecoderDictionary`
-    pub fn loaded(&self) -> &DecoderDictionary<'_> {
+    pub fn loaded(&self) -> Option<&DecoderDictionary<'_>> {
         match self {
-            ZstdDictionary::Raw(_) => unreachable!(),
-            ZstdDictionary::Loaded(dict) => dict,
+            ZstdDictionary::Raw(_) => None,
+            ZstdDictionary::Loaded(dict) => Some(dict),
         }
     }
 }

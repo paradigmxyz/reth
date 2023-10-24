@@ -34,6 +34,7 @@ tracing-appender = "0.2"
 anyhow = "1.0"
 thiserror.workspace = true
 hex = "*"
+derive_more = "0.99"
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["small_rng"] }
