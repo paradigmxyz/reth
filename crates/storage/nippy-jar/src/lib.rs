@@ -495,6 +495,7 @@ where
     }
 }
 
+/// Holds an `Arc` over a file and its associated mmap handle.
 #[derive(Debug, Clone)]
 pub struct MmapHandle {
     /// File descriptor. Needs to be kept alive as long as the mmap handle.
