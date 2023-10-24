@@ -177,7 +177,7 @@ mod tests {
 
     #[tokio::test]
     async fn can_create_replay_transaction_stream() {
-        let client = HttpClientBuilder::default().build("http://69.67.151.138:8545").unwrap();
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
 
         // Assuming you have some transactions you want to test, replace with actual hashes
         let transactions = vec![
