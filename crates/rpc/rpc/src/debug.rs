@@ -263,7 +263,10 @@ where
                             .into_pre_state_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config),
+                            TracingInspectorConfig::from_geth_config(&config)
+                                // if in default mode, we need to return all touched storages, for
+                                // which we need to record steps and statediff
+                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
 
                         let frame =
@@ -490,7 +493,10 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config),
+                            TracingInspectorConfig::from_geth_config(&config)
+                                // if in default mode, we need to return all touched storages, for
+                                // which we need to record steps and statediff
+                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
                         let (res, _) = inspect(&mut *db, env, &mut inspector)?;
 

@@ -14,7 +14,7 @@ use revm::interpreter::{
     opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, SharedMemory, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -248,6 +248,28 @@ impl CallTraceNode {
         } else {
             self.trace.address
         }
+    }
+
+    /// Returns all storage slots touched by this trace and the value this storage.
+    ///
+    /// A touched slot is either a slot that was written to or read from.
+    ///
+    /// If the slot is accessed more than once, the result only includes the first time it was
+    /// accessed, in other words in only returns the original value of the slot.
+    pub(crate) fn touched_slots(&self) -> BTreeMap<U256, U256> {
+        let mut touched_slots = BTreeMap::new();
+        for change in self.trace.steps.iter().filter_map(|s| s.storage_change.as_ref()) {
+            match touched_slots.entry(change.key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(change.value);
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {
+                    // already touched
+                }
+            }
+        }
+
+        touched_slots
     }
 
     /// Pushes all steps onto the stack in reverse order
