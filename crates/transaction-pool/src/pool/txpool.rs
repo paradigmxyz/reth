@@ -1959,28 +1959,80 @@ mod tests {
         fn assert_single_tx_starting_subpool<T: TransactionOrdering>(&self, pool: &TxPool<T>) {
             match self.subpool {
                 SubPool::Blob => {
-                    assert_eq!(pool.blob_transactions.len(), 1);
-                    assert!(pool.pending_pool.is_empty());
-                    assert!(pool.basefee_pool.is_empty());
-                    assert!(pool.queued_pool.is_empty());
+                    assert_eq!(
+                        pool.blob_transactions.len(),
+                        1,
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert!(
+                        pool.pending_pool.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert!(
+                        pool.basefee_pool.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert!(
+                        pool.queued_pool.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
                 }
                 SubPool::Pending => {
-                    assert!(pool.blob_transactions.is_empty());
-                    assert_eq!(pool.pending_pool.len(), 1);
-                    assert!(pool.basefee_pool.is_empty());
-                    assert!(pool.queued_pool.is_empty());
+                    assert!(
+                        pool.blob_transactions.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert_eq!(
+                        pool.pending_pool.len(),
+                        1,
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert!(
+                        pool.basefee_pool.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert!(
+                        pool.queued_pool.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
                 }
                 SubPool::BaseFee => {
-                    assert!(pool.blob_transactions.is_empty());
-                    assert!(pool.pending_pool.is_empty());
-                    assert_eq!(pool.basefee_pool.len(), 1);
-                    assert!(pool.queued_pool.is_empty());
+                    assert!(
+                        pool.blob_transactions.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert!(
+                        pool.pending_pool.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert_eq!(
+                        pool.basefee_pool.len(),
+                        1,
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert!(
+                        pool.queued_pool.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
                 }
                 SubPool::Queued => {
-                    assert!(pool.blob_transactions.is_empty());
-                    assert!(pool.pending_pool.is_empty());
-                    assert!(pool.basefee_pool.is_empty());
-                    assert_eq!(pool.queued_pool.len(), 1);
+                    assert!(
+                        pool.blob_transactions.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert!(
+                        pool.pending_pool.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert!(
+                        pool.basefee_pool.is_empty(),
+                        "pool length check failed at start of test: {self:?}"
+                    );
+                    assert_eq!(
+                        pool.queued_pool.len(),
+                        1,
+                        "pool length check failed at start of test: {self:?}"
+                    );
                 }
             }
         }
@@ -1991,28 +2043,80 @@ mod tests {
         fn assert_single_tx_ending_subpool<T: TransactionOrdering>(&self, pool: &TxPool<T>) {
             match self.new_subpool {
                 SubPool::Blob => {
-                    assert_eq!(pool.blob_transactions.len(), 1);
-                    assert!(pool.pending_pool.is_empty());
-                    assert!(pool.basefee_pool.is_empty());
-                    assert!(pool.queued_pool.is_empty());
+                    assert_eq!(
+                        pool.blob_transactions.len(),
+                        1,
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert!(
+                        pool.pending_pool.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert!(
+                        pool.basefee_pool.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert!(
+                        pool.queued_pool.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
                 }
                 SubPool::Pending => {
-                    assert!(pool.blob_transactions.is_empty());
-                    assert_eq!(pool.pending_pool.len(), 1);
-                    assert!(pool.basefee_pool.is_empty());
-                    assert!(pool.queued_pool.is_empty());
+                    assert!(
+                        pool.blob_transactions.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert_eq!(
+                        pool.pending_pool.len(),
+                        1,
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert!(
+                        pool.basefee_pool.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert!(
+                        pool.queued_pool.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
                 }
                 SubPool::BaseFee => {
-                    assert!(pool.blob_transactions.is_empty());
-                    assert!(pool.pending_pool.is_empty());
-                    assert_eq!(pool.basefee_pool.len(), 1);
-                    assert!(pool.queued_pool.is_empty());
+                    assert!(
+                        pool.blob_transactions.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert!(
+                        pool.pending_pool.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert_eq!(
+                        pool.basefee_pool.len(),
+                        1,
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert!(
+                        pool.queued_pool.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
                 }
                 SubPool::Queued => {
-                    assert!(pool.blob_transactions.is_empty());
-                    assert!(pool.pending_pool.is_empty());
-                    assert!(pool.basefee_pool.is_empty());
-                    assert_eq!(pool.queued_pool.len(), 1);
+                    assert!(
+                        pool.blob_transactions.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert!(
+                        pool.pending_pool.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert!(
+                        pool.basefee_pool.is_empty(),
+                        "pool length check failed for end of test: {self:?}"
+                    );
+                    assert_eq!(
+                        pool.queued_pool.len(),
+                        1,
+                        "pool length check failed for end of test: {self:?}"
+                    );
                 }
             }
         }
@@ -2118,7 +2222,10 @@ mod tests {
 
             // check tx state and derived subpool, it should not move into the blob pool
             let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
-            assert_eq!(internal_tx.subpool, promotion_test.subpool);
+            assert_eq!(
+                internal_tx.subpool, promotion_test.subpool,
+                "Subpools do not match at start of test: {promotion_test:?}"
+            );
 
             // set block info with new base fee
             block_info.pending_basefee = promotion_test.basefee_update;
@@ -2127,7 +2234,10 @@ mod tests {
 
             // check tx state and derived subpool, it should not move into the blob pool
             let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
-            assert_eq!(internal_tx.subpool, promotion_test.new_subpool);
+            assert_eq!(
+                internal_tx.subpool, promotion_test.new_subpool,
+                "Subpools do not match at end of test: {promotion_test:?}"
+            );
 
             // assert new pool lengths
             promotion_test.assert_single_tx_ending_subpool(&pool);
