@@ -26,14 +26,14 @@ impl InclusionFilter for InclusionFilters {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
         match self {
             InclusionFilters::Cuckoo(c) => c.add(element),
-            InclusionFilters::Unused => todo!(),
+            InclusionFilters::Unused => Err(NippyJarError::UnsupportedFilterQuery),
         }
     }
 
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
         match self {
             InclusionFilters::Cuckoo(c) => c.contains(element),
-            InclusionFilters::Unused => todo!(),
+            InclusionFilters::Unused => Err(NippyJarError::UnsupportedFilterQuery),
         }
     }
 }
