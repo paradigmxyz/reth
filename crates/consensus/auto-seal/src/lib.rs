@@ -305,6 +305,9 @@ impl StorageInner {
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
         // call the 4788 beacon contract
 
+        // set the first block to find the correct index in bundle state
+        executor.set_first_block(block.number);
+
         let (receipts, gas_used) =
             executor.execute_transactions(block, U256::ZERO, Some(senders))?;
 
