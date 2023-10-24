@@ -1,8 +1,9 @@
 //! Async caching support for eth RPC
 
+use alloy_primitives::BlockNumber;
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, RethResult};
-use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, B256};
+use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, B256, Header, SealedHeader};
 use reth_provider::{
     BlockReader, BlockSource, CanonStateNotification, EvmEnvProvider, StateProviderFactory,
 };
@@ -41,6 +42,9 @@ type ReceiptsResponseSender = oneshot::Sender<RethResult<Option<Vec<Receipt>>>>;
 /// The type that can send the response to a requested env
 type EnvResponseSender = oneshot::Sender<RethResult<(CfgEnv, BlockEnv)>>;
 
+/// The type that can send the response to a requested list of block headers 
+type BlockFeeResponseSender = oneshot::Sender<RethResult<Option<SealedHeader>>>;
+
 type BlockLruCache<L> = MultiConsumerLruCache<
     B256,
     Block,
@@ -51,6 +55,8 @@ type BlockLruCache<L> = MultiConsumerLruCache<
 type ReceiptsLruCache<L> = MultiConsumerLruCache<B256, Vec<Receipt>, L, ReceiptsResponseSender>;
 
 type EnvLruCache<L> = MultiConsumerLruCache<B256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
+
+type FeeHistoryLruCache<L> = MultiConsumerLruCache<BlockNumber, SealedHeader, L, BlockFeeResponseSender>;
 
 /// Provides async access to cached eth data
 ///
@@ -77,6 +83,7 @@ impl EthStateCache {
             full_block_cache: BlockLruCache::new(max_blocks, "blocks"),
             receipts_cache: ReceiptsLruCache::new(max_receipts, "receipts"),
             evm_env_cache: EnvLruCache::new(max_envs, "evm_env"),
+            fee_history_cache: FeeHistoryLruCache::new(max_blocks, "fee_history"),
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
@@ -199,6 +206,17 @@ impl EthStateCache {
         let _ = self.to_service.send(CacheAction::GetEnv { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
+
+
+    /// Requests available fee history based on cached block headers
+    pub(crate) async fn get_fee_history(
+        &self,
+        block_number: u64,
+    ) -> RethResult<Option<SealedHeader>>{
+        let (response_tx, rx) = oneshot::channel();
+        let _  = self.to_service.send(CacheAction::GetBlockFee { block_number, response_tx});
+        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+    }
 }
 
 /// A task than manages caches for data required by the `eth` rpc implementation.
@@ -224,7 +242,7 @@ pub(crate) struct EthStateCacheService<
     LimitReceipts = ByLength,
     LimitEnvs = ByLength,
 > where
-    LimitBlocks: Limiter<B256, Block>,
+    LimitBlocks: Limiter<B256, Block> + Limiter<u64, SealedHeader>,
     LimitReceipts: Limiter<B256, Vec<Receipt>>,
     LimitEnvs: Limiter<B256, (CfgEnv, BlockEnv)>,
 {
@@ -236,6 +254,8 @@ pub(crate) struct EthStateCacheService<
     receipts_cache: ReceiptsLruCache<LimitReceipts>,
     /// The LRU cache for revm environments
     evm_env_cache: EnvLruCache<LimitEnvs>,
+    /// The LRU cache for blocks fees history
+    fee_history_cache: FeeHistoryLruCache<LimitBlocks>,
     /// Sender half of the action channel.
     action_tx: UnboundedSender<CacheAction>,
     /// Receiver half of the action channel.
@@ -270,7 +290,8 @@ where
 
         // cache good block
         if let Ok(Some(block)) = res {
-            self.full_block_cache.insert(block_hash, block);
+            self.full_block_cache.insert(block_hash, block.clone());
+            self.fee_history_cache.insert(block.number, block.header.clone().seal_slow()); 
         }
     }
 
@@ -292,6 +313,7 @@ where
         self.full_block_cache.update_cached_metrics();
         self.receipts_cache.update_cached_metrics();
         self.evm_env_cache.update_cached_metrics();
+        self.fee_history_cache.update_cached_metrics();
     }
 }
 
@@ -409,6 +431,12 @@ where
                                 }));
                             }
                         }
+                        CacheAction::GetBlockFee { block_number, response_tx } => {
+                             if let Some(fee) = this.fee_history_cache.get(&block_number).cloned() {
+                                let _ = response_tx.send(Ok(Some(fee)));
+                                continue
+                            }
+                        }
                         CacheAction::BlockResult { block_hash, res } => {
                             this.on_new_block(block_hash, res);
                         }
@@ -461,6 +489,7 @@ enum CacheAction {
     ReceiptsResult { block_hash: B256, res: RethResult<Option<Vec<Receipt>>> },
     EnvResult { block_hash: B256, res: Box<RethResult<(CfgEnv, BlockEnv)>> },
     CacheNewCanonicalChain { blocks: Vec<SealedBlock>, receipts: Vec<BlockReceipts> },
+    GetBlockFee{ block_number:u64, response_tx: BlockFeeResponseSender },
 }
 
 struct BlockReceipts {

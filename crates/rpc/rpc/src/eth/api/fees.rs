@@ -1,9 +1,9 @@
-//! Contains RPC handler implementations for fee history.
-
 use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
+use alloy_primitives::FixedBytes;
+use reth_interfaces::RethError;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     basefee::calculate_next_block_base_fee, BlockNumberOrTag, SealedHeader, U256, B256 
@@ -51,7 +51,6 @@ where
             return Ok(FeeHistory::default())
         }
 
-
         // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
         let max_fee_history = if reward_percentiles.is_none() {
             self.gas_oracle().config().max_header_history
@@ -67,6 +66,7 @@ where
             );
             block_count = max_fee_history
         }
+        
 
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
             return Err(EthApiError::UnknownBlockNumber)
@@ -79,7 +79,8 @@ where
             block_count = end_block_plus;
         }
 
-        // If reward percentiles were specified, we need to validate that they are monotonically
+        // If reward percentiles were specified, we  + schnellru::Limiter<u64,
+        // reth_primitives::Header>need to validate that they are monotonically
         // increasing and 0 <= p <= 100
         //
         // Note: The types used ensure that the percentiles are never < 0
@@ -94,31 +95,50 @@ where
         // Treat a request for 1 block as a request for `newest_block..=newest_block`,
         // otherwise `newest_block - 2
         // SAFETY: We ensured that block count is capped
-        let start_block = end_block_plus - block_count;
-        let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
-        if headers.len() != block_count as usize {
-            return Err(EthApiError::InvalidBlockRange)
-        }
 
-        // Collect base fees, gas usage ratios and (optionally) reward percentile data
+        let start_block = end_block_plus - block_count;
+        // TO-DO: first we support only in-cache queries
+        // let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
+
+        // begin
         let mut base_fee_per_gas: Vec<U256> = Vec::new();
         let mut gas_used_ratio: Vec<f64> = Vec::new();
         let mut rewards: Vec<Vec<U256>> = Vec::new();
-        for header in &headers {
+
+        let mut headers: Vec<SealedHeader> = Vec::new();
+
+        for n in start_block..end_block_plus {
+            let header = self.cache()
+                .get_fee_history(n)
+                .await?
+                .ok_or(EthApiError::InternalEthError)?;
+
+            if n == end_block_plus {
+                headers.push(header.clone());
+            }      
+            
             base_fee_per_gas
                 .push(U256::try_from(header.base_fee_per_gas.unwrap_or_default()).unwrap());
             gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
 
             // Percentiles were specified, so we need to collect reward percentile ino
             if let Some(percentiles) = &reward_percentiles {
-                rewards.push(self.calculate_reward_percentiles(percentiles, header).await?);
+                rewards.push(self.calculate_reward_percentiles(percentiles, &header).await?);
             }
-        }
+        };
+
+//        if headers.len() != block_count as usize {
+  //          return Err(EthApiError::InvalidBlockRange)
+    //    }
+
+        // Collect base fees, gas usage ratios and (optionally) reward percentile data
+        
 
         // The spec states that `base_fee_per_gas` "[..] includes the next block after the newest of
         // the returned range, because this value can be derived from the newest block"
         //
         // The unwrap is safe since we checked earlier that we got at least 1 header.
+        //
         let last_header = headers.last().unwrap();
         let chain_spec = self.provider().chain_spec();
         base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
