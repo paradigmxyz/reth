@@ -14,8 +14,6 @@ use revm_primitives::{
     Address, Bytes, B256, U256,
 };
 
-pub use codecs_derive::*;
-
 /// Trait that implements the `Compact` codec.
 ///
 /// When deriving the trait for custom structs, be aware of certain limitations/recommendations:
