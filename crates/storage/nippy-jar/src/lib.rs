@@ -10,6 +10,7 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::{
     clone::Clone,
@@ -17,7 +18,9 @@ use std::{
     fs::File,
     io::{Seek, Write},
     marker::Sync,
+    ops::Deref,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use sucds::{
     int_vectors::PrefixSummedEliasFano,
@@ -245,6 +248,11 @@ where
             .parent()
             .expect("exists")
             .join(format!("{}.idx", data_path.file_name().expect("exists").to_string_lossy()))
+    }
+
+    /// Returns a [`MmapHandle`] of the data file
+    pub fn open_data(&self) -> Result<MmapHandle, NippyJarError> {
+        MmapHandle::new(self.data_path())
     }
 
     /// If required, prepares any compression algorithm to an early pass of the data.
@@ -487,6 +495,33 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct MmapHandle {
+    /// File descriptor. Needs to be kept alive as long as the mmap handle.
+    #[allow(unused)]
+    file: Arc<File>,
+    /// Mmap handle.
+    mmap: Arc<Mmap>,
+}
+
+impl MmapHandle {
+    pub fn new(path: PathBuf) -> Result<Self, NippyJarError> {
+        let file = File::open(path)?;
+
+        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
+        let mmap = unsafe { Mmap::map(&file)? };
+
+        Ok(Self { file: Arc::new(file), mmap: Arc::new(mmap) })
+    }
+}
+
+impl Deref for MmapHandle {
+    type Target = Mmap;
+    fn deref(&self) -> &Self::Target {
+        &self.mmap
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -664,7 +699,7 @@ mod tests {
 
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
             assert!(zstd.use_dict);
-            let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
+            let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
 
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
@@ -699,7 +734,7 @@ mod tests {
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Lz4(_)) = loaded_nippy.compressor() {
-            let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
+            let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
 
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
@@ -737,7 +772,7 @@ mod tests {
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
             assert!(!zstd.use_dict);
 
-            let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
+            let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
 
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
@@ -794,7 +829,7 @@ mod tests {
             assert_eq!(loaded_nippy.user_header().block_start, block_start);
 
             if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
-                let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
+                let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
 
                 // Iterate over compressed values and compare
                 let mut row_num = 0usize;
@@ -859,7 +894,7 @@ mod tests {
             let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
 
             if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
-                let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
+                let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
 
                 // Shuffled for chaos.
                 let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();

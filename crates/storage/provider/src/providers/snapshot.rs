@@ -12,18 +12,45 @@ use reth_primitives::{
     SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
     B256, U256,
 };
-use std::{ops::RangeBounds, path::PathBuf};
+use std::{
+    ops::{Deref, RangeBounds},
+    path::PathBuf,
+};
 
 /// Alias type for each specific `NippyJar`.
-type NippyJarRef<'a> =
-    dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), NippyJar<SegmentHeader>>;
+type NippyJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), LoadedJar>;
+
+/// Helper type to reuse an associated snapshot mmap handle on created cursors.
+#[derive(Debug)]
+struct LoadedJar {
+    jar: NippyJar<SegmentHeader>,
+    data_file: reth_nippy_jar::MmapHandle,
+}
+
+impl LoadedJar {
+    fn new(jar: NippyJar<SegmentHeader>) -> RethResult<Self> {
+        let data_file = jar.open_data()?;
+        Ok(Self { jar, data_file })
+    }
+
+    fn data_file(&self) -> reth_nippy_jar::MmapHandle {
+        self.data_file.clone()
+    }
+}
+
+impl Deref for LoadedJar {
+    type Target = NippyJar<SegmentHeader>;
+    fn deref(&self) -> &Self::Target {
+        &self.jar
+    }
+}
 
 /// SnapshotProvider
 #[derive(Debug, Default)]
 pub struct SnapshotProvider {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
-    map: DashMap<(BlockNumber, SnapshotSegment), NippyJar<SegmentHeader>>,
+    map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
 }
 
 impl SnapshotProvider {
@@ -43,8 +70,7 @@ impl SnapshotProvider {
         }
 
         if let Some(path) = &path {
-            let jar = NippyJar::load(path)?;
-            self.map.insert(key, jar);
+            self.map.insert(key, LoadedJar::new(NippyJar::load(path)?)?);
         } else {
             path = Some(segment.filename(
                 &((snapshot * SNAPSHOT_BLOCK_NUMBER_CHUNKS)..=
@@ -189,7 +215,7 @@ impl TransactionsProvider for SnapshotProvider {
 #[derive(Debug)]
 pub struct SnapshotJarProvider<'a> {
     /// Reference to a value on [`SnapshotProvider`]
-    pub jar: NippyJarRef<'a>,
+    jar: NippyJarRef<'a>,
 }
 
 impl<'a> SnapshotJarProvider<'a> {
@@ -198,14 +224,14 @@ impl<'a> SnapshotJarProvider<'a> {
     where
         'b: 'a,
     {
-        Ok(NippyJarCursor::new(self.jar.value())?)
+        Ok(NippyJarCursor::new(self.jar.value(), Some(self.jar.data_file()))?)
     }
 }
 
 impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
         // WIP
-        let mut cursor = NippyJarCursor::new(self.jar.value())?;
+        let mut cursor = self.cursor()?;
 
         let header = Header::decompress(
             cursor.row_by_key_with_cols::<0b01, 2>(&block_hash.0).unwrap().unwrap()[0],
@@ -222,7 +248,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
 
     fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
         Header::decompress(
-            NippyJarCursor::new(self.jar.value())?
+            self.cursor()?
                 .row_by_number_with_cols::<0b01, 2>(
                     (num - self.jar.user_header().block_start()) as usize,
                 )?
@@ -234,7 +260,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
 
     fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
         // WIP
-        let mut cursor = NippyJarCursor::new(self.jar.value())?;
+        let mut cursor = NippyJarCursor::new(self.jar.value(), Some(self.jar.data_file()))?;
 
         let row = cursor.row_by_key_with_cols::<0b11, 2>(&block_hash.0).unwrap().unwrap();
 
@@ -308,7 +334,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
 
     fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
         TransactionSignedNoHash::decompress(
-            NippyJarCursor::new(self.jar.value())?
+            self.cursor()?
                 .row_by_number_with_cols::<0b1, 1>(
                     (num - self.jar.user_header().tx_start()) as usize,
                 )?
@@ -328,7 +354,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
 
     fn transaction_by_hash(&self, hash: TxHash) -> RethResult<Option<TransactionSigned>> {
         // WIP
-        let mut cursor = NippyJarCursor::new(self.jar.value())?;
+        let mut cursor = self.cursor()?;
 
         let tx = TransactionSignedNoHash::decompress(
             cursor.row_by_key_with_cols::<0b1, 1>(&hash.0).unwrap().unwrap()[0],
