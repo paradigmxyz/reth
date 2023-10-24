@@ -10,7 +10,12 @@ description = "tracing helpers"
 
 [dependencies]
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "env-filter",
+    "fmt",
+    "json",
+    "std",
+] }
 tracing-appender.workspace = true
 tracing-journald = "0.3"
 rolling-file = "0.2.0"
