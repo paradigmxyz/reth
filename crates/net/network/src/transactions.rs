@@ -966,6 +966,8 @@ struct GetPooledTxRequest {
 
 struct GetPooledTxResponse {
     peer_id: PeerId,
+    /// Request object so we know what hashes were requested and can do cleanup
+    request: GetPooledTxRequest,
     result: Result<RequestResult<PooledTransactions>, RecvError>,
 }
 
