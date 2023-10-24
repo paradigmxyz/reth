@@ -194,6 +194,16 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 println!("");
             }
 
+            #[cfg(feature = "enable_test_max_th")]
+            {
+                println!(
+                    "block_number: {:?}, start_block: {:?}, state.size_hint: {:?}",
+                    block_number,
+                    start_block,
+                    state.size_hint()
+                );
+            }
+
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(block_number - start_block, state.size_hint() as u64)
             {

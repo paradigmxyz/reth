@@ -85,6 +85,7 @@ enable_cache_record = ["reth-provider/enable_cache_record"]
 finish_after_execution_stage = []
 enable_execution_duration_record = ["minstant"]
 enable_tps_gas_record = []
+enable_test_max_th = []
 
 [[bench]]
 name = "criterion"
