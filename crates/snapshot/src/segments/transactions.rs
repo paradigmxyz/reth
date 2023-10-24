@@ -51,12 +51,10 @@ impl Segment for Transactions {
         let mut hashes = None;
         if self.filters.has_filters() {
             hashes = Some(
-                tables::Transactions::recover_hashes(
-                    provider.tx_ref(),
-                    *tx_range.start()..(*tx_range.end() + 1),
-                )?
-                .into_iter()
-                .map(|(tx, _)| Ok(tx)),
+                provider
+                    .transaction_hashes_by_range(*tx_range.start()..(*tx_range.end() + 1))?
+                    .into_iter()
+                    .map(|(tx, _)| Ok(tx)),
             );
         }
 
