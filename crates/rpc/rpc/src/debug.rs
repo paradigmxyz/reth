@@ -897,7 +897,10 @@ where
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
         let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
-        Ok(tx.map(TransactionSource::into_recovered).map(|tx|tx.envelope_encoded()).unwrap_or_default())
+        Ok(tx
+            .map(TransactionSource::into_recovered)
+            .map(|tx| tx.envelope_encoded())
+            .unwrap_or_default())
     }
 
     /// Handler for `debug_getRawReceipts`
