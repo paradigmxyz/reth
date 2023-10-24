@@ -55,6 +55,7 @@ impl Command {
         let block_range = self.from..=(self.from + self.block_interval - 1);
 
         let mut rng = rand::thread_rng();
+
         let tx_range = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
             .provider()?
             .transaction_range_by_block_range(block_range.clone())?;
@@ -107,7 +108,7 @@ impl Command {
             row_indexes.shuffle(&mut rng);
         }
 
-        // BENCHMARK QUERYING A RANDOM HEADER BY NUMBER
+        // BENCHMARK QUERYING A RANDOM RECEIPT BY NUMBER
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())];
             bench(
@@ -131,7 +132,7 @@ impl Command {
             )?;
         }
 
-        // BENCHMARK QUERYING A RANDOM HEADER BY HASH
+        // BENCHMARK QUERYING A RANDOM RECEIPT BY HASH
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
             let tx_hash =

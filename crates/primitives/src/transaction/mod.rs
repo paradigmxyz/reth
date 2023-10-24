@@ -1,6 +1,6 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
-    keccak256, Address, Bytes, TxHash, B256,
+    keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256,
 };
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -28,6 +28,7 @@ pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 pub use tx_value::TxValue;
+pub use variant::TransactionSignedVariant;
 
 mod access_list;
 mod eip1559;
@@ -41,6 +42,7 @@ mod signature;
 mod tx_type;
 mod tx_value;
 pub(crate) mod util;
+mod variant;
 
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
 // parallel.
@@ -116,8 +118,8 @@ impl Transaction {
     pub fn chain_id(&self) -> Option<u64> {
         match self {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
-            Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(*chain_id),
-            Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(*chain_id),
+            Transaction::Eip2930(TxEip2930 { chain_id, .. }) |
+            Transaction::Eip1559(TxEip1559 { chain_id, .. }) |
             Transaction::Eip4844(TxEip4844 { chain_id, .. }) => Some(*chain_id),
         }
     }
@@ -126,8 +128,8 @@ impl Transaction {
     pub fn set_chain_id(&mut self, chain_id: u64) {
         match self {
             Transaction::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
-            Transaction::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) => *c = chain_id,
-            Transaction::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Transaction::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) |
+            Transaction::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) |
             Transaction::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) => *c = chain_id,
         }
     }
@@ -161,9 +163,9 @@ impl Transaction {
     /// Gets the transaction's value field.
     pub fn value(&self) -> TxValue {
         *match self {
-            Transaction::Legacy(TxLegacy { value, .. }) => value,
-            Transaction::Eip2930(TxEip2930 { value, .. }) => value,
-            Transaction::Eip1559(TxEip1559 { value, .. }) => value,
+            Transaction::Legacy(TxLegacy { value, .. }) |
+            Transaction::Eip2930(TxEip2930 { value, .. }) |
+            Transaction::Eip1559(TxEip1559 { value, .. }) |
             Transaction::Eip4844(TxEip4844 { value, .. }) => value,
         }
     }
@@ -171,9 +173,9 @@ impl Transaction {
     /// Get the transaction's nonce.
     pub fn nonce(&self) -> u64 {
         match self {
-            Transaction::Legacy(TxLegacy { nonce, .. }) => *nonce,
-            Transaction::Eip2930(TxEip2930 { nonce, .. }) => *nonce,
-            Transaction::Eip1559(TxEip1559 { nonce, .. }) => *nonce,
+            Transaction::Legacy(TxLegacy { nonce, .. }) |
+            Transaction::Eip2930(TxEip2930 { nonce, .. }) |
+            Transaction::Eip1559(TxEip1559 { nonce, .. }) |
             Transaction::Eip4844(TxEip4844 { nonce, .. }) => *nonce,
         }
     }
@@ -226,8 +228,7 @@ impl Transaction {
     /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
     pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
-            Transaction::Legacy(_) => None,
-            Transaction::Eip2930(_) => None,
+            Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
             Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
             Transaction::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
                 Some(*max_priority_fee_per_gas)
@@ -241,9 +242,7 @@ impl Transaction {
     /// This is also commonly referred to as the "blob versioned hashes" (`BlobVersionedHashes`).
     pub fn blob_versioned_hashes(&self) -> Option<Vec<B256>> {
         match self {
-            Transaction::Legacy(_) => None,
-            Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(_) => None,
+            Transaction::Legacy(_) | Transaction::Eip2930(_) | Transaction::Eip1559(_) => None,
             Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
                 Some(blob_versioned_hashes.to_vec())
             }
@@ -352,9 +351,9 @@ impl Transaction {
     /// Get the transaction's input field.
     pub fn input(&self) -> &Bytes {
         match self {
-            Transaction::Legacy(TxLegacy { input, .. }) => input,
-            Transaction::Eip2930(TxEip2930 { input, .. }) => input,
-            Transaction::Eip1559(TxEip1559 { input, .. }) => input,
+            Transaction::Legacy(TxLegacy { input, .. }) |
+            Transaction::Eip2930(TxEip2930 { input, .. }) |
+            Transaction::Eip1559(TxEip1559 { input, .. }) |
             Transaction::Eip4844(TxEip4844 { input, .. }) => input,
         }
     }
@@ -1307,6 +1306,9 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
         self.clone()
     }
 }
+
+/// Either a transaction hash or number.
+pub type TxHashOrNumber = BlockHashOrNumber;
 
 #[cfg(test)]
 mod tests {

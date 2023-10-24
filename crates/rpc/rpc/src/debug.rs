@@ -3,7 +3,7 @@ use crate::{
         error::{EthApiError, EthResult},
         revm_utils::{
             clone_into_empty_db, inspect, inspect_and_return_db, prepare_call_env,
-            replay_transactions_until, result_output, transact, EvmOverrides,
+            replay_transactions_until, transact, EvmOverrides,
         },
         EthTransactions, TransactionSource,
     },
@@ -14,12 +14,12 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
+    revm::env::tx_env_with_recovered, Account, Address, Block, BlockId, BlockNumberOrTag, Bytes,
+    TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::{StateProviderDatabase, SubState},
-    env::tx_env_with_recovered,
     tracing::{
         js::{JsDbRequest, JsInspector},
         FourByteInspector, TracingInspector, TracingInspectorConfig,
@@ -263,7 +263,10 @@ where
                             .into_pre_state_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config),
+                            TracingInspectorConfig::from_geth_config(&config)
+                                // if in default mode, we need to return all touched storages, for
+                                // which we need to record steps and statediff
+                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
 
                         let frame =
@@ -330,7 +333,7 @@ where
             })
             .await?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default();
+        let return_value = res.result.into_output().unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok(frame.into())
@@ -490,7 +493,10 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config),
+                            TracingInspectorConfig::from_geth_config(&config)
+                                // if in default mode, we need to return all touched storages, for
+                                // which we need to record steps and statediff
+                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
                         let (res, _) = inspect(&mut *db, env, &mut inspector)?;
 
@@ -533,7 +539,7 @@ where
 
         let (res, _) = inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default();
+        let return_value = res.result.into_output().unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))
@@ -604,7 +610,7 @@ where
             match req {
                 JsDbRequest::Basic { address, resp } => {
                     let acc = db
-                        .basic(address)
+                        .basic_ref(address)
                         .map(|maybe_acc| {
                             maybe_acc.map(|acc| Account {
                                 nonce: acc.nonce,
@@ -617,13 +623,13 @@ where
                 }
                 JsDbRequest::Code { code_hash, resp } => {
                     let code = db
-                        .code_by_hash(code_hash)
+                        .code_by_hash_ref(code_hash)
                         .map(|code| code.bytecode)
                         .map_err(|err| err.to_string());
                     let _ = resp.send(code);
                 }
                 JsDbRequest::StorageAt { address, index, resp } => {
-                    let value = db.storage(address, index).map_err(|err| err.to_string());
+                    let value = db.storage_ref(address, index).map_err(|err| err.to_string());
                     let _ = resp.send(value);
                 }
             }

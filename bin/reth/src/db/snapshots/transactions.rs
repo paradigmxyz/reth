@@ -109,7 +109,7 @@ impl Command {
             row_indexes.shuffle(&mut rng);
         }
 
-        // BENCHMARK QUERYING A RANDOM HEADER BY NUMBER
+        // BENCHMARK QUERYING A RANDOM TRANSACTION BY NUMBER
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())];
             bench(
@@ -134,7 +134,7 @@ impl Command {
             )?;
         }
 
-        // BENCHMARK QUERYING A RANDOM HEADER BY HASH
+        // BENCHMARK QUERYING A RANDOM TRANSACTION BY HASH
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
             let transaction_hash =

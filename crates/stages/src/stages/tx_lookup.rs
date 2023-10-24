@@ -13,6 +13,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
+    TransactionsProviderExt,
 };
 use tracing::*;
 
@@ -92,12 +93,12 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
 
-        let tx = provider.tx_ref();
-        let mut tx_list = tables::Transactions::recover_hashes(tx, tx_range)?;
+        let mut tx_list = provider.transaction_hashes_by_range(tx_range)?;
 
         // Sort before inserting the reverse lookup for hash -> tx_id.
         tx_list.par_sort_unstable_by(|txa, txb| txa.0.cmp(&txb.0));
 
+        let tx = provider.tx_ref();
         let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
 
         // If the last inserted element in the database is equal or bigger than the first

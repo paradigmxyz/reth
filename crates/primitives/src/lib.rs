@@ -23,7 +23,6 @@ mod block;
 mod chain;
 mod compression;
 pub mod constants;
-pub mod contract;
 pub mod eip4844;
 mod forkid;
 pub mod fs;
@@ -31,7 +30,6 @@ mod genesis;
 mod hardfork;
 mod header;
 mod integer_list;
-pub mod listener;
 mod log;
 mod net;
 mod peer;
@@ -39,6 +37,8 @@ mod precaution;
 pub mod proofs;
 mod prune;
 mod receipt;
+/// Helpers for working with revm
+pub mod revm;
 pub mod serde_helper;
 pub mod snapshot;
 pub mod stage;
@@ -91,7 +91,7 @@ pub use transaction::{
     IntoRecoveredTransaction, InvalidTransactionError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionKind, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
-    TxEip4844, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    TxEip4844, TxHashOrNumber, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;

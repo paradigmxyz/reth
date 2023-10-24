@@ -4,7 +4,7 @@ use reth_primitives::{
     Address, BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber,
 };
-use std::ops::{RangeBounds, RangeInclusive};
+use std::ops::{Range, RangeBounds, RangeInclusive};
 
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
@@ -84,4 +84,10 @@ pub trait TransactionsProviderExt: BlockReader + Send + Sync {
 
         Ok(from..=to)
     }
+
+    /// Get transaction hashes from a transaction range.
+    fn transaction_hashes_by_range(
+        &self,
+        tx_range: Range<TxNumber>,
+    ) -> RethResult<Vec<(TxHash, TxNumber)>>;
 }

@@ -1,4 +1,4 @@
-//! Revm utils and implementations specific to reth.
+//! Event listeners
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -9,11 +9,5 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod config;
-
-/// Helpers for configuring Revm [`Env`](reth_primitives::revm_primitives::Env).
-pub mod env;
-
-/// Helpers for type compatibility between reth and revm types
-mod compat;
-pub use compat::*;
+mod event_listeners;
+pub use event_listeners::EventListeners;

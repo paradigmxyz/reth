@@ -2,9 +2,9 @@
 
 use alloy_rlp::Encodable;
 use reth_primitives::{
-    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, B256, U256,
+    revm::config::revm_spec_by_timestamp_after_merge, Address, BlobTransactionSidecar, ChainSpec,
+    Header, SealedBlock, Withdrawal, B256, U256,
 };
-use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
     PayloadId,

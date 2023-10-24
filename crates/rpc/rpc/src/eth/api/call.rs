@@ -12,13 +12,11 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
-use reth_revm::{
-    access_list::AccessListInspector, database::StateProviderDatabase, env::tx_env_with_recovered,
-};
+use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
     StateContext,
@@ -208,7 +206,7 @@ where
                     if no_code_callee {
                         // simple transfer, check if caller has sufficient funds
                         let available_funds =
-                            db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
+                            db.basic_ref(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
                         if env.tx.value > available_funds {
                             return Err(
                                 RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
@@ -380,7 +378,7 @@ where
         let to = if let Some(to) = request.to {
             to
         } else {
-            let nonce = db.basic(from)?.unwrap_or_default().nonce;
+            let nonce = db.basic_ref(from)?.unwrap_or_default().nonce;
             from.create(nonce)
         };
 

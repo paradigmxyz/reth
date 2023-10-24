@@ -1,4 +1,6 @@
-use reth_primitives::{Address, BlockHash, BlockHashOrNumber, BlockNumber, TxNumber, B256};
+use reth_primitives::{
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, TxHashOrNumber, TxNumber, B256,
+};
 
 /// Bundled errors variants thrown by various providers.
 #[allow(missing_docs)]
@@ -37,15 +39,15 @@ pub enum ProviderError {
     /// Thrown when required header related data was not found but was required.
     #[error("No header found for {0:?}")]
     HeaderNotFound(BlockHashOrNumber),
-    /// Thrown we were unable to find a specific block
+    /// The specific block is missing.
     #[error("Block does not exist {0:?}")]
     BlockNotFound(BlockHashOrNumber),
-    /// Thrown we were unable to find a specific transaction
+    /// The specific transaction is missing.
     #[error("Transaction does not exist {0:?}")]
-    TransactionNotFound(BlockHashOrNumber),
-    /// Thrown we were unable to find a specific receipt
+    TransactionNotFound(TxHashOrNumber),
+    /// The specific receipt is missing
     #[error("Receipt does not exist {0:?}")]
-    ReceiptNotFound(BlockHashOrNumber),
+    ReceiptNotFound(TxHashOrNumber),
     /// Thrown we were unable to find the best block
     #[error("Best block does not exist")]
     BestBlockNotFound,

@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
+    revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
@@ -25,7 +26,6 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -39,10 +39,7 @@ use revm::{
     primitives::{BlockEnv, CfgEnv},
     Inspector,
 };
-use revm_primitives::{
-    db::DatabaseCommit, utilities::create_address, Env, ExecutionResult, ResultAndState, SpecId,
-    State,
-};
+use revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State};
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBox<'r>>>;
@@ -1058,7 +1055,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     match tx.transaction.kind() {
         Create => {
             res_receipt.contract_address =
-                Some(create_address(transaction.signer(), tx.transaction.nonce()));
+                Some(transaction.signer().create(tx.transaction.nonce()));
         }
         Call(addr) => {
             res_receipt.to = Some(*addr);
