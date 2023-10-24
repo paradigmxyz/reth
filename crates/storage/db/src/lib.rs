@@ -194,7 +194,7 @@ pub mod test_utils {
             self.db.as_ref().unwrap()
         }
 
-        /// retunrs the inner db
+        /// returns the inner db
         pub fn into_inner_db(mut self) -> DB {
             self.db.take().unwrap() // take out db to avoid clean path in drop fn
         }
