@@ -16,10 +16,10 @@
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::path::Path;
 use tracing::Subscriber;
+
 use tracing_subscriber::{
     filter::Directive, prelude::*, registry::LookupSpan, EnvFilter, Layer, Registry,
 };
@@ -135,4 +135,21 @@ pub fn init_test_tracing() {
         .with_env_filter(EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
         .try_init();
+}
+
+/// Builds a new tracing layer that writes to stdout in JSON format.
+///
+/// The events are filtered by `default_directive`, unless overridden by `RUST_LOG`.
+pub fn json_stdout<S>(default_directive: impl Into<Directive>) -> BoxedLayer<S>
+where
+    S: Subscriber,
+    for<'a> S: LookupSpan<'a>,
+{
+    let filter =
+        EnvFilter::builder().with_default_directive(default_directive.into()).from_env_lossy();
+
+    tracing_subscriber::fmt::layer()
+        .json() // Use the JSON formatter
+        .with_filter(filter)
+        .boxed()
 }
