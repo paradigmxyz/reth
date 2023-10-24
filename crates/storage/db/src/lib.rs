@@ -189,7 +189,7 @@ pub mod test_utils {
     }
 
     impl<DB> TempDatabase<DB> {
-        /// retunrs the ref of inner db
+        /// returns the ref of inner db
         pub fn db(&self) -> &DB {
             self.db.as_ref().unwrap()
         }
