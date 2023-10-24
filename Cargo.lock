@@ -5683,7 +5683,11 @@ dependencies = [
 name = "reth-auto-seal-consensus"
 version = "0.1.0-alpha.10"
 dependencies = [
+ "clap",
+ "eyre",
  "futures-util",
+ "jsonrpsee",
+ "reth",
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-primitives",
@@ -5691,6 +5695,8 @@ dependencies = [
  "reth-revm",
  "reth-stages",
  "reth-transaction-pool",
+ "serde_json",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tracing",
