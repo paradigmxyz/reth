@@ -33,7 +33,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
+use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
@@ -54,6 +54,9 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
 /// Softlimit for the response size of a GetPooledTransactions message (2MB)
 const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
     GetPooledTransactionLimit::SizeSoftLimit(2 * 1024 * 1024);
+
+/// How many peers we keep track of for each missing transaction.
+const MAX_ALTERNATIVE_PEERS_PER_TX: usize = 3;
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
@@ -505,7 +508,8 @@ where
             hashes.truncate(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES);
 
             // request the missing transactions
-            let request_sent: bool = self.transaction_fetcher.request_from(hashes, peer);
+            let request_sent =
+                self.transaction_fetcher.request_transactions_from_peer(hashes, peer);
             if !request_sent {
                 self.metrics.egress_peer_channel_full.increment(1);
                 return
@@ -536,7 +540,12 @@ where
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
                     .filter_map(Result::ok)
-                    .collect();
+                    .collect::<Vec<_>>();
+
+                // mark the transactions as received
+                self.transaction_fetcher.on_received_full_transactions_broadcast(
+                    non_blob_txs.iter().map(|tx| tx.hash()),
+                );
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
@@ -772,7 +781,7 @@ where
 
         let fetch_event = this.transaction_fetcher.poll(cx);
         match fetch_event {
-            Poll::Ready(FetchEvent::TransactionFetched { peer_id, transactions }) => {
+            Poll::Ready(FetchEvent::TransactionsFetched { peer_id, transactions }) => {
                 if let Some(txns) = transactions {
                     this.import_transactions(peer_id, txns, TransactionSource::Response);
                 }
@@ -1007,10 +1016,7 @@ struct Peer {
     client_version: Arc<String>,
 }
 
-// === TransactionFetcher ===
-/// * active requests - especially inflight hashes, so that whenever we receive new missing hashes
-///   we can check first if they're already being requested.
-/// * missing hashes and peers that send us these - so we can possibly re-request them
+/// The type responsible for fetching missing transactions from peers.
 #[derive(Debug, Default)]
 struct TransactionFetcher {
     /// All currently active requests for pooled transactions.
@@ -1019,11 +1025,134 @@ struct TransactionFetcher {
     inflight_hash_to_fallback_peers: HashMap<TxHash, Vec<PeerId>>,
 }
 
+// === impl TransactionFetcher ===
+
+impl TransactionFetcher {
+    /// Advances all inflight requests and returns the next event.
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchEvent> {
+        if let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
+            self.inflight_requests.poll_next_unpin(cx)
+        {
+            return match result {
+                Ok(Ok(txs)) => {
+                    // clear received hashes
+                    for tx in txs.0.iter() {
+                        self.inflight_hash_to_fallback_peers.remove(tx.hash());
+                    }
+
+                    // TODO - check if we need to re-request any of the hashes missing from the
+                    // response but present in the request
+
+                    Poll::Ready(FetchEvent::TransactionsFetched {
+                        peer_id,
+                        transactions: Some(txs.0),
+                    })
+                }
+                Ok(Err(req_err)) => {
+                    // TODO: also clear the hashes from the inflight hashes and schedule a
+                    // re-request for alternatives
+                    Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
+                }
+                Err(_) => {
+                    // TODO: we need to change the error type of `GetPooledTxResponse` so that it
+                    // always returns the request object so we know what hashes were requested and
+                    // can do cleanup
+
+                    // request channel closed/dropped
+                    Poll::Ready(FetchEvent::FetchError {
+                        peer_id,
+                        error: RequestError::ChannelClosed,
+                    })
+                }
+            }
+        }
+        Poll::Pending
+    }
+
+    /// Removes the provided transaction hashes from the inflight requests set.
+    ///
+    /// This is called when we receive full transactions that are currently scheduled for fetching.
+    fn on_received_full_transactions_broadcast<'a>(
+        &mut self,
+        hashes: impl IntoIterator<Item = &'a TxHash>,
+    ) {
+        for hash in hashes.into_iter() {
+            self.inflight_hash_to_fallback_peers.remove(hash);
+        }
+    }
+
+    /// Requests the missing transactions from the announced hashes of the peer
+    ///
+    /// This filters all announced hashes that are already in flight, and requests the missing,
+    /// while marking the given peer as an alternative peer for the hashes that are already in
+    /// flight.
+    fn request_transactions_from_peer(
+        &mut self,
+        mut announced_hashes: Vec<TxHash>,
+        peer: &Peer,
+    ) -> bool {
+        let peer_id: PeerId = peer.request_tx.peer_id;
+        // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
+        announced_hashes.retain(|&hash| {
+            match self.inflight_hash_to_fallback_peers.entry(hash) {
+                Entry::Vacant(entry) => {
+                    // the hash is not in inflight hashes, insert it and retain in the vector
+                    entry.insert(vec![peer_id]);
+                    true
+                }
+                Entry::Occupied(mut entry) => {
+                    // the hash is already in inflight, add this peer as a backup if not more than 3
+                    // backups already
+                    let backups = entry.get_mut();
+                    if backups.len() < MAX_ALTERNATIVE_PEERS_PER_TX {
+                        backups.push(peer_id);
+                    }
+                    false
+                }
+            }
+        });
+
+        // 2. request all missing from peer
+        if announced_hashes.is_empty() {
+            // nothing to request
+            return false
+        }
+
+        let (response, rx) = oneshot::channel();
+        let req: PeerRequest = PeerRequest::GetPooledTransactions {
+            request: GetPooledTransactions(announced_hashes),
+            response,
+        };
+
+        // try to send the request to the peer
+        if let Err(err) = peer.request_tx.try_send(req) {
+            // peer channel is full
+            match err {
+                TrySendError::Full(req) | TrySendError::Closed(req) => {
+                    // need to do some cleanup so
+                    let req = req.into_get_pooled_transactions().expect("is get pooled tx");
+
+                    // we know that the peer is the only entry in the map, so we can remove all
+                    for hash in req.0.into_iter() {
+                        self.inflight_hash_to_fallback_peers.remove(&hash);
+                    }
+                }
+            }
+            return false
+        } else {
+            //create a new request for it, from that peer
+            self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
+        }
+
+        true
+    }
+}
+
 /// Represents possible events from fetching transactions.
 #[derive(Debug)]
-pub enum FetchEvent {
+enum FetchEvent {
     /// Triggered when transactions are successfully fetched.
-    TransactionFetched {
+    TransactionsFetched {
         /// The ID of the peer from which transactions were fetched.
         peer_id: PeerId,
         /// The transactions that were fetched, if available.
@@ -1036,87 +1165,6 @@ pub enum FetchEvent {
         /// The specific error that occurred while fetching.
         error: RequestError,
     },
-}
-
-#[allow(dead_code)]
-impl TransactionFetcher {
-    /// Removes the provided transaction hashes from the inflight requests set.
-    pub fn handle_broadcasted_transactions(&mut self, hashes: Vec<TxHash>) {
-        for hash in hashes.iter() {
-            self.inflight_hash_to_fallback_peers.remove(hash);
-        }
-    }
-
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchEvent> {
-        if let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
-            self.inflight_requests.poll_next_unpin(cx)
-        {
-            match result {
-                Ok(Ok(txs)) => {
-                    self.inflight_requests.clear();
-                    for tx in txs.0.iter() {
-                        self.inflight_hash_to_fallback_peers.remove(tx.hash());
-                    }
-                    return Poll::Ready(FetchEvent::TransactionFetched {
-                        peer_id,
-                        transactions: Some(txs.0),
-                    })
-                }
-                Ok(Err(req_err)) => {
-                    return Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
-                }
-                Err(_) => {
-                    // request channel closed/dropped
-                    return Poll::Ready(FetchEvent::FetchError {
-                        peer_id,
-                        error: RequestError::ChannelClosed,
-                    })
-                }
-            }
-        }
-        Poll::Pending
-    }
-
-    // request the missing transactions
-    fn request_from(&mut self, mut hashes: Vec<TxHash>, peer: &Peer) -> bool {
-        let peer_id: PeerId = peer.request_tx.peer_id;
-        // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
-        hashes.retain(|&hash| {
-            match self.inflight_hash_to_fallback_peers.entry(hash) {
-                Entry::Vacant(entry) => {
-                    // the hash is not in inflight hashes, insert it and retain in the vector
-                    entry.insert(vec![peer_id]);
-                    true
-                }
-                Entry::Occupied(mut entry) => {
-                    // the hash is already in inflight, add this peer as a backup if not more than 3
-                    // backups already
-                    let backups = entry.get_mut();
-                    if backups.len() < 3 {
-                        backups.push(peer_id);
-                    }
-                    false
-                }
-            }
-        });
-        // 2. request all missing from peer
-        if hashes.is_empty() {
-            // nothing to request
-            return false
-        }
-        let (response, rx) = oneshot::channel();
-        let req: PeerRequest =
-            PeerRequest::GetPooledTransactions { request: GetPooledTransactions(hashes), response };
-        // 3. insert hashes to inflight set
-        if peer.request_tx.try_send(req).is_ok() {
-            //create a new request for it, from that peer
-            self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
-        } else {
-            //increment metrics egress_peer_channel_full
-            return false
-        }
-        true
-    }
 }
 
 /// Commands to send to the [`TransactionsManager`]
