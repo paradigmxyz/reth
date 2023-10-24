@@ -410,8 +410,8 @@ where
         let mut env: *mut ffi::MDBX_env = ptr::null_mut();
         unsafe {
             if let Some(log_level) = self.log_level {
-                // Returns the previously debug_flags in the 0-15 bits and log_level in the
-                // 16-31 bits, no need to use `mdbx_result`.
+                // Returns the previous debug_flags in the 0-15 bits and log_level in the 16-31
+                // bits, no need to use `mdbx_result`.
                 ffi::mdbx_setup_debug(log_level, ffi::MDBX_DBG_DONTCHANGE, None);
             }
 
@@ -432,7 +432,13 @@ where
                         }
                     }
 
-                    let page_size = if path.exists() {
+                    let page_size = if path
+                        .join(
+                            std::str::from_utf8(ffi::MDBX_DATANAME)
+                                .expect("MDBX database file name is a UTF-8 encoded string"),
+                        )
+                        .exists()
+                    {
                         -1
                     } else {
                         match geometry.page_size {
