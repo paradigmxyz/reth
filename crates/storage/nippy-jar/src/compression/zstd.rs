@@ -32,10 +32,7 @@ pub struct Zstd {
     /// Max size of a dictionary
     pub(crate) max_dict_size: usize,
     /// List of column dictionaries.
-    #[serde(
-        serialize_with = "serialize_dictionaries",
-        deserialize_with = "deserialize_dictionaries"
-    )]
+    #[serde(with = "dictionaries_serde")]
     pub(crate) dictionaries: Option<Arc<ZstdDictionaries<'static>>>,
     /// Number of columns to compress.
     columns: usize,
@@ -237,27 +234,31 @@ impl Compression for Zstd {
     }
 }
 
-fn serialize_dictionaries<S>(
-    dictionaries: &Option<Arc<ZstdDictionaries<'static>>>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match dictionaries {
-        Some(dicts) => serializer.serialize_some(dicts.as_ref()),
-        None => serializer.serialize_none(),
-    }
-}
+mod dictionaries_serde {
+    use super::*;
 
-fn deserialize_dictionaries<'de, D>(
-    deserializer: D,
-) -> Result<Option<Arc<ZstdDictionaries<'static>>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let dictionaries: Option<Vec<RawDictionary>> = Option::deserialize(deserializer)?;
-    Ok(dictionaries.map(|dicts| Arc::new(ZstdDictionaries::load(dicts))))
+    pub fn serialize<S>(
+        dictionaries: &Option<Arc<ZstdDictionaries<'static>>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match dictionaries {
+            Some(dicts) => serializer.serialize_some(dicts.as_ref()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<Arc<ZstdDictionaries<'static>>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let dictionaries: Option<Vec<RawDictionary>> = Option::deserialize(deserializer)?;
+        Ok(dictionaries.map(|dicts| Arc::new(ZstdDictionaries::load(dicts))))
+    }
 }
 
 /// List of [`ZstdDictionary`]
