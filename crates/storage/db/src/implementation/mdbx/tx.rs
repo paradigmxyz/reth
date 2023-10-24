@@ -11,18 +11,20 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::DatabaseWriteOperation;
 use reth_libmdbx::{ffi::DBI, EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use std::{str::FromStr, sync::Arc, time::Instant};
+use std::{
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
 pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     /// Libmdbx-sys transaction.
     pub inner: Transaction<'a, K, E>,
-    /// Cached internal transaction ID provided by libmdbx.
-    id: Option<u64>,
     /// Database table handle cache.
     pub(crate) db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
-    metrics_tx: Option<MetricEventsSender>,
+    metrics_handler: Option<MetricsHandler>,
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
@@ -31,18 +33,18 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     where
         'a: 'env,
     {
-        Self { inner, id: None, db_handles: Default::default(), metrics_tx: None }
+        Self { inner, db_handles: Default::default(), metrics_handler: None }
     }
 
     /// Sets the [MetricEventsSender] to report metrics about the transaction and cursors.
     pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
-        self.metrics_tx = Some(metrics_tx);
+        self.metrics_handler = Some(MetricsHandler { txn_id: self.id(), metrics_tx });
         self
     }
 
     /// Gets this transaction ID.
-    pub fn id(&mut self) -> u64 {
-        *self.id.get_or_insert_with(|| self.inner.id())
+    pub fn id(&self) -> u64 {
+        self.metrics_handler.as_ref().map_or_else(|| self.inner.id(), |handler| handler.txn_id)
     }
 
     /// Gets a table database handle if it exists, otherwise creates it.
@@ -79,14 +81,13 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         f: impl FnOnce(Self) -> R,
     ) -> R {
         let start = Instant::now();
-        let (txn_id, metrics_tx) =
-            self.metrics_tx.take().map(|metrics_tx| (self.id(), metrics_tx)).unzip();
+        let metrics_handler = self.metrics_handler.take();
         let result = f(self);
-        if let (Some(txn_id), Some(metrics_tx)) = (txn_id, metrics_tx) {
-            let _ = metrics_tx.send(MetricEvent::CloseTransaction {
-                txn_id,
+        if let Some(handler) = metrics_handler {
+            let _ = handler.metrics_tx.send(MetricEvent::CloseTransaction {
+                txn_id: handler.txn_id,
                 outcome,
-                commit_duration: start.elapsed(),
+                close_duration: start.elapsed(),
             });
         }
         result
@@ -99,11 +100,29 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     ) -> R {
         let start = Instant::now();
         let result = f(&self.inner);
-        if let Some(metrics_tx) = &self.metrics_tx {
-            let _ =
-                metrics_tx.send(MetricEvent::Operation { operation, duration: start.elapsed() });
+        if let Some(handler) = &self.metrics_handler {
+            let _ = handler
+                .metrics_tx
+                .send(MetricEvent::Operation { operation, duration: start.elapsed() });
         }
         result
+    }
+}
+
+#[derive(Debug)]
+struct MetricsHandler {
+    /// Cached internal transaction ID provided by libmdbx.
+    txn_id: u64,
+    metrics_tx: MetricEventsSender,
+}
+
+impl Drop for MetricsHandler {
+    fn drop(&mut self) {
+        let _ = self.metrics_tx.send(MetricEvent::CloseTransaction {
+            txn_id: self.txn_id,
+            outcome: TransactionOutcome::Drop,
+            close_duration: Duration::default(),
+        });
     }
 }
 
@@ -135,7 +154,7 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
         })
     }
 
-    fn drop(self) {
+    fn abort(self) {
         self.execute_with_close_transaction_metric(TransactionOutcome::Abort, |this| {
             drop(this.inner)
         })
@@ -144,8 +163,8 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
     // Iterate over read only values in database.
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
         let mut cursor = self.new_cursor()?;
-        if let Some(metrics_tx) = &self.metrics_tx {
-            cursor = cursor.with_metrics_tx(metrics_tx.clone());
+        if let Some(handler) = &self.metrics_handler {
+            cursor = cursor.with_metrics_tx(handler.metrics_tx.clone());
         }
         Ok(cursor)
     }
@@ -155,8 +174,8 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
         &self,
     ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
         let mut cursor = self.new_cursor()?;
-        if let Some(metrics_tx) = &self.metrics_tx {
-            cursor = cursor.with_metrics_tx(metrics_tx.clone());
+        if let Some(handler) = &self.metrics_handler {
+            cursor = cursor.with_metrics_tx(handler.metrics_tx.clone());
         }
         Ok(cursor)
     }
@@ -213,8 +232,8 @@ impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, DatabaseError> {
         let mut cursor = self.new_cursor()?;
-        if let Some(metrics_tx) = &self.metrics_tx {
-            cursor = cursor.with_metrics_tx(metrics_tx.clone());
+        if let Some(handler) = &self.metrics_handler {
+            cursor = cursor.with_metrics_tx(handler.metrics_tx.clone());
         }
         Ok(cursor)
     }
@@ -223,8 +242,8 @@ impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, DatabaseError> {
         let mut cursor = self.new_cursor()?;
-        if let Some(metrics_tx) = &self.metrics_tx {
-            cursor = cursor.with_metrics_tx(metrics_tx.clone());
+        if let Some(handler) = &self.metrics_handler {
+            cursor = cursor.with_metrics_tx(handler.metrics_tx.clone());
         }
         Ok(cursor)
     }

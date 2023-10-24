@@ -16,7 +16,7 @@ pub type MetricEventsSender = UnboundedSender<MetricEvent>;
 #[allow(missing_docs)]
 pub enum MetricEvent {
     OpenTransaction { txn_id: u64, mode: TransactionMode },
-    CloseTransaction { txn_id: u64, outcome: TransactionOutcome, commit_duration: Duration },
+    CloseTransaction { txn_id: u64, outcome: TransactionOutcome, close_duration: Duration },
     Operation { operation: Operation, duration: Duration },
 }
 
@@ -40,8 +40,8 @@ impl MetricsListener {
             MetricEvent::OpenTransaction { txn_id, mode } => {
                 self.metrics.record_open_transaction(txn_id, mode)
             }
-            MetricEvent::CloseTransaction { txn_id, outcome, commit_duration } => {
-                self.metrics.record_close_transaction(txn_id, outcome, commit_duration)
+            MetricEvent::CloseTransaction { txn_id, outcome, close_duration } => {
+                self.metrics.record_close_transaction(txn_id, outcome, close_duration)
             }
             MetricEvent::Operation { operation, duration } => {
                 self.metrics.record_operation(operation, duration)

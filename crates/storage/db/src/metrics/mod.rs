@@ -36,6 +36,7 @@ impl Display for TransactionMode {
 pub enum TransactionOutcome {
     Commit,
     Abort,
+    Drop,
 }
 
 impl Display for TransactionOutcome {
@@ -43,6 +44,7 @@ impl Display for TransactionOutcome {
         match self {
             TransactionOutcome::Commit => write!(f, "commit"),
             TransactionOutcome::Abort => write!(f, "abort"),
+            TransactionOutcome::Drop => write!(f, "drop"),
         }
     }
 }
@@ -104,7 +106,7 @@ impl Metrics {
         &mut self,
         txn_id: u64,
         outcome: TransactionOutcome,
-        commit_duration: Duration,
+        close_duration: Duration,
     ) {
         if let Some(transaction) = self.transactions.remove(&txn_id) {
             let mode = transaction.mode;
@@ -115,7 +117,7 @@ impl Metrics {
                 ])
             });
             metrics.open_duration_seconds.record(transaction.begin.elapsed());
-            metrics.commit_duration_seconds.record(commit_duration);
+            metrics.close_duration_seconds.record(close_duration);
 
             self.open_transactions
                 .entry(mode)
@@ -149,8 +151,8 @@ struct OpenTransactionMetrics {
 struct TransactionMetrics {
     /// The time a database transaction has been open
     open_duration_seconds: Histogram,
-    /// Database transaction commit duration
-    commit_duration_seconds: Histogram,
+    /// The time it took to close a database transaction
+    close_duration_seconds: Histogram,
 }
 
 #[derive(Metrics)]

@@ -63,7 +63,7 @@ impl DbTx for TxMock {
         todo!()
     }
 
-    fn drop(self) {
+    fn abort(self) {
         todo!()
     }
 
