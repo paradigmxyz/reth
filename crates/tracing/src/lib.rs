@@ -148,8 +148,5 @@ where
     let filter =
         EnvFilter::builder().with_default_directive(default_directive.into()).from_env_lossy();
 
-    tracing_subscriber::fmt::layer()
-        .json() 
-        .with_filter(filter)
-        .boxed()
+    tracing_subscriber::fmt::layer().json().with_filter(filter).boxed()
 }
