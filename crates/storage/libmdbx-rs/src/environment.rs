@@ -432,6 +432,16 @@ where
                         }
                     }
 
+                    let page_size = if path.exists() {
+                        -1
+                    } else {
+                        match geometry.page_size {
+                            None => -1,
+                            Some(PageSize::MinimalAcceptable) => 0,
+                            Some(PageSize::Set(size)) => size as isize,
+                        }
+                    };
+
                     mdbx_result(ffi::mdbx_env_set_geometry(
                         env,
                         min_size,
@@ -439,11 +449,7 @@ where
                         max_size,
                         geometry.growth_step.unwrap_or(-1),
                         geometry.shrink_threshold.unwrap_or(-1),
-                        match geometry.page_size {
-                            None => -1,
-                            Some(PageSize::MinimalAcceptable) => 0,
-                            Some(PageSize::Set(size)) => size as isize,
-                        },
+                        page_size,
                     ))?;
                 }
                 for (opt, v) in [
