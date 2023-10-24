@@ -91,15 +91,18 @@ struct Metrics {
 
 impl Metrics {
     pub(crate) fn record_open_transaction(&mut self, txn_id: u64, mode: TransactionMode) {
-        self.transactions.insert(txn_id, Transaction { begin: Instant::now(), mode });
+        let is_new =
+            self.transactions.insert(txn_id, Transaction { begin: Instant::now(), mode }).is_none();
 
-        self.open_transactions
-            .entry(mode)
-            .or_insert_with(|| {
-                OpenTransactionMetrics::new_with_labels(&[("mode", mode.to_string())])
-            })
-            .total
-            .increment(1.0)
+        if is_new {
+            self.open_transactions
+                .entry(mode)
+                .or_insert_with(|| {
+                    OpenTransactionMetrics::new_with_labels(&[("mode", mode.to_string())])
+                })
+                .total
+                .increment(1.0)
+        }
     }
 
     pub(crate) fn record_close_transaction(
