@@ -52,8 +52,11 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         let result = f(self);
 
         if let Some(metrics_tx) = &self.metrics_tx {
-            let _ =
-                metrics_tx.send(MetricEvent::Operation { operation, duration: start.elapsed() });
+            let _ = metrics_tx.send(MetricEvent::Operation {
+                table: T::NAME,
+                operation,
+                duration: start.elapsed(),
+            });
         }
 
         result

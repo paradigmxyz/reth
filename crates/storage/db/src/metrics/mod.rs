@@ -132,9 +132,17 @@ impl Metrics {
         }
     }
 
-    pub(crate) fn record_operation(&mut self, operation: Operation, duration: Duration) {
+    pub(crate) fn record_operation(
+        &mut self,
+        table: &'static str,
+        operation: Operation,
+        duration: Duration,
+    ) {
         let metrics = self.operation_metrics.entry(operation).or_insert_with(|| {
-            OperationMetrics::new_with_labels(&[("operation", operation.to_string())])
+            OperationMetrics::new_with_labels(&[
+                ("table", table.to_string()),
+                ("operation", operation.to_string()),
+            ])
         });
 
         metrics.calls_total.increment(1);

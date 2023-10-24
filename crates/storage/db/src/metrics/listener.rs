@@ -17,7 +17,7 @@ pub type MetricEventsSender = UnboundedSender<MetricEvent>;
 pub enum MetricEvent {
     OpenTransaction { txn_id: u64, mode: TransactionMode },
     CloseTransaction { txn_id: u64, outcome: TransactionOutcome, close_duration: Duration },
-    Operation { operation: Operation, duration: Duration },
+    Operation { table: &'static str, operation: Operation, duration: Duration },
 }
 
 /// Metrics routine that listens to new metric events on the `events_rx` receiver.
@@ -43,8 +43,8 @@ impl MetricsListener {
             MetricEvent::CloseTransaction { txn_id, outcome, close_duration } => {
                 self.metrics.record_close_transaction(txn_id, outcome, close_duration)
             }
-            MetricEvent::Operation { operation, duration } => {
-                self.metrics.record_operation(operation, duration)
+            MetricEvent::Operation { table, operation, duration } => {
+                self.metrics.record_operation(table, operation, duration)
             }
         }
     }

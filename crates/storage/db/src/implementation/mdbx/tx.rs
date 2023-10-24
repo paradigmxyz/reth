@@ -93,7 +93,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         result
     }
 
-    fn execute_with_operation_metric<R>(
+    fn execute_with_operation_metric<T: Table, R>(
         &self,
         operation: Operation,
         f: impl FnOnce(&Transaction<'_, K, E>) -> R,
@@ -101,9 +101,11 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         let start = Instant::now();
         let result = f(&self.inner);
         if let Some(handler) = &self.metrics_handler {
-            let _ = handler
-                .metrics_tx
-                .send(MetricEvent::Operation { operation, duration: start.elapsed() });
+            let _ = handler.metrics_tx.send(MetricEvent::Operation {
+                table: T::NAME,
+                operation,
+                duration: start.elapsed(),
+            });
         }
         result
     }
@@ -140,7 +142,7 @@ impl<E: EnvironmentKind> TableImporter for Tx<'_, RW, E> {}
 
 impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
-        self.execute_with_operation_metric(Operation::Get, |tx| {
+        self.execute_with_operation_metric::<T, _>(Operation::Get, |tx| {
             tx.get(self.get_dbi::<T>()?, key.encode().as_ref())
                 .map_err(|e| DatabaseError::Read(e.into()))?
                 .map(decode_one::<T>)
@@ -193,7 +195,7 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
 impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.execute_with_operation_metric(Operation::Put, |tx| {
+        self.execute_with_operation_metric::<T, _>(Operation::Put, |tx| {
             tx.put(self.get_dbi::<T>()?, key.as_ref(), &value.compress(), WriteFlags::UPSERT)
                 .map_err(|e| DatabaseError::Write {
                     code: e.into(),
@@ -216,7 +218,7 @@ impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
             data = Some(value.as_ref());
         };
 
-        self.execute_with_operation_metric(Operation::Delete, |tx| {
+        self.execute_with_operation_metric::<T, _>(Operation::Delete, |tx| {
             tx.del(self.get_dbi::<T>()?, key.encode(), data)
                 .map_err(|e| DatabaseError::Delete(e.into()))
         })
