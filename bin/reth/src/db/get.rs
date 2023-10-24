@@ -1,7 +1,7 @@
 use crate::utils::DbTool;
 use clap::Parser;
 
-use reth_db::{database::Database, table::Table, TableType, TableViewer, Tables};
+use reth_db::{database::Database, table::Table, RawKey, RawTable, TableType, TableViewer, Tables};
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -12,9 +12,13 @@ pub struct Command {
     /// NOTE: The dupsort tables are not supported now.
     pub table: Tables,
 
-    /// The key to get content for   
+    /// The key to get content for
     #[arg(value_parser = maybe_json_value_parser)]
     pub key: String,
+
+    /// Output bytes instead of human-readable decoded value
+    #[clap(long)]
+    pub raw: bool,
 }
 
 impl Command {
@@ -51,9 +55,17 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
         // get a key for given table
         let key = self.args.table_key::<T>()?;
 
-        match self.tool.get::<T>(key)? {
+        let content = if self.args.raw {
+            self.tool
+                .get::<RawTable<T>>(RawKey::from(key))?
+                .map(|content| format!("{:?}", content.raw_value()))
+        } else {
+            self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
+        };
+
+        match content {
             Some(content) => {
-                println!("{}", serde_json::to_string_pretty(&content)?);
+                println!("{}", content);
             }
             None => {
                 error!(target: "reth::cli", "No content for the given table key.");
