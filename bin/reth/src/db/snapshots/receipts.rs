@@ -83,9 +83,7 @@ impl Command {
                     for num in row_indexes.iter() {
                         Receipt::decompress(
                             cursor
-                                .row_by_number_with_cols::<0b1, 1>(
-                                    (num - tx_range.start()) as usize,
-                                )?
+                                .row_by_number_with_cols((num - tx_range.start()) as usize, 0b1)?
                                 .ok_or(ProviderError::ReceiptNotFound((*num).into()))?[0],
                         )?;
                         // TODO: replace with below when eventually SnapshotProvider re-uses cursor
@@ -120,7 +118,7 @@ impl Command {
                 || {
                     Ok(Receipt::decompress(
                         cursor
-                            .row_by_number_with_cols::<0b1, 1>((num - tx_range.start()) as usize)?
+                            .row_by_number_with_cols((num - tx_range.start()) as usize, 0b1)?
                             .ok_or(ProviderError::ReceiptNotFound((num as u64).into()))?[0],
                     )?)
                 },
@@ -150,7 +148,7 @@ impl Command {
                 || {
                     let receipt = Receipt::decompress(
                         cursor
-                            .row_by_key_with_cols::<0b1, 1>(tx_hash.as_slice())?
+                            .row_by_key_with_cols(tx_hash.as_slice(), 0b1)?
                             .ok_or(ProviderError::ReceiptNotFound(tx_hash.into()))?[0],
                     )?;
 

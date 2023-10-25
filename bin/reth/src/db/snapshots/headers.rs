@@ -73,7 +73,7 @@ impl Command {
                     for num in row_indexes.iter() {
                         Header::decompress(
                             cursor
-                                .row_by_number_with_cols::<0b01, 2>((num - self.from) as usize)?
+                                .row_by_number_with_cols((num - self.from) as usize, 0b001)?
                                 .ok_or(ProviderError::HeaderNotFound((*num).into()))?[0],
                         )?;
                         // TODO: replace with below when eventually SnapshotProvider re-uses cursor
@@ -108,7 +108,7 @@ impl Command {
                 || {
                     Ok(Header::decompress(
                         cursor
-                            .row_by_number_with_cols::<0b01, 2>((num - self.from) as usize)?
+                            .row_by_number_with_cols((num - self.from) as usize, 0b001)?
                             .ok_or(ProviderError::HeaderNotFound((num as u64).into()))?[0],
                     )?)
                 },
@@ -138,7 +138,7 @@ impl Command {
                 || {
                     let header = Header::decompress(
                         cursor
-                            .row_by_key_with_cols::<0b01, 2>(header_hash.as_slice())?
+                            .row_by_key_with_cols(header_hash.as_slice(), 0b01)?
                             .ok_or(ProviderError::HeaderNotFound(header_hash.into()))?[0],
                     )?;
 

@@ -124,13 +124,13 @@ impl<'a> SnapshotCursor<'a> {
         key_or_num: KeyOrNumber<'_>,
     ) -> RethResult<Option<Vec<&'_ [u8]>>> {
         let row = match key_or_num {
-            KeyOrNumber::Hash(k) => self.row_by_key_with_cols::<SELECTOR, COLUMNS>(k),
+            KeyOrNumber::Hash(k) => self.row_by_key_with_cols(k, SELECTOR),
             KeyOrNumber::Number(n) => {
                 let offset = self.jar().user_header().start();
                 if offset > n {
                     return Ok(None)
                 }
-                self.row_by_number_with_cols::<SELECTOR, COLUMNS>((n - offset) as usize)
+                self.row_by_number_with_cols((n - offset) as usize, SELECTOR)
             }
         }?;
 

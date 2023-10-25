@@ -158,7 +158,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
         TransactionSignedNoHash::decompress(
             self.cursor()?
-                .row_by_number_with_cols::<0b1, 1>((num - self.user_header().tx_start()) as usize)?
+                .row_by_number_with_cols((num - self.user_header().tx_start()) as usize, 0b1)?
                 .ok_or_else(|| ProviderError::TransactionNotFound(num.into()))?[0],
         )
         .map(Into::into)
@@ -178,7 +178,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
         let mut cursor = self.cursor()?;
 
         let tx = TransactionSignedNoHash::decompress(
-            cursor.row_by_key_with_cols::<0b1, 1>(&hash.0).unwrap().unwrap()[0],
+            cursor.row_by_key_with_cols(&hash.0, 0b1).unwrap().unwrap()[0],
         )
         .unwrap()
         .with_hash();

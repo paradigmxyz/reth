@@ -83,9 +83,7 @@ impl Command {
                     for num in row_indexes.iter() {
                         TransactionSignedNoHash::decompress(
                             cursor
-                                .row_by_number_with_cols::<0b1, 1>(
-                                    (num - tx_range.start()) as usize,
-                                )?
+                                .row_by_number_with_cols((num - tx_range.start()) as usize, 0b1)?
                                 .ok_or(ProviderError::TransactionNotFound((*num).into()))?[0],
                         )?
                         .with_hash();
@@ -121,7 +119,7 @@ impl Command {
                 || {
                     Ok(TransactionSignedNoHash::decompress(
                         cursor
-                            .row_by_number_with_cols::<0b1, 1>((num - tx_range.start()) as usize)?
+                            .row_by_number_with_cols((num - tx_range.start()) as usize, 0b1)?
                             .ok_or(ProviderError::TransactionNotFound((num as u64).into()))?[0],
                     )?
                     .with_hash())
@@ -152,7 +150,7 @@ impl Command {
                 || {
                     let transaction = TransactionSignedNoHash::decompress(
                         cursor
-                            .row_by_key_with_cols::<0b1, 1>(transaction_hash.as_slice())?
+                            .row_by_key_with_cols(transaction_hash.as_slice(), 0b1)?
                             .ok_or(ProviderError::TransactionNotFound(transaction_hash.into()))?[0],
                     )?;
 
