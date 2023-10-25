@@ -81,8 +81,12 @@ impl SnapshotSegment {
 /// A segment header that contains information common to all segments. Used for storage.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub struct SegmentHeader {
+    /// Block range of the snapshot segment
     block_range: RangeInclusive<BlockNumber>,
+    /// Transaction range of the snapshot segment
     tx_range: RangeInclusive<TxNumber>,
+    /// Whether this segment rows are block based
+    block_based: bool,
 }
 
 impl SegmentHeader {
@@ -90,8 +94,9 @@ impl SegmentHeader {
     pub fn new(
         block_range: RangeInclusive<BlockNumber>,
         tx_range: RangeInclusive<TxNumber>,
+        block_based: bool,
     ) -> Self {
-        Self { block_range, tx_range }
+        Self { block_range, tx_range, block_based }
     }
 
     /// Returns the first block number of the segment.
@@ -102,5 +107,13 @@ impl SegmentHeader {
     /// Returns the first transaction number of the segment.
     pub fn tx_start(&self) -> TxNumber {
         *self.tx_range.start()
+    }
+
+    /// Returns the row offset.
+    pub fn start(&self) -> u64 {
+        if self.block_based {
+            return self.block_start()
+        }
+        self.tx_start()
     }
 }

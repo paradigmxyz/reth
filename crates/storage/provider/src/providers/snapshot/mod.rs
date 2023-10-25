@@ -60,7 +60,7 @@ mod test {
         // Ranges
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
-        let segment_header = SegmentHeader::new(range.clone(), range.clone());
+        let segment_header = SegmentHeader::new(range.clone(), range.clone(), true);
 
         // Data sources
         let db = create_test_rw_db();
