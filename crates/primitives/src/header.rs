@@ -1,6 +1,6 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
-    constants::{EMPTY_OMMER_ROOT, EMPTY_ROOT_HASH},
+    constants::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH},
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     keccak256, Address, BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom,
     Bytes, B256, B64, U256,
@@ -115,7 +115,7 @@ impl Default for Header {
     fn default() -> Self {
         Header {
             parent_hash: Default::default(),
-            ommers_hash: EMPTY_OMMER_ROOT,
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: Default::default(),
             state_root: EMPTY_ROOT_HASH,
             transactions_root: EMPTY_ROOT_HASH,
@@ -164,7 +164,7 @@ impl Header {
 
     /// Check if the ommers hash equals to empty hash list.
     pub fn ommers_hash_is_empty(&self) -> bool {
-        self.ommers_hash == EMPTY_OMMER_ROOT
+        self.ommers_hash == EMPTY_OMMER_ROOT_HASH
     }
 
     /// Check if the transaction root equals to empty root.

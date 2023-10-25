@@ -1,7 +1,7 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 use reth_primitives::{
-    constants::{EMPTY_OMMER_ROOT, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
+    constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self},
     Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, B256, U256, U64,
 };
@@ -51,7 +51,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         parent_beacon_block_root: None,
         extra_data: payload.extra_data,
         // Defaults
-        ommers_hash: EMPTY_OMMER_ROOT,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         difficulty: Default::default(),
         nonce: Default::default(),
     };
