@@ -12,8 +12,8 @@ use crate::{
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::{tables, transaction::DbTx};
 use reth_primitives::{
+    constants::EMPTY_ROOT_HASH,
     keccak256,
-    proofs::EMPTY_ROOT,
     trie::{HashBuilder, Nibbles},
     Address, BlockNumber, B256,
 };
@@ -438,7 +438,7 @@ where
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty(self.hashed_address)? {
             return Ok((
-                EMPTY_ROOT,
+                EMPTY_ROOT_HASH,
                 0,
                 TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),
             ))
@@ -671,7 +671,7 @@ mod tests {
 
         let tx = factory.provider_rw().unwrap();
         let got = StorageRoot::new(tx.tx_ref(), address).root().unwrap();
-        assert_eq!(got, EMPTY_ROOT);
+        assert_eq!(got, EMPTY_ROOT_HASH);
     }
 
     #[test]

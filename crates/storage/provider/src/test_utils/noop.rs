@@ -4,7 +4,8 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
     ReceiptProviderIdExt, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionsProvider, WithdrawalsProvider,
+    StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::RethResult;
@@ -94,6 +95,7 @@ impl BlockReader for NoopProvider {
     fn block_with_senders(
         &self,
         _number: BlockNumber,
+        _transaction_kind: TransactionVariant,
     ) -> RethResult<Option<reth_primitives::BlockWithSenders>> {
         Ok(None)
     }
@@ -262,7 +264,7 @@ impl ChangeSetReader for NoopProvider {
 
 impl StateRootProvider for NoopProvider {
     fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<B256> {
-        todo!()
+        Ok(B256::default())
     }
 }
 

@@ -7,11 +7,12 @@ use crate::{
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
+use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
 /// non-4844 signed transaction.
-// TODO: redo arbitrary for this encoding - the previous encoding was incorrect
+#[add_arbitrary_tests]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PooledTransactionsElement {
     /// A legacy transaction
@@ -416,6 +417,49 @@ impl From<TransactionSigned> for PooledTransactionsElement {
             }
         }
     }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let transaction = TransactionSigned::arbitrary(u)?;
+
+        // this will have an empty sidecar
+        let pooled_txs_element = PooledTransactionsElement::from(transaction);
+
+        // generate a sidecar for blob txs
+        if let PooledTransactionsElement::BlobTransaction(mut tx) = pooled_txs_element {
+            tx.sidecar = crate::BlobTransactionSidecar::arbitrary(u)?;
+            Ok(PooledTransactionsElement::BlobTransaction(tx))
+        } else {
+            Ok(pooled_txs_element)
+        }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for PooledTransactionsElement {
+    type Parameters = ();
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::{any, Strategy};
+
+        any::<(TransactionSigned, crate::BlobTransactionSidecar)>()
+            .prop_map(move |(transaction, sidecar)| {
+                // this will have an empty sidecar
+                let pooled_txs_element = PooledTransactionsElement::from(transaction);
+
+                // generate a sidecar for blob txs
+                if let PooledTransactionsElement::BlobTransaction(mut tx) = pooled_txs_element {
+                    tx.sidecar = sidecar;
+                    PooledTransactionsElement::BlobTransaction(tx)
+                } else {
+                    pooled_txs_element
+                }
+            })
+            .boxed()
+    }
+
+    type Strategy = proptest::strategy::BoxedStrategy<PooledTransactionsElement>;
 }
 
 /// A signed pooled transaction with recovered signer.

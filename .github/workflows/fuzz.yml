@@ -31,8 +31,6 @@ jobs:
         uses: actions/checkout@v3
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -41,25 +39,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: install
-          args: cargo-test-fuzz afl
-      - name: Force install cargo-afl
-        run: |
-          cargo install --force afl
-          cargo afl --version
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+          args: cargo-test-fuzz cargo-afl
 
       - name: Run fuzz tests
         run: |
           ./.github/scripts/fuzz.sh ${{ matrix.target }}
         env:
           AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES: 1
-      - name: Upload coverage data to codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
-          flags: fuzz-tests
 
   fuzz-success:
     if: always()

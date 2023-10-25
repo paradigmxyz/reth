@@ -1,12 +1,12 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
-    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
+    Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Bundle, CallRequest, EIP1186AccountProofResponse,
-    EthCallResponse, FeeHistory, Index, RichBlock, StateContext, SyncStatus, Transaction,
-    TransactionReceipt, TransactionRequest, Work,
+    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
+    SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -74,10 +74,8 @@ pub trait EthApi {
 
     /// Returns all transaction receipts for a given block.
     #[method(name = "getBlockReceipts")]
-    async fn block_receipts(
-        &self,
-        number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Vec<TransactionReceipt>>>;
+    async fn block_receipts(&self, block_id: BlockId)
+        -> RpcResult<Option<Vec<TransactionReceipt>>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]

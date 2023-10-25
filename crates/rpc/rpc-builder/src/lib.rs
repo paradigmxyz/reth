@@ -159,6 +159,7 @@ pub use crate::eth::{EthConfig, EthHandlers};
 pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::noop::NoopNetwork;
+use reth_rpc::eth::EthBundle;
 use reth_transaction_pool::noop::NoopTransactionPool;
 
 /// Convenience function for starting a server in one step.
@@ -1044,6 +1045,7 @@ where
                 cache.clone(),
                 self.config.eth.max_logs_per_response,
                 executor.clone(),
+                self.config.eth.stale_filter_ttl,
             );
 
             let pubsub = EthPubSub::with_spawner(
@@ -1073,6 +1075,12 @@ where
     pub fn trace_api(&mut self) -> TraceApi<Provider, EthApi<Provider, Pool, Network>> {
         let eth = self.eth_handlers();
         TraceApi::new(self.provider.clone(), eth.api, self.blocking_pool_guard.clone())
+    }
+
+    /// Instantiates [EthBundle] Api
+    pub fn bundle_api(&mut self) -> EthBundle<EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        EthBundle::new(eth_api, self.blocking_pool_guard.clone())
     }
 
     /// Instantiates OtterscanApi

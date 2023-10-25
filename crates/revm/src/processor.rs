@@ -1,8 +1,6 @@
 use crate::{
     database::StateProviderDatabase,
-    env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    into_reth_log,
     stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
@@ -11,6 +9,10 @@ use reth_interfaces::{
     RethError,
 };
 use reth_primitives::{
+    revm::{
+        compat::into_reth_log,
+        env::{fill_cfg_and_block_env, fill_tx_env},
+    },
     Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
     PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
@@ -131,6 +133,11 @@ impl<'a> EVMProcessor<'a> {
     /// Configures the executor with the given inspectors.
     pub fn set_stack(&mut self, stack: InspectorStack) {
         self.stack = stack;
+    }
+
+    /// Configure the executor with the given block.
+    pub fn set_first_block(&mut self, num: BlockNumber) {
+        self.first_block = Some(num);
     }
 
     /// Returns a reference to the database
@@ -616,7 +623,7 @@ mod tests {
 
     impl StateRootProvider for StateProviderTest {
         fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
-            todo!()
+            unimplemented!("state root computation is not supported")
         }
     }
 

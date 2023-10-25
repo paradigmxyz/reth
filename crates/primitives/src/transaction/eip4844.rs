@@ -15,6 +15,19 @@ use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::{
+    arbitrary::{any as proptest_any, ParamsFor},
+    collection::vec as proptest_vec,
+    strategy::{BoxedStrategy, Strategy},
+};
+
+#[cfg(any(test, feature = "arbitrary"))]
+use crate::{
+    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
+    kzg::BYTES_PER_FIELD_ELEMENT,
+};
+
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
 /// A transaction with blob hashes and max blob fee
@@ -339,10 +352,6 @@ impl From<kzg::Error> for BlobTransactionValidationError {
 ///
 /// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
 /// of a `PooledTransactions` response.
-///
-/// NOTE: This contains a [TransactionSigned], which could be a non-4844 transaction type, even
-/// though that would not make sense. This type is meant to be constructed using decoding methods,
-/// which should always construct the [TransactionSigned] with an EIP-4844 transaction.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BlobTransaction {
     /// The transaction hash.
@@ -676,4 +685,78 @@ impl BlobTransactionSidecarRlp {
             proofs: Decodable::decode(buf)?,
         })
     }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut arr = [0u8; BYTES_PER_BLOB];
+        let blobs: Vec<Blob> = (0..u.int_in_range(1..=16)?)
+            .map(|_| {
+                arr = arbitrary::Arbitrary::arbitrary(u).unwrap();
+
+                // Ensure that each blob is cacnonical by ensuring each field element contained in
+                // the blob is < BLS_MODULUS
+                for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
+                    arr[i * BYTES_PER_FIELD_ELEMENT] = 0;
+                }
+
+                Blob::from(arr)
+            })
+            .collect();
+
+        Ok(generate_blob_sidecar(blobs))
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
+    type Parameters = ParamsFor<String>;
+    type Strategy = BoxedStrategy<BlobTransactionSidecar>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        proptest_vec(proptest_vec(proptest_any::<u8>(), BYTES_PER_BLOB), 1..=5)
+            .prop_map(move |blobs| {
+                let blobs = blobs
+                    .into_iter()
+                    .map(|mut blob| {
+                        let mut arr = [0u8; BYTES_PER_BLOB];
+
+                        // Ensure that each blob is cacnonical by ensuring each field element
+                        // contained in the blob is < BLS_MODULUS
+                        for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
+                            blob[i * BYTES_PER_FIELD_ELEMENT] = 0;
+                        }
+
+                        arr.copy_from_slice(blob.as_slice());
+                        arr.into()
+                    })
+                    .collect();
+
+                generate_blob_sidecar(blobs)
+            })
+            .boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+fn generate_blob_sidecar(blobs: Vec<Blob>) -> BlobTransactionSidecar {
+    let kzg_settings = MAINNET_KZG_TRUSTED_SETUP.clone();
+
+    let commitments: Vec<Bytes48> = blobs
+        .iter()
+        .map(|blob| KzgCommitment::blob_to_kzg_commitment(&blob.clone(), &kzg_settings).unwrap())
+        .map(|commitment| commitment.to_bytes())
+        .collect();
+
+    let proofs: Vec<Bytes48> = blobs
+        .iter()
+        .zip(commitments.iter())
+        .map(|(blob, commitment)| {
+            KzgProof::compute_blob_kzg_proof(blob, commitment, &kzg_settings).unwrap()
+        })
+        .map(|proof| proof.to_bytes())
+        .collect();
+
+    BlobTransactionSidecar { blobs, commitments, proofs }
 }

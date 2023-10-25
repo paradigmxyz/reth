@@ -11,10 +11,10 @@ use reth_rpc_types::trace::{
     },
 };
 use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, Memory, OpCode, Stack,
+    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, SharedMemory, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -32,13 +32,21 @@ pub enum CallKind {
 
 impl CallKind {
     /// Returns true if the call is a create
+    #[inline]
     pub fn is_any_create(&self) -> bool {
         matches!(self, CallKind::Create | CallKind::Create2)
     }
 
     /// Returns true if the call is a delegate of some sorts
+    #[inline]
     pub fn is_delegate(&self) -> bool {
         matches!(self, CallKind::DelegateCall | CallKind::CallCode)
+    }
+
+    /// Returns true if the call is [CallKind::StaticCall].
+    #[inline]
+    pub fn is_static_call(&self) -> bool {
+        matches!(self, CallKind::StaticCall)
     }
 }
 
@@ -242,6 +250,28 @@ impl CallTraceNode {
         }
     }
 
+    /// Returns all storage slots touched by this trace and the value this storage.
+    ///
+    /// A touched slot is either a slot that was written to or read from.
+    ///
+    /// If the slot is accessed more than once, the result only includes the first time it was
+    /// accessed, in other words in only returns the original value of the slot.
+    pub(crate) fn touched_slots(&self) -> BTreeMap<U256, U256> {
+        let mut touched_slots = BTreeMap::new();
+        for change in self.trace.steps.iter().filter_map(|s| s.storage_change.as_ref()) {
+            match touched_slots.entry(change.key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(change.value);
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {
+                    // already touched
+                }
+            }
+        }
+
+        touched_slots
+    }
+
     /// Pushes all steps onto the stack in reverse order
     /// so that the first step is on top of the stack
     pub(crate) fn push_steps_on_stack<'a>(
@@ -413,6 +443,11 @@ impl CallTraceNode {
             logs: Default::default(),
         };
 
+        if self.trace.kind.is_static_call() {
+            // STATICCALL frames don't have a value
+            call_frame.value = None;
+        }
+
         // we need to populate error and revert reason
         if !self.trace.success {
             call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref());
@@ -483,7 +518,7 @@ pub(crate) struct CallTraceStep {
     /// All allocated memory in a step
     ///
     /// This will be empty if memory capture is disabled
-    pub(crate) memory: Memory,
+    pub(crate) memory: SharedMemory,
     /// Size of memory at the beginning of the step
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
@@ -533,7 +568,7 @@ impl CallTraceStep {
         }
 
         if opts.is_memory_enabled() {
-            log.memory = Some(convert_memory(self.memory.data()));
+            log.memory = Some(convert_memory(self.memory.slice(0, self.memory.len())));
         }
 
         log

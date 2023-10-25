@@ -1,6 +1,6 @@
 use crate::{
-    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
-    MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
+    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, BlockErrorKind, ExecInput, ExecOutput,
+    MetricEvent, MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use num_traits::Zero;
 use reth_db::{
@@ -19,7 +19,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError,
+    OriginalValuesKnown, ProviderError, TransactionVariant,
 };
 use std::{
     ops::RangeInclusive,
@@ -144,8 +144,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+            // we need the block's transactions but we don't need the transaction hashes
             let block = provider
-                .block_with_senders(block_number)?
+                .block_with_senders(block_number, TransactionVariant::NoHash)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             fetch_block_duration += time.elapsed();
@@ -159,7 +161,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Execute the block
             let (block, senders) = block.into_components();
             executor.execute_and_verify_receipt(&block, td, Some(senders)).map_err(|error| {
-                StageError::ExecutionError { block: block.header.clone().seal_slow(), error }
+                StageError::Block {
+                    block: block.header.clone().seal_slow(),
+                    error: BlockErrorKind::Execution(error),
+                }
             })?;
 
             execution_duration += time.elapsed();
@@ -326,13 +331,6 @@ fn calculate_gas_used_from_headers<DB: Database>(
     Ok(gas_total)
 }
 
-/// The size of the stack used by the executor.
-///
-/// Ensure the size is aligned to 8 as this is usually more efficient.
-///
-/// Currently 64 megabytes.
-const BIG_STACK_SIZE: usize = 64 * 1024 * 1024;
-
 #[async_trait::async_trait]
 impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
@@ -346,25 +344,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        // For Ethereum transactions that reaches the max call depth (1024) revm can use more stack
-        // space than what is allocated by default.
-        //
-        // To make sure we do not panic in this case, spawn a thread with a big stack allocated.
-        //
-        // A fix in revm is pending to give more insight into the stack size, which we can use later
-        // to optimize revm or move data to the heap.
-        //
-        // See https://github.com/bluealloy/revm/issues/305
-        std::thread::scope(|scope| {
-            let handle = std::thread::Builder::new()
-                .stack_size(BIG_STACK_SIZE)
-                .spawn_scoped(scope, || {
-                    // execute and store output to results
-                    self.execute_inner(provider, input)
-                })
-                .expect("Expects that thread name is not null");
-            handle.join().expect("Expects for thread to not panic")
-        })
+        self.execute_inner(provider, input)
     }
 
     /// Unwind the stage.

@@ -20,7 +20,7 @@ use reth_primitives::{Account, Address, Bytes, B256, KECCAK_EMPTY, U256};
 use revm::{
     interpreter::{
         opcode::{PUSH0, PUSH32},
-        Memory, OpCode, Stack,
+        OpCode, SharedMemory, Stack,
     },
     primitives::State,
 };
@@ -132,14 +132,14 @@ impl StepLog {
 
 /// Represents the memory object
 #[derive(Debug)]
-pub(crate) struct MemoryObj(pub(crate) Memory);
+pub(crate) struct MemoryObj(pub(crate) SharedMemory);
 
 impl MemoryObj {
     pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
         let obj = JsObject::default();
         let len = self.0.len();
         // TODO: add into data <https://github.com/bluealloy/revm/pull/516>
-        let value = to_buf(self.0.data().clone(), context)?;
+        let value = to_buf(self.0.slice(0, len).to_vec(), context)?;
 
         let length = FunctionObjectBuilder::new(
             context,

@@ -24,8 +24,8 @@ use reth_interfaces::{
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec,
-    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256, EMPTY_OMMER_ROOT,
-    U256,
+    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
+    EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
@@ -262,7 +262,7 @@ impl StorageInner {
 
         let mut header = Header {
             parent_hash: self.best_hash,
-            ommers_hash: EMPTY_OMMER_ROOT,
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: Default::default(),
             state_root: Default::default(),
             transactions_root: Default::default(),
@@ -304,6 +304,9 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
         // call the 4788 beacon contract
+
+        // set the first block to find the correct index in bundle state
+        executor.set_first_block(block.number);
 
         let (receipts, gas_used) =
             executor.execute_transactions(block, U256::ZERO, Some(senders))?;
