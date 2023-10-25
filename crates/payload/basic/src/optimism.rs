@@ -96,15 +96,7 @@ where
             Err(err) => {
                 match err {
                     EVMError::Transaction(err) => {
-                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                            // if the nonce is too low, we can skip this transaction
-                            trace!(target: "payload_builder", ?err, ?sequencer_tx, "skipping nonce too low transaction");
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            trace!(target: "payload_builder", ?err, ?sequencer_tx, "skipping invalid transaction and its descendants");
-                        }
-
+                        trace!(target: "optimism_payload_builder", ?err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
                         continue
                     }
                     err => {
