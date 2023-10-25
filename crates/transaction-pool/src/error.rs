@@ -17,6 +17,13 @@ pub trait PoolTransactionError: std::error::Error + Send + Sync {
     fn is_bad_transaction(&self) -> bool;
 }
 
+// Needed for `#[error(transparent)]`
+impl std::error::Error for Box<dyn PoolTransactionError> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        (**self).source()
+    }
+}
+
 /// Transaction pool error.
 #[derive(Debug, thiserror::Error)]
 #[error("[{hash}]: {kind}")]
@@ -191,7 +198,7 @@ pub enum InvalidPoolTransactionError {
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
     /// Any other error that occurred while inserting/validating that is transaction specific
-    #[error("{0}")]
+    #[error(transparent)]
     Other(Box<dyn PoolTransactionError>),
     /// The transaction is specified to use less gas than required to start the
     /// invocation.

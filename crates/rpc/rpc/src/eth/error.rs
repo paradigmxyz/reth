@@ -528,7 +528,7 @@ pub enum RpcPoolError {
     #[error(transparent)]
     Invalid(#[from] RpcInvalidTransactionError),
     /// Custom pool error
-    #[error("{0}")]
+    #[error(transparent)]
     PoolTransactionError(Box<dyn PoolTransactionError>),
     /// Eip-4844 related error
     #[error(transparent)]
