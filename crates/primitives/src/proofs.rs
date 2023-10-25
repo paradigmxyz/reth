@@ -1,7 +1,7 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{
-    constants::EMPTY_ROOT_HASH,
+    constants::EMPTY_OMMER_ROOT,
     keccak256,
     trie::{HashBuilder, Nibbles},
     Address, GenesisAccount, Header, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned,
@@ -87,13 +87,13 @@ where
 
 /// Calculates the root hash for ommer/uncle headers.
 pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
+    // Check if `ommers` list is empty
+    if ommers.is_empty() {
+        return EMPTY_OMMER_ROOT
+    }
     // RLP Encode
     let mut ommers_rlp = Vec::new();
     alloy_rlp::encode_list(ommers, &mut ommers_rlp);
-    // Check if `ommers` list is empty
-    if ommers_rlp.is_empty() {
-        return EMPTY_ROOT_HASH
-    }
     keccak256(ommers_rlp)
 }
 
