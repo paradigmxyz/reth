@@ -28,7 +28,7 @@ use reth_primitives::{
     proofs,
     revm::{compat::into_reth_log, env::tx_env_with_recovered},
     Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts,
-    SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT, U256,
+    SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
@@ -865,7 +865,7 @@ where
 
     let header = Header {
         parent_hash: parent_block.hash,
-        ommers_hash: EMPTY_OMMER_ROOT,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: initialized_block_env.coinbase,
         state_root,
         transactions_root,
@@ -953,7 +953,7 @@ where
 
     let header = Header {
         parent_hash: parent_block.hash,
-        ommers_hash: EMPTY_OMMER_ROOT,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: initialized_block_env.coinbase,
         state_root,
         transactions_root: EMPTY_TRANSACTIONS,
