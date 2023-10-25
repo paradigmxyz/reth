@@ -386,15 +386,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
         while self.len() > limit.max_txs && !offenders.is_empty() {
             let offender = offenders.pop().unwrap();
 
-            let txs = self.get_txs_by_sender(&offender);
-            let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
+            todo!();
+            // let txs = self.get_txs_by_sender(&offender);
+            // let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
 
-            let txs = txs.split_off(max_account_slots);
-            for tx_id in txs {
-                if let Some(tx) = self.remove_transaction(&tx_id) {
-                    removed.push(tx);
-                }
-            }
+            // let txs = txs.split_off(max_account_slots);
+            // for tx_id in txs {
+            //     if let Some(tx) = self.remove_transaction(&tx_id) {
+            //         removed.push(tx);
+            //     }
+            // }
         }
 
         // penalize non-local txs if limit is still exceeded
@@ -448,20 +449,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
         spammers.retain(|_, txs| txs.len() > max_account_slots);
 
         spammers
-    }
-
-    /// Get txs by sender
-    pub(crate) fn get_txs_by_sender(
-        &self,
-        sender: &Address,
-    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut txs = Vec::new();
-        for tx in self.all.iter() {
-            if tx.transaction.sender() == *sender {
-                txs.push(tx.transaction.clone());
-            }
-        }
-        txs
     }
 
     /// The reported size of all transactions in this pool.
