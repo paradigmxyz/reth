@@ -111,8 +111,8 @@ reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
 reth-tokio-util = { path = "crates/tokio-util" }
 # revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "6ca6c08d37714cc6660ddfe5e542cdabace08962" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "6ca6c08d37714cc6660ddfe5e542cdabace08962" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "0d78d1eb304a2ce41ddac8f03206f5a316af247b" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "0d78d1eb304a2ce41ddac8f03206f5a316af247b" }
 
 ## eth
 alloy-primitives = "0.4"
