@@ -1142,7 +1142,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
-    /// Recovers transaction hashes by walking through [`crate::tables::Transactions`] table and
+    /// Recovers transaction hashes by walking through `Transactions` table and
     /// calculating them in a parallel manner. Returned unsorted.
     fn transaction_hashes_by_range(
         &self,
