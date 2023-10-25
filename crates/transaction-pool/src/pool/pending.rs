@@ -8,7 +8,7 @@ use crate::pool::best::BestTransactionsWithBasefee;
 use reth_primitives::Address;
 use std::{
     cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
 };
 use tokio::sync::broadcast;
@@ -343,8 +343,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
         max_account_slots: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        let mut spammers = self.get_spammers(max_account_slots);
-        spammers.sort_by(|(_, a), (_, b)| b.cmp(a));
+        let mut spammers_map = self.get_spammers(max_account_slots);
+
+        let mut spammers = spammers_map.iter().map(|(addr, txs)| (*addr, txs.len())).collect::<Vec<_>>();
+        // sort by number of txs
+        spammers.sort_by(|(_, txs1_len), (_, txs2_len)| txs1_len.cmp(txs2_len));
 
         // penalize spammers first by equalizing txs count first
         let mut offenders = Vec::new();
@@ -356,21 +359,23 @@ impl<T: TransactionOrdering> PendingPool<T> {
             while offenders.len() > 1 {
                 let threshold = offenders_tx_count; // currenct spammer txs count
 
-                while self.len() > limit.max_txs && spammers[spammer_index - 1].1 > threshold {
-                    for current_offender in &offenders {
-                        let txs = self.get_txs_by_sender(current_offender);
-                        let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
+                todo!()
+                // while self.len() > limit.max_txs && spammers[spammer_index - 1].1 > threshold {
+                //     for current_offender in &offenders {
+                //         // sort txs by nonce
+                //         todo!()
+                //         let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
 
-                        let txs = txs.split_off(threshold);
+                //         let txs = txs.split_off(threshold);
 
-                        // remove the txs exeeding the threshold
-                        for tx_id in txs {
-                            if let Some(tx) = self.remove_transaction(&tx_id) {
-                                removed.push(tx);
-                            }
-                        }
-                    }
-                }
+                //         // remove the txs exeeding the threshold
+                //         for tx_id in txs {
+                //             if let Some(tx) = self.remove_transaction(&tx_id) {
+                //                 removed.push(tx);
+                //             }
+                //         }
+                //     }
+                // }
             }
             spammer_index += 1;
         }
@@ -418,28 +423,24 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns account address and their txs_count that are _not local_ and whose transaction
     /// count > `max_account_slots` limit.
     ///
-    /// This returns the a list of tuples, containing addresses and their transaction count.
-    pub(crate) fn get_spammers(&self, max_account_slots: usize) -> Vec<(Address, usize)> {
-        let mut spammers = HashMap::new();
+    /// This returns a map from address to pending transactions for addresses with over
+    /// `max_account_slots` transactions.
+    pub(crate) fn get_spammers(&self, max_account_slots: usize) -> HashMap<Address, Vec<PendingTransaction<T>>> {
+        let mut spammers: HashMap<Address, Vec<PendingTransaction<T>>> = HashMap::new();
         for tx in self.all.iter() {
             if tx.transaction.is_local() {
                 continue
             }
 
+            // push the tx or populate with the current tx
             let sender = tx.transaction.sender();
-
-            match spammers.entry(sender) {
-                Entry::Occupied(mut entry) => {
-                    let count = entry.get_mut();
-                    *count += 1;
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(1);
-                }
-            }
+            spammers
+                .entry(sender)
+                .and_modify(|txs| txs.push(tx.clone()))
+                .or_insert(vec![tx.clone()]);
         }
 
-        spammers.into_iter().filter(|(_, count)| *count > max_account_slots).collect()
+        spammers
     }
 
     /// Get txs by sender
@@ -685,9 +686,9 @@ mod tests {
 
         // find the spammers - this should be A, B, C, but not D
         let spammers = pool.get_spammers(max_account_slots);
-        let spammers = spammers.iter().collect::<HashSet<_>>();
-        let expected_spammers = [(a, 4), (b, 3), (c, 3)];
-        let expected_spammers = expected_spammers.iter().collect::<HashSet<_>>();
+        let spammers = spammers.into_iter().map(|(addr, txs)| (addr, txs.len())).collect::<HashSet<_>>();
+        let expected_spammers = [(a, 4), (b, 3), (c, 3usize)];
+        let expected_spammers = expected_spammers.into_iter().collect::<HashSet<_>>();
         assert_eq!(spammers, expected_spammers);
 
         // truncate the pool
