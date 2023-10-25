@@ -24,8 +24,8 @@ use reth_interfaces::{
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec,
-    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256, EMPTY_OMMER_ROOT,
-    U256,
+    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
+    EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
@@ -262,7 +262,7 @@ impl StorageInner {
 
         let mut header = Header {
             parent_hash: self.best_hash,
-            ommers_hash: EMPTY_OMMER_ROOT,
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: Default::default(),
             state_root: Default::default(),
             transactions_root: Default::default(),

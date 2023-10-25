@@ -11,7 +11,7 @@ use reth_primitives::{Chain, ForkId, PeerId, B256, U256};
 /// # Example
 /// ```
 /// use reth_eth_wire::EthVersion;
-/// use reth_primitives::{Chain, U256, B256, MAINNET_GENESIS, MAINNET, Hardfork};
+/// use reth_primitives::{Chain, U256, B256, MAINNET_GENESIS_HASH, MAINNET, Hardfork};
 /// use reth_eth_wire::types::Status;
 ///
 /// // this is just an example status message!
@@ -19,8 +19,8 @@ use reth_primitives::{Chain, ForkId, PeerId, B256, U256};
 ///     .version(EthVersion::Eth66.into())
 ///     .chain(Chain::mainnet())
 ///     .total_difficulty(U256::from(100))
-///     .blockhash(B256::from(MAINNET_GENESIS))
-///     .genesis(B256::from(MAINNET_GENESIS))
+///     .blockhash(B256::from(MAINNET_GENESIS_HASH))
+///     .genesis(B256::from(MAINNET_GENESIS_HASH))
 ///     .forkid(Hardfork::Paris.fork_id(&MAINNET).unwrap())
 ///     .build();
 ///
@@ -30,8 +30,8 @@ use reth_primitives::{Chain, ForkId, PeerId, B256, U256};
 ///         version: EthVersion::Eth66.into(),
 ///         chain: Chain::mainnet(),
 ///         total_difficulty: U256::from(100),
-///         blockhash: B256::from(MAINNET_GENESIS),
-///         genesis: B256::from(MAINNET_GENESIS),
+///         blockhash: B256::from(MAINNET_GENESIS_HASH),
+///         genesis: B256::from(MAINNET_GENESIS_HASH),
 ///         forkid: Hardfork::Paris.fork_id(&MAINNET).unwrap(),
 ///     }
 /// );

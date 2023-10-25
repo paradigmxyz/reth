@@ -3,7 +3,7 @@ use reth_consensus_common::validation;
 use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
     constants::{ALLOWED_FUTURE_BLOCK_TIME_SECONDS, MAXIMUM_EXTRA_DATA_SIZE},
-    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256,
+    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
 
@@ -55,7 +55,7 @@ impl Consensus for BeaconConsensus {
                 return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
 
-            if header.ommers_hash != EMPTY_OMMER_ROOT {
+            if header.ommers_hash != EMPTY_OMMER_ROOT_HASH {
                 return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
             }
 

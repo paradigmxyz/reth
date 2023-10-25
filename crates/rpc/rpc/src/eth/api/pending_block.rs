@@ -7,7 +7,7 @@ use reth_primitives::{
     proofs,
     revm::{compat::into_reth_log, env::tx_env_with_recovered},
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlock, SealedHeader, B256, EMPTY_OMMER_ROOT, U256,
+    Receipts, SealedBlock, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -212,7 +212,7 @@ impl PendingBlockEnv {
 
         let header = Header {
             parent_hash,
-            ommers_hash: EMPTY_OMMER_ROOT,
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: block_env.coinbase,
             state_root,
             transactions_root,
