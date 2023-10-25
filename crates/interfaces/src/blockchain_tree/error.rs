@@ -23,7 +23,7 @@ pub enum BlockchainTreeError {
         chain_id: u64,
     },
     /// Thrown if a canonical chain header cannot be found.
-    #[error("canonical chain header #{block_hash} can't be found")]
+    #[error("canonical chain header {block_hash} can't be found")]
     CanonicalChain {
         /// The block hash of the missing canonical chain header.
         block_hash: BlockHash,

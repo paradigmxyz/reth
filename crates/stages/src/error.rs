@@ -22,7 +22,7 @@ pub enum BlockErrorKind {
 #[derive(Error, Debug)]
 pub enum StageError {
     /// The stage encountered an error related to a block.
-    #[error("stage encountered an error in block {number}: {error}", number = block.number)]
+    #[error("stage encountered an error in block #{number}: {error}", number = block.number)]
     Block {
         /// The block that caused the error.
         block: SealedHeader,
@@ -33,8 +33,9 @@ pub enum StageError {
     /// The stage encountered a downloader error where the responses cannot be attached to the
     /// current head.
     #[error(
-        "stage encountered inconsistent chain. \
-         Downloaded header #{header_number} ({header_hash:?}) is detached from local head #{head_number} ({head_hash:?}): {error}",
+        "stage encountered inconsistent chain: \
+         downloaded header #{header_number} ({header_hash}) is detached from \
+         local head #{head_number} ({head_hash}): {error}",
         header_number = header.number,
         header_hash = header.hash,
         head_number = local_head.number,
