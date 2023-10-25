@@ -1,7 +1,10 @@
 use super::LoadedJarRef;
 use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
 use reth_db::{
-    snapshot::SnapshotCursor,
+    snapshot::{
+        SnapshotCursor, HEADER_COLUMNS, S_HEADER, S_HEADER_HASH, S_HEADER_TD,
+        S_HEADER_TD_WITH_HASH, S_HEADER_WITH_HASH,
+    },
     table::{Decompress, Table},
     CanonicalHeaders, HeaderTD,
 };
@@ -43,19 +46,19 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
         Ok(self
             .cursor()?
-            .get_two::<Header, <CanonicalHeaders as Table>::Value, 0b101, 3>(block_hash.into())?
+            .get_two::<Header, <CanonicalHeaders as Table>::Value, S_HEADER_WITH_HASH, HEADER_COLUMNS>(block_hash.into())?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(header, _)| header))
     }
 
     fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
-        self.cursor()?.get_one::<Header, 0b001, 3>(num.into())
+        self.cursor()?.get_one::<Header, S_HEADER, HEADER_COLUMNS>(num.into())
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
         Ok(self
             .cursor()?
-            .get_two::<<HeaderTD as Table>::Value, <CanonicalHeaders as Table>::Value, 0b110, 3>(
+            .get_two::<<HeaderTD as Table>::Value, <CanonicalHeaders as Table>::Value, S_HEADER_TD_WITH_HASH, HEADER_COLUMNS>(
                 block_hash.into(),
             )?
             .filter(|(_, hash)| hash == block_hash)
@@ -65,7 +68,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     fn header_td_by_number(&self, num: BlockNumber) -> RethResult<Option<U256>> {
         Ok(self
             .cursor()?
-            .get_one::<<HeaderTD as Table>::Value, 0b010, 3>(num.into())?
+            .get_one::<<HeaderTD as Table>::Value, S_HEADER_TD, HEADER_COLUMNS>(num.into())?
             .map(Into::into))
     }
 
@@ -76,7 +79,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range.start..range.end {
-            match cursor.get_one::<Header, 0b001, 3>(num.into())? {
+            match cursor.get_one::<Header, S_HEADER, HEADER_COLUMNS>(num.into())? {
                 Some(header) => headers.push(header),
                 None => return Ok(headers),
             }
@@ -96,7 +99,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
 
         for number in range.start..range.end {
             match cursor
-                .get_two::<Header, <CanonicalHeaders as Table>::Value, 0b101, 3>(number.into())?
+                .get_two::<Header, <CanonicalHeaders as Table>::Value, S_HEADER_WITH_HASH, HEADER_COLUMNS>(number.into())?
             {
                 Some((header, hash)) => headers.push(header.seal(hash)),
                 None => return Ok(headers),
@@ -108,14 +111,16 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
         Ok(self
             .cursor()?
-            .get_two::<Header, <CanonicalHeaders as Table>::Value, 0b101, 3>(number.into())?
+            .get_two::<Header, <CanonicalHeaders as Table>::Value, S_HEADER_WITH_HASH, HEADER_COLUMNS>(number.into())?
             .map(|(header, hash)| header.seal(hash)))
     }
 }
 
 impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
     fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
-        self.cursor()?.get_one::<<CanonicalHeaders as Table>::Value, 0b100, 3>(number.into())
+        self.cursor()?.get_one::<<CanonicalHeaders as Table>::Value, S_HEADER_HASH, HEADER_COLUMNS>(
+            number.into(),
+        )
     }
 
     fn canonical_hashes_range(

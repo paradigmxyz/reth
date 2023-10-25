@@ -205,3 +205,16 @@ impl<'a> From<u64> for KeyOrNumber<'a> {
         KeyOrNumber::Number(value)
     }
 }
+
+/// Snapshot segment total columns.
+pub const HEADER_COLUMNS: usize = 3;
+/// Selector for header.
+pub const S_HEADER: usize = 0b001;
+/// Selector for header td.
+pub const S_HEADER_TD: usize = 0b010;
+/// Selector for header hash.
+pub const S_HEADER_HASH: usize = 0b100;
+/// Selector for header td and header hash.
+pub const S_HEADER_TD_WITH_HASH: usize = 0b110;
+/// Selector for header and header hash.
+pub const S_HEADER_WITH_HASH: usize = 0b101;
