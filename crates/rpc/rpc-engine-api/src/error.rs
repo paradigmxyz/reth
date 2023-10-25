@@ -16,11 +16,13 @@ pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
 ///
-/// Note: This is a high-fidelity error type which can be converted to an RPC error that adheres to the spec: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
+/// Note: This is a high-fidelity error type which can be converted to an RPC error that adheres to
+/// the [Engine API spec](https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors).
 #[derive(Error, Debug)]
 pub enum EngineApiError {
-    /// Unknown payload requested.
-    #[error("unknown payload")]
+    // **IMPORTANT**: keep error messages in sync with the Engine API spec linked above.
+    /// Payload does not exist / is not available.
+    #[error("Unknown payload")]
     UnknownPayload,
     /// The payload body request length is too large.
     #[error("payload request too large: {len}")]

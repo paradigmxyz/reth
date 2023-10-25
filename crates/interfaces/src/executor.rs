@@ -1,17 +1,19 @@
+use crate::RethError;
 use reth_primitives::{BlockNumHash, Bloom, PruneSegmentError, B256};
+use revm_primitives::EVMError;
 use thiserror::Error;
 
 /// Transaction validation errors
-#[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
-    #[error("EVM reported invalid transaction ({hash}): {message}")]
+    #[error("EVM reported invalid transaction ({hash}): {error}")]
     EVM {
         /// The hash of the transaction
         hash: B256,
-        /// Error message
-        message: String,
+        /// The EVM error.
+        #[source]
+        error: Box<EVMError<RethError>>,
     },
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
@@ -23,9 +25,9 @@ pub enum BlockValidationError {
     #[error("receipt root {got} is different than expected {expected}")]
     ReceiptRootDiff {
         /// The actual receipt root
-        got: B256,
+        got: Box<B256>,
         /// The expected receipt root
-        expected: B256,
+        expected: Box<B256>,
     },
     /// Error when header bloom filter doesn't match expected value
     #[error("header bloom filter {got} is different than expected {expected}")]
@@ -62,18 +64,32 @@ pub enum BlockValidationError {
         /// The hash of the block
         hash: B256,
     },
+    /// Error for missing total difficulty
     #[error("missing total difficulty for block {hash}")]
-    MissingTotalDifficulty { hash: B256 },
+    MissingTotalDifficulty {
+        /// The hash of the block
+        hash: B256,
+    },
     /// Error for EIP-4788 when parent beacon block root is missing
-    #[error("EIP-4788 Parent beacon block root missing for active Cancun block")]
+    #[error("EIP-4788 parent beacon block root missing for active Cancun block")]
     MissingParentBeaconBlockRoot,
     /// Error for Cancun genesis block when parent beacon block root is not zero
-    #[error("the parent beacon block root is not zero for Cancun genesis block")]
-    CancunGenesisParentBeaconBlockRootNotZero,
+    #[error("the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}")]
+    CancunGenesisParentBeaconBlockRootNotZero {
+        /// The beacon block root
+        parent_beacon_block_root: B256,
+    },
+    /// EVM error during beacon root contract call
+    #[error("failed to apply beacon root contract call at {parent_beacon_block_root}: {message}")]
+    BeaconRootContractCall {
+        /// The beacon block root
+        parent_beacon_block_root: Box<B256>,
+        /// The error message.
+        message: String,
+    },
 }
 
 /// BlockExecutor Errors
-#[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
