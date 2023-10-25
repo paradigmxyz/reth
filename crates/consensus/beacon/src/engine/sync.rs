@@ -396,7 +396,7 @@ mod tests {
     use futures::poll;
     use reth_db::{
         mdbx::{Env, WriteMap},
-        test_utils::create_test_rw_db,
+        test_utils::{create_test_rw_db, TempDatabase},
     };
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
@@ -449,7 +449,7 @@ mod tests {
         }
 
         /// Builds the pipeline.
-        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<Env<WriteMap>>> {
+        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<Env<WriteMap>>>> {
             reth_tracing::init_test_tracing();
             let db = create_test_rw_db();
 

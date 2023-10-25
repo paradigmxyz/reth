@@ -69,7 +69,7 @@ mod tests {
     #[ignore]
     async fn test_prune() {
         let test_tx = TestTransaction::default();
-        let factory = Arc::new(ProviderFactory::new(test_tx.tx.as_ref(), MAINNET.clone()));
+        let factory = Arc::new(ProviderFactory::new(test_tx.tx.db(), MAINNET.clone()));
 
         let provider = factory.provider_rw().unwrap();
         let tip = 66;

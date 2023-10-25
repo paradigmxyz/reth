@@ -380,7 +380,6 @@ mod tests {
         tables,
         test_utils::create_test_rw_db,
         transaction::DbTx,
-        DatabaseEnv,
     };
     use reth_primitives::{
         revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256,
@@ -399,11 +398,10 @@ mod tests {
         },
         CacheState, DatabaseCommit, State,
     };
-    use std::sync::Arc;
 
     #[test]
     fn write_to_db_account_info() {
-        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -546,7 +544,7 @@ mod tests {
 
     #[test]
     fn write_to_db_storage() {
-        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -739,7 +737,7 @@ mod tests {
 
     #[test]
     fn write_to_db_multiple_selfdestructs() {
-        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
@@ -1052,7 +1050,7 @@ mod tests {
 
     #[test]
     fn storage_change_after_selfdestruct_within_block() {
-        let db: Arc<DatabaseEnv> = create_test_rw_db();
+        let db = create_test_rw_db();
         let factory = ProviderFactory::new(db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 

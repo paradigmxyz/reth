@@ -851,7 +851,7 @@ mod tests {
                 .with_cuckoo_filter(col1.len())
                 .with_fmph();
 
-            nippy.prepare_compression(data.clone()).unwrap();
+            nippy.prepare_compression(data).unwrap();
             nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)

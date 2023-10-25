@@ -281,7 +281,7 @@ mod tests {
         let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         // create an empty file
         let file = tempfile::tempfile().unwrap();
@@ -368,7 +368,7 @@ mod tests {
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
 
         // insert headers in db for the bodies downloader
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
