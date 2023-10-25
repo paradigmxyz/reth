@@ -383,7 +383,7 @@ impl ParityTraceBuilder {
         } else {
             Some(MemoryDelta {
                 off: step.memory_size,
-                data: step.memory.slice(0, step.memory.len()).to_vec().into(),
+                data: step.memory.as_bytes().to_vec().into(),
             })
         };
 
