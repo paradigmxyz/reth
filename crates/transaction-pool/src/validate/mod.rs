@@ -59,6 +59,21 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
             Self::Error(hash, ..) => *hash,
         }
     }
+
+    /// Returns true if the transaction is valid.
+    pub fn is_valid(&self) -> bool {
+        matches!(self, Self::Valid { .. })
+    }
+
+    /// Returns true if the transaction is invalid.
+    pub fn is_invalid(&self) -> bool {
+        matches!(self, Self::Invalid(_, _))
+    }
+
+    /// Returns true if validation resulted in an error.
+    pub fn is_error(&self) -> bool {
+        matches!(self, Self::Error(_, _))
+    }
 }
 
 /// A wrapper type for a transaction that is valid and has an optional extracted EIP-4844 blob
