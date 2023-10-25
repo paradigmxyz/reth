@@ -97,6 +97,7 @@ where
 
         let start_block = end_block_plus - block_count;
 
+        // Collect base fees, gas usage ratios and (optionally) reward percentile data
         let mut base_fee_per_gas: Vec<U256> = Vec::new();
         let mut gas_used_ratio: Vec<f64> = Vec::new();
         let mut rewards: Vec<Vec<U256>> = Vec::new();
