@@ -338,7 +338,7 @@ impl TracingInspector {
             }
         }
         if self.config.record_state_diff {
-            let op = interp.current_opcode();
+            let op = step.op.get();
 
             let journal_entry = data
                 .journaled_state
