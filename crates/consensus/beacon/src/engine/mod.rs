@@ -868,7 +868,7 @@ where
         head_block.total_difficulty =
             self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
                 RethError::Provider(ProviderError::TotalDifficultyNotFound {
-                    number: head_block.number,
+                    block_number: head_block.number,
                 })
             })?;
         self.sync_state_updater.update_status(head_block);

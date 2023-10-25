@@ -187,8 +187,8 @@ tables!([
     (PruneCheckpoints, TableType::Table)
 ]);
 
-#[macro_export]
 /// Macro to declare key value table.
+#[macro_export]
 macro_rules! table {
     ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | $value:ty) => {
         $(#[$docs])+
@@ -204,7 +204,7 @@ macro_rules! table {
         }
 
         impl $table_name {
-            #[doc=concat!("Return ", stringify!($table_name), " as it is present inside the database.")]
+            #[doc = concat!("Return ", stringify!($table_name), " as it is present inside the database")]
             pub const fn const_name() -> &'static str {
                 stringify!($table_name)
             }
@@ -225,7 +225,7 @@ macro_rules! dupsort {
         table!(
             $(#[$docs])+
             ///
-            #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`].")]
+            #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`]")]
             ( $table_name ) $key | $value
         );
         impl DupSort for $table_name {
