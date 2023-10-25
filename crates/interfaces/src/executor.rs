@@ -65,7 +65,7 @@ pub enum BlockValidationError {
     #[error("missing total difficulty for block {hash}")]
     MissingTotalDifficulty { hash: B256 },
     /// Error for EIP-4788 when parent beacon block root is missing
-    #[error("eIP-4788 Parent beacon block root missing for active Cancun block")]
+    #[error("EIP-4788 Parent beacon block root missing for active Cancun block")]
     MissingParentBeaconBlockRoot,
     /// Error for Cancun genesis block when parent beacon block root is not zero
     #[error("the parent beacon block root is not zero for Cancun genesis block")]
