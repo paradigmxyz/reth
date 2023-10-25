@@ -24,7 +24,7 @@ mod types;
 mod utils;
 use crate::tracing::{
     arena::PushTraceKind,
-    types::{CallTraceNode, StorageChange, StorageChangeReason},
+    types::{CallTraceNode, RecordedMemory, StorageChange, StorageChangeReason},
     utils::gas_used,
 };
 pub use builder::{
@@ -280,7 +280,7 @@ impl TracingInspector {
         let memory = self
             .config
             .record_memory_snapshots
-            .then(|| interp.shared_memory.clone())
+            .then(|| RecordedMemory::new(interp.shared_memory.context_memory().to_vec()))
             .unwrap_or_default();
         let stack =
             self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
@@ -302,8 +302,8 @@ impl TracingInspector {
             contract: interp.contract.address,
             stack,
             push_stack: None,
+            memory_size: memory.len(),
             memory,
-            memory_size: interp.shared_memory.len(),
             gas_remaining: self.gas_inspector.gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
