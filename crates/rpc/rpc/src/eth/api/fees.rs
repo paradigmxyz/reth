@@ -217,29 +217,3 @@ where
         Ok(rewards_in_block)
     }
 }
-
-/// Wrapper struct for LruMap
-#[derive(Deref, DerefMut)]
-struct BaseFeePerGasLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
-
-impl Debug for BaseFeePerGasLruCache {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BaseFeePerGasLruCache")
-            .field("cache_length", &self.len())
-            .field("cache_memory_usage", &self.memory_usage())
-            .finish()
-    }
-}
-
-/// Wrapper struct for LruMap
-#[derive(Deref, DerefMut)]
-struct GasUsedRatioLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
-
-impl Debug for GasUsedRatioLruCache {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GasUsedRatioLruCache")
-            .field("cache_length", &self.len())
-            .field("cache_memory_usage", &self.memory_usage())
-            .finish()
-    }
-}
