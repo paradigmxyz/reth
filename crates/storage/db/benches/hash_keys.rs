@@ -86,6 +86,7 @@ where
             // Reset DB
             let _ = fs::remove_dir_all(bench_db_path);
             let db = Arc::try_unwrap(create_test_rw_db_with_path(bench_db_path)).unwrap();
+            let db = db.into_inner_db();
 
             let mut unsorted_input = unsorted_input.clone();
             if scenario_str == "append_all" {
