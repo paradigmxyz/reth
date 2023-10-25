@@ -178,13 +178,8 @@ impl<T: TransactionOrdering> TxPool<T> {
                     };
                     self.add_transaction_to_subpool(to, tx);
                 }
-
-                // TODO: base fee demotions should have happened in update_base_fee, would it make
-                // sense to combine the methods and do it here?
             }
-            (Ordering::Less, Ordering::Equal) |
-            (Ordering::Equal, Ordering::Less) |
-            (Ordering::Less, Ordering::Less) => {
+            (Ordering::Less, Ordering::Equal) | (_, Ordering::Less) => {
                 // decreased blob fee or base fee: recheck blob pool and promote all that are now
                 // valid
                 let removed = self
@@ -202,7 +197,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     self.add_transaction_to_subpool(to, tx);
                 }
             }
-            (Ordering::Less, Ordering::Greater) | (Ordering::Greater, Ordering::Less) => {
+            (Ordering::Less, Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
                 let removed =
                     self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
@@ -218,9 +213,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                     };
                     self.add_transaction_to_subpool(to, tx);
                 }
-
-                // TODO: base fee demotions should have happened in update_base_fee, would it make
-                // sense to combine the methods and do it here?
 
                 // decreased blob fee or base fee: recheck blob pool and promote all that are now
                 // valid
@@ -2063,10 +2055,8 @@ mod tests {
 
     #[test]
     fn test_promote_blob_tx_with_both_pending_fee_updates() {
-        // this test starts out with a high base and blobee.
-        //
-        // first the blobfee is increased, we make sure the tx stays in the blobpool.
-        // next the basefee is increased, we make sure the tx is promoted.
+        // this exhaustively tests all possible promotion scenarios for a single transaction moving
+        // between the blob and pending pool
         let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
