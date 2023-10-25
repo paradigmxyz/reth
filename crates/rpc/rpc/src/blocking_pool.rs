@@ -145,7 +145,7 @@ impl<T> Future for BlockingTaskHandle<T> {
 ///
 /// This should only happen
 #[derive(Debug, Default, thiserror::Error)]
-#[error("Tokio channel dropped while awaiting result")]
+#[error("tokio channel dropped while awaiting result")]
 #[non_exhaustive]
 pub struct TokioBlockingTaskError;
 
