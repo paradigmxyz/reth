@@ -537,6 +537,8 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 
 #[cfg(test)]
 mod tests {
+    use reth_primitives::address;
+
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
@@ -612,5 +614,77 @@ mod tests {
 
         // First transaction should be evicted.
         assert_eq!(pool.pop_worst().map(|tx| *tx.hash()), Some(*t.hash()));
+    }
+
+    #[test]
+    fn truncate_by_sender() {
+        // this test ensures that we evict from the pending pool by sender
+        // TODO: Ensure local transactions are not evicted
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // TODO: make creating these mock tx chains easier
+        // create a chain of transactions by sender A, B, C
+        let a1 = MockTransaction::eip1559()
+            .with_sender(address!("000000000000000000000000000000000000000a"));
+        let a2 = a1.clone().with_nonce(1);
+        let a3 = a1.clone().with_nonce(2);
+        let a4 = a1.clone().with_nonce(3);
+
+        let b1 = MockTransaction::eip1559()
+            .with_sender(address!("000000000000000000000000000000000000000b"));
+        let b2 = b1.clone().with_nonce(1);
+        let b3 = b1.clone().with_nonce(2);
+
+        // C has the same number of txs as B
+        let c1 = MockTransaction::eip1559()
+            .with_sender(address!("000000000000000000000000000000000000000c"));
+        let c2 = c1.clone().with_nonce(1);
+        let c3 = c1.clone().with_nonce(2);
+
+        // just construct a list of all txs to add
+        let expected_pending = vec![a1.clone(), b1.clone(), c1.clone()];
+        let expected_removed = vec![
+            a2.clone(),
+            a3.clone(),
+            a4.clone(),
+            b2.clone(),
+            b3.clone(),
+            c2.clone(),
+            c3.clone(),
+        ];
+        let all_txs = vec![a1, a2, a3, a4, b1, b2, b3, c1, c2, c3];
+
+        // add all the transactions to the pool
+        for tx in all_txs {
+            println!("adding tx {:?}, has id: {:?}", tx, f.tx_id(&tx));
+            pool.add_transaction(f.validated_arc(tx), 0);
+        }
+
+        // let's set the max_account_slots to 2, and the max total txs to 3, we should end up with
+        // only the first transactions
+        let pool_limit = SubPoolLimit {
+            max_txs: 3,
+            // TODO: size is going to make this complicated i think....
+            max_size: usize::MAX,
+        };
+
+        let max_account_slots = 2;
+
+        // truncate the pool
+        let removed = pool.truncate_pool(pool_limit, max_account_slots);
+        assert_eq!(removed.len(), expected_removed.len());
+
+        // get the inner txs from the removed txs
+        let removed = removed.into_iter().map(|tx| tx.transaction.clone()).collect::<Vec<_>>();
+        assert_eq!(removed, expected_removed);
+
+        // get the pending pool
+        let pending = pool.all().collect::<Vec<_>>();
+        assert_eq!(pending.len(), expected_pending.len());
+
+        // get the inner txs from the pending txs
+        let pending = pending.into_iter().map(|tx| tx.transaction.clone()).collect::<Vec<_>>();
+        assert_eq!(pending, expected_pending);
     }
 }
