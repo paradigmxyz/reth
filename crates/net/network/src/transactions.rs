@@ -811,10 +811,10 @@ where
                     // rules)
                     if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
-                        this.on_bad_import(*err.hash());
+                        this.on_bad_import(err.hash);
                         continue
                     }
-                    this.on_good_import(*err.hash());
+                    this.on_good_import(err.hash);
                 }
             }
         }

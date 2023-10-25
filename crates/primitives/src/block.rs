@@ -343,10 +343,10 @@ impl Decodable for BlockHashOrNumber {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to parse `{input}` as integer: {pares_int_error} or as hex: {hex_error}")]
+#[error("failed to parse {input:?} as a number: {parse_int_error} or hash: {hex_error}")]
 pub struct ParseBlockHashOrNumberError {
     input: String,
-    pares_int_error: ParseIntError,
+    parse_int_error: ParseIntError,
     hex_error: crate::hex::FromHexError,
 }
 
@@ -360,7 +360,7 @@ impl FromStr for BlockHashOrNumber {
                 Ok(val) => Ok(val.into()),
                 Err(hex_error) => Err(ParseBlockHashOrNumberError {
                     input: s.to_string(),
-                    pares_int_error,
+                    parse_int_error: pares_int_error,
                     hex_error,
                 }),
             },
