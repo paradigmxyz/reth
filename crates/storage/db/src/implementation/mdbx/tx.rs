@@ -2,7 +2,9 @@
 
 use super::cursor::Cursor;
 use crate::{
-    metrics::{MetricEvent, MetricEventsSender, Operation, TransactionOutcome},
+    metrics::{
+        Operation, OperationMetrics, TransactionMetrics, TransactionMode, TransactionOutcome,
+    },
     table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::{utils::decode_one, Tables, NUM_TABLES},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
@@ -11,11 +13,7 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::DatabaseWriteOperation;
 use reth_libmdbx::{ffi::DBI, EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use std::{
-    str::FromStr,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
@@ -24,7 +22,7 @@ pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     pub inner: Transaction<'a, K, E>,
     /// Database table handle cache.
     pub(crate) db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
-    metrics_handler: Option<MetricsHandler>,
+    metrics_handler: Option<MetricsHandler<K>>,
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
@@ -36,10 +34,22 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         Self { inner, db_handles: Default::default(), metrics_handler: None }
     }
 
-    /// Sets the [MetricEventsSender] to report metrics about the transaction and cursors.
-    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
-        self.metrics_handler = Some(MetricsHandler { txn_id: self.id(), metrics_tx });
-        self
+    /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
+    pub fn new_with_metrics<'a>(inner: Transaction<'a, K, E>, with_metrics: bool) -> Self
+    where
+        'a: 'env,
+    {
+        let metrics_handler = with_metrics.then(|| {
+            let handler = MetricsHandler::<K> {
+                txn_id: inner.id(),
+                start: Instant::now(),
+                close_recorded: false,
+                _marker: PhantomData,
+            };
+            TransactionMetrics::record_open(handler.transaction_mode());
+            handler
+        });
+        Self { inner, db_handles: Default::default(), metrics_handler }
     }
 
     /// Gets this transaction ID.
@@ -68,11 +78,12 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
 
     /// Create db Cursor
     pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'env, K, T>, DatabaseError> {
-        Ok(Cursor::new(
-            self.inner
-                .cursor_with_dbi(self.get_dbi::<T>()?)
-                .map_err(|e| DatabaseError::InitCursor(e.into()))?,
-        ))
+        let inner = self
+            .inner
+            .cursor_with_dbi(self.get_dbi::<T>()?)
+            .map_err(|e| DatabaseError::InitCursor(e.into()))?;
+
+        Ok(Cursor::new_with_metrics(inner, self.metrics_handler.is_some()))
     }
 
     fn execute_with_close_transaction_metric<R>(
@@ -80,17 +91,25 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         outcome: TransactionOutcome,
         f: impl FnOnce(Self) -> R,
     ) -> R {
-        let start = Instant::now();
-        let metrics_handler = self.metrics_handler.take();
-        let result = f(self);
-        if let Some(handler) = metrics_handler {
-            let _ = handler.metrics_tx.send(MetricEvent::CloseTransaction {
-                txn_id: handler.txn_id,
+        if let Some(mut metrics_handler) = self.metrics_handler.take() {
+            metrics_handler.close_recorded = true;
+
+            let start = Instant::now();
+            let result = f(self);
+            let close_duration = start.elapsed();
+            let open_duration = metrics_handler.start.elapsed();
+
+            TransactionMetrics::record_close(
+                metrics_handler.transaction_mode(),
                 outcome,
-                close_duration: start.elapsed(),
-            });
+                open_duration,
+                Some(close_duration),
+            );
+
+            result
+        } else {
+            f(self)
         }
-        result
     }
 
     fn execute_with_operation_metric<T: Table, R>(
@@ -98,33 +117,52 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         operation: Operation,
         f: impl FnOnce(&Transaction<'_, K, E>) -> R,
     ) -> R {
-        let start = Instant::now();
-        let result = f(&self.inner);
-        if let Some(handler) = &self.metrics_handler {
-            let _ = handler.metrics_tx.send(MetricEvent::Operation {
-                table: T::NAME,
-                operation,
-                duration: start.elapsed(),
-            });
+        if self.metrics_handler.is_some() {
+            let start = Instant::now();
+            let result = f(&self.inner);
+            let duration = start.elapsed();
+
+            OperationMetrics::record(T::NAME, operation, duration);
+
+            result
+        } else {
+            f(&self.inner)
         }
-        result
     }
 }
 
 #[derive(Debug)]
-struct MetricsHandler {
+struct MetricsHandler<K: TransactionKind> {
     /// Cached internal transaction ID provided by libmdbx.
     txn_id: u64,
-    metrics_tx: MetricEventsSender,
+    /// The time when transaction has started.
+    start: Instant,
+    /// If true, the metric about transaction closing has already been recorded and we don't need
+    /// to do anything on [Drop::drop].
+    close_recorded: bool,
+    _marker: PhantomData<K>,
 }
 
-impl Drop for MetricsHandler {
+impl<K: TransactionKind> MetricsHandler<K> {
+    const fn transaction_mode(&self) -> TransactionMode {
+        if K::IS_READ_ONLY {
+            TransactionMode::ReadOnly
+        } else {
+            TransactionMode::ReadWrite
+        }
+    }
+}
+
+impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
-        let _ = self.metrics_tx.send(MetricEvent::CloseTransaction {
-            txn_id: self.txn_id,
-            outcome: TransactionOutcome::Drop,
-            close_duration: Duration::default(),
-        });
+        if !self.close_recorded {
+            TransactionMetrics::record_close(
+                self.transaction_mode(),
+                TransactionOutcome::Drop,
+                self.start.elapsed(),
+                None,
+            );
+        }
     }
 }
 
@@ -164,22 +202,14 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
 
     // Iterate over read only values in database.
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
-        let mut cursor = self.new_cursor()?;
-        if let Some(handler) = &self.metrics_handler {
-            cursor = cursor.with_metrics_tx(handler.metrics_tx.clone());
-        }
-        Ok(cursor)
+        self.new_cursor()
     }
 
     /// Iterate over read only values in database.
     fn cursor_dup_read<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
-        let mut cursor = self.new_cursor()?;
-        if let Some(handler) = &self.metrics_handler {
-            cursor = cursor.with_metrics_tx(handler.metrics_tx.clone());
-        }
-        Ok(cursor)
+        self.new_cursor()
     }
 
     /// Returns number of entries in the table using cheap DB stats invocation.
@@ -233,20 +263,12 @@ impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
     fn cursor_write<T: Table>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, DatabaseError> {
-        let mut cursor = self.new_cursor()?;
-        if let Some(handler) = &self.metrics_handler {
-            cursor = cursor.with_metrics_tx(handler.metrics_tx.clone());
-        }
-        Ok(cursor)
+        self.new_cursor()
     }
 
     fn cursor_dup_write<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, DatabaseError> {
-        let mut cursor = self.new_cursor()?;
-        if let Some(handler) = &self.metrics_handler {
-            cursor = cursor.with_metrics_tx(handler.metrics_tx.clone());
-        }
-        Ok(cursor)
+        self.new_cursor()
     }
 }

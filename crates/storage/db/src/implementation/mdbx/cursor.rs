@@ -9,7 +9,7 @@ use crate::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    metrics::{MetricEvent, MetricEventsSender, Operation},
+    metrics::{Operation, OperationMetrics},
     table::{Compress, DupSort, Encode, Table},
     tables::utils::*,
     DatabaseError,
@@ -28,19 +28,17 @@ pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     pub(crate) inner: reth_libmdbx::Cursor<'tx, K>,
     /// Cache buffer that receives compressed values.
     buf: Vec<u8>,
-    metrics_tx: Option<MetricEventsSender>,
+    with_metrics: bool,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
 }
 
 impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
-    pub(crate) fn new(inner: reth_libmdbx::Cursor<'tx, K>) -> Self {
-        Self { inner, buf: Vec::new(), metrics_tx: None, _dbi: PhantomData }
-    }
-
-    pub(crate) fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
-        self.metrics_tx = Some(metrics_tx);
-        self
+    pub(crate) fn new_with_metrics(
+        inner: reth_libmdbx::Cursor<'tx, K>,
+        with_metrics: bool,
+    ) -> Self {
+        Self { inner, buf: Vec::new(), with_metrics, _dbi: PhantomData }
     }
 
     fn execute_with_operation_metric<R>(
@@ -48,18 +46,17 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         operation: Operation,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let start = Instant::now();
-        let result = f(self);
+        if self.with_metrics {
+            let start = Instant::now();
+            let result = f(self);
+            let duration = start.elapsed();
 
-        if let Some(metrics_tx) = &self.metrics_tx {
-            let _ = metrics_tx.send(MetricEvent::Operation {
-                table: T::NAME,
-                operation,
-                duration: start.elapsed(),
-            });
+            OperationMetrics::record(T::NAME, operation, duration);
+
+            result
+        } else {
+            f(self)
         }
-
-        result
     }
 }
 

@@ -2,7 +2,6 @@
 
 use crate::{
     database::{Database, DatabaseGAT},
-    metrics::{MetricEvent, MetricEventsSender, TransactionMode},
     tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
@@ -38,7 +37,7 @@ pub enum EnvKind {
 pub struct Env<E: EnvironmentKind> {
     /// Libmdbx-sys environment.
     pub inner: Environment<E>,
-    metrics_tx: Option<MetricEventsSender>,
+    with_metrics: bool,
 }
 
 impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
@@ -48,31 +47,17 @@ impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
 
 impl<E: EnvironmentKind> Database for Env<E> {
     fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
-        let mut tx = Tx::new(
+        Ok(Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?,
-        );
-        if let Some(metrics_tx) = &self.metrics_tx {
-            tx = tx.with_metrics_tx(metrics_tx.clone());
-            let _ = metrics_tx.send(MetricEvent::OpenTransaction {
-                txn_id: tx.id(),
-                mode: TransactionMode::ReadOnly,
-            });
-        }
-        Ok(tx)
+            self.with_metrics,
+        ))
     }
 
     fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
-        let mut tx = Tx::new(
+        Ok(Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?,
-        );
-        if let Some(metrics_tx) = &self.metrics_tx {
-            tx = tx.with_metrics_tx(metrics_tx.clone());
-            let _ = metrics_tx.send(MetricEvent::OpenTransaction {
-                txn_id: tx.id(),
-                mode: TransactionMode::ReadWrite,
-            });
-        }
-        Ok(tx)
+            self.with_metrics,
+        ))
     }
 }
 
@@ -140,16 +125,15 @@ impl<E: EnvironmentKind> Env<E> {
 
         let env = Env {
             inner: inner_env.open(path).map_err(|e| DatabaseError::FailedToOpen(e.into()))?,
-            metrics_tx: None,
+            with_metrics: false,
         };
 
         Ok(env)
     }
 
-    /// Sets the [MetricEventsSender] to report metrics about the database, transactions and
-    /// cursors.
-    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
-        self.metrics_tx = Some(metrics_tx);
+    /// Enables metrics on the database.
+    pub fn with_metrics(mut self) -> Self {
+        self.with_metrics = true;
         self
     }
 

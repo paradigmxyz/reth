@@ -249,14 +249,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let prometheus_handle = self.install_prometheus_recorder()?;
 
-        debug!(target: "reth::cli", "Spawning database metrics listener task");
-        let (db_metrics_tx, db_metrics_rx) = unbounded_channel();
-        let db_metrics_listener = reth_db::MetricsListener::new(db_metrics_rx);
-        ctx.task_executor.spawn_critical("database metrics listener task", db_metrics_listener);
-
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics_tx(db_metrics_tx));
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics());
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
