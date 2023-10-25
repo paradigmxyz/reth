@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    error::{PoolError, PoolResult},
+    error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{
         listener::PoolEventBroadcast,
@@ -449,12 +449,12 @@ where
             TransactionValidationOutcome::Invalid(tx, err) => {
                 let mut listener = self.event_listener.write();
                 listener.discarded(tx.hash());
-                Err(PoolError::InvalidTransaction(*tx.hash(), err))
+                Err(PoolError::new(*tx.hash(), err))
             }
             TransactionValidationOutcome::Error(tx_hash, err) => {
                 let mut listener = self.event_listener.write();
                 listener.discarded(&tx_hash);
-                Err(PoolError::Other(tx_hash, err))
+                Err(PoolError::other(tx_hash, err))
             }
         }
     }
@@ -498,7 +498,7 @@ where
             .into_iter()
             .map(|res| match res {
                 Ok(ref hash) if discarded.contains(hash) => {
-                    Err(PoolError::DiscardedOnInsert(*hash))
+                    Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }
                 other => other,
             })

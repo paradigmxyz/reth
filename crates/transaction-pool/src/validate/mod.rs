@@ -347,6 +347,6 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionValidatorError {
     /// Failed to communicate with the validation service.
-    #[error("Validation service unreachable")]
+    #[error("validation service unreachable")]
     ValidationServiceUnreachable,
 }
