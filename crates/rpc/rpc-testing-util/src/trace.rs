@@ -174,4 +174,43 @@ mod tests {
         let stream = client.trace_block_buffered(block, 2);
         assert_is_stream(&stream);
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn can_create_replay_transaction_stream() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+
+        // Assuming you have some transactions you want to test, replace with actual hashes.
+        let transactions = vec![
+            "0x4e08fe36db723a338e852f89f613e606b0c9a17e649b18b01251f86236a2cef3".parse().unwrap(),
+            "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb".parse().unwrap(),
+        ];
+
+        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
+
+        let mut stream = client.replay_transactions(transactions, trace_types);
+        let mut successes = 0;
+        let mut failures = 0;
+        let mut all_results = Vec::new();
+
+        assert_is_stream(&stream);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok((trace_result, tx_hash)) => {
+                    println!("Success for tx_hash {:?}: {:?}", tx_hash, trace_result);
+                    successes += 1;
+                    all_results.push(Ok((trace_result, tx_hash)));
+                }
+                Err((error, tx_hash)) => {
+                    println!("Error for tx_hash {:?}: {:?}", tx_hash, error);
+                    failures += 1;
+                    all_results.push(Err((error, tx_hash)));
+                }
+            }
+        }
+
+        println!("Total successes: {}", successes);
+        println!("Total failures: {}", failures);
+    }
 }
