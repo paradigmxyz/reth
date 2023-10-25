@@ -14,6 +14,10 @@ pub trait HeaderProvider: Send + Sync {
     /// Get header by block hash
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>>;
 
+    /// Get header by block number and db time
+    #[cfg(feature = "enable_db_speed_record")]
+    fn header_by_number_with_db_info(&self, num: u64) -> Result<(Option<Header>, u64, u128)>;
+
     /// Get header by block number
     fn header_by_number(&self, num: u64) -> Result<Option<Header>>;
 
@@ -27,6 +31,13 @@ pub trait HeaderProvider: Send + Sync {
 
     /// Get total difficulty by block hash.
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>>;
+
+    /// Get total difficulty and time of read db by block number.
+    #[cfg(feature = "enable_db_speed_record")]
+    fn header_td_by_number_with_db_info(
+        &self,
+        number: BlockNumber,
+    ) -> Result<(Option<U256>, u64, u128)>;
 
     /// Get total difficulty by block number.
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>>;

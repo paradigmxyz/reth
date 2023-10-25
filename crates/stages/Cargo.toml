@@ -86,6 +86,7 @@ finish_after_execution_stage = []
 enable_execution_duration_record = ["minstant"]
 enable_tps_gas_record = []
 enable_test_max_th = []
+enable_db_speed_record =["reth-provider/enable_db_speed_record"]
 
 [[bench]]
 name = "criterion"

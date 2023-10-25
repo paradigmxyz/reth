@@ -165,6 +165,10 @@ enable_execution_duration_record = [
     "open_performance_dashboard",
 ]
 enable_test_max_th = ["reth-stages/enable_test_max_th"]
+enable_db_speed_record = [
+    "reth-stages/enable_db_speed_record",
+    "open_performance_dashboard",
+]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

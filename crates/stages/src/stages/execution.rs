@@ -1,10 +1,10 @@
+#[cfg(feature = "enable_db_speed_record")]
+use crate::DbSpeedRecord;
 #[cfg(feature = "enable_execution_duration_record")]
 use crate::ExecutionDurationRecord;
-#[cfg(feature = "open_performance_dashboard")]
-use crate::MetricEvent;
 use crate::{
-    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEventsSender, Stage,
-    StageError, UnwindInput, UnwindOutput,
+    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
+    MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use num_traits::Zero;
 use reth_db::{
@@ -118,6 +118,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
+        #[cfg(feature = "enable_db_speed_record")]
+        let mut db_speed_record = DbSpeedRecord::default();
+
         #[cfg(feature = "enable_execution_duration_record")]
         let mut duration_record = ExecutionDurationRecord::default();
         #[cfg(feature = "enable_execution_duration_record")]
@@ -143,12 +146,37 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         for block_number in start_block..=max_block {
             #[cfg(feature = "enable_execution_duration_record")]
             duration_record.start_time_recorder();
+
+            #[cfg(feature = "enable_db_speed_record")]
+            let (td, block) = {
+                let (option_td, db_size, db_time) =
+                    provider.header_td_by_number_with_db_info(block_number)?;
+                let td =
+                    option_td.ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+                db_speed_record.add_read_header_td_db_time(db_time);
+                db_speed_record.add_read_header_td_db_size(db_size);
+
+                let (option_block, db_size, db_time) =
+                    provider.block_with_senders_with_db_info(block_number)?;
+                let block = option_block
+                    .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
+
+                db_speed_record.add_read_block_with_senders_db_size(db_size);
+                db_speed_record.add_read_block_with_senders_db_time(db_time);
+
+                (td, block)
+            };
+
+            #[cfg(not(feature = "enable_db_speed_record"))]
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+            #[cfg(not(feature = "enable_db_speed_record"))]
             let block = provider
                 .block_with_senders(block_number)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
+
             #[cfg(feature = "enable_execution_duration_record")]
             duration_record.add_read_block();
 
@@ -169,8 +197,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             duration_record.add_execute_tx();
 
             // Gas and txs metrics
-            #[cfg(feature = "enable_tps_gas_record")]
             if let Some(metrics_tx) = &mut self.metrics_tx {
+                #[cfg(not(feature = "enable_tps_gas_record"))]
+                let _ =
+                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
+
+                #[cfg(feature = "enable_tps_gas_record")]
                 let _ = metrics_tx.send(MetricEvent::BlockTpsAndGas {
                     txs: block.body.len() as u64,
                     gas: block.header.gas_used,
@@ -190,7 +222,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             {
                 println!("");
                 let cachedb_size = executor.get_cachedb_size();
-                println!("cachedb_size = {:?}", cachedb_size);
+                println!("block_number: {:?}, cachedb_size = {:?}", block_number, cachedb_size);
                 println!("");
             }
 
@@ -234,11 +266,41 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Write remaining changes
         trace!(target: "sync::stages::execution", accounts = state.accounts().len(), "Writing updated state to database");
         let start = Instant::now();
+
+        #[cfg(feature = "enable_db_speed_record")]
+        let write_to_db_time = {
+            db_speed_record.write_to_db_size = u64::try_from(state.size()).unwrap();
+            Instant::now()
+        };
+
         #[cfg(feature = "enable_execution_duration_record")]
         duration_record.start_time_recorder();
+
         state.write_to_db(provider.tx_ref(), max_block)?;
+
         #[cfg(feature = "enable_execution_duration_record")]
         duration_record.add_write_to_db();
+
+        #[cfg(feature = "enable_db_speed_record")]
+        {
+            db_speed_record.write_to_db_time = write_to_db_time.elapsed().as_nanos();
+
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let _ = metrics_tx.send(MetricEvent::DBSpeedInfo {
+                    read_header_td_db_time: db_speed_record.read_header_td_db_time,
+                    read_header_td_db_size: db_speed_record.read_header_td_db_size,
+                    read_block_with_senders_db_time: db_speed_record
+                        .read_block_with_senders_db_time,
+                    read_block_with_senders_db_size: db_speed_record
+                        .read_block_with_senders_db_size,
+                    write_to_db_time: db_speed_record.write_to_db_time,
+                    write_to_db_size: db_speed_record.write_to_db_size,
+                });
+            }
+
+            println!("\ndb_speed_record: {:?}\n", db_speed_record);
+        }
+
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
 
         #[cfg(feature = "enable_execution_duration_record")]

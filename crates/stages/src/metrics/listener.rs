@@ -1,7 +1,6 @@
 use crate::metrics::SyncMetrics;
-#[cfg(feature = "enable_tps_gas_record")]
-use reth_primitives::constants::MGAS_TO_GAS;
 use reth_primitives::{
+    constants::MGAS_TO_GAS,
     stage::{StageCheckpoint, StageId},
     BlockNumber,
 };
@@ -34,6 +33,11 @@ pub enum MetricEvent {
         /// If specified, `entities_total` metric is updated.
         max_block_number: Option<BlockNumber>,
     },
+    /// Execution stage processed some amount of gas.
+    ExecutionStageGas {
+        /// Gas processed.
+        gas: u64,
+    },
     // /// Revm metric record.
     // #[cfg(feature = "enable_opcode_metrics")]
     // RevmMetricRecord {
@@ -63,6 +67,22 @@ pub enum MetricEvent {
         txs: u64,
         /// Gas processed.
         gas: u64,
+    },
+    /// db speed metric record
+    #[cfg(feature = "enable_db_speed_record")]
+    DBSpeedInfo {
+        /// total time of read header td from db
+        read_header_td_db_time: u128,
+        /// total data size of read header td from db
+        read_header_td_db_size: u64,
+        /// total time of read block with senders from db
+        read_block_with_senders_db_time: u128,
+        /// total data size of read block with senders from db
+        read_block_with_senders_db_size: u64,
+        /// time of write to db
+        write_to_db_time: u128,
+        /// data size of write to db
+        write_to_db_size: u64,
     },
 }
 
@@ -111,7 +131,11 @@ impl MetricsListener {
                     stage_metrics.entities_total.set(total as f64);
                 }
             }
-
+            MetricEvent::ExecutionStageGas { gas } => self
+                .sync_metrics
+                .execution_stage
+                .mgas_processed_total
+                .increment(gas as f64 / MGAS_TO_GAS as f64),
             #[cfg(feature = "enable_execution_duration_record")]
             MetricEvent::ExecutionStageTime {
                 execute_inner,
@@ -148,6 +172,39 @@ impl MetricsListener {
                     .execution_stage
                     .mgas_processed_total
                     .increment(gas as f64 / MGAS_TO_GAS as f64);
+            }
+            #[cfg(feature = "enable_db_speed_record")]
+            MetricEvent::DBSpeedInfo {
+                read_header_td_db_time,
+                read_header_td_db_size,
+                read_block_with_senders_db_time,
+                read_block_with_senders_db_size,
+                write_to_db_time,
+                write_to_db_size,
+            } => {
+                self.sync_metrics
+                    .execution_stage
+                    .read_header_td_db_time
+                    .increment(read_header_td_db_time.try_into().expect("truncation error"));
+                self.sync_metrics
+                    .execution_stage
+                    .read_header_td_db_size
+                    .increment(read_header_td_db_size);
+                self.sync_metrics.execution_stage.read_block_with_senders_db_time.increment(
+                    read_block_with_senders_db_time.try_into().expect("truncation error"),
+                );
+                self.sync_metrics
+                    .execution_stage
+                    .read_block_with_senders_db_size
+                    .increment(read_block_with_senders_db_size);
+                self.sync_metrics
+                    .execution_stage
+                    .db_speed_write_to_db_time
+                    .increment(write_to_db_time.try_into().expect("truncation error"));
+                self.sync_metrics
+                    .execution_stage
+                    .db_speed_write_to_db_size
+                    .increment(write_to_db_size);
             }
         }
     }

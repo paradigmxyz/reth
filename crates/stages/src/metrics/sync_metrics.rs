@@ -7,7 +7,6 @@ use std::collections::HashMap;
 #[derive(Debug, Default)]
 pub(crate) struct SyncMetrics {
     pub(crate) stages: HashMap<StageId, StageMetrics>,
-    #[cfg(feature = "open_performance_dashboard")]
     pub(crate) execution_stage: ExecutionStageMetrics,
 }
 
@@ -36,12 +35,10 @@ pub(crate) struct StageMetrics {
 #[metrics(scope = "sync.execution")]
 pub(crate) struct ExecutionStageMetrics {
     /// The total amount of gas processed (in millions).
-    #[cfg(feature = "enable_tps_gas_record")]
     pub(crate) mgas_processed_total: Gauge,
     /// The total amount of transactions processed.
     #[cfg(feature = "enable_tps_gas_record")]
     pub(crate) txs_processed_total: Counter,
-    #[cfg(feature = "open_performance_dashboard")]
     /// Time of execute inner.
     #[cfg(feature = "enable_execution_duration_record")]
     pub(crate) execute_inner_time: Counter,
@@ -57,4 +54,23 @@ pub(crate) struct ExecutionStageMetrics {
     /// Time of write to db.
     #[cfg(feature = "enable_execution_duration_record")]
     pub(crate) write_to_db_time: Counter,
+
+    /// total time of read header td from db
+    #[cfg(feature = "enable_db_speed_record")]
+    pub(crate) read_header_td_db_time: Counter,
+    /// total data size of read header td from db
+    #[cfg(feature = "enable_db_speed_record")]
+    pub(crate) read_header_td_db_size: Counter,
+    /// total time of read block with senders from db
+    #[cfg(feature = "enable_db_speed_record")]
+    pub(crate) read_block_with_senders_db_time: Counter,
+    /// total data size of read block with senders from db
+    #[cfg(feature = "enable_db_speed_record")]
+    pub(crate) read_block_with_senders_db_size: Counter,
+    /// time of write to db
+    #[cfg(feature = "enable_db_speed_record")]
+    pub(crate) db_speed_write_to_db_time: Counter,
+    /// data size of write to db
+    #[cfg(feature = "enable_db_speed_record")]
+    pub(crate) db_speed_write_to_db_size: Counter,
 }
