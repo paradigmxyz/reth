@@ -6,14 +6,11 @@ use crate::{
 };
 
 use crate::eth::cache::BlockFees;
-use derive_more::{Deref, DerefMut};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, B256, U256};
+use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
-use schnellru::{ByLength, LruMap};
-use std::fmt::{self, Debug, Formatter};
 use tracing::debug;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
