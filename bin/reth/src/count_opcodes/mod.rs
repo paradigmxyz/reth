@@ -181,7 +181,7 @@ mod test {
 
     #[test]
     fn test_filter_bytecode_bytes() {
-        let test_bytecode_bytes = Bytes::from_hex(bytecode_test_string()).unwrap();
+        let test_bytecode_bytes = Bytes::from_hex(all_opcodes_test_string()).unwrap();
         // assuming push data inside test bytes is "0xaa"
         let manually_filtered_bytes =
             Bytes::from_iter(test_bytecode_bytes.iter().filter(|op| **op != 0xaa));
@@ -190,7 +190,7 @@ mod test {
 
     #[test]
     fn opcode_counter() {
-        let test_bytecode = bytecode_test_string();
+        let test_bytecode = all_opcodes_test_string();
         let bytecode = Bytecode::new_raw(hex::decode(&test_bytecode).unwrap().into());
         let filtered_bytes = filter_bytecode_bytes(bytecode.bytes());
 
@@ -204,17 +204,52 @@ mod test {
                 assert_eq!(opcode_counter.opcodes.get(&i), Some(1_usize).as_ref());
             }
         }
-
-        info!("opcodes processing done!");
-        info!("start opcodes printing...");
-        opcode_counter.print_counts(50);
-        info!("opcodes printing done!");
     }
 
+    #[test]
+    fn opcode_counter_tuples() {
+        let test_bytecode = opcodes_tuples_test_string();
+        let bytecode = Bytecode::new_raw(hex::decode(&test_bytecode).unwrap().into());
+        let filtered_bytes = filter_bytecode_bytes(bytecode.bytes());
 
+        let mut opcode_counter = OpCodeCounter::new();
+        opcode_counter.count_sequences(&filtered_bytes);
 
-    fn bytecode_test_string() -> String {
-        let test_bytecode = "00"; // STOP 13
+        assert_eq!(opcode_counter.opcodes.get(&0).unwrap().clone(), 1);
+        assert_eq!(opcode_counter.tuple_opcodes.get(&[1, 2]).unwrap().clone(), 2);
+        assert_eq!(opcode_counter.triplets_opcodes.get(&[3, 4, 5]).unwrap().clone(), 2);
+        assert_eq!(opcode_counter.quadruplets_opcodes.get(&[6, 7, 8, 9]).unwrap().clone(), 2);
+    }
+
+    fn opcodes_tuples_test_string() -> String {
+        let test_bytecode = "00"; // STOP
+        
+        let test_bytecode = format!("{test_bytecode}01"); // ADD
+        let test_bytecode = format!("{test_bytecode}02"); // MUL
+        let test_bytecode = format!("{test_bytecode}01"); // ADD
+        let test_bytecode = format!("{test_bytecode}02"); // MUL
+
+        let test_bytecode = format!("{test_bytecode}03"); // SUB
+        let test_bytecode = format!("{test_bytecode}04"); // DIV
+        let test_bytecode = format!("{test_bytecode}05"); // SDIV
+        let test_bytecode = format!("{test_bytecode}03"); // SUB
+        let test_bytecode = format!("{test_bytecode}04"); // DIV
+        let test_bytecode = format!("{test_bytecode}05"); // SDIV
+
+        let test_bytecode = format!("{test_bytecode}06"); // MOD
+        let test_bytecode = format!("{test_bytecode}07"); // SMOD
+        let test_bytecode = format!("{test_bytecode}08"); // ADDMOD
+        let test_bytecode = format!("{test_bytecode}09"); // MULMOD
+        let test_bytecode = format!("{test_bytecode}06"); // MOD
+        let test_bytecode = format!("{test_bytecode}07"); // SMOD
+        let test_bytecode = format!("{test_bytecode}08"); // ADDMOD
+        let test_bytecode = format!("{test_bytecode}09"); // MULMOD
+
+        test_bytecode
+    }
+
+    fn all_opcodes_test_string() -> String {
+        let test_bytecode = "00"; // STOP
         let test_bytecode = format!("{test_bytecode}01"); // ADD
         let test_bytecode = format!("{test_bytecode}02"); // MUL
         let test_bytecode = format!("{test_bytecode}03"); // SUB
