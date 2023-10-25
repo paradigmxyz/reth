@@ -8,7 +8,7 @@ use crate::pool::best::BestTransactionsWithBasefee;
 use reth_primitives::Address;
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
+    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     sync::Arc,
 };
 use tokio::sync::broadcast;
@@ -415,25 +415,31 @@ impl<T: TransactionOrdering> PendingPool<T> {
         removed
     }
 
-    /// Returns account address and their txs_count that are not local and whose tx count >
-    /// max_account_slots limit
+    /// Returns account address and their txs_count that are _not local_ and whose transaction
+    /// count > `max_account_slots` limit.
+    ///
+    /// This returns the a list of tuples, containing addresses and their transaction count.
     pub(crate) fn get_spammers(&self, max_account_slots: usize) -> Vec<(Address, usize)> {
-        let mut spammers = Vec::new();
+        let mut spammers = HashMap::new();
         for tx in self.all.iter() {
             if tx.transaction.is_local() {
                 continue
             }
+
             let sender = tx.transaction.sender();
-            let txs = self.get_txs_by_sender(&sender);
-            if txs.len() <= max_account_slots {
-                continue
+
+            match spammers.entry(sender) {
+                Entry::Occupied(mut entry) => {
+                    let count = entry.get_mut();
+                    *count += 1;
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(1);
+                }
             }
-            if spammers.iter().any(|(s, _)| s == &sender) {
-                continue
-            }
-            spammers.push((sender, txs.len()));
         }
-        spammers
+
+        spammers.into_iter().filter(|(_, count)| *count > max_account_slots).collect()
     }
 
     /// Get txs by sender
@@ -632,26 +638,22 @@ mod tests {
 
         // TODO: make creating these mock tx chains easier
         // create a chain of transactions by sender A, B, C
-        let a1 = MockTransaction::eip1559()
-            .with_sender(a);
+        let a1 = MockTransaction::eip1559().with_sender(a);
         let a2 = a1.clone().with_nonce(1);
         let a3 = a1.clone().with_nonce(2);
         let a4 = a1.clone().with_nonce(3);
 
-        let b1 = MockTransaction::eip1559()
-            .with_sender(b);
+        let b1 = MockTransaction::eip1559().with_sender(b);
         let b2 = b1.clone().with_nonce(1);
         let b3 = b1.clone().with_nonce(2);
 
         // C has the same number of txs as B
-        let c1 = MockTransaction::eip1559()
-            .with_sender(c);
+        let c1 = MockTransaction::eip1559().with_sender(c);
         let c2 = c1.clone().with_nonce(1);
         let c3 = c1.clone().with_nonce(2);
 
         // D is not a spammer
-        let d1 = MockTransaction::eip1559()
-            .with_sender(d);
+        let d1 = MockTransaction::eip1559().with_sender(d);
 
         // just construct a list of all txs to add
         let expected_pending = vec![a1.clone(), b1.clone(), c1.clone(), d1.clone()];
