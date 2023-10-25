@@ -1,3 +1,5 @@
+//! Contains RPC handler implementations for fee history.
+
 use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
