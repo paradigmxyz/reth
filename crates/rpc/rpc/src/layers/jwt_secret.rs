@@ -22,9 +22,9 @@ pub enum JwtError {
     InvalidLength(usize, usize),
     #[error("unsupported signature algorithm. Only HS256 is supported")]
     UnsupportedSignatureAlgorithm,
-    #[error("the provided signature is invalid")]
+    #[error("provided signature is invalid")]
     InvalidSignature,
-    #[error("the IAT (issued-at) claim is not within ±60 seconds from the current time")]
+    #[error("IAT (issued-at) claim is not within ±60 seconds from the current time")]
     InvalidIssuanceTimestamp,
     #[error("Authorization header is missing or invalid")]
     MissingOrInvalidAuthorizationHeader,

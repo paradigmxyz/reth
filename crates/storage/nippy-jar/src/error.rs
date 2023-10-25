@@ -23,7 +23,7 @@ pub enum NippyJarError {
     UnexpectedMissingValue(u64, u64),
     #[error(transparent)]
     FilterError(#[from] cuckoofilter::CuckooError),
-    #[error("nippyJar initialized without filter")]
+    #[error("nippy jar initialized without filter")]
     FilterMissing,
     #[error("filter has reached max capacity")]
     FilterMaxCapacity,
@@ -31,9 +31,9 @@ pub enum NippyJarError {
     FilterCuckooNotLoaded,
     #[error("perfect hashing function doesn't have any keys added")]
     PHFMissingKeys,
-    #[error("nippyJar initialized without perfect hashing function")]
+    #[error("nippy jar initialized without perfect hashing function")]
     PHFMissing,
-    #[error("nippyJar was built without an index")]
+    #[error("nippy jar was built without an index")]
     UnsupportedFilterQuery,
     #[error("compression or decompression requires a bigger destination output")]
     OutputTooSmall,

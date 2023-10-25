@@ -51,7 +51,7 @@ pub enum StageError {
         error: Box<consensus::ConsensusError>,
     },
     /// The stage encountered a database error.
-    #[error("an internal database error occurred: {0}")]
+    #[error("internal database error occurred: {0}")]
     Database(#[from] DbError),
     /// Invalid pruning configuration
     #[error(transparent)]
@@ -63,7 +63,7 @@ pub enum StageError {
     #[error("download channel closed")]
     ChannelClosed,
     /// The stage encountered a database integrity error.
-    #[error("a database integrity error occurred: {0}")]
+    #[error("database integrity error occurred: {0}")]
     DatabaseIntegrity(#[from] ProviderError),
     /// Invalid download response. Applicable for stages which
     /// rely on external downloaders
@@ -113,7 +113,7 @@ pub enum PipelineError {
     #[error(transparent)]
     Interface(#[from] RethError),
     /// The pipeline encountered an error while trying to send an event.
-    #[error("the pipeline encountered an error while trying to send an event")]
+    #[error("pipeline encountered an error while trying to send an event")]
     Channel(#[from] SendError<PipelineEvent>),
     /// The stage encountered an internal error.
     #[error(transparent)]
