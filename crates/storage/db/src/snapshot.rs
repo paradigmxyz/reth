@@ -4,12 +4,12 @@ use crate::{
     abstraction::cursor::DbCursorRO,
     table::{Decompress, Key, Table},
     transaction::DbTx,
-    RawKey, RawTable,
+    CanonicalHeaders, HeaderTD, RawKey, RawTable,
 };
 use derive_more::{Deref, DerefMut};
 use reth_interfaces::{RethError, RethResult};
 use reth_nippy_jar::{ColumnResult, MmapHandle, NippyJar, NippyJarCursor, PHFKey};
-use reth_primitives::{snapshot::SegmentHeader, B256};
+use reth_primitives::{snapshot::SegmentHeader, BlockHash, Header, B256};
 use reth_tracing::tracing::*;
 use serde::{Deserialize, Serialize};
 use std::{error::Error as StdError, ops::RangeInclusive};
@@ -119,18 +119,19 @@ impl<'a> SnapshotCursor<'a> {
     }
 
     /// Gets a row of values.
-    pub fn get<const SELECTOR: usize, const COLUMNS: usize>(
+    pub fn get(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
+        mask: usize,
     ) -> RethResult<Option<Vec<&'_ [u8]>>> {
         let row = match key_or_num {
-            KeyOrNumber::Hash(k) => self.row_by_key_with_cols(k, SELECTOR),
+            KeyOrNumber::Hash(k) => self.row_by_key_with_cols(k, mask),
             KeyOrNumber::Number(n) => {
                 let offset = self.jar().user_header().start();
                 if offset > n {
                     return Ok(None)
                 }
-                self.row_by_number_with_cols((n - offset) as usize, SELECTOR)
+                self.row_by_number_with_cols((n - offset) as usize, mask)
             }
         }?;
 
@@ -138,52 +139,103 @@ impl<'a> SnapshotCursor<'a> {
     }
 
     /// Gets one column value from a row.
-    pub fn get_one<T: Decompress, const SELECTOR: usize, const COLUMNS: usize>(
+    pub fn get_one<M: ColumnMaskOne>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> RethResult<Option<T>> {
-        let row = self.get::<SELECTOR, COLUMNS>(key_or_num)?;
+    ) -> RethResult<Option<M::T>> {
+        let row = self.get(key_or_num, M::MASK)?;
 
         match row {
-            Some(row) => Ok(Some(T::decompress(row[0])?)),
+            Some(row) => Ok(Some(M::T::decompress(row[0])?)),
             None => Ok(None),
         }
     }
 
     /// Gets two column values from a row.
-    pub fn get_two<T: Decompress, K: Decompress, const SELECTOR: usize, const COLUMNS: usize>(
+    pub fn get_two<M: ColumnMaskTwo>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> RethResult<Option<(T, K)>> {
-        let row = self.get::<SELECTOR, COLUMNS>(key_or_num)?;
+    ) -> RethResult<Option<(M::T, M::J)>> {
+        let row = self.get(key_or_num, M::MASK)?;
 
         match row {
-            Some(row) => Ok(Some((T::decompress(row[0])?, K::decompress(row[1])?))),
+            Some(row) => Ok(Some((M::T::decompress(row[0])?, M::J::decompress(row[1])?))),
             None => Ok(None),
         }
     }
 
     /// Gets three column values from a row.
-    pub fn get_three<
-        T: Decompress,
-        K: Decompress,
-        J: Decompress,
-        const SELECTOR: usize,
-        const COLUMNS: usize,
-    >(
+    pub fn get_three<M: ColumnMaskThree>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> RethResult<Option<(T, K, J)>> {
-        let row = self.get::<SELECTOR, COLUMNS>(key_or_num)?;
+        mask: usize,
+    ) -> RethResult<Option<(M::T, M::J, M::K)>> {
+        let row = self.get(key_or_num, mask)?;
 
         match row {
-            Some(row) => {
-                Ok(Some((T::decompress(row[0])?, K::decompress(row[1])?, J::decompress(row[2])?)))
-            }
+            Some(row) => Ok(Some((
+                M::T::decompress(row[0])?,
+                M::J::decompress(row[1])?,
+                M::K::decompress(row[2])?,
+            ))),
             None => Ok(None),
         }
     }
 }
+
+pub trait ColumnMaskOne {
+    type T: Decompress;
+    const MASK: usize;
+}
+
+pub trait ColumnMaskTwo {
+    type T: Decompress;
+    type J: Decompress;
+    const MASK: usize;
+}
+
+pub trait ColumnMaskThree {
+    type T: Decompress;
+    type J: Decompress;
+    type K: Decompress;
+    const MASK: usize;
+}
+
+pub struct Mask<T, J = (), K = ()>(std::marker::PhantomData<(T, J, K)>);
+pub type HeaderMask<T, J = (), K = ()> = Mask<T, J, K>;
+pub type ReceiptMask<T, J = (), K = ()> = Mask<T, J, K>;
+pub type TransactionMask<T, J = (), K = ()> = Mask<T, J, K>;
+
+macro_rules! add_mask {
+    ($mask_struct:tt, $type1:ty, $mask:expr) => {
+        impl ColumnMaskOne for $mask_struct<$type1> {
+            type T = $type1;
+            const MASK: usize = $mask;
+        }
+    };
+    ($mask_struct:tt, $type1:ty, $type2:ty, $mask:expr) => {
+        impl ColumnMaskTwo for $mask_struct<$type1, $type2> {
+            type T = $type1;
+            type J = $type2;
+            const MASK: usize = $mask;
+        }
+    };
+    ($mask_struct:tt, $type1:ty, $type2:ty, $type3:ty, $mask:expr) => {
+        impl ColumnMaskTwo for $mask_struct<$type1, $type2, $type3> {
+            type T = $type1;
+            type J = $type2;
+            type K = $type3;
+            const MASK: usize = $mask;
+        }
+    };
+}
+
+add_mask!(HeaderMask, Header, 0b001);
+add_mask!(HeaderMask, BlockHash, 0b100);
+add_mask!(HeaderMask, <HeaderTD as Table>::Value, 0b010);
+
+add_mask!(HeaderMask, <HeaderTD as Table>::Value, <CanonicalHeaders as Table>::Value, 0b110);
+add_mask!(HeaderMask, Header, BlockHash, 0b101);
 
 /// Either a key _or_ a block number
 #[derive(Debug)]
@@ -209,9 +261,9 @@ impl<'a> From<u64> for KeyOrNumber<'a> {
 /// Snapshot segment total columns.
 pub const HEADER_COLUMNS: usize = 3;
 /// Selector for header.
-pub const S_HEADER: usize = 0b001;
+// pub const S_HEADER: usize = 0b001;
 /// Selector for header td.
-pub const S_HEADER_TD: usize = 0b010;
+// pub const S_HEADER_TD: usize = 0b010;
 /// Selector for header hash.
 pub const S_HEADER_HASH: usize = 0b100;
 /// Selector for header td and header hash.
