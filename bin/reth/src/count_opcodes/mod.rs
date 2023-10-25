@@ -6,12 +6,15 @@ use reth_provider::ProviderFactory;
 use reth_revm::interpreter::{opcode, OpCode};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tracing::info;
+use itertools::Itertools;
 
 /// `reth count-opcodes` command
 #[derive(Debug, Parser)]
 pub struct Command {
     #[arg(long, value_name = "DB_DIR", verbatim_doc_comment)]
     db_dir: PathBuf,
+    #[arg(long, value_name = "TAKE_SIZE", verbatim_doc_comment)]
+    take: usize,
 }
 
 impl Command {
@@ -37,7 +40,7 @@ impl Command {
         }
         info!("opcodes processing done!");
         info!("start opcodes printing...");
-        opcode_counter.print_counts();
+        opcode_counter.print_counts(self.take);
 
         info!("opcodes printing done!");
         Ok(())
@@ -98,23 +101,24 @@ impl OpCodeCounter {
         }
     }
 
-    fn print_counts(&self) {
+    fn print_counts(&self, size: usize) {
         println!("Single opcodes:");
-        for (opcode, occurencies) in &self.opcodes {
-            match OpCode::new(*opcode) {
-                Some(op) => println!("{}: {}", op, occurencies),
-                None => println!("{}: {}", opcode, occurencies),
-            };
+        let opcodes_vec = self
+        .opcodes
+        .iter()
+        .map(|(k, v)| (opcode_or_invalid(*k), *v))
+        .sorted_by(|a, b| b.1.cmp(&a.1)).take(size).collect::<Vec<(OpCode, usize)>>();
+
+        for el in &opcodes_vec {
+            println!("{}: {}", el.0, el.1);
         }
         println!("----------------------------------------------");
 
-        let mut tuple_vec: Vec<(OpCode, OpCode, usize)> = self
+        let tuple_vec = self
             .tuple_opcodes
             .iter()
             .map(|(k, v)| (opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), *v))
-            .collect();
-
-        tuple_vec.sort_by(|a, b| a.2.cmp(&b.2));
+            .sorted_by(|a, b| b.2.cmp(&a.2)).take(size).collect::<Vec<(OpCode, OpCode, usize)>>();
 
         println!("Tuple opcodes:");
         for el in &tuple_vec {
@@ -124,15 +128,11 @@ impl OpCodeCounter {
        
         println!("----------------------------------------------");
 
-        let mut triplets_vec: Vec<(OpCode, OpCode, OpCode, usize)> = self
+        let triplets_vec = self
             .triplets_opcodes
             .iter()
-            .map(|(k, v)| {
-                (opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), opcode_or_invalid(k[2]), *v)
-            })
-            .collect();
-
-        triplets_vec.sort_by(|a, b| a.3.cmp(&b.3));
+            .map(|(k, v)| (opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), opcode_or_invalid(k[2]), *v))
+            .sorted_by(|a, b| b.3.cmp(&a.3)).take(size).collect::<Vec<(OpCode, OpCode, OpCode, usize)>>();
 
         println!("Triplet opcodes:");
         for el in &triplets_vec {
@@ -141,7 +141,7 @@ impl OpCodeCounter {
 
         println!("----------------------------------------------");
 
-        let mut quadruplets_vec: Vec<(OpCode, OpCode, OpCode, OpCode, usize)> = self
+        let quadruplets_vec = self
             .quadruplets_opcodes
             .iter()
             .map(|(k, v)| {
@@ -151,10 +151,7 @@ impl OpCodeCounter {
                     opcode_or_invalid(k[2]),
                     opcode_or_invalid(k[3]), * v,
                 )
-            })
-            .collect();
-
-        quadruplets_vec.sort_by(|a, b| a.4.cmp(&b.4));
+            }).sorted_by(|a, b| b.4.cmp(&a.4)).take(size).collect::<Vec<(OpCode, OpCode, OpCode, OpCode, usize)>>();
 
         println!("Quadruplets opcodes:");
         for el in &quadruplets_vec {
@@ -210,9 +207,11 @@ mod test {
 
         info!("opcodes processing done!");
         info!("start opcodes printing...");
-        opcode_counter.print_counts();
+        opcode_counter.print_counts(50);
         info!("opcodes printing done!");
     }
+
+
 
     fn bytecode_test_string() -> String {
         let test_bytecode = "00"; // STOP 13
