@@ -345,7 +345,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut removed = Vec::new();
         let mut spammers_map = self.get_spammers(max_account_slots);
 
-        let mut spammers = spammers_map.iter().map(|(addr, txs)| (*addr, txs.len())).collect::<Vec<_>>();
+        let mut spammers =
+            spammers_map.iter().map(|(addr, txs)| (*addr, txs.len())).collect::<Vec<_>>();
         // sort by number of txs
         spammers.sort_by(|(_, txs1_len), (_, txs2_len)| txs1_len.cmp(txs2_len));
 
@@ -425,7 +426,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
     ///
     /// This returns a map from address to pending transactions for addresses with over
     /// `max_account_slots` transactions.
-    pub(crate) fn get_spammers(&self, max_account_slots: usize) -> HashMap<Address, Vec<PendingTransaction<T>>> {
+    pub(crate) fn get_spammers(
+        &self,
+        max_account_slots: usize,
+    ) -> HashMap<Address, Vec<PendingTransaction<T>>> {
         let mut spammers: HashMap<Address, Vec<PendingTransaction<T>>> = HashMap::new();
         for tx in self.all.iter() {
             if tx.transaction.is_local() {
@@ -439,6 +443,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 .and_modify(|txs| txs.push(tx.clone()))
                 .or_insert(vec![tx.clone()]);
         }
+
+        // filter out accounts that are below the threshold
+        spammers.retain(|_, txs| txs.len() > max_account_slots);
 
         spammers
     }
@@ -686,7 +693,8 @@ mod tests {
 
         // find the spammers - this should be A, B, C, but not D
         let spammers = pool.get_spammers(max_account_slots);
-        let spammers = spammers.into_iter().map(|(addr, txs)| (addr, txs.len())).collect::<HashSet<_>>();
+        let spammers =
+            spammers.into_iter().map(|(addr, txs)| (addr, txs.len())).collect::<HashSet<_>>();
         let expected_spammers = [(a, 4), (b, 3), (c, 3usize)];
         let expected_spammers = expected_spammers.into_iter().collect::<HashSet<_>>();
         assert_eq!(spammers, expected_spammers);
