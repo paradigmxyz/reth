@@ -537,6 +537,8 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use reth_primitives::address;
 
     use super::*;
@@ -623,27 +625,36 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
 
+        let a = address!("000000000000000000000000000000000000000a");
+        let b = address!("000000000000000000000000000000000000000b");
+        let c = address!("000000000000000000000000000000000000000c");
+        let d = address!("000000000000000000000000000000000000000d");
+
         // TODO: make creating these mock tx chains easier
         // create a chain of transactions by sender A, B, C
         let a1 = MockTransaction::eip1559()
-            .with_sender(address!("000000000000000000000000000000000000000a"));
+            .with_sender(a);
         let a2 = a1.clone().with_nonce(1);
         let a3 = a1.clone().with_nonce(2);
         let a4 = a1.clone().with_nonce(3);
 
         let b1 = MockTransaction::eip1559()
-            .with_sender(address!("000000000000000000000000000000000000000b"));
+            .with_sender(b);
         let b2 = b1.clone().with_nonce(1);
         let b3 = b1.clone().with_nonce(2);
 
         // C has the same number of txs as B
         let c1 = MockTransaction::eip1559()
-            .with_sender(address!("000000000000000000000000000000000000000c"));
+            .with_sender(c);
         let c2 = c1.clone().with_nonce(1);
         let c3 = c1.clone().with_nonce(2);
 
+        // D is not a spammer
+        let d1 = MockTransaction::eip1559()
+            .with_sender(d);
+
         // just construct a list of all txs to add
-        let expected_pending = vec![a1.clone(), b1.clone(), c1.clone()];
+        let expected_pending = vec![a1.clone(), b1.clone(), c1.clone(), d1.clone()];
         let expected_removed = vec![
             a2.clone(),
             a3.clone(),
@@ -653,7 +664,7 @@ mod tests {
             c2.clone(),
             c3.clone(),
         ];
-        let all_txs = vec![a1, a2, a3, a4, b1, b2, b3, c1, c2, c3];
+        let all_txs = vec![a1, a2, a3, a4, b1, b2, b3, c1, c2, c3, d1];
 
         // add all the transactions to the pool
         for tx in all_txs {
@@ -663,13 +674,19 @@ mod tests {
 
         // let's set the max_account_slots to 2, and the max total txs to 3, we should end up with
         // only the first transactions
+        let max_account_slots = 2;
         let pool_limit = SubPoolLimit {
             max_txs: 3,
             // TODO: size is going to make this complicated i think....
             max_size: usize::MAX,
         };
 
-        let max_account_slots = 2;
+        // find the spammers - this should be A, B, C, but not D
+        let spammers = pool.get_spammers(max_account_slots);
+        let spammers = spammers.iter().collect::<HashSet<_>>();
+        let expected_spammers = [(a, 4), (b, 3), (c, 3)];
+        let expected_spammers = expected_spammers.iter().collect::<HashSet<_>>();
+        assert_eq!(spammers, expected_spammers);
 
         // truncate the pool
         let removed = pool.truncate_pool(pool_limit, max_account_slots);
