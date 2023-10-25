@@ -228,14 +228,16 @@ fn stage_checkpoint<DB: Database>(
 #[error(transparent)]
 enum SenderRecoveryStageError {
     /// A transaction failed sender recovery
-    FailedRecovery(FailedSenderRecoveryError),
+    #[error(transparent)]
+    FailedRecovery(#[from] FailedSenderRecoveryError),
 
     /// A different type of stage error occurred
+    #[error(transparent)]
     StageError(#[from] StageError),
 }
 
 #[derive(Error, Debug)]
-#[error("Sender recovery failed for transaction {tx}.")]
+#[error("sender recovery failed for transaction {tx}")]
 struct FailedSenderRecoveryError {
     /// The transaction that failed sender recovery
     tx: TxNumber,

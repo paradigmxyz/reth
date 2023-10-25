@@ -1,7 +1,6 @@
 //! Support for building a pending block via local txpool.
 
 use crate::eth::error::{EthApiError, EthResult};
-use core::fmt::Debug;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
@@ -248,7 +247,7 @@ impl PendingBlockEnv {
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
-fn pre_block_beacon_root_contract_call<DB>(
+fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
@@ -257,8 +256,7 @@ fn pre_block_beacon_root_contract_call<DB>(
     parent_beacon_block_root: Option<B256>,
 ) -> EthResult<()>
 where
-    DB: Database + DatabaseCommit,
-    <DB as Database>::Error: Debug,
+    DB::Error: std::fmt::Display,
 {
     // Configure the environment for the block.
     let env = Env {

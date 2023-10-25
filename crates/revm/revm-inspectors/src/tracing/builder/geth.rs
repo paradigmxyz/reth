@@ -179,15 +179,12 @@ impl GethTraceBuilder {
     /// * `state` - The state post-transaction execution.
     /// * `diff_mode` - if prestate is in diff or prestate mode.
     /// * `db` - The database to fetch state pre-transaction execution.
-    pub fn geth_prestate_traces<DB>(
+    pub fn geth_prestate_traces<DB: DatabaseRef>(
         &self,
         ResultAndState { state, .. }: &ResultAndState,
         prestate_config: PreStateConfig,
         db: DB,
-    ) -> Result<PreStateFrame, DB::Error>
-    where
-        DB: DatabaseRef,
-    {
+    ) -> Result<PreStateFrame, DB::Error> {
         // loads the code from the account or the database
         // Geth always includes the contract code in the prestate. However,
         // the code hash will be KECCAK_EMPTY if the account is an EOA. Therefore

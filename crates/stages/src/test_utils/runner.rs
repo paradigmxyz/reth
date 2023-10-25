@@ -9,11 +9,11 @@ use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum TestRunnerError {
-    #[error("Database error occurred.")]
+    #[error(transparent)]
     Database(#[from] DatabaseError),
-    #[error("Internal runner error occurred.")]
+    #[error(transparent)]
     Internal(#[from] Box<dyn std::error::Error>),
-    #[error("Internal interface error occurred.")]
+    #[error(transparent)]
     Interface(#[from] RethError),
 }
 

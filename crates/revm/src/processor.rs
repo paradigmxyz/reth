@@ -268,7 +268,7 @@ impl<'a> EVMProcessor<'a> {
             // main execution.
             self.evm.transact()
         };
-        out.map_err(|e| BlockValidationError::EVM { hash, message: format!("{e:?}") }.into())
+        out.map_err(|e| BlockValidationError::EVM { hash, error: e.into() }.into())
     }
 
     /// Runs the provided transactions and commits their state to the run-time database.
@@ -534,8 +534,8 @@ pub fn verify_receipt<'a>(
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
     if receipts_root != expected_receipts_root {
         return Err(BlockValidationError::ReceiptRootDiff {
-            got: receipts_root,
-            expected: expected_receipts_root,
+            got: Box::new(receipts_root),
+            expected: Box::new(expected_receipts_root),
         }
         .into())
     }

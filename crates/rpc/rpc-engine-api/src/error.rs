@@ -16,24 +16,26 @@ pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
 ///
-/// Note: This is a high-fidelity error type which can be converted to an RPC error that adheres to the spec: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
+/// Note: This is a high-fidelity error type which can be converted to an RPC error that adheres to
+/// the [Engine API spec](https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors).
 #[derive(Error, Debug)]
 pub enum EngineApiError {
-    /// Unknown payload requested.
+    // **IMPORTANT**: keep error messages in sync with the Engine API spec linked above.
+    /// Payload does not exist / is not available.
     #[error("Unknown payload")]
     UnknownPayload,
     /// The payload body request length is too large.
-    #[error("Payload request too large: {len}")]
+    #[error("payload request too large: {len}")]
     PayloadRequestTooLarge {
         /// The length that was requested.
         len: u64,
     },
     /// Thrown if engine_getPayloadBodiesByRangeV1 contains an invalid range
-    #[error("invalid start or count, start: {start} count: {count}")]
+    #[error("invalid start ({start}) or count ({count})")]
     InvalidBodiesRange {
         /// Start of the range
         start: u64,
-        /// requested number of items
+        /// Requested number of items
         count: u64,
     },
     /// Thrown if `PayloadAttributes` provided in engine_forkchoiceUpdated before V3 contains a
@@ -44,10 +46,10 @@ pub enum EngineApiError {
     #[error("withdrawals not supported in V1")]
     WithdrawalsNotSupportedInV1,
     /// Thrown if engine_forkchoiceUpdated contains no withdrawals after Shanghai
-    #[error("no withdrawals post-shanghai")]
+    #[error("no withdrawals post-Shanghai")]
     NoWithdrawalsPostShanghai,
     /// Thrown if engine_forkchoiceUpdated contains withdrawals before Shanghai
-    #[error("withdrawals pre-shanghai")]
+    #[error("withdrawals pre-Shanghai")]
     HasWithdrawalsPreShanghai,
     /// Thrown if the `PayloadAttributes` provided in engine_forkchoiceUpdated contains no parent
     /// beacon block root after Cancun
@@ -59,7 +61,8 @@ pub enum EngineApiError {
     UnsupportedFork,
     /// Terminal total difficulty mismatch during transition configuration exchange.
     #[error(
-        "Invalid transition terminal total difficulty. Execution: {execution}. Consensus: {consensus}"
+        "invalid transition terminal total difficulty: \
+         execution: {execution}, consensus: {consensus}"
     )]
     TerminalTD {
         /// Execution terminal total difficulty value.
@@ -69,7 +72,8 @@ pub enum EngineApiError {
     },
     /// Terminal block hash mismatch during transition configuration exchange.
     #[error(
-        "Invalid transition terminal block hash. Execution: {execution:?}. Consensus: {consensus:?}"
+        "invalid transition terminal block hash: \
+         execution: {execution:?}, consensus: {consensus}"
     )]
     TerminalBlockHash {
         /// Execution terminal block hash. `None` if block number is not found in the database.
@@ -85,7 +89,7 @@ pub enum EngineApiError {
     NewPayload(#[from] BeaconOnNewPayloadError),
     /// Encountered an internal error.
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
     /// Fetching the payload failed
     #[error(transparent)]
     GetPayloadError(#[from] PayloadBuilderError),

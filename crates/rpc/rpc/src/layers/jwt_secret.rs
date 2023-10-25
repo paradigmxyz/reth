@@ -20,19 +20,19 @@ pub enum JwtError {
     JwtSecretHexDecodeError(#[from] hex::FromHexError),
     #[error("JWT key is expected to have a length of {0} digits. {1} digits key provided")]
     InvalidLength(usize, usize),
-    #[error("Unsupported signature algorithm. Only HS256 is supported")]
+    #[error("unsupported signature algorithm. Only HS256 is supported")]
     UnsupportedSignatureAlgorithm,
-    #[error("The provided signature is invalid")]
+    #[error("provided signature is invalid")]
     InvalidSignature,
-    #[error("The iat (issued-at) claim is not within +-60 seconds from the current time")]
+    #[error("IAT (issued-at) claim is not within ±60 seconds from the current time")]
     InvalidIssuanceTimestamp,
     #[error("Authorization header is missing or invalid")]
     MissingOrInvalidAuthorizationHeader,
-    #[error("JWT decoding error {0}")]
+    #[error("JWT decoding error: {0}")]
     JwtDecodingError(String),
     #[error(transparent)]
     JwtFsPathError(#[from] FsPathError),
-    #[error("An I/O error occurred: {0}")]
+    #[error(transparent)]
     IOError(#[from] std::io::Error),
 }
 

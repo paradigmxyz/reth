@@ -331,20 +331,14 @@ impl TxEip4844 {
 #[derive(Debug, thiserror::Error)]
 pub enum BlobTransactionValidationError {
     /// Proof validation failed.
-    #[error("invalid kzg proof")]
+    #[error("invalid KZG proof")]
     InvalidProof,
-    /// An error returned by the [kzg] library
-    #[error("kzg error: {0:?}")]
-    KZGError(kzg::Error),
-    /// The inner transaction is not a blob transaction
+    /// An error returned by [`kzg`].
+    #[error("KZG error: {0:?}")]
+    KZGError(#[from] kzg::Error),
+    /// The inner transaction is not a blob transaction.
     #[error("unable to verify proof for non blob transaction: {0}")]
     NotBlobTransaction(u8),
-}
-
-impl From<kzg::Error> for BlobTransactionValidationError {
-    fn from(value: kzg::Error) -> Self {
-        Self::KZGError(value)
-    }
 }
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their

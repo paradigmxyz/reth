@@ -63,16 +63,16 @@ pub fn hash_or_num_value_parser(value: &str) -> eyre::Result<BlockHashOrNumber, 
 #[derive(thiserror::Error, Debug)]
 pub enum SocketAddressParsingError {
     /// Failed to convert the string into a socket addr
-    #[error("Cannot parse socket address: {0}")]
+    #[error("could not parse socket address: {0}")]
     Io(#[from] std::io::Error),
     /// Input must not be empty
-    #[error("Cannot parse socket address from empty string")]
+    #[error("cannot parse socket address from empty string")]
     Empty,
     /// Failed to parse the address
-    #[error("Could not parse socket address from {0}")]
+    #[error("could not parse socket address from {0}")]
     Parse(String),
     /// Failed to parse port
-    #[error("Could not parse port: {0}")]
+    #[error("could not parse port: {0}")]
     Port(#[from] std::num::ParseIntError),
 }
 

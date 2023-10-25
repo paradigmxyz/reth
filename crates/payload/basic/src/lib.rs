@@ -43,7 +43,6 @@ use revm::{
     Database, DatabaseCommit, State,
 };
 use std::{
-    fmt::Debug,
     future::Future,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
@@ -1042,7 +1041,7 @@ fn commit_withdrawals<DB: Database<Error = RethError>>(
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
-fn pre_block_beacon_root_contract_call<DB>(
+fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
@@ -1051,8 +1050,7 @@ fn pre_block_beacon_root_contract_call<DB>(
     attributes: &PayloadBuilderAttributes,
 ) -> Result<(), PayloadBuilderError>
 where
-    DB: Database + DatabaseCommit,
-    <DB as Database>::Error: Debug,
+    DB::Error: std::fmt::Display,
 {
     // Configure the environment for the block.
     let env = Env {

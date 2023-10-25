@@ -179,15 +179,12 @@ impl ParityTraceBuilder {
     /// Note: this is considered a convenience method that takes the state map of
     /// [ResultAndState] after inspecting a transaction
     /// with the [TracingInspector](crate::tracing::TracingInspector).
-    pub fn into_trace_results_with_state<DB>(
+    pub fn into_trace_results_with_state<DB: DatabaseRef>(
         self,
         res: &ResultAndState,
         trace_types: &HashSet<TraceType>,
         db: DB,
-    ) -> Result<TraceResults, DB::Error>
-    where
-        DB: DatabaseRef,
-    {
+    ) -> Result<TraceResults, DB::Error> {
         let ResultAndState { ref result, ref state } = res;
 
         let breadth_first_addresses = if trace_types.contains(&TraceType::VmTrace) {

@@ -341,22 +341,22 @@ impl From<ExecutionPayloadV3> for ExecutionPayload {
 #[derive(thiserror::Error, Debug)]
 pub enum PayloadError {
     /// Invalid payload extra data.
-    #[error("Invalid payload extra data: {0}")]
+    #[error("invalid payload extra data: {0}")]
     ExtraData(Bytes),
     /// Invalid payload base fee.
-    #[error("Invalid payload base fee: {0}")]
+    #[error("invalid payload base fee: {0}")]
     BaseFee(U256),
     /// Invalid payload blob gas used.
-    #[error("Invalid payload blob gas used: {0}")]
+    #[error("invalid payload blob gas used: {0}")]
     BlobGasUsed(U256),
     /// Invalid payload excess blob gas.
-    #[error("Invalid payload excess blob gas: {0}")]
+    #[error("invalid payload excess blob gas: {0}")]
     ExcessBlobGas(U256),
     /// Pre-cancun Payload has blob transactions.
-    #[error("Invalid payload, pre-Cancun payload has blob transactions")]
+    #[error("pre-Cancun payload has blob transactions")]
     PreCancunBlockWithBlobTransactions,
     /// Invalid payload block hash.
-    #[error("blockhash mismatch, want {consensus}, got {execution}")]
+    #[error("block hash mismatch: want {consensus}, got {execution}")]
     BlockHash {
         /// The block hash computed from the payload.
         execution: B256,
@@ -364,7 +364,7 @@ pub enum PayloadError {
         consensus: B256,
     },
     /// Expected blob versioned hashes do not match the given transactions.
-    #[error("Expected blob versioned hashes do not match the given transactions")]
+    #[error("expected blob versioned hashes do not match the given transactions")]
     InvalidVersionedHashes,
     /// Encountered decoding error.
     #[error(transparent)]

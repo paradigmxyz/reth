@@ -233,7 +233,7 @@ mod tests {
         let jwt = "this jwt has serious encoding problems".to_string();
         let (status, body) = send_request(Some(jwt)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(body, "JWT decoding error Error(InvalidToken)".to_string());
+        assert_eq!(body, "JWT decoding error: Error(InvalidToken)".to_string());
     }
 
     async fn send_request(jwt: Option<String>) -> (StatusCode, String) {

@@ -183,11 +183,11 @@ fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<NodeReco
 /// Possible error types when parsing a `NodeRecord`
 #[derive(Debug, thiserror::Error)]
 pub enum NodeRecordParseError {
-    #[error("Failed to parse url: {0}")]
+    #[error("failed to parse url: {0}")]
     InvalidUrl(String),
-    #[error("Failed to parse id")]
+    #[error("failed to parse id")]
     InvalidId(String),
-    #[error("Failed to discport query: {0}")]
+    #[error("failed to discport query: {0}")]
     Discport(ParseIntError),
 }
 

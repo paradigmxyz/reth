@@ -513,7 +513,7 @@ enum FilterKind {
 pub enum FilterError {
     #[error("filter not found")]
     FilterNotFound(FilterId),
-    #[error("Query exceeds max results {0}")]
+    #[error("query exceeds max results {0}")]
     QueryExceedsMaxResults(usize),
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
