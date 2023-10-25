@@ -36,7 +36,7 @@ impl<'a> SnapshotJarProvider<'a> {
     where
         'b: 'a,
     {
-        Ok(NippyJarCursor::new(self.value(), Some(self.mmap_handle()))?)
+        Ok(NippyJarCursor::with_handle(self.value(), self.mmap_handle())?)
     }
 }
 
@@ -72,7 +72,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
 
     fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
         // WIP
-        let mut cursor = NippyJarCursor::new(self.value(), Some(self.mmap_handle()))?;
+        let mut cursor = NippyJarCursor::with_handle(self.value(), self.mmap_handle())?;
 
         let row = cursor.row_by_key_with_cols::<0b11, 2>(&block_hash.0).unwrap().unwrap();
 

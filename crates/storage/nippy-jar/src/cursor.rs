@@ -33,16 +33,22 @@ impl<'a, H> NippyJarCursor<'a, H>
 where
     H: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static,
 {
-    pub fn new(
+    pub fn new(jar: &'a NippyJar<H>) -> Result<Self, NippyJarError> {
+        let max_row_size = jar.max_row_size;
+        Ok(NippyJarCursor {
+            jar,
+            mmap_handle: jar.open_data()?,
+            // Makes sure that we have enough buffer capacity to decompress any row of data.
+            internal_buffer: Vec::with_capacity(max_row_size),
+            row: 0,
+        })
+    }
+
+    pub fn with_handle(
         jar: &'a NippyJar<H>,
-        mmap_handle: Option<MmapHandle>,
+        mmap_handle: MmapHandle,
     ) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
-        let mmap_handle = match mmap_handle {
-            Some(h) => h,
-            None => jar.open_data()?,
-        };
-
         Ok(NippyJarCursor {
             jar,
             mmap_handle,
