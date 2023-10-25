@@ -1,6 +1,6 @@
 //! Async caching support for eth RPC
 
-use alloy_primitives::{BlockNumber};
+use alloy_primitives::BlockNumber;
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, B256};
@@ -42,7 +42,7 @@ type ReceiptsResponseSender = oneshot::Sender<RethResult<Option<Vec<Receipt>>>>;
 /// The type that can send the response to a requested env
 type EnvResponseSender = oneshot::Sender<RethResult<(CfgEnv, BlockEnv)>>;
 
-/// The type that can send the response to a requested list of block headers 
+/// The type that can send the response to a requested list of block headers
 type BlockFeeResponseSender = oneshot::Sender<RethResult<Option<BlockFees>>>;
 
 /// The type that contains fees data for associated block in cache
@@ -50,16 +50,15 @@ type BlockFeeResponseSender = oneshot::Sender<RethResult<Option<BlockFees>>>;
 pub struct BlockFees {
     /// Hash of the block
     pub block_hash: B256,
-    /// Block data on bas_fee_per_gas 
+    /// Block data on bas_fee_per_gas
     pub base_fee_per_gas: u64,
     /// Precalculated ratio
-    pub gas_used_ratio: f64, 
+    pub gas_used_ratio: f64,
     /// Block data on gas_used
     pub gas_used: u64,
     /// Block data on gas_limit
     pub gas_limit: u64,
 }
-
 
 type BlockLruCache<L> = MultiConsumerLruCache<
     B256,
@@ -72,7 +71,8 @@ type ReceiptsLruCache<L> = MultiConsumerLruCache<B256, Vec<Receipt>, L, Receipts
 
 type EnvLruCache<L> = MultiConsumerLruCache<B256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
 
-type FeeHistoryLruCache<L> = MultiConsumerLruCache<BlockNumber, BlockFees, L, BlockFeeResponseSender>;
+type FeeHistoryLruCache<L> =
+    MultiConsumerLruCache<BlockNumber, BlockFees, L, BlockFeeResponseSender>;
 
 /// Provides async access to cached eth data
 ///
@@ -223,14 +223,10 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
-
     /// Requests available fee history based on cached block headers
-    pub(crate) async fn get_fee_history(
-        &self,
-        block_number: u64,
-    ) -> RethResult<Option<BlockFees>>{
+    pub(crate) async fn get_fee_history(&self, block_number: u64) -> RethResult<Option<BlockFees>> {
         let (response_tx, rx) = oneshot::channel();
-        let _  = self.to_service.send(CacheAction::GetBlockFee { block_number, response_tx});
+        let _ = self.to_service.send(CacheAction::GetBlockFee { block_number, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 }
@@ -308,14 +304,15 @@ where
         if let Ok(Some(block)) = res {
             self.full_block_cache.insert(block_hash, block.clone());
             self.fee_history_cache.insert(
-                block.number, 
-                BlockFees { 
+                block.number,
+                BlockFees {
                     base_fee_per_gas: block.header.base_fee_per_gas.unwrap_or_default(),
                     gas_used_ratio: block.header.gas_used as f64 / block.header.gas_limit as f64,
                     gas_used: block.header.gas_used,
                     gas_limit: block.header.gas_limit,
-                    block_hash: block_hash,
-                  }); 
+                    block_hash,
+                },
+            );
         }
     }
 
@@ -456,7 +453,7 @@ where
                             }
                         }
                         CacheAction::GetBlockFee { block_number, response_tx } => {
-                             if let Some(fee) = this.fee_history_cache.get(&block_number).cloned() {
+                            if let Some(fee) = this.fee_history_cache.get(&block_number).cloned() {
                                 let _ = response_tx.send(Ok(Some(fee)));
                                 continue
                             }
@@ -513,7 +510,7 @@ enum CacheAction {
     ReceiptsResult { block_hash: B256, res: RethResult<Option<Vec<Receipt>>> },
     EnvResult { block_hash: B256, res: Box<RethResult<(CfgEnv, BlockEnv)>> },
     CacheNewCanonicalChain { blocks: Vec<SealedBlock>, receipts: Vec<BlockReceipts> },
-    GetBlockFee{ block_number:u64, response_tx: BlockFeeResponseSender },
+    GetBlockFee { block_number: u64, response_tx: BlockFeeResponseSender },
 }
 
 struct BlockReceipts {

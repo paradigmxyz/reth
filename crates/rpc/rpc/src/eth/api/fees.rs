@@ -3,18 +3,16 @@ use crate::{
     EthApi,
 };
 
+use crate::eth::cache::BlockFees;
+use derive_more::{Deref, DerefMut};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256, B256 
-};
+use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, B256, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
-use tracing::debug;
-use derive_more::{Deref, DerefMut};
 use schnellru::{ByLength, LruMap};
 use std::fmt::{self, Debug, Formatter};
-use crate::eth::cache::BlockFees;
+use tracing::debug;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -102,17 +100,15 @@ where
         let mut rewards: Vec<Vec<U256>> = Vec::new();
 
         struct LastBlock {
-            gas_used:  u64,
-            gas_limit:  u64,
-            base_fee_per_gas:  u64,
+            gas_used: u64,
+            gas_limit: u64,
+            base_fee_per_gas: u64,
         }
-        let mut last_block = LastBlock{gas_used: 0, gas_limit: 0, base_fee_per_gas: 0};
+        let mut last_block = LastBlock { gas_used: 0, gas_limit: 0, base_fee_per_gas: 0 };
 
         for n in start_block..end_block_plus {
-            let block_fees = self.cache()
-                .get_fee_history(n)
-                .await?
-                .ok_or(EthApiError::InternalEthError)?;
+            let block_fees =
+                self.cache().get_fee_history(n).await?.ok_or(EthApiError::InternalEthError)?;
 
             if n == end_block_plus {
                 last_block.gas_used = block_fees.gas_used;
@@ -127,10 +123,10 @@ where
             if let Some(percentiles) = &reward_percentiles {
                 rewards.push(self.calculate_reward_percentiles(percentiles, &block_fees).await?);
             }
-        };
+        }
 
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
-        
+
         // The spec states that `base_fee_per_gas` "[..] includes the next block after the newest of
         // the returned range, because this value can be derived from the newest block"
         //
@@ -182,7 +178,9 @@ where
 
                 Some(TxGasAndReward {
                     gas_used,
-                    reward: tx.effective_gas_tip(Some(block_fees.base_fee_per_gas)).unwrap_or_default(),
+                    reward: tx
+                        .effective_gas_tip(Some(block_fees.base_fee_per_gas))
+                        .unwrap_or_default(),
                 })
             })
             .collect::<Vec<_>>();
@@ -217,8 +215,6 @@ where
     }
 }
 
-
-
 /// Wrapper struct for LruMap
 #[derive(Deref, DerefMut)]
 struct BaseFeePerGasLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
@@ -231,7 +227,6 @@ impl Debug for BaseFeePerGasLruCache {
             .finish()
     }
 }
-
 
 /// Wrapper struct for LruMap
 #[derive(Deref, DerefMut)]
