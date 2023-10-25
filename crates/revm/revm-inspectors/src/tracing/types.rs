@@ -11,7 +11,7 @@ use reth_rpc_types::trace::{
     },
 };
 use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, SharedMemory, Stack,
+    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
@@ -518,7 +518,7 @@ pub(crate) struct CallTraceStep {
     /// All allocated memory in a step
     ///
     /// This will be empty if memory capture is disabled
-    pub(crate) memory: SharedMemory,
+    pub(crate) memory: RecordedMemory,
     /// Size of memory at the beginning of the step
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
@@ -568,7 +568,7 @@ impl CallTraceStep {
         }
 
         if opts.is_memory_enabled() {
-            log.memory = Some(convert_memory(self.memory.slice(0, self.memory.len())));
+            log.memory = Some(self.memory.memory_chunks());
         }
 
         log
@@ -622,4 +622,37 @@ pub(crate) struct StorageChange {
     pub(crate) value: U256,
     pub(crate) had_value: Option<U256>,
     pub(crate) reason: StorageChangeReason,
+}
+
+/// Represents the memory captured during execution
+///
+/// This is a wrapper around the [SharedMemory](revm::interpreter::SharedMemory) context memory.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct RecordedMemory(pub(crate) Vec<u8>);
+
+impl RecordedMemory {
+    pub(crate) fn new(mem: Vec<u8>) -> Self {
+        Self(mem)
+    }
+
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub(crate) fn resize(&mut self, size: usize) {
+        self.0.resize(size, 0);
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Converts the memory into 32byte hex chunks
+    pub(crate) fn memory_chunks(&self) -> Vec<String> {
+        convert_memory(self.as_bytes())
+    }
 }
