@@ -25,7 +25,7 @@ impl TreeState {
     /// hashes.
     pub(crate) fn new(
         last_finalized_block_number: BlockNumber,
-        last_canonical_hashes: Vec<(BlockNumber, BlockHash)>,
+        last_canonical_hashes: impl IntoIterator<Item = (BlockNumber, BlockHash)>,
         buffer_limit: usize,
     ) -> Self {
         Self {

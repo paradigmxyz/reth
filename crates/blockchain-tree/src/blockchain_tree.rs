@@ -6,7 +6,7 @@ use crate::{
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
-use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
+use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -99,30 +99,27 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
     ) -> RethResult<Self> {
-        let max_reorg_depth = config.max_reorg_depth();
+        let max_reorg_depth = config.max_reorg_depth() as usize;
         // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
         // depth at least N blocks must be sent at once.
         let (canon_state_notification_sender, _receiver) =
-            tokio::sync::broadcast::channel(max_reorg_depth as usize * 2);
+            tokio::sync::broadcast::channel(max_reorg_depth * 2);
 
-        let last_canonical_hashes = externals
-            .db
-            .tx()?
-            .cursor_read::<tables::CanonicalHeaders>()?
-            .walk_back(None)?
-            .take(config.num_of_canonical_hashes() as usize)
-            .collect::<Result<Vec<(BlockNumber, BlockHash)>, _>>()?;
+        let last_canonical_hashes =
+            externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
 
         // TODO(rakita) save last finalized block inside database but for now just take
         // tip-max_reorg_depth
         // task: https://github.com/paradigmxyz/reth/issues/1712
-        let (last_finalized_block_number, _) =
-            if last_canonical_hashes.len() > max_reorg_depth as usize {
-                last_canonical_hashes[max_reorg_depth as usize]
-            } else {
-                // it is in reverse order from tip to N
-                last_canonical_hashes.last().cloned().unwrap_or_default()
-            };
+        let last_finalized_block_number = if last_canonical_hashes.len() > max_reorg_depth {
+            // we pick `Highest - max_reorg_depth` block as last finalized block.
+            last_canonical_hashes.keys().nth_back(max_reorg_depth)
+        } else {
+            // we pick the lowest block as last finalized block.
+            last_canonical_hashes.keys().next()
+        }
+        .copied()
+        .unwrap_or_default();
 
         Ok(Self {
             externals,
@@ -743,12 +740,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         let last_canonical_hashes = self
             .externals
-            .db
-            .tx()?
-            .cursor_read::<tables::CanonicalHeaders>()?
-            .walk_back(None)?
-            .take(self.config.num_of_canonical_hashes() as usize)
-            .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
+            .fetch_latest_canonical_hashes(self.config.num_of_canonical_hashes() as usize)?;
 
         let (mut remove_chains, _) =
             self.block_indices_mut().update_block_hashes(last_canonical_hashes.clone());
@@ -773,13 +765,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     pub fn connect_buffered_blocks_to_canonical_hashes(&mut self) -> RethResult<()> {
         let last_canonical_hashes = self
             .externals
-            .db
-            .tx()?
-            .cursor_read::<tables::CanonicalHeaders>()?
-            .walk_back(None)?
-            .take(self.config.num_of_canonical_hashes() as usize)
-            .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?;
-
+            .fetch_latest_canonical_hashes(self.config.num_of_canonical_hashes() as usize)?;
         self.connect_buffered_blocks_to_hashes(last_canonical_hashes)?;
 
         Ok(())
@@ -1171,7 +1157,7 @@ mod tests {
     use crate::block_buffer::BufferedBlocks;
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
-    use reth_db::{test_utils::create_test_rw_db, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{tables, test_utils::create_test_rw_db, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{
         proofs::EMPTY_ROOT, stage::StageCheckpoint, ChainSpecBuilder, B256, MAINNET,
