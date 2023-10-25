@@ -254,7 +254,7 @@ where
 
     let header = Header {
         parent_hash: parent_block.hash,
-        ommers_hash: EMPTY_OMMER_ROOT,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: initialized_block_env.coinbase,
         state_root,
         transactions_root,

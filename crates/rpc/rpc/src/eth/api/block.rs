@@ -86,7 +86,7 @@ where
             #[cfg(feature = "optimism")]
             let (block_timestamp, l1_block_info): (_, Option<L1BlockInfo>) = {
                 let body = reth_revm::optimism::parse_l1_info_tx(
-                    &block.body.get(0).ok_or(EthApiError::InternalEthError)?.input()[4..],
+                    &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
                 );
                 (block.timestamp, body.ok())
             };

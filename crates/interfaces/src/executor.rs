@@ -129,12 +129,22 @@ pub enum BlockExecutionError {
     #[error("execution unavailable for tests")]
     UnavailableForTest,
 
+    /// Error when trying to parse L1 block info
     #[cfg(feature = "optimism")]
     #[error("Could not get L1 block info from L2 block: {message:?}")]
-    L1BlockInfoError { message: String },
+    L1BlockInfoError {
+        /// The inner error message
+        message: String,
+    },
+    /// Error for when there is insufficient funds for the L1 cost of an L2 transaction
     #[cfg(feature = "optimism")]
     #[error("Insufficient funds to cover transaction L1 cost: want {want}, have {have}")]
-    InsufficientFundsForL1Cost { want: u64, have: u64 },
+    InsufficientFundsForL1Cost {
+        /// How much ETH the L1 fee requires
+        want: u64,
+        /// How much ETH the account has
+        have: u64,
+    },
 }
 
 impl BlockExecutionError {

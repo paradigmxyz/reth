@@ -4,7 +4,7 @@ use crate::{
     constants::EMPTY_OMMER_ROOT_HASH,
     keccak256,
     trie::{HashBuilder, Nibbles},
-    Address, GenesisAccount, Header, Log, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
+    Address, GenesisAccount, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
     TransactionSigned, Withdrawal, B256,
 };
 use alloy_rlp::Encodable;
@@ -184,11 +184,13 @@ mod tests {
     use super::*;
     use crate::{
         bloom,
+        constants::EMPTY_ROOT_HASH,
         hex_literal::hex,
         proofs::{calculate_receipt_root, calculate_transaction_root, genesis_state_root},
         Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256, GOERLI,
         HOLESKY, MAINNET, SEPOLIA, U256,
     };
+    use alloy_primitives::b256;
     use alloy_rlp::Decodable;
 
     #[test]

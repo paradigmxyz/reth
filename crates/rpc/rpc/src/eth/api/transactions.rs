@@ -907,7 +907,7 @@ where
             let block_timestamp = block.timestamp;
 
             let l1_block_info: Option<L1BlockInfo> = reth_revm::optimism::parse_l1_info_tx(
-                &block.body.get(0).ok_or(EthApiError::InternalEthError)?.input()[4..],
+                &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
             )
             .map_err(|_| EthApiError::InternalEthError)
             .ok();
