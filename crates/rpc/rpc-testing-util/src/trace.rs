@@ -198,15 +198,6 @@ where
     /// Fetches the `trace_block` responses for the provided block IDs from both clients
     /// and compares them. If there are inconsistencies between the two responses, this
     /// method will panic with a relevant message indicating the difference.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_ids` - A collection of block IDs for which trace responses will be fetched
-    ///   and compared.
-    ///
-    /// # Panics
-    ///
-    /// If the responses from the two clients are inconsistent.
     pub async fn compare_trace_block_responses(&self, block_ids: Vec<BlockId>) {
         let stream1 = self.client1.trace_block_buffered(block_ids.clone(), 2);
         let stream2 = self.client2.trace_block_buffered(block_ids, 2);
