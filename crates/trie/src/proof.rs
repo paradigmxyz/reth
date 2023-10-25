@@ -10,8 +10,8 @@ use crate::{
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::{tables, transaction::DbTx};
 use reth_primitives::{
+    constants::EMPTY_ROOT_HASH,
     keccak256,
-    proofs::EMPTY_ROOT,
     trie::{AccountProof, HashBuilder, Nibbles, StorageProof},
     Address, B256,
 };
@@ -115,7 +115,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty(hashed_address)? {
-            return Ok((EMPTY_ROOT, proofs))
+            return Ok((EMPTY_ROOT_HASH, proofs))
         }
 
         let target_nibbles = proofs.iter().map(|p| p.nibbles.clone()).collect::<Vec<_>>();
@@ -299,7 +299,7 @@ mod tests {
         let target = Address::from_str("0x1ed9b1dd266b607ee278726d324b855a093394a6").unwrap();
         let slots = Vec::from([B256::with_last_byte(1), B256::with_last_byte(3)]);
         let account_proof = Proof::new(&tx).account_proof(target, &slots).unwrap();
-        assert_eq!(account_proof.storage_root, EMPTY_ROOT, "expected empty storage root");
+        assert_eq!(account_proof.storage_root, EMPTY_ROOT_HASH, "expected empty storage root");
 
         assert_eq!(slots.len(), account_proof.storage_proofs.len());
         for (idx, slot) in slots.into_iter().enumerate() {

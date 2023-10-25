@@ -100,18 +100,18 @@ pub const KECCAK_EMPTY: B256 =
 pub const EMPTY_OMMER_ROOT: B256 =
     b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347");
 
-/// hash of an empty set `keccak256(rlp([]))`
-const EMPTY_SET_HASH: B256 =
+/// Root hash of an empty trie.
+pub const EMPTY_ROOT_HASH: B256 =
     b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
 
 /// Transactions root of empty receipts set.
-pub const EMPTY_RECEIPTS: B256 = EMPTY_SET_HASH;
+pub const EMPTY_RECEIPTS: B256 = EMPTY_ROOT_HASH;
 
 /// Transactions root of empty transactions set.
-pub const EMPTY_TRANSACTIONS: B256 = EMPTY_SET_HASH;
+pub const EMPTY_TRANSACTIONS: B256 = EMPTY_ROOT_HASH;
 
 /// Withdrawals root of empty withdrawals set.
-pub const EMPTY_WITHDRAWALS: B256 = EMPTY_SET_HASH;
+pub const EMPTY_WITHDRAWALS: B256 = EMPTY_ROOT_HASH;
 
 /// The number of blocks to unwind during a reorg that already became a part of canonical chain.
 ///
