@@ -1,9 +1,9 @@
 //! Async caching support for eth RPC
 
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{BlockNumber};
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, RethResult};
-use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, B256, Header, SealedHeader};
+use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, B256};
 use reth_provider::{
     BlockReader, BlockSource, CanonStateNotification, EvmEnvProvider, StateProviderFactory,
 };
@@ -43,7 +43,23 @@ type ReceiptsResponseSender = oneshot::Sender<RethResult<Option<Vec<Receipt>>>>;
 type EnvResponseSender = oneshot::Sender<RethResult<(CfgEnv, BlockEnv)>>;
 
 /// The type that can send the response to a requested list of block headers 
-type BlockFeeResponseSender = oneshot::Sender<RethResult<Option<SealedHeader>>>;
+type BlockFeeResponseSender = oneshot::Sender<RethResult<Option<BlockFees>>>;
+
+/// The type that contains fees data for associated block in cache
+#[derive(Clone, Debug)]
+pub struct BlockFees {
+    /// Hash of the block
+    pub block_hash: B256,
+    /// Block data on bas_fee_per_gas 
+    pub base_fee_per_gas: u64,
+    /// Precalculated ratio
+    pub gas_used_ratio: f64, 
+    /// Block data on gas_used
+    pub gas_used: u64,
+    /// Block data on gas_limit
+    pub gas_limit: u64,
+}
+
 
 type BlockLruCache<L> = MultiConsumerLruCache<
     B256,
@@ -56,7 +72,7 @@ type ReceiptsLruCache<L> = MultiConsumerLruCache<B256, Vec<Receipt>, L, Receipts
 
 type EnvLruCache<L> = MultiConsumerLruCache<B256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
 
-type FeeHistoryLruCache<L> = MultiConsumerLruCache<BlockNumber, SealedHeader, L, BlockFeeResponseSender>;
+type FeeHistoryLruCache<L> = MultiConsumerLruCache<BlockNumber, BlockFees, L, BlockFeeResponseSender>;
 
 /// Provides async access to cached eth data
 ///
@@ -212,7 +228,7 @@ impl EthStateCache {
     pub(crate) async fn get_fee_history(
         &self,
         block_number: u64,
-    ) -> RethResult<Option<SealedHeader>>{
+    ) -> RethResult<Option<BlockFees>>{
         let (response_tx, rx) = oneshot::channel();
         let _  = self.to_service.send(CacheAction::GetBlockFee { block_number, response_tx});
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -242,7 +258,7 @@ pub(crate) struct EthStateCacheService<
     LimitReceipts = ByLength,
     LimitEnvs = ByLength,
 > where
-    LimitBlocks: Limiter<B256, Block> + Limiter<u64, SealedHeader>,
+    LimitBlocks: Limiter<B256, Block> + Limiter<u64, BlockFees>,
     LimitReceipts: Limiter<B256, Vec<Receipt>>,
     LimitEnvs: Limiter<B256, (CfgEnv, BlockEnv)>,
 {
@@ -291,7 +307,15 @@ where
         // cache good block
         if let Ok(Some(block)) = res {
             self.full_block_cache.insert(block_hash, block.clone());
-            self.fee_history_cache.insert(block.number, block.header.clone().seal_slow()); 
+            self.fee_history_cache.insert(
+                block.number, 
+                BlockFees { 
+                    base_fee_per_gas: block.header.base_fee_per_gas.unwrap_or_default(),
+                    gas_used_ratio: block.header.gas_used as f64 / block.header.gas_limit as f64,
+                    gas_used: block.header.gas_used,
+                    gas_limit: block.header.gas_limit,
+                    block_hash: block_hash,
+                  }); 
         }
     }
 

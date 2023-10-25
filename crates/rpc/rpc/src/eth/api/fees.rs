@@ -2,11 +2,10 @@ use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use alloy_primitives::FixedBytes;
-use reth_interfaces::RethError;
+
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    basefee::calculate_next_block_base_fee, BlockNumberOrTag, SealedHeader, U256, B256 
+    basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256, B256 
 };
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
@@ -15,6 +14,7 @@ use tracing::debug;
 use derive_more::{Deref, DerefMut};
 use schnellru::{ByLength, LruMap};
 use std::fmt::{self, Debug, Formatter};
+use crate::eth::cache::BlockFees;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -66,7 +66,6 @@ where
             );
             block_count = max_fee_history
         }
-        
 
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
             return Err(EthApiError::UnknownBlockNumber)
@@ -97,54 +96,50 @@ where
         // SAFETY: We ensured that block count is capped
 
         let start_block = end_block_plus - block_count;
-        // TO-DO: first we support only in-cache queries
-        // let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
 
-        // begin
         let mut base_fee_per_gas: Vec<U256> = Vec::new();
         let mut gas_used_ratio: Vec<f64> = Vec::new();
         let mut rewards: Vec<Vec<U256>> = Vec::new();
 
-        let mut headers: Vec<SealedHeader> = Vec::new();
+        struct LastBlock {
+            gas_used:  u64,
+            gas_limit:  u64,
+            base_fee_per_gas:  u64,
+        }
+        let mut last_block = LastBlock{gas_used: 0, gas_limit: 0, base_fee_per_gas: 0};
 
         for n in start_block..end_block_plus {
-            let header = self.cache()
+            let block_fees = self.cache()
                 .get_fee_history(n)
                 .await?
                 .ok_or(EthApiError::InternalEthError)?;
 
             if n == end_block_plus {
-                headers.push(header.clone());
-            }      
-            
-            base_fee_per_gas
-                .push(U256::try_from(header.base_fee_per_gas.unwrap_or_default()).unwrap());
-            gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
+                last_block.gas_used = block_fees.gas_used;
+                last_block.gas_limit = block_fees.gas_limit;
+                last_block.base_fee_per_gas = block_fees.base_fee_per_gas;
+            }
+
+            base_fee_per_gas.push(U256::try_from(block_fees.base_fee_per_gas).unwrap());
+            gas_used_ratio.push(block_fees.gas_used_ratio);
 
             // Percentiles were specified, so we need to collect reward percentile ino
             if let Some(percentiles) = &reward_percentiles {
-                rewards.push(self.calculate_reward_percentiles(percentiles, &header).await?);
+                rewards.push(self.calculate_reward_percentiles(percentiles, &block_fees).await?);
             }
         };
 
-//        if headers.len() != block_count as usize {
-  //          return Err(EthApiError::InvalidBlockRange)
-    //    }
-
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
         
-
         // The spec states that `base_fee_per_gas` "[..] includes the next block after the newest of
         // the returned range, because this value can be derived from the newest block"
         //
         // The unwrap is safe since we checked earlier that we got at least 1 header.
-        //
-        let last_header = headers.last().unwrap();
         let chain_spec = self.provider().chain_spec();
         base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
-            last_header.gas_used,
-            last_header.gas_limit,
-            last_header.base_fee_per_gas.unwrap_or_default(),
+            last_block.gas_used,
+            last_block.gas_limit,
+            last_block.base_fee_per_gas,
             chain_spec.base_fee_params,
         )));
 
@@ -164,11 +159,11 @@ where
     async fn calculate_reward_percentiles(
         &self,
         percentiles: &[f64],
-        header: &SealedHeader,
+        block_fees: &BlockFees,
     ) -> Result<Vec<U256>, EthApiError> {
         let (transactions, receipts) = self
             .cache()
-            .get_transactions_and_receipts(header.hash)
+            .get_transactions_and_receipts(block_fees.block_hash)
             .await?
             .ok_or(EthApiError::InvalidBlockRange)?;
 
@@ -187,7 +182,7 @@ where
 
                 Some(TxGasAndReward {
                     gas_used,
-                    reward: tx.effective_gas_tip(header.base_fee_per_gas).unwrap_or_default(),
+                    reward: tx.effective_gas_tip(Some(block_fees.base_fee_per_gas)).unwrap_or_default(),
                 })
             })
             .collect::<Vec<_>>();
@@ -210,7 +205,7 @@ where
                 continue
             }
 
-            let threshold = (header.gas_used as f64 * percentile / 100.) as u64;
+            let threshold = (block_fees.gas_used as f64 * percentile / 100.) as u64;
             while cumulative_gas_used < threshold && tx_index < transactions.len() - 1 {
                 tx_index += 1;
                 cumulative_gas_used += transactions[tx_index].gas_used;
