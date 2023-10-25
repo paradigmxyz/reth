@@ -146,7 +146,8 @@ pub mod triehash {
 mod tests {
     use super::*;
     use crate::{
-        bloom, hex, Block, Receipt, TxType, B256, GOERLI, HOLESKY, MAINNET, SEPOLIA, U256,
+        b256, bloom, hex, Block, Log, Receipt, TxType, B256, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+        U256,
     };
     use alloy_rlp::Decodable;
 
