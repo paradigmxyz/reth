@@ -176,6 +176,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn can_create_replay_transaction_stream() {
         let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
 
@@ -185,7 +186,7 @@ mod tests {
             "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb".parse().unwrap(),
         ];
 
-        let trace_types = vec![TraceType::StateDiff, TraceType::VmTrace].into_iter().collect();
+        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
 
         let mut stream = client.replay_transactions(transactions, trace_types);
         let mut successes = 0;
