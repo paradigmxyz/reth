@@ -1,5 +1,5 @@
 use super::mask::{ColumnMaskOne, ColumnMaskThree, ColumnMaskTwo};
-use crate::{table::Decompress};
+use crate::table::Decompress;
 use derive_more::{Deref, DerefMut};
 use reth_interfaces::{RethError, RethResult};
 use reth_nippy_jar::{MmapHandle, NippyJar, NippyJarCursor};

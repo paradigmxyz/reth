@@ -44,7 +44,7 @@ pub trait ColumnMaskThree {
 }
 
 #[macro_export]
-/// Add snapshot mask
+/// Add mask to access values from a specific snapshot segment.
 macro_rules! add_snapshot_mask {
     ($mask_struct:tt, $type1:ty, $mask:expr) => {
         impl ColumnMaskOne for $mask_struct<$type1> {
