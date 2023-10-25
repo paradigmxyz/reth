@@ -1160,7 +1160,7 @@ mod tests {
     use reth_db::{tables, test_utils::create_test_rw_db, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{
-        proofs::EMPTY_ROOT, stage::StageCheckpoint, ChainSpecBuilder, B256, MAINNET,
+        constants::EMPTY_ROOT_HASH, stage::StageCheckpoint, ChainSpecBuilder, B256, MAINNET,
     };
     use reth_provider::{
         test_utils::{blocks::BlockChainTestData, TestExecutorFactory},
@@ -1190,7 +1190,7 @@ mod tests {
         // insert genesis to db.
 
         genesis.header.header.number = 10;
-        genesis.header.header.state_root = EMPTY_ROOT;
+        genesis.header.header.state_root = EMPTY_ROOT_HASH;
         let factory = ProviderFactory::new(&db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
