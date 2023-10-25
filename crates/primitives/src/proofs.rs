@@ -1,7 +1,8 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{
-    b256, keccak256,
+    constants::EMPTY_OMMER_ROOT_HASH,
+    keccak256,
     trie::{HashBuilder, Nibbles},
     Address, GenesisAccount, Header, Log, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
     TransactionSigned, Withdrawal, B256,
@@ -10,14 +11,6 @@ use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
 use itertools::Itertools;
 use std::collections::HashMap;
-
-/// Keccak-256 hash of the RLP of an empty list, KEC("\xc0").
-pub const EMPTY_LIST_HASH: B256 =
-    b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347");
-
-/// Root hash of an empty trie.
-pub const EMPTY_ROOT: B256 =
-    b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
 
 /// Adjust the index of an item for rlp encoding.
 pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
@@ -129,16 +122,12 @@ pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
     })
 }
 
-/// Calculates the log root for headers.
-pub fn calculate_log_root(logs: &[Log]) -> B256 {
-    //https://github.com/ethereum/go-ethereum/blob/356bbe343a30789e77bb38f25983c8f2f2bfbb47/cmd/evm/internal/t8ntool/execution.go#L255
-    let mut logs_rlp = Vec::new();
-    alloy_rlp::encode_list(logs, &mut logs_rlp);
-    keccak256(logs_rlp)
-}
-
 /// Calculates the root hash for ommer/uncle headers.
 pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
+    // Check if `ommers` list is empty
+    if ommers.is_empty() {
+        return EMPTY_OMMER_ROOT_HASH
+    }
     // RLP Encode
     let mut ommers_rlp = Vec::new();
     alloy_rlp::encode_list(ommers, &mut ommers_rlp);
@@ -486,7 +475,7 @@ b256!("000000000000000000000000000000000000000000000000000000000011a1d3"),
     fn check_empty_state_root() {
         let genesis_alloc = HashMap::new();
         let root = genesis_state_root(&genesis_alloc);
-        assert_eq!(root, EMPTY_ROOT);
+        assert_eq!(root, EMPTY_ROOT_HASH);
     }
 
     #[test]

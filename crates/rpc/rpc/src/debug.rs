@@ -263,7 +263,10 @@ where
                             .into_pre_state_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config),
+                            TracingInspectorConfig::from_geth_config(&config)
+                                // if in default mode, we need to return all touched storages, for
+                                // which we need to record steps and statediff
+                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
 
                         let frame =
@@ -490,7 +493,10 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config),
+                            TracingInspectorConfig::from_geth_config(&config)
+                                // if in default mode, we need to return all touched storages, for
+                                // which we need to record steps and statediff
+                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
                         let (res, _) = inspect(&mut *db, env, &mut inspector)?;
 
@@ -891,13 +897,10 @@ where
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
         let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
-
-        let mut res = Vec::new();
-        if let Some(tx) = tx.map(TransactionSource::into_recovered) {
-            tx.encode(&mut res);
-        }
-
-        Ok(res.into())
+        Ok(tx
+            .map(TransactionSource::into_recovered)
+            .map(|tx| tx.envelope_encoded())
+            .unwrap_or_default())
     }
 
     /// Handler for `debug_getRawReceipts`

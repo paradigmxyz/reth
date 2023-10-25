@@ -28,7 +28,7 @@ use reth_primitives::{
     proofs,
     revm::{compat::into_reth_log, env::tx_env_with_recovered},
     Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts,
-    SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT, U256,
+    SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{
@@ -43,7 +43,6 @@ use revm::{
     Database, DatabaseCommit, State,
 };
 use std::{
-    fmt::Debug,
     future::Future,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
@@ -940,7 +939,7 @@ where
 
     let header = Header {
         parent_hash: parent_block.hash,
-        ommers_hash: EMPTY_OMMER_ROOT,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: initialized_block_env.coinbase,
         state_root,
         transactions_root,
@@ -1029,7 +1028,7 @@ where
 
     let header = Header {
         parent_hash: parent_block.hash,
-        ommers_hash: EMPTY_OMMER_ROOT,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: initialized_block_env.coinbase,
         state_root,
         transactions_root: EMPTY_TRANSACTIONS,
@@ -1118,7 +1117,7 @@ fn commit_withdrawals<DB: Database<Error = RethError>>(
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
-fn pre_block_beacon_root_contract_call<DB>(
+fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
@@ -1127,8 +1126,7 @@ fn pre_block_beacon_root_contract_call<DB>(
     attributes: &PayloadBuilderAttributes,
 ) -> Result<(), PayloadBuilderError>
 where
-    DB: Database + DatabaseCommit,
-    <DB as Database>::Error: Debug,
+    DB::Error: std::fmt::Display,
 {
     // Configure the environment for the block.
     let env = Env {

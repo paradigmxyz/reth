@@ -1,7 +1,7 @@
 //! The internal transaction pool implementation.
 use crate::{
     config::TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
-    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError},
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind},
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
     pool::{
@@ -414,7 +414,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_nonce: u64,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
         if self.contains(tx.hash()) {
-            return Err(PoolError::AlreadyImported(*tx.hash()))
+            return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported))
         }
 
         // Update sender info with balance and nonce
@@ -452,42 +452,50 @@ impl<T: TransactionOrdering> TxPool<T> {
                 self.metrics.invalid_transactions.increment(1);
                 match err {
                     InsertErr::Underpriced { existing, transaction: _ } => {
-                        Err(PoolError::ReplacementUnderpriced(existing))
+                        Err(PoolError::new(existing, PoolErrorKind::ReplacementUnderpriced))
                     }
-                    InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => Err(
-                        PoolError::FeeCapBelowMinimumProtocolFeeCap(*transaction.hash(), fee_cap),
-                    ),
-                    InsertErr::ExceededSenderTransactionsCapacity { transaction } => {
-                        Err(PoolError::SpammerExceededCapacity(
-                            transaction.sender(),
+                    InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => {
+                        Err(PoolError::new(
                             *transaction.hash(),
+                            PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(fee_cap),
+                        ))
+                    }
+                    InsertErr::ExceededSenderTransactionsCapacity { transaction } => {
+                        Err(PoolError::new(
+                            *transaction.hash(),
+                            PoolErrorKind::SpammerExceededCapacity(transaction.sender()),
                         ))
                     }
                     InsertErr::TxGasLimitMoreThanAvailableBlockGas {
                         transaction,
                         block_gas_limit,
                         tx_gas_limit,
-                    } => Err(PoolError::InvalidTransaction(
+                    } => Err(PoolError::new(
                         *transaction.hash(),
-                        InvalidPoolTransactionError::ExceedsGasLimit(block_gas_limit, tx_gas_limit),
+                        PoolErrorKind::InvalidTransaction(
+                            InvalidPoolTransactionError::ExceedsGasLimit(
+                                block_gas_limit,
+                                tx_gas_limit,
+                            ),
+                        ),
                     )),
-                    InsertErr::BlobTxHasNonceGap { transaction } => {
-                        Err(PoolError::InvalidTransaction(
-                            *transaction.hash(),
+                    InsertErr::BlobTxHasNonceGap { transaction } => Err(PoolError::new(
+                        *transaction.hash(),
+                        PoolErrorKind::InvalidTransaction(
                             Eip4844PoolTransactionError::Eip4844NonceGap.into(),
-                        ))
-                    }
-                    InsertErr::Overdraft { transaction } => Err(PoolError::InvalidTransaction(
-                        *transaction.hash(),
-                        InvalidPoolTransactionError::Overdraft,
+                        ),
                     )),
-                    InsertErr::TxTypeConflict { transaction } => {
-                        Err(PoolError::ExistingConflictingTransactionType(
+                    InsertErr::Overdraft { transaction } => Err(PoolError::new(
+                        *transaction.hash(),
+                        PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Overdraft),
+                    )),
+                    InsertErr::TxTypeConflict { transaction } => Err(PoolError::new(
+                        *transaction.hash(),
+                        PoolErrorKind::ExistingConflictingTransactionType(
                             transaction.sender(),
-                            *transaction.hash(),
                             transaction.tx_type(),
-                        ))
-                    }
+                        ),
+                    )),
                 }
             }
         }
@@ -1828,8 +1836,8 @@ mod tests {
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
         let tx = f.validated(tx);
         pool.add_transaction(tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        match pool.add_transaction(tx, on_chain_balance, on_chain_nonce).unwrap_err() {
-            PoolError::AlreadyImported(_) => {}
+        match pool.add_transaction(tx, on_chain_balance, on_chain_nonce).unwrap_err().kind {
+            PoolErrorKind::AlreadyImported => {}
             _ => unreachable!(),
         }
     }

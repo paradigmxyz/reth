@@ -23,8 +23,7 @@ pub use sharded_key::ShardedKey;
 macro_rules! impl_uints {
     ($($name:tt),+) => {
         $(
-            impl Encode for $name
-            {
+            impl Encode for $name {
                 type Encoded = [u8; std::mem::size_of::<$name>()];
 
                 fn encode(self) -> Self::Encoded {
@@ -32,12 +31,11 @@ macro_rules! impl_uints {
                 }
             }
 
-            impl Decode for $name
-            {
+            impl Decode for $name {
                 fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, $crate::DatabaseError> {
                     Ok(
                         $name::from_be_bytes(
-                            value.as_ref().try_into().map_err(|_| $crate::DatabaseError::DecodeError)?
+                            value.as_ref().try_into().map_err(|_| $crate::DatabaseError::Decode)?
                         )
                     )
                 }
@@ -50,6 +48,7 @@ impl_uints!(u64, u32, u16, u8);
 
 impl Encode for Vec<u8> {
     type Encoded = Vec<u8>;
+
     fn encode(self) -> Self::Encoded {
         self
     }
@@ -63,6 +62,7 @@ impl Decode for Vec<u8> {
 
 impl Encode for Address {
     type Encoded = [u8; 20];
+
     fn encode(self) -> Self::Encoded {
         self.0 .0
     }
@@ -76,6 +76,7 @@ impl Decode for Address {
 
 impl Encode for B256 {
     type Encoded = [u8; 32];
+
     fn encode(self) -> Self::Encoded {
         self.0
     }
@@ -83,12 +84,13 @@ impl Encode for B256 {
 
 impl Decode for B256 {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Ok(B256::from_slice(value.as_ref()))
+        Ok(B256::new(value.as_ref().try_into().map_err(|_| DatabaseError::Decode)?))
     }
 }
 
 impl Encode for String {
     type Encoded = Vec<u8>;
+
     fn encode(self) -> Self::Encoded {
         self.into_bytes()
     }
@@ -96,7 +98,7 @@ impl Encode for String {
 
 impl Decode for String {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        String::from_utf8(value.as_ref().to_vec()).map_err(|_| DatabaseError::DecodeError)
+        String::from_utf8(value.as_ref().to_vec()).map_err(|_| DatabaseError::Decode)
     }
 }
 

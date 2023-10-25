@@ -15,7 +15,7 @@ the steps for running Reth as a full node, what caveats to expect and how to con
 - Archive node – Reth node that has all historical data from genesis.
 - Pruned node – Reth node that has its historical data pruned partially or fully through
 a [custom configuration](./config.md#the-prune-section).
-- Full Node – Reth node that has the latest state and historical data for only the last 128 blocks available
+- Full Node – Reth node that has the latest state and historical data for only the last 10064 blocks available
 for querying in the same way as an archive node.
 
 The node type that was chosen when first [running a node](./run-a-node.md) **can not** be changed after
@@ -46,11 +46,11 @@ RUST_LOG=info reth node \
 
 ## Size
 
-All numbers are as of August 2023 at block number 17.9M for mainnet.
+All numbers are as of October 2023 at block number 18.3M for mainnet.
 
 ### Archive Node
 
-Archive node occupies at least 2.1TB.
+Archive node occupies at least 2.14TB.
 
 You can track the growth of Reth archive node size with our
 [public Grafana dashboard](https://reth.paradigm.xyz/d/2k8BXz24k/reth?orgId=1&refresh=30s&viewPanel=52).
@@ -60,13 +60,13 @@ You can track the growth of Reth archive node size with our
 Different segments take up different amounts of disk space.
 If pruned fully, this is the total freed space you'll get, per segment:
 
-| Segment              | Size  |
+| Segment            | Size  |
 |--------------------|-------|
-| Sender Recovery    | 70GB  |
-| Transaction Lookup | 140GB |
-| Receipts           | 240GB |
-| Account History    | 230GB |
-| Storage History    | 680GB |
+| Sender Recovery    | 75GB  |
+| Transaction Lookup | 150GB |
+| Receipts           | 250GB |
+| Account History    | 240GB |
+| Storage History    | 700GB |
 
 ### Full Node
 
@@ -78,11 +78,11 @@ Essentially, the full node is the same as following configuration for the pruned
 block_interval = 5
 
 [prune.parts]
-sender_recovery = { distance = 128 }
+sender_recovery = { distance = 10_064 }
 # transaction_lookup is not pruned
 receipts = { before = 11052984 } # Beacon Deposit Contract deployment block: https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
-account_history = { distance = 128 }
-storage_history = { distance = 128 }
+account_history = { distance = 10_064 }
+storage_history = { distance = 10_064 }
 
 [prune.parts.receipts_log_filter]
 # Prune all receipts, leaving only those which contain logs from address `0x00000000219ab540356cbb839cbe05303d7705fa`,
@@ -91,17 +91,17 @@ storage_history = { distance = 128 }
 ```
 
 Meaning, it prunes:
-- Account History and Storage History up to the last 128 blocks
-- Sender Recovery up to the last 128 blocks. The caveat is that it's pruned gradually after the initial sync
+- Account History and Storage History up to the last 10064 blocks
+- Sender Recovery up to the last 10064 blocks. The caveat is that it's pruned gradually after the initial sync
 is completed, so the disk space is reclaimed slowly.
-- Receipts up to the last 128 blocks, preserving all receipts with the logs from Beacon Deposit Contract
+- Receipts up to the last 10064 blocks, preserving all receipts with the logs from Beacon Deposit Contract
 
 Given the aforementioned segment sizes, we get the following full node size:
 ```text
 Archive Node - Receipts - AccountHistory - StorageHistory = Full Node
 ```
 ```text
-2.1TB - 240GB - 230GB - 680GB = 950GB
+2.14TB - 250GB - 240GB - 700GB = 950GB
 ```
 
 ## RPC support
@@ -124,67 +124,67 @@ The following tables describe RPC methods available in the full node.
 
 #### `debug` namespace
 
-| RPC                        | Note                                                     |
-|----------------------------|----------------------------------------------------------|
-| `debug_getRawBlock`        |                                                          |
-| `debug_getRawHeader`       |                                                          |
-| `debug_getRawReceipts`     | Only for the last 128 blocks and Beacon Deposit Contract |
-| `debug_getRawTransaction`  |                                                          |
-| `debug_traceBlock`         | Only for the last 128 blocks                             |
-| `debug_traceBlockByHash`   | Only for the last 128 blocks                             |
-| `debug_traceBlockByNumber` | Only for the last 128 blocks                             |
-| `debug_traceCall`          | Only for the last 128 blocks                             |
-| `debug_traceCallMany`      | Only for the last 128 blocks                             |
-| `debug_traceTransaction`   | Only for the last 128 blocks                             |
+| RPC                        | Note                                                       |
+|----------------------------|------------------------------------------------------------|
+| `debug_getRawBlock`        |                                                            |
+| `debug_getRawHeader`       |                                                            |
+| `debug_getRawReceipts`     | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `debug_getRawTransaction`  |                                                            |
+| `debug_traceBlock`         | Only for the last 10064 blocks                             |
+| `debug_traceBlockByHash`   | Only for the last 10064 blocks                             |
+| `debug_traceBlockByNumber` | Only for the last 10064 blocks                             |
+| `debug_traceCall`          | Only for the last 10064 blocks                             |
+| `debug_traceCallMany`      | Only for the last 10064 blocks                             |
+| `debug_traceTransaction`   | Only for the last 10064 blocks                             |
 
 
 #### `eth` namespace
 
-| RPC / Segment                             | Note                                                     |
-|-------------------------------------------|----------------------------------------------------------|
-| `eth_accounts`                            |                                                          |
-| `eth_blockNumber`                         |                                                          |
-| `eth_call`                                | Only for the last 128 blocks                             |
-| `eth_chainId`                             |                                                          |
-| `eth_createAccessList`                    | Only for the last 128 blocks                             |
-| `eth_estimateGas`                         | Only for the last 128 blocks                             |
-| `eth_feeHistory`                          |                                                          |
-| `eth_gasPrice`                            |                                                          |
-| `eth_getBalance`                          | Only for the last 128 blocks                             |
-| `eth_getBlockByHash`                      |                                                          |
-| `eth_getBlockByNumber`                    |                                                          |
-| `eth_getBlockReceipts`                    | Only for the last 128 blocks and Beacon Deposit Contract |
-| `eth_getBlockTransactionCountByHash`      |                                                          |
-| `eth_getBlockTransactionCountByNumber`    |                                                          |
-| `eth_getCode`                             |                                                          |
-| `eth_getFilterChanges`                    |                                                          |
-| `eth_getFilterLogs`                       | Only for the last 128 blocks and Beacon Deposit Contract |
-| `eth_getLogs`                             | Only for the last 128 blocks and Beacon Deposit Contract |
-| `eth_getStorageAt`                        | Only for the last 128 blocks                             |
-| `eth_getTransactionByBlockHashAndIndex`   |                                                          |
-| `eth_getTransactionByBlockNumberAndIndex` |                                                          |
-| `eth_getTransactionByHash`                |                                                          |
-| `eth_getTransactionCount`                 | Only for the last 128 blocks                             |
-| `eth_getTransactionReceipt`               | Only for the last 128 blocks and Beacon Deposit Contract |
-| `eth_getUncleByBlockHashAndIndex`         |                                                          |
-| `eth_getUncleByBlockNumberAndIndex`       |                                                          |
-| `eth_getUncleCountByBlockHash`            |                                                          |
-| `eth_getUncleCountByBlockNumber`          |                                                          |
-| `eth_maxPriorityFeePerGas`                |                                                          |
-| `eth_mining`                              |                                                          |
-| `eth_newBlockFilter`                      |                                                          |
-| `eth_newFilter`                           |                                                          |
-| `eth_newPendingTransactionFilter`         |                                                          |
-| `eth_protocolVersion`                     |                                                          |
-| `eth_sendRawTransaction`                  |                                                          |
-| `eth_sendTransaction`                     |                                                          |
-| `eth_sign`                                |                                                          |
-| `eth_signTransaction`                     |                                                          |
-| `eth_signTypedData`                       |                                                          |
-| `eth_subscribe`                           |                                                          |
-| `eth_syncing`                             |                                                          |
-| `eth_uninstallFilter`                     |                                                          |
-| `eth_unsubscribe`                         |                                                          |
+| RPC / Segment                             | Note                                                       |
+|-------------------------------------------|------------------------------------------------------------|
+| `eth_accounts`                            |                                                            |
+| `eth_blockNumber`                         |                                                            |
+| `eth_call`                                | Only for the last 10064 blocks                             |
+| `eth_chainId`                             |                                                            |
+| `eth_createAccessList`                    | Only for the last 10064 blocks                             |
+| `eth_estimateGas`                         | Only for the last 10064 blocks                             |
+| `eth_feeHistory`                          |                                                            |
+| `eth_gasPrice`                            |                                                            |
+| `eth_getBalance`                          | Only for the last 10064 blocks                             |
+| `eth_getBlockByHash`                      |                                                            |
+| `eth_getBlockByNumber`                    |                                                            |
+| `eth_getBlockReceipts`                    | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `eth_getBlockTransactionCountByHash`      |                                                            |
+| `eth_getBlockTransactionCountByNumber`    |                                                            |
+| `eth_getCode`                             |                                                            |
+| `eth_getFilterChanges`                    |                                                            |
+| `eth_getFilterLogs`                       | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `eth_getLogs`                             | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `eth_getStorageAt`                        | Only for the last 10064 blocks                             |
+| `eth_getTransactionByBlockHashAndIndex`   |                                                            |
+| `eth_getTransactionByBlockNumberAndIndex` |                                                            |
+| `eth_getTransactionByHash`                |                                                            |
+| `eth_getTransactionCount`                 | Only for the last 10064 blocks                             |
+| `eth_getTransactionReceipt`               | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `eth_getUncleByBlockHashAndIndex`         |                                                            |
+| `eth_getUncleByBlockNumberAndIndex`       |                                                            |
+| `eth_getUncleCountByBlockHash`            |                                                            |
+| `eth_getUncleCountByBlockNumber`          |                                                            |
+| `eth_maxPriorityFeePerGas`                |                                                            |
+| `eth_mining`                              |                                                            |
+| `eth_newBlockFilter`                      |                                                            |
+| `eth_newFilter`                           |                                                            |
+| `eth_newPendingTransactionFilter`         |                                                            |
+| `eth_protocolVersion`                     |                                                            |
+| `eth_sendRawTransaction`                  |                                                            |
+| `eth_sendTransaction`                     |                                                            |
+| `eth_sign`                                |                                                            |
+| `eth_signTransaction`                     |                                                            |
+| `eth_signTypedData`                       |                                                            |
+| `eth_subscribe`                           |                                                            |
+| `eth_syncing`                             |                                                            |
+| `eth_uninstallFilter`                     |                                                            |
+| `eth_unsubscribe`                         |                                                            |
 
 #### `net` namespace
 
@@ -196,16 +196,16 @@ The following tables describe RPC methods available in the full node.
 
 #### `trace` namespace
 
-| RPC / Segment                   | Note                         |
-|---------------------------------|------------------------------|
-| `trace_block`                   | Only for the last 128 blocks |
-| `trace_call`                    | Only for the last 128 blocks |
-| `trace_callMany`                | Only for the last 128 blocks |
-| `trace_get`                     | Only for the last 128 blocks |
-| `trace_rawTransaction`          | Only for the last 128 blocks |
-| `trace_replayBlockTransactions` | Only for the last 128 blocks |
-| `trace_replayTransaction`       | Only for the last 128 blocks |
-| `trace_transaction`             | Only for the last 128 blocks |
+| RPC / Segment                   | Note                           |
+|---------------------------------|--------------------------------|
+| `trace_block`                   | Only for the last 10064 blocks |
+| `trace_call`                    | Only for the last 10064 blocks |
+| `trace_callMany`                | Only for the last 10064 blocks |
+| `trace_get`                     | Only for the last 10064 blocks |
+| `trace_rawTransaction`          | Only for the last 10064 blocks |
+| `trace_replayBlockTransactions` | Only for the last 10064 blocks |
+| `trace_replayTransaction`       | Only for the last 10064 blocks |
+| `trace_transaction`             | Only for the last 10064 blocks |
 
 #### `txpool` namespace
 

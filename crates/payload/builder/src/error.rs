@@ -13,7 +13,7 @@ use revm_primitives::Address;
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadBuilderError {
     /// Thrown whe the parent block is missing.
-    #[error("missing parent block {0:?}")]
+    #[error("missing parent block {0}")]
     MissingParentBlock(B256),
     /// An oneshot channels has been closed.
     #[error("sender has been dropped")]
@@ -25,7 +25,7 @@ pub enum PayloadBuilderError {
     #[error(transparent)]
     Internal(#[from] RethError),
     /// Unrecoverable error during evm execution.
-    #[error("evm execution error: {0:?}")]
+    #[error("evm execution error: {0}")]
     EvmExecutionError(EVMError<RethError>),
     /// Thrown if the payload requests withdrawals before Shanghai activation.
     #[error("withdrawals set before Shanghai activation")]

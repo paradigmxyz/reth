@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -145,10 +145,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                                 let sealed_header = provider
                                     .sealed_header(block_number)?
                                     .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
-                                return Err(StageError::Validation {
+                                return Err(StageError::Block {
                                     block: sealed_header,
-                                    error:
+                                    error: BlockErrorKind::Validation(
                                         consensus::ConsensusError::TransactionSignerRecoveryError,
+                                    ),
                                 })
                             }
                             SenderRecoveryStageError::StageError(err) => return Err(err),
@@ -227,14 +228,16 @@ fn stage_checkpoint<DB: Database>(
 #[error(transparent)]
 enum SenderRecoveryStageError {
     /// A transaction failed sender recovery
-    FailedRecovery(FailedSenderRecoveryError),
+    #[error(transparent)]
+    FailedRecovery(#[from] FailedSenderRecoveryError),
 
     /// A different type of stage error occurred
+    #[error(transparent)]
     StageError(#[from] StageError),
 }
 
 #[derive(Error, Debug)]
-#[error("Sender recovery failed for transaction {tx}.")]
+#[error("sender recovery failed for transaction {tx}")]
 struct FailedSenderRecoveryError {
     /// The transaction that failed sender recovery
     tx: TxNumber,

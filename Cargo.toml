@@ -51,6 +51,7 @@ members = [
     "examples/cli-extension-event-hooks",
     "examples/rpc-db",
     "examples/manual-p2p",
+    "examples/beacon-api-sse",
     "examples/trace-transaction-cli"
 ]
 default-members = ["bin/reth"]
@@ -110,8 +111,8 @@ reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
 reth-tokio-util = { path = "crates/tokio-util" }
 # revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "df44297bc3949dc9e0cec06594c62dd946708b2a" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "df44297bc3949dc9e0cec06594c62dd946708b2a" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "6ca6c08d37714cc6660ddfe5e542cdabace08962" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "6ca6c08d37714cc6660ddfe5e542cdabace08962" }
 
 ## eth
 alloy-primitives = "0.4"
@@ -122,7 +123,7 @@ ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
-discv5 = { git = "https://github.com/sigp/discv5", rev = "d2e30e04ee62418b9e57278cee907c02b99d5bd1" }
+discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
 igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
 
 ## js
