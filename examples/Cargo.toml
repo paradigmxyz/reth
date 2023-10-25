@@ -30,10 +30,6 @@ name = "db-access"
 path = "db-access.rs"
 
 [[example]]
-name = "count_opcodes"
-path = "count_opcodes.rs"
-
-[[example]]
 name = "network"
 path = "network.rs"
 

@@ -164,7 +164,7 @@ pub enum Commands<Ext: RethCliExt = ()> {
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command),
-
+    /// Script for counting opcodes occurrencies
     #[command(name = "count-opcodes")]
     CountOpcodes(count_opcodes::Command),
 }

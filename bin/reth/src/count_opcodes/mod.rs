@@ -1,18 +1,21 @@
+//! `reth count-opcodes` comamnd. Tool to count opcodes occurrencies.
 use crate::primitives::Bytes;
 use clap::Parser;
+use itertools::Itertools;
 use reth_db::{open_db_read_only, tables};
 use reth_primitives::ChainSpecBuilder;
 use reth_provider::ProviderFactory;
 use reth_revm::interpreter::{opcode, OpCode};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tracing::info;
-use itertools::Itertools;
 
 /// `reth count-opcodes` command
 #[derive(Debug, Parser)]
 pub struct Command {
+    /// The database path.
     #[arg(long, value_name = "DB_DIR", verbatim_doc_comment)]
     db_dir: PathBuf,
+    /// The top `take` opcodes to display.
     #[arg(long, value_name = "TAKE_SIZE", verbatim_doc_comment)]
     take: usize,
 }
@@ -35,7 +38,7 @@ impl Command {
 
         info!("start opcodes processing...");
         for (_address, bytecode) in bytecodes {
-            let filtered_bytes = filter_bytecode_bytes(&bytecode.bytes());
+            let filtered_bytes = filter_bytecode_bytes(bytecode.bytes());
             opcode_counter.count_sequences(&filtered_bytes);
         }
         info!("opcodes processing done!");
@@ -104,10 +107,12 @@ impl OpCodeCounter {
     fn print_counts(&self, size: usize) {
         println!("Single opcodes:");
         let opcodes_vec = self
-        .opcodes
-        .iter()
-        .map(|(k, v)| (opcode_or_invalid(*k), *v))
-        .sorted_by(|a, b| b.1.cmp(&a.1)).take(size).collect::<Vec<(OpCode, usize)>>();
+            .opcodes
+            .iter()
+            .map(|(k, v)| (opcode_or_invalid(*k), *v))
+            .sorted_by(|a, b| b.1.cmp(&a.1))
+            .take(size)
+            .collect::<Vec<(OpCode, usize)>>();
 
         for el in &opcodes_vec {
             println!("{}: {}", el.0, el.1);
@@ -118,21 +123,26 @@ impl OpCodeCounter {
             .tuple_opcodes
             .iter()
             .map(|(k, v)| (opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), *v))
-            .sorted_by(|a, b| b.2.cmp(&a.2)).take(size).collect::<Vec<(OpCode, OpCode, usize)>>();
+            .sorted_by(|a, b| b.2.cmp(&a.2))
+            .take(size)
+            .collect::<Vec<(OpCode, OpCode, usize)>>();
 
         println!("Tuple opcodes:");
         for el in &tuple_vec {
             println!("{} {}: {}", el.0, el.1, el.2);
         }
-       
-       
+
         println!("----------------------------------------------");
 
         let triplets_vec = self
             .triplets_opcodes
             .iter()
-            .map(|(k, v)| (opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), opcode_or_invalid(k[2]), *v))
-            .sorted_by(|a, b| b.3.cmp(&a.3)).take(size).collect::<Vec<(OpCode, OpCode, OpCode, usize)>>();
+            .map(|(k, v)| {
+                (opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), opcode_or_invalid(k[2]), *v)
+            })
+            .sorted_by(|a, b| b.3.cmp(&a.3))
+            .take(size)
+            .collect::<Vec<(OpCode, OpCode, OpCode, usize)>>();
 
         println!("Triplet opcodes:");
         for el in &triplets_vec {
@@ -149,9 +159,13 @@ impl OpCodeCounter {
                     opcode_or_invalid(k[0]),
                     opcode_or_invalid(k[1]),
                     opcode_or_invalid(k[2]),
-                    opcode_or_invalid(k[3]), * v,
+                    opcode_or_invalid(k[3]),
+                    *v,
                 )
-            }).sorted_by(|a, b| b.4.cmp(&a.4)).take(size).collect::<Vec<(OpCode, OpCode, OpCode, OpCode, usize)>>();
+            })
+            .sorted_by(|a, b| b.4.cmp(&a.4))
+            .take(size)
+            .collect::<Vec<(OpCode, OpCode, OpCode, OpCode, usize)>>();
 
         println!("Quadruplets opcodes:");
         for el in &quadruplets_vec {
@@ -165,7 +179,7 @@ fn opcode_or_invalid(opcode: u8) -> OpCode {
     if let Some(op) = OpCode::new(opcode) {
         op
     } else {
-            OpCode::new(0xFE).unwrap() // INVALID
+        OpCode::new(0xFE).unwrap() // INVALID
     }
 }
 
@@ -209,7 +223,7 @@ mod test {
     #[test]
     fn opcode_counter_tuples() {
         let test_bytecode = opcodes_tuples_test_string();
-        let bytecode = Bytecode::new_raw(hex::decode(&test_bytecode).unwrap().into());
+        let bytecode = Bytecode::new_raw(hex::decode(test_bytecode).unwrap().into());
         let filtered_bytes = filter_bytecode_bytes(bytecode.bytes());
 
         let mut opcode_counter = OpCodeCounter::new();
@@ -223,7 +237,7 @@ mod test {
 
     fn opcodes_tuples_test_string() -> String {
         let test_bytecode = "00"; // STOP
-        
+
         let test_bytecode = format!("{test_bytecode}01"); // ADD
         let test_bytecode = format!("{test_bytecode}02"); // MUL
         let test_bytecode = format!("{test_bytecode}01"); // ADD
