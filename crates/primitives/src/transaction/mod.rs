@@ -1,6 +1,6 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
-    keccak256, Address, Bytes, TxHash, B256,
+    keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256,
 };
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -1306,6 +1306,9 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
         self.clone()
     }
 }
+
+/// Either a transaction hash or number.
+pub type TxHashOrNumber = BlockHashOrNumber;
 
 #[cfg(test)]
 mod tests {
