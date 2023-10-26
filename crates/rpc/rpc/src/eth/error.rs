@@ -326,7 +326,12 @@ pub enum RpcInvalidTransactionError {
     BlobTransactionIsCreate,
     /// A deposit transaction was submitted as a system transaction post-regolith.
     #[error("no system transactions allowed after regolith")]
+    #[cfg(feature = "optimism")]
     DepositSystemTxPostRegolith,
+    /// A deposit transaction halted post-regolith
+    #[error("deposit transaction halted after regolith")]
+    #[cfg(feature = "optimism")]
+    HaltedDepositPostRegolith,
 }
 
 impl RpcInvalidTransactionError {
@@ -438,6 +443,10 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             #[cfg(feature = "optimism")]
             InvalidTransaction::DepositSystemTxPostRegolith => {
                 RpcInvalidTransactionError::DepositSystemTxPostRegolith
+            }
+            #[cfg(feature = "optimism")]
+            InvalidTransaction::HaltedDepositPostRegolith => {
+                RpcInvalidTransactionError::HaltedDepositPostRegolith
             }
         }
     }
