@@ -1,4 +1,4 @@
-use super::mask::{ColumnMaskOne, ColumnMaskThree, ColumnMaskTwo};
+use super::mask::{ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo};
 use crate::table::Decompress;
 use derive_more::{Deref, DerefMut};
 use reth_interfaces::{RethError, RethResult};
@@ -39,7 +39,7 @@ impl<'a> SnapshotCursor<'a> {
     }
 
     /// Gets one column value from a row.
-    pub fn get_one<M: ColumnMaskOne>(
+    pub fn get_one<M: ColumnSelectorOne>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
     ) -> RethResult<Option<M::T>> {
@@ -52,7 +52,7 @@ impl<'a> SnapshotCursor<'a> {
     }
 
     /// Gets two column values from a row.
-    pub fn get_two<M: ColumnMaskTwo>(
+    pub fn get_two<M: ColumnSelectorTwo>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
     ) -> RethResult<Option<(M::T, M::J)>> {
@@ -66,7 +66,7 @@ impl<'a> SnapshotCursor<'a> {
 
     /// Gets three column values from a row.
     #[allow(clippy::type_complexity)]
-    pub fn get_three<M: ColumnMaskThree>(
+    pub fn get_three<M: ColumnSelectorThree>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
     ) -> RethResult<Option<(M::T, M::J, M::K)>> {

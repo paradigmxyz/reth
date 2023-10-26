@@ -1,7 +1,7 @@
 use super::{ReceiptMask, TransactionMask};
 use crate::{
     add_snapshot_mask,
-    snapshot::mask::{ColumnMaskOne, ColumnMaskTwo, HeaderMask},
+    snapshot::mask::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask},
     table::Table,
     CanonicalHeaders, HeaderTD, Receipts, Transactions,
 };
