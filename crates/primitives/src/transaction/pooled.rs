@@ -582,15 +582,15 @@ mod tests {
     #[test]
     fn legacy_valid_pooled_decoding() {
         // d3 <- payload length, d3 - c0 = 0x13 = 19
-        // 0b
-        // 02
-        // 80
-        // 80
-        // 83 c5cdeb
-        // 87 83c5acfd9e407c
-        // 56
-        // 56
-        // 56
+        // 0b <- nonce
+        // 02 <- gas_price
+        // 80 <- gas_limit
+        // 80 <- to (Create)
+        // 83 c5cdeb <- value
+        // 87 83c5acfd9e407c <- input
+        // 56 <- v (eip155, so modified with a chain id)
+        // 56 <- r
+        // 56 <- s
         let data = &hex!("d30b02808083c5cdeb8783c5acfd9e407c565656")[..];
 
         let input_rlp = &mut &data[..];
