@@ -966,7 +966,7 @@ struct GetPooledTxRequest {
 struct GetPooledTxResponse {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes
-    request: Vec<TxHash>,
+    requested_hashes: Vec<TxHash>,
     result: Result<RequestResult<PooledTransactions>, RecvError>,
 }
 
@@ -1002,7 +1002,7 @@ impl Future for GetPooledTxRequestFut {
 
                 Poll::Ready(GetPooledTxResponse {
                     peer_id: req.peer_id,
-                    request: request_hashes,
+                    requested_hashes: request_hashes,
                     result,
                 })
             }
@@ -1062,7 +1062,7 @@ impl TransactionFetcher {
 
     /// Advances all inflight requests and returns the next event.
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchEvent> {
-        if let Poll::Ready(Some(GetPooledTxResponse { peer_id, request, result })) =
+        if let Poll::Ready(Some(GetPooledTxResponse { peer_id, requested_hashes, result })) =
             self.inflight_requests.poll_next_unpin(cx)
         {
             return match result {
@@ -1073,7 +1073,7 @@ impl TransactionFetcher {
 
                     // check if we need to re-request any of the hashes missing from the
                     // response but present in the request
-                    let missing_hashes: Vec<TxHash> = request
+                    let missing_hashes: Vec<TxHash> = requested_hashes
                         .iter()
                         .filter(|&&hash| !received_hashes.contains(&hash))
                         .cloned()
@@ -1087,13 +1087,13 @@ impl TransactionFetcher {
                     })
                 }
                 Ok(Err(req_err)) => {
-                    self.remove_inflight_hashes(&request);
-                    self.re_request_hashes(request, peer_id);
+                    self.remove_inflight_hashes(&requested_hashes);
+                    self.re_request_hashes(requested_hashes, peer_id);
                     Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
                 }
                 Err(_) => {
-                    self.remove_inflight_hashes(&request);
-                    self.re_request_hashes(request, peer_id);
+                    self.remove_inflight_hashes(&requested_hashes);
+                    self.re_request_hashes(requested_hashes, peer_id);
                     // request channel closed/dropped
                     Poll::Ready(FetchEvent::FetchError {
                         peer_id,
