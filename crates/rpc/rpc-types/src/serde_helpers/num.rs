@@ -9,7 +9,7 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 ///
 ///
 /// ```rust
-/// use crate::serde_helpers::num::U64HexOrNumber;
+/// use reth_rpc_types::serde_helpers::num::U64HexOrNumber;
 /// let number_json = "100";
 /// let hex_json = "\"0x64\"";
 ///

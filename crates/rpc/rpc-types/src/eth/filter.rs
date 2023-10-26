@@ -282,7 +282,7 @@ impl Filter {
     /// Match the latest block only
     ///
     /// ```rust
-    /// # use reth_primitives::BlockNumberOrTag;
+    /// # use reth_rpc_types::BlockNumberOrTag;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
     /// let filter = Filter::new().select(BlockNumberOrTag::Latest);

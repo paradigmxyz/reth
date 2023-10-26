@@ -1,4 +1,4 @@
-//! Compat utilities for [NodeRecord]s.
+//! Compat utilities for NodeRecords.
 
 /// Convert from [reth_primitives::NodeRecord] to [reth_rpc_types::NodeRecord]
 pub fn from_primitive_node_record(
