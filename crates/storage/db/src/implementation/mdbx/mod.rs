@@ -37,6 +37,7 @@ pub enum EnvKind {
 pub struct Env<E: EnvironmentKind> {
     /// Libmdbx-sys environment.
     pub inner: Environment<E>,
+    /// Whether to record metrics or not.
     with_metrics: bool,
 }
 

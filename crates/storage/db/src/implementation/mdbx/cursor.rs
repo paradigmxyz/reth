@@ -28,6 +28,7 @@ pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     pub(crate) inner: reth_libmdbx::Cursor<'tx, K>,
     /// Cache buffer that receives compressed values.
     buf: Vec<u8>,
+    /// Whether to record metrics or not.
     with_metrics: bool,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
@@ -41,6 +42,10 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         Self { inner, buf: Vec::new(), with_metrics, _dbi: PhantomData }
     }
 
+    /// If `self.with_metrics == true`, measure the time it takes to execute the closure and record
+    /// a metric with the provided operation.
+    ///
+    /// Otherwise, just execute the closure.
     fn execute_with_operation_metric<R>(
         &mut self,
         operation: Operation,

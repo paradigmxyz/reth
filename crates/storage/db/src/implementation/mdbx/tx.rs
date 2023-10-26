@@ -86,6 +86,10 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         Ok(Cursor::new_with_metrics(inner, self.metrics_handler.is_some()))
     }
 
+    /// If `self.metrics_handler == Some(_)`, measure the time it takes to execute the closure and
+    /// record a metric with the provided transaction outcome.
+    ///
+    /// Otherwise, just execute the closure.
     fn execute_with_close_transaction_metric<R>(
         mut self,
         outcome: TransactionOutcome,
@@ -112,6 +116,10 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         }
     }
 
+    /// If `self.metrics_handler == Some(_)`, measure the time it takes to execute the closure and
+    /// record a metric with the provided operation.
+    ///
+    /// Otherwise, just execute the closure.
     fn execute_with_operation_metric<T: Table, R>(
         &self,
         operation: Operation,
