@@ -42,7 +42,7 @@ pub enum ProviderError {
     /// when required header related data was not found but was required.
     #[error("no header found for {0:?}")]
     HeaderNotFound(BlockHashOrNumber),
-     /// The specific transaction is missing.
+    /// The specific transaction is missing.
     #[error("no transaction found for {0:?}")]
     TransactionNotFound(TxHashOrNumber),
     /// The specific receipt is missing
