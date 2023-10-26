@@ -10,11 +10,12 @@ use crate::eth::{
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
+use std::fmt::{self, Debug, Formatter};
 use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64, SealedHeader,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -29,6 +30,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{oneshot, Mutex};
+use derive_more::{Deref, DerefMut};
+use schnellru::{ByLength, LruMap};
 
 mod block;
 mod call;
@@ -41,6 +44,8 @@ mod transactions;
 
 use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
+
+use super::revm_utils::FillableTransaction;
 
 /// `Eth` API trait.
 ///
@@ -137,6 +142,9 @@ where
             task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
+            fee_history_cache: Mutex::new(FeeHistoryLruCache(LruMap::new(ByLength::new(
+               1024, 
+            ))))
         };
         Self { inner: Arc::new(inner) }
     }
@@ -189,6 +197,11 @@ where
     /// Returns the inner `Pool`
     pub fn pool(&self) -> &Pool {
         &self.inner.pool
+    }
+
+    /// Returns fee history cache
+    pub fn fee_history_cache(&self) -> &Mutex<FeeHistoryLruCache> {
+        &self.inner.fee_history_cache
     }
 }
 
@@ -438,4 +451,45 @@ struct EthApiInner<Provider, Pool, Network> {
     pending_block: Mutex<Option<PendingBlock>>,
     /// A pool dedicated to blocking tasks.
     blocking_task_pool: BlockingTaskPool,
+    /// Cache for block fees history
+    fee_history_cache: Mutex<FeeHistoryLruCache>,
 }
+
+
+/// The type that contains fees data for associated block in cache
+#[derive(Clone, Debug)]
+pub struct BlockFees {
+    /// Block data on bas_fee_per_gas
+    pub base_fee_per_gas: u64,
+    /// Precalculated ratio
+    pub gas_used_ratio: f64,
+    /// Block data on gas_used
+    pub gas_used: u64,
+    /// Block data on gas_limit
+    pub gas_limit: u64,
+}
+
+impl BlockFees {
+    fn from_header(header: SealedHeader) -> BlockFees {
+        BlockFees {
+            base_fee_per_gas: header.base_fee_per_gas.unwrap_or_default(),
+            gas_used_ratio: header.gas_used as f64 / header.gas_limit as f64,
+            gas_used: header.gas_used,
+            gas_limit: header.gas_limit,
+        }
+    }
+}
+
+/// Wrapper struct for LruMap
+#[derive(Deref, DerefMut)]
+pub struct FeeHistoryLruCache(LruMap<B256, BlockFees, ByLength>);
+
+impl Debug for FeeHistoryLruCache {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FeeHistoryLruCache")
+            .field("cache_length", &self.len())
+            .field("cache_memory_usage", &self.memory_usage())
+            .finish()
+    }
+}
+

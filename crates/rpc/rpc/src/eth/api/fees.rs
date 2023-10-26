@@ -5,9 +5,9 @@ use crate::{
     EthApi,
 };
 
-use crate::eth::cache::BlockFees;
+use crate::eth::api::{BlockFees};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256};
+use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256, B256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
@@ -48,6 +48,8 @@ where
             return Ok(FeeHistory::default())
         }
 
+        let mut fee_history_cache = self.inner.fee_history_cache.lock().await;
+
         // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
         let max_fee_history = if reward_percentiles.is_none() {
             self.gas_oracle().config().max_header_history
@@ -67,13 +69,14 @@ where
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
             return Err(EthApiError::UnknownBlockNumber)
         };
-
+        
         // need to add 1 to the end block to get the correct (inclusive) range
         let end_block_plus = end_block + 1;
         // Ensure that we would not be querying outside of genesis
         if end_block_plus < block_count {
             block_count = end_block_plus;
         }
+
 
         // If reward percentiles were specified, we  + schnellru::Limiter<u64,
         // reth_primitives::Header>need to validate that they are monotonically
@@ -106,23 +109,40 @@ where
         }
         let mut last_block = LastBlock { gas_used: 0, gas_limit: 0, base_fee_per_gas: 0 };
 
-        for n in start_block..end_block_plus {
-            let block_fees =
-                self.cache().get_fee_history(n).await?.ok_or(EthApiError::InternalEthError)?;
+        let end_block_header = self.provider().sealed_header(end_block)?.unwrap();
+        let mut current_hash = end_block_header.hash; 
+        let mut parrent_hash = end_block_header.parent_hash;
+        for n in (start_block..end_block).rev() {
+            let block_fees: BlockFees;
 
-            if n == end_block_plus {
+            if let Some(cached_block_fees) = fee_history_cache.get(&current_hash) {
+                    block_fees = cached_block_fees.to_owned();
+                } else {
+                    let current_header = self
+                        .provider().sealed_header(n)?.unwrap();
+
+                    parrent_hash = current_header.parent_hash;
+                    block_fees = BlockFees::from_header(current_header.clone());
+                    fee_history_cache 
+                        .insert(current_hash, block_fees.clone());
+                };
+
+
+            if n == end_block {
                 last_block.gas_used = block_fees.gas_used;
                 last_block.gas_limit = block_fees.gas_limit;
                 last_block.base_fee_per_gas = block_fees.base_fee_per_gas;
             }
 
-            base_fee_per_gas.push(U256::try_from(block_fees.base_fee_per_gas).unwrap());
-            gas_used_ratio.push(block_fees.gas_used_ratio);
+            base_fee_per_gas.push(U256::try_from(block_fees.base_fee_per_gas.clone()).unwrap());
+            gas_used_ratio.push(block_fees.gas_used_ratio.clone());
 
             // Percentiles were specified, so we need to collect reward percentile ino
             if let Some(percentiles) = &reward_percentiles {
-                rewards.push(self.calculate_reward_percentiles(percentiles, &block_fees).await?);
+                rewards.push(self.calculate_reward_percentiles(percentiles, current_hash.clone(), &block_fees).await?);
             }
+
+            current_hash = parrent_hash;
         }
 
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
@@ -138,7 +158,10 @@ where
             last_block.base_fee_per_gas,
             chain_spec.base_fee_params,
         )));
-
+        
+        base_fee_per_gas.reverse();
+        gas_used_ratio.reverse();
+        
         Ok(FeeHistory {
             base_fee_per_gas,
             gas_used_ratio,
@@ -155,11 +178,12 @@ where
     async fn calculate_reward_percentiles(
         &self,
         percentiles: &[f64],
+        header_hash: B256,
         block_fees: &BlockFees,
     ) -> Result<Vec<U256>, EthApiError> {
         let (transactions, receipts) = self
             .cache()
-            .get_transactions_and_receipts(block_fees.block_hash)
+            .get_transactions_and_receipts(header_hash)
             .await?
             .ok_or(EthApiError::InvalidBlockRange)?;
 
