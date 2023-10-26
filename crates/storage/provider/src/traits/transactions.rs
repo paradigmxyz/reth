@@ -1,10 +1,10 @@
-use crate::BlockNumReader;
-use reth_interfaces::RethResult;
+use crate::{BlockNumReader, BlockReader};
+use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{
     Address, BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber,
 };
-use std::ops::RangeBounds;
+use std::ops::{Range, RangeBounds, RangeInclusive};
 
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
@@ -62,4 +62,32 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
     ///
     /// Returns None if the transaction is not found.
     fn transaction_sender(&self, id: TxNumber) -> RethResult<Option<Address>>;
+}
+
+///  Client trait for fetching additional [TransactionSigned] related data.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait TransactionsProviderExt: BlockReader + Send + Sync {
+    /// Get transactions range by block range.
+    fn transaction_range_by_block_range(
+        &self,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> RethResult<RangeInclusive<TxNumber>> {
+        let from = self
+            .block_body_indices(*block_range.start())?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(*block_range.start()))?
+            .first_tx_num();
+
+        let to = self
+            .block_body_indices(*block_range.end())?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(*block_range.end()))?
+            .last_tx_num();
+
+        Ok(from..=to)
+    }
+
+    /// Get transaction hashes from a transaction range.
+    fn transaction_hashes_by_range(
+        &self,
+        tx_range: Range<TxNumber>,
+    ) -> RethResult<Vec<(TxHash, TxNumber)>>;
 }

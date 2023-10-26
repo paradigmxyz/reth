@@ -37,7 +37,7 @@ pub use state::{
 };
 
 mod transactions;
-pub use transactions::TransactionsProvider;
+pub use transactions::{TransactionsProvider, TransactionsProviderExt};
 
 mod withdrawals;
 pub use withdrawals::WithdrawalsProvider;

@@ -32,6 +32,7 @@ thiserror.workspace = true
 jsonrpsee-types.workspace = true
 jsonrpsee-core.workspace = true
 tracing.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 alloy-rlp.workspace = true
