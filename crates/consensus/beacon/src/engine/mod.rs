@@ -72,6 +72,7 @@ pub use handle::BeaconConsensusEngineHandle;
 mod forkchoice;
 use crate::hooks::{EngineHookEvent, EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
+use reth_interfaces::blockchain_tree::BlockValidationKind;
 
 mod metrics;
 
@@ -1294,7 +1295,9 @@ where
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
         let block_hash = block.hash;
-        let status = self.blockchain.insert_block_without_senders(block.clone())?;
+        let status = self
+            .blockchain
+            .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive)?;
         let mut latest_valid_hash = None;
         let block = Arc::new(block);
         let status = match status {
@@ -1415,7 +1418,10 @@ where
             return
         }
 
-        match self.blockchain.insert_block_without_senders(block) {
+        match self
+            .blockchain
+            .insert_block_without_senders(block, BlockValidationKind::SkipStateRootValidation)
+        {
             Ok(status) => {
                 match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
