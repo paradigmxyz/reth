@@ -7,7 +7,7 @@ use crate::{
     header::Head,
     proofs::genesis_state_root,
     Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
-    SealedHeader, B256, EMPTY_OMMER_ROOT, U256,
+    SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use once_cell::sync::Lazy;
 use revm_primitives::{address, b256};
@@ -370,7 +370,7 @@ impl ChainSpec {
             parent_hash: B256::ZERO,
             number: 0,
             transactions_root: EMPTY_TRANSACTIONS,
-            ommers_hash: EMPTY_OMMER_ROOT,
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             receipts_root: EMPTY_RECEIPTS,
             logs_bloom: Default::default(),
             gas_limit: self.genesis.gas_limit,
@@ -1444,7 +1444,7 @@ Post-merge hard forks (timestamp based):
         // technically unecessary - but we include it here for thoroughness
         let fork_cond_block_only_case = ChainSpec::builder()
             .chain(Chain::mainnet())
-            .genesis(empty_genesis.clone())
+            .genesis(empty_genesis)
             .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
             .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
             .build();
@@ -1959,7 +1959,7 @@ Post-merge hard forks (timestamp based):
                 timestamp + 1,
             ),
             (
-                construct_chainspec(default_spec_builder.clone(), timestamp + 1, timestamp + 2),
+                construct_chainspec(default_spec_builder, timestamp + 1, timestamp + 2),
                 timestamp + 1,
             ),
         ];

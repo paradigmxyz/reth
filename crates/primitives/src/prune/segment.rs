@@ -43,10 +43,10 @@ impl PruneSegment {
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum PruneSegmentError {
     /// Invalid configuration of a prune segment.
-    #[error("The configuration provided for {0} is invalid.")]
+    #[error("the configuration provided for {0} is invalid")]
     Configuration(PruneSegment),
     /// Receipts have been pruned
-    #[error("Receipts have been pruned")]
+    #[error("receipts have been pruned")]
     ReceiptsPruned,
 }
 

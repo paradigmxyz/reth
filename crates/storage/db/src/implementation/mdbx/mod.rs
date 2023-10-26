@@ -49,14 +49,14 @@ impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
 impl<E: EnvironmentKind> Database for Env<E> {
     fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
         Ok(Tx::new_with_metrics(
-            self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?,
+            self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.with_metrics,
         ))
     }
 
     fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
         Ok(Tx::new_with_metrics(
-            self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?,
+            self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.with_metrics,
         ))
     }
@@ -125,7 +125,7 @@ impl<E: EnvironmentKind> Env<E> {
         }
 
         let env = Env {
-            inner: inner_env.open(path).map_err(|e| DatabaseError::FailedToOpen(e.into()))?,
+            inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             with_metrics: false,
         };
 
@@ -140,7 +140,7 @@ impl<E: EnvironmentKind> Env<E> {
 
     /// Creates all the defined tables, if necessary.
     pub fn create_tables(&self) -> Result<(), DatabaseError> {
-        let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTransaction(e.into()))?;
+        let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
 
         for table in Tables::ALL {
             let flags = match table.table_type() {
@@ -149,7 +149,7 @@ impl<E: EnvironmentKind> Env<E> {
             };
 
             tx.create_db(Some(table.name()), flags)
-                .map_err(|e| DatabaseError::TableCreation(e.into()))?;
+                .map_err(|e| DatabaseError::CreateTable(e.into()))?;
         }
 
         tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
