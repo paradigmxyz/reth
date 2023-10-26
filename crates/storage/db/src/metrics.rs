@@ -96,11 +96,14 @@ pub(crate) struct TransactionMetrics {
 }
 
 impl TransactionMetrics {
+    /// Record transaction opening.
     pub(crate) fn record_open(mode: TransactionMode) {
         let metrics = Self::new_with_labels(&[(Labels::TransactionMode.as_str(), mode.as_str())]);
         metrics.open_total.increment(1.0);
     }
 
+    /// Record transaction closing with the duration it was open and the duration it took to close
+    /// it.
     pub(crate) fn record_close(
         mode: TransactionMode,
         outcome: TransactionOutcome,
@@ -127,11 +130,12 @@ impl TransactionMetrics {
 pub(crate) struct OperationMetrics {
     /// Total number of database operations made
     calls_total: Counter,
-    /// Database operation duration
+    /// The time it took to execute a database operation
     duration_seconds: Histogram,
 }
 
 impl OperationMetrics {
+    /// Record operation metric with the duration it took to execute.
     pub(crate) fn record(table: &'static str, operation: Operation, duration: Duration) {
         let metrics = Self::new_with_labels(&[
             (Labels::Table.as_str(), table),

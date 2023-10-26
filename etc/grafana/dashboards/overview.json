@@ -539,7 +539,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(rate(reth_database_transaction_close_duration_seconds_sum{instance=~\"$instance\", outcome = \"commit\"}[$__rate_interval]) / rate(reth_database_transaction_close_duration_seconds_count{instance=~\"$instance\", outcome=\"commit\"}[$__rate_interval]))",
+          "expr": "sum(rate(reth_database_transaction_close_duration_seconds_sum{instance=~\"$instance\", outcome=\"commit\"}[$__rate_interval]) / rate(reth_database_transaction_close_duration_seconds_count{instance=~\"$instance\", outcome=\"commit\"}[$__rate_interval]))",
           "format": "time_series",
           "instant": false,
           "legendFormat": "Commit time",
@@ -725,7 +725,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(rate(reth_database_transaction_open_duration_seconds_sum{instance=~\"$instance\"}[$__rate_interval]) / rate(reth_database_transaction_open_duration_seconds_count{instance=~\"$instance\"}[$__rate_interval])) by (outcome, mode)",
+          "expr": "sum(rate(reth_database_transaction_open_duration_seconds_sum{instance=~\"$instance\", outcome!=\"\"}[$__rate_interval]) / rate(reth_database_transaction_open_duration_seconds_count{instance=~\"$instance\", outcome!=\"\"}[$__rate_interval])) by (outcome, mode)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{mode}}, {{outcome}}",
@@ -825,7 +825,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_database_transaction_open_duration_seconds{instance=~\"$instance\", quantile=\"1\"}[$__interval])) by (outcome, mode)",
+          "expr": "sum(increase(reth_database_transaction_open_duration_seconds{instance=~\"$instance\", outcome!=\"\", quantile=\"1\"}[$__interval])) by (outcome, mode)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{mode}}, {{outcome}}",
@@ -925,7 +925,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(reth_database_open_transactions_total{instance=~\"$instance\"}) by (mode)",
+          "expr": "sum(reth_database_transaction_open_total{instance=~\"$instance\"}) by (mode)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{mode}}",
@@ -1733,8 +1733,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1827,8 +1826,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1946,8 +1944,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2251,8 +2248,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",

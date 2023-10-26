@@ -22,6 +22,10 @@ pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     pub inner: Transaction<'a, K, E>,
     /// Database table handle cache.
     pub(crate) db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
+    /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
+    /// closed by [Tx::commit] or [Tx::abort], but we still need to report it in the metrics.
+    ///
+    /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
 }
 
