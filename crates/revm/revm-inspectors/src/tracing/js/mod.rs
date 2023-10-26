@@ -274,8 +274,7 @@ impl JsInspector {
         if !self.precompiles_registered {
             return
         }
-        let precompiles =
-            PrecompileList(precompiles.addresses().into_iter().map(Into::into).collect());
+        let precompiles = PrecompileList(precompiles.addresses().into_iter().copied().collect());
 
         let _ = precompiles.register_callable(&mut self.ctx);
 
