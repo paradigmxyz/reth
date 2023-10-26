@@ -345,6 +345,7 @@ impl Decodable for PooledTransactionsElement {
         } else {
             // decode the type byte, only decode BlobTransaction if it is a 4844 transaction
             let tx_type = *buf.first().ok_or(RlpError::InputTooShort)?;
+            let remaining_len = buf.len();
 
             if tx_type == EIP4844_TX_TYPE_ID {
                 // Recall that the blob transaction response `TranactionPayload` is encoded like
@@ -362,11 +363,24 @@ impl Decodable for PooledTransactionsElement {
                 // Now, we decode the inner blob transaction:
                 // `rlp([[chain_id, nonce, ...], blobs, commitments, proofs])`
                 let blob_tx = BlobTransaction::decode_inner(buf)?;
+
+                // check that the bytes consumed match the payload length
+                let bytes_consumed = remaining_len - buf.len();
+                if bytes_consumed != header.payload_length {
+                    return Err(RlpError::UnexpectedLength)
+                }
+
                 Ok(PooledTransactionsElement::BlobTransaction(blob_tx))
             } else {
                 // DO NOT advance the buffer for the type, since we want the enveloped decoding to
                 // decode it again and advance the buffer on its own.
                 let typed_tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
+
+                // check that the bytes consumed match the payload length
+                let bytes_consumed = remaining_len - buf.len();
+                if bytes_consumed != header.payload_length {
+                    return Err(RlpError::UnexpectedLength)
+                }
 
                 // because we checked the tx type, we can be sure that the transaction is not a
                 // blob transaction or legacy

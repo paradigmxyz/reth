@@ -1040,6 +1040,8 @@ impl TransactionSigned {
             return Err(RlpError::Custom("typed tx fields must be encoded as a list"))
         }
 
+        let remaining_len = data.len();
+
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
         let tx_length = 1 + header.length() + header.payload_length;
 
@@ -1052,6 +1054,11 @@ impl TransactionSigned {
         };
 
         let signature = Signature::decode(data)?;
+
+        let bytes_consumed = remaining_len - data.len();
+        if bytes_consumed != header.payload_length {
+            return Err(RlpError::UnexpectedLength)
+        }
 
         let hash = keccak256(&original_encoding[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };
