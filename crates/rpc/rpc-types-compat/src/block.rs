@@ -2,7 +2,9 @@
 
 use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
-use reth_primitives::{Block as PrimitiveBlock, Header as PrimitiveHeader, B256, U256, U64};
+use reth_primitives::{
+    Block as PrimitiveBlock, BlockNumberOrTag, Header as PrimitiveHeader, B256, U256, U64,
+};
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
 /// Converts the given primitive block into a [Block] response with the given
@@ -85,6 +87,87 @@ pub fn from_block_full(
     ))
 }
 
+/// Converts from a [reth_primitives::BlockId] to a [reth_rpc_types::BlockId]
+pub fn from_primitive_block_id(block_id: reth_primitives::BlockId) -> reth_rpc_types::BlockId {
+    match block_id {
+        reth_primitives::BlockId::Hash(hash) => {
+            reth_rpc_types::BlockId::Hash(reth_rpc_types::RpcBlockHash {
+                block_hash: hash.block_hash,
+                require_canonical: hash.require_canonical,
+            })
+        }
+        reth_primitives::BlockId::Number(number) => match number {
+            BlockNumberOrTag::Earliest => {
+                reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Earliest)
+            }
+            BlockNumberOrTag::Latest => {
+                reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Latest)
+            }
+            BlockNumberOrTag::Pending => {
+                reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Pending)
+            }
+            BlockNumberOrTag::Finalized => {
+                reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Finalized)
+            }
+            BlockNumberOrTag::Safe => {
+                reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Safe)
+            }
+            BlockNumberOrTag::Number(number) => {
+                reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Number(number))
+            }
+        },
+    }
+}
+
+/// Converts from a [reth_rpc_types::BlockId] to a [reth_primitives::BlockId]
+pub fn to_primitive_block_id(block_id: reth_rpc_types::BlockId) -> reth_primitives::BlockId {
+    match block_id {
+        reth_rpc_types::BlockId::Hash(hash) => {
+            reth_primitives::BlockId::Hash(reth_primitives::RpcBlockHash {
+                block_hash: hash.block_hash,
+                require_canonical: hash.require_canonical,
+            })
+        }
+        reth_rpc_types::BlockId::Number(number) => match number {
+            reth_rpc_types::BlockNumberOrTag::Earliest => {
+                reth_primitives::BlockId::Number(reth_primitives::BlockNumberOrTag::Earliest)
+            }
+            reth_rpc_types::BlockNumberOrTag::Latest => {
+                reth_primitives::BlockId::Number(reth_primitives::BlockNumberOrTag::Latest)
+            }
+            reth_rpc_types::BlockNumberOrTag::Pending => {
+                reth_primitives::BlockId::Number(reth_primitives::BlockNumberOrTag::Pending)
+            }
+            reth_rpc_types::BlockNumberOrTag::Finalized => {
+                reth_primitives::BlockId::Number(reth_primitives::BlockNumberOrTag::Finalized)
+            }
+            reth_rpc_types::BlockNumberOrTag::Safe => {
+                reth_primitives::BlockId::Number(reth_primitives::BlockNumberOrTag::Safe)
+            }
+            reth_rpc_types::BlockNumberOrTag::Number(number) => {
+                reth_primitives::BlockId::Number(reth_primitives::BlockNumberOrTag::Number(number))
+            }
+        },
+    }
+}
+
+/// Converts from a [reth_rpc_types::BlockNumberOrTag] to a [reth_primitives::BlockNumberOrTag]
+pub fn to_primitive_block_number_or_tag(
+    block_id: reth_rpc_types::BlockNumberOrTag,
+) -> reth_primitives::BlockNumberOrTag {
+    match block_id {
+        reth_rpc_types::BlockNumberOrTag::Earliest => reth_primitives::BlockNumberOrTag::Earliest,
+        reth_rpc_types::BlockNumberOrTag::Latest => reth_primitives::BlockNumberOrTag::Latest,
+        reth_rpc_types::BlockNumberOrTag::Pending => reth_primitives::BlockNumberOrTag::Pending,
+        reth_rpc_types::BlockNumberOrTag::Finalized => reth_primitives::BlockNumberOrTag::Finalized,
+        reth_rpc_types::BlockNumberOrTag::Safe => reth_primitives::BlockNumberOrTag::Safe,
+        reth_rpc_types::BlockNumberOrTag::Number(number) => {
+            reth_primitives::BlockNumberOrTag::Number(number)
+        }
+    }
+}
+
+/// Converts from a [reth_primitives::SealedHeader] to a [reth_rpc_types::BlockNumberOrTag]
 pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader) -> Header {
     let reth_primitives::SealedHeader {
         header:
@@ -138,7 +221,9 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
     }
 }
 
-fn from_primitive_withdrawal(withdrawal: reth_primitives::Withdrawal) -> reth_rpc_types::Withdrawal {
+fn from_primitive_withdrawal(
+    withdrawal: reth_primitives::Withdrawal,
+) -> reth_rpc_types::Withdrawal {
     reth_rpc_types::Withdrawal {
         index: withdrawal.validator_index,
         address: withdrawal.address,
@@ -157,7 +242,13 @@ fn from_block_with_transactions(
 ) -> Block {
     let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
     let header = from_primitive_with_hash(block.header.seal(block_hash));
-    let withdrawals = if header.withdrawals_root.is_some() { block.withdrawals.map(|withdrawals| withdrawals.into_iter().map(|w| from_primitive_withdrawal(w)).collect()) } else { None };
+    let withdrawals = if header.withdrawals_root.is_some() {
+        block
+            .withdrawals
+            .map(|withdrawals| withdrawals.into_iter().map(from_primitive_withdrawal).collect())
+    } else {
+        None
+    };
     Block {
         header,
         uncles,
