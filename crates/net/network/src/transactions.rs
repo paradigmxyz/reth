@@ -592,10 +592,14 @@ where
             }
             TransactionsCommand::TransactionsHandle { peer_id, requested_hashes, result } => {
                 if let Some(peer) = self.peers.get(&peer_id) {
-                    match peer.request_tx.send(RequestMessage::GetTransactions(requested_hashes)).await {
+                    match peer
+                        .request_tx
+                        .send(RequestMessage::GetTransactions(requested_hashes))
+                        .await
+                    {
                         Ok(transactions) => {
                             let _ = result.send(Ok(RequestResult::Fulfilled(transactions)));
-                        },
+                        }
                         Err(e) => {
                             let _ = result.send(Err(e));
                         }
