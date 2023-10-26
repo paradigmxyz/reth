@@ -506,7 +506,7 @@ pub struct MmapHandle {
 }
 
 impl MmapHandle {
-    pub fn new(path: PathBuf) -> Result<Self, NippyJarError> {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, NippyJarError> {
         let file = File::open(path)?;
 
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
