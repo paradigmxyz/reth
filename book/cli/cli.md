@@ -77,7 +77,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /Users/shekhirin/Library/Caches/reth/logs]
+          [default: /reth/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
