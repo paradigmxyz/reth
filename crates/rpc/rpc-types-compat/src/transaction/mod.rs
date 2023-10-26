@@ -132,6 +132,20 @@ fn fill(
     }
 }
 
+/// Convert [reth_primitives::AccessList] to [reth_rpc_types::AccessList]
+pub fn from_primitive_access_list(access_list: reth_primitives::AccessList) -> reth_rpc_types::AccessList {
+    reth_rpc_types::AccessList(
+        access_list
+            .0
+            .into_iter()
+            .map(|item| reth_rpc_types::AccessListItem {
+                address: item.address.0.into(),
+                storage_keys: item.storage_keys.into_iter().map(|key| key.0.into()).collect(),
+            })
+            .collect(),
+    )
+}
+
 /// Convert [TransactionSignedEcRecovered] to [CallRequest]
 pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequest {
     let from = tx.signer();
@@ -141,7 +155,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequ
     let input = tx.transaction.input().clone();
     let nonce = tx.transaction.nonce();
     let chain_id = tx.transaction.chain_id();
-    let access_list = tx.transaction.access_list().cloned();
+    let access_list = tx.transaction.access_list().cloned().map(|access_list| from_primitive_access_list(access_list));
     let max_fee_per_blob_gas = tx.transaction.max_fee_per_blob_gas();
     let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
     let tx_type = tx.transaction.tx_type();
