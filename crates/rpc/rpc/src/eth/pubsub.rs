@@ -294,7 +294,9 @@ where
                 .committed()
                 .map(|chain| chain.headers().collect::<Vec<_>>())
                 .unwrap_or_default();
-            futures::stream::iter(headers.into_iter().map(Header::from_primitive_with_hash))
+            futures::stream::iter(
+                headers.into_iter().map(reth_rpc_types_compat::block::from_primitive_with_hash),
+            )
         })
     }
 

@@ -15,6 +15,7 @@ use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
+use reth_rpc_types_compat::block::to_primitive_block_number_or_tag;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -167,11 +168,19 @@ where
                 let (from_block_number, to_block_number) = match filter.block_option {
                     FilterBlockOption::Range { from_block, to_block } => {
                         let from = from_block
-                            .map(|num| self.inner.provider.convert_block_number(num))
+                            .map(|num| {
+                                self.inner
+                                    .provider
+                                    .convert_block_number(to_primitive_block_number_or_tag(num))
+                            })
                             .transpose()?
                             .flatten();
                         let to = to_block
-                            .map(|num| self.inner.provider.convert_block_number(num))
+                            .map(|num| {
+                                self.inner
+                                    .provider
+                                    .convert_block_number(to_primitive_block_number_or_tag(num))
+                            })
                             .transpose()?
                             .flatten();
                         logs_utils::get_filter_block_range(from, to, start_block, info)
@@ -348,11 +357,15 @@ where
                 // we start at the most recent block if unset in filter
                 let start_block = info.best_number;
                 let from = from_block
-                    .map(|num| self.provider.convert_block_number(num))
+                    .map(|num| {
+                        self.provider.convert_block_number(to_primitive_block_number_or_tag(num))
+                    })
                     .transpose()?
                     .flatten();
                 let to = to_block
-                    .map(|num| self.provider.convert_block_number(num))
+                    .map(|num| {
+                        self.provider.convert_block_number(to_primitive_block_number_or_tag(num))
+                    })
                     .transpose()?
                     .flatten();
                 let (from_block_number, to_block_number) =

@@ -7,6 +7,7 @@ use reth_primitives::{
 };
 use reth_rpc_types::TypedTransactionRequest;
 
+use reth_rpc_types_compat::transaction::to_primitive_transaction;
 use secp256k1::SecretKey;
 use std::collections::HashMap;
 
@@ -78,7 +79,8 @@ impl EthSigner for DevSigner {
         address: &Address,
     ) -> Result<TransactionSigned> {
         // convert to primitive transaction
-        let transaction = request.into_transaction().ok_or(SignError::InvalidTransactionRequest)?;
+        let transaction =
+            to_primitive_transaction(request).ok_or(SignError::InvalidTransactionRequest)?;
         let tx_signature_hash = transaction.signature_hash();
         let signature = self.sign_hash(tx_signature_hash, *address)?;
 

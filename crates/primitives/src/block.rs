@@ -710,6 +710,7 @@ pub struct RpcBlockHash {
 }
 
 impl RpcBlockHash {
+    /// Creates a new [RpcBlockHash] from a block hash and an optional `require_canonical` flag.
     pub fn from_hash(block_hash: B256, require_canonical: Option<bool>) -> Self {
         RpcBlockHash { block_hash, require_canonical }
     }

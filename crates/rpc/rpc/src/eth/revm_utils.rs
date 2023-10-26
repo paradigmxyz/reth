@@ -3,7 +3,7 @@
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
     revm::env::{fill_tx_env, fill_tx_env_with_recovered},
-    AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
+    Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
@@ -309,7 +309,9 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         value: value.unwrap_or_default(),
         data: input.try_into_unique_input()?.unwrap_or_default(),
         chain_id: chain_id.map(|c| c.to()),
-        access_list: access_list.map(AccessList::into_flattened).unwrap_or_default(),
+        access_list: access_list
+            .map(reth_rpc_types::AccessList::into_flattened)
+            .unwrap_or_default(),
         // EIP-4844 fields
         blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
