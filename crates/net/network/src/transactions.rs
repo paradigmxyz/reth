@@ -19,8 +19,8 @@ use reth_interfaces::{
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
-    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
-    TransactionSigned, TxHash, B256,
+    FromRecoveredPooledTransaction, PeerId, PooledTransactionsElement, TransactionSigned, TxHash,
+    B256,
 };
 use reth_transaction_pool::{
     error::PoolResult, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
@@ -752,7 +752,6 @@ where
 impl<Pool> Future for TransactionsManager<Pool>
 where
     Pool: TransactionPool + Unpin + 'static,
-    <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
     type Output = ();
 
