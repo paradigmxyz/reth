@@ -458,6 +458,7 @@ mod tests {
             database::Database,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             tables,
+            test_utils::TempDatabase,
             transaction::{DbTx, DbTxMut},
             DatabaseEnv,
         };
@@ -740,7 +741,7 @@ mod tests {
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
-            db: Arc<DatabaseEnv>,
+            db: Arc<TempDatabase<DatabaseEnv>>,
             responses: HashMap<B256, BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
@@ -748,7 +749,7 @@ mod tests {
 
         impl TestBodyDownloader {
             pub(crate) fn new(
-                db: Arc<DatabaseEnv>,
+                db: Arc<TempDatabase<DatabaseEnv>>,
                 responses: HashMap<B256, BlockBody>,
                 batch_size: u64,
             ) -> Self {

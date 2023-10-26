@@ -9,17 +9,17 @@ pub(crate) type LookupResult<T> = Result<T, LookupError>;
 #[derive(thiserror::Error, Debug)]
 #[allow(missing_docs)]
 pub enum ParseDnsEntryError {
-    #[error("Unknown entry: {0}")]
+    #[error("unknown entry: {0}")]
     UnknownEntry(String),
-    #[error("Field {0} not found.")]
+    #[error("field {0} not found")]
     FieldNotFound(&'static str),
-    #[error("Base64 decoding failed: {0}")]
+    #[error("base64 decoding failed: {0}")]
     Base64DecodeError(String),
-    #[error("Base32 decoding failed: {0}")]
+    #[error("base32 decoding failed: {0}")]
     Base32DecodeError(String),
     #[error("{0}")]
     RlpDecodeError(String),
-    #[error("Invalid child hash in branch: {0}")]
+    #[error("invalid child hash in branch: {0}")]
     InvalidChildHash(String),
     #[error("{0}")]
     Other(String),
@@ -31,10 +31,10 @@ pub enum ParseDnsEntryError {
 pub(crate) enum LookupError {
     #[error(transparent)]
     Parse(#[from] ParseDnsEntryError),
-    #[error("Failed to verify root {0}")]
+    #[error("failed to verify root {0}")]
     InvalidRoot(TreeRootEntry),
-    #[error("Request timed out")]
+    #[error("request timed out")]
     RequestTimedOut,
-    #[error("Entry not found")]
+    #[error("entry not found")]
     EntryNotFound,
 }

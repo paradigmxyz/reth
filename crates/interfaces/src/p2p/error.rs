@@ -73,15 +73,15 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum RequestError {
-    #[error("Closed channel to the peer.")]
+    #[error("closed channel to the peer")]
     ChannelClosed,
-    #[error("Connection to a peer dropped while handling the request.")]
+    #[error("connection to a peer dropped while handling the request")]
     ConnectionDropped,
-    #[error("Capability Message is not supported by remote peer.")]
+    #[error("capability message is not supported by remote peer")]
     UnsupportedCapability,
-    #[error("Request timed out while awaiting response.")]
+    #[error("request timed out while awaiting response")]
     Timeout,
-    #[error("Received bad response.")]
+    #[error("received bad response")]
     BadResponse,
 }
 
@@ -119,7 +119,7 @@ pub type DownloadResult<T> = Result<T, DownloadError>;
 pub enum DownloadError {
     /* ==================== HEADER ERRORS ==================== */
     /// Header validation failed
-    #[error("Failed to validate header {hash}. Details: {error}.")]
+    #[error("failed to validate header {hash}: {error}")]
     HeaderValidation {
         /// Hash of header failing validation
         hash: B256,
@@ -128,7 +128,7 @@ pub enum DownloadError {
         error: consensus::ConsensusError,
     },
     /// Received an invalid tip
-    #[error("Received invalid tip: {received:?}. Expected {expected:?}.")]
+    #[error("received invalid tip: {received}. Expected {expected}")]
     InvalidTip {
         /// The hash of the received tip
         received: B256,
@@ -136,7 +136,7 @@ pub enum DownloadError {
         expected: B256,
     },
     /// Received a tip with an invalid tip number
-    #[error("Received invalid tip number: {received:?}. Expected {expected:?}.")]
+    #[error("received invalid tip number: {received}. Expected {expected}")]
     InvalidTipNumber {
         /// The block number of the received tip
         received: u64,
@@ -144,7 +144,7 @@ pub enum DownloadError {
         expected: u64,
     },
     /// Received a response to a request with unexpected start block
-    #[error("Headers response starts at unexpected block: {received:?}. Expected {expected:?}.")]
+    #[error("headers response starts at unexpected block: {received}. Expected {expected}")]
     HeadersResponseStartBlockMismatch {
         /// The block number of the received tip
         received: u64,
@@ -152,7 +152,7 @@ pub enum DownloadError {
         expected: u64,
     },
     /// Received headers with less than expected items.
-    #[error("Received less headers than expected: {received:?}. Expected {expected:?}.")]
+    #[error("received less headers than expected: {received}. Expected {expected}")]
     HeadersResponseTooShort {
         /// How many headers we received.
         received: u64,
@@ -161,7 +161,7 @@ pub enum DownloadError {
     },
     /* ==================== BODIES ERRORS ==================== */
     /// Block validation failed
-    #[error("Failed to validate body for header {hash}. Details: {error}.")]
+    #[error("failed to validate body for header {hash}: {error}")]
     BodyValidation {
         /// Hash of header failing validation
         hash: B256,
@@ -170,7 +170,7 @@ pub enum DownloadError {
         error: consensus::ConsensusError,
     },
     /// Received more bodies than requested.
-    #[error("Received more bodies than requested. Expected: {expected}. Received: {received}")]
+    #[error("received more bodies than requested. Expected: {expected}. Received: {received}")]
     TooManyBodies {
         /// How many bodies we received.
         received: usize,
@@ -178,23 +178,23 @@ pub enum DownloadError {
         expected: usize,
     },
     /// Headers missing from the database.
-    #[error("Header missing from the database: {block_number}")]
+    #[error("header missing from the database: {block_number}")]
     MissingHeader {
         /// Missing header block number.
         block_number: BlockNumber,
     },
     /// Body range invalid
-    #[error("Requested body range is invalid: {range:?}.")]
+    #[error("requested body range is invalid: {range:?}")]
     InvalidBodyRange {
         /// Invalid block number range.
         range: RangeInclusive<BlockNumber>,
     },
     /* ==================== COMMON ERRORS ==================== */
     /// Timed out while waiting for request id response.
-    #[error("Timed out while waiting for response.")]
+    #[error("timed out while waiting for response")]
     Timeout,
     /// Received empty response while expecting non empty
-    #[error("Received empty response.")]
+    #[error("received empty response")]
     EmptyResponse,
     /// Error while executing the request.
     #[error(transparent)]
