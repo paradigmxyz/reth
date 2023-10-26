@@ -26,9 +26,6 @@ serde_json.workspace = true
 jsonrpsee-types = { workspace = true, optional = true }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 c-kzg = { workspace = true, features = ["serde"] }
-arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
 url = "2.3"
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
@@ -38,7 +35,6 @@ bytes.workspace = true
 
 [features]
 default = ["jsonrpsee-types"]
-arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 
 [dev-dependencies]
 # misc
