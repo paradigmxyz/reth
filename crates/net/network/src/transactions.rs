@@ -1055,7 +1055,7 @@ impl TransactionFetcher {
     }
 
     /// Removes the specified hashes from inflight tracking.
-    fn remove_inflight_hashes(&mut self, hashes: &[TxHash]) {
+    fn remove_inflight_hashes(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
         for hash in hashes {
             self.inflight_hash_to_fallback_peers.remove(hash);
         }
