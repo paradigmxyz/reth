@@ -1159,9 +1159,21 @@ impl Decodable for TransactionSigned {
         let mut original_encoding = *buf;
         let header = Header::decode(buf)?;
 
+        let remaining_len = buf.len();
+
         // if the transaction is encoded as a string then it is a typed transaction
         if !header.list {
-            TransactionSigned::decode_enveloped_typed_transaction(buf)
+            let tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
+
+            let bytes_consumed = remaining_len - buf.len();
+            // because Header::decode works for single bytes (including the tx type), returning a
+            // string Header with payload_length of 1, we need to make sure this check is only
+            // performed for transactions with a string header
+            if bytes_consumed != header.payload_length && original_encoding[0] > EMPTY_STRING_CODE {
+                return Err(RlpError::UnexpectedLength)
+            }
+
+            Ok(tx)
         } else {
             let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut original_encoding)?;
 
