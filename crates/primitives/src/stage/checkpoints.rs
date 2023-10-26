@@ -246,15 +246,6 @@ impl StageCheckpoint {
     }
 }
 
-impl Display for StageCheckpoint {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.entities() {
-            Some(entities) => entities.fmt(f),
-            None => write!(f, "{}", self.block_number),
-        }
-    }
-}
-
 // TODO(alexey): add a merkle checkpoint. Currently it's hard because [`MerkleCheckpoint`]
 //  is not a Copy type.
 /// Stage-specific checkpoint metrics.
