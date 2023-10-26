@@ -324,29 +324,22 @@ impl Decodable for PooledTransactionsElement {
             return Err(RlpError::InputTooShort)
         }
 
+        // keep the original buf around for legacy decoding
+        let mut original_encoding = *buf;
+
         // If the header is a list header, it is a legacy transaction. Otherwise, it is a typed
         // transaction
         let header = Header::decode(buf)?;
 
         // Check if the tx is a list
         if header.list {
-            // only decode the length of the list, since we already decoded the header
-            let transaction_length = header.payload_length;
-            let original_len = buf.len();
-
-            if transaction_length > original_len {
-                return Err(RlpError::InputTooShort)
-            }
-
             // decode as legacy transaction
             let (transaction, hash, signature) =
-                TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
+                TransactionSigned::decode_rlp_legacy_transaction_tuple(&mut original_encoding)?;
 
-            // check the new length, compared to the original length and the header length
-            let decoded = original_len - buf.len();
-            if decoded != transaction_length {
-                return Err(RlpError::UnexpectedLength)
-            }
+            // advance the buffer by however long the legacy transaction decoding advanced the
+            // buffer
+            *buf = original_encoding;
 
             Ok(Self::Legacy { transaction, signature, hash })
         } else {
@@ -532,7 +525,7 @@ mod tests {
     use assert_matches::assert_matches;
 
     #[test]
-    fn invalid_pooled_decoding_input_too_short() {
+    fn invalid_legacy_pooled_decoding_input_too_short() {
         let input_too_short = [
             // this should fail because the payload length is longer than expected
             &hex!("d90b0280808bc5cd028083c5cdfd9e407c56565656")[..],
@@ -543,8 +536,9 @@ mod tests {
             // obviously longer than one byte.
             &hex!("c10b02808083c5cd028883c5cdfd9e407c56565656"),
             &hex!("c10b0280808bc5cd028083c5cdfd9e407c56565656"),
-            // these are too long for `d3`
-            &hex!("d30b02808083c5cdeb8783c5acfd9e407c56565656"),
+            // this one is 19 bytes, and the buf is long enough, but the transaction will not
+            // consume that many bytes.
+            &hex!("d40b02808083c5cdeb8783c5acfd9e407c5656565656"),
             &hex!("d30102808083c5cd02887dc5cdfd9e64fd9e407c56"),
         ];
 
@@ -555,6 +549,17 @@ mod tests {
             assert!(
                 res.is_err(),
                 "expected err after decoding rlp input: {:x?}",
+                Bytes::copy_from_slice(hex_data)
+            );
+
+            // this is a legacy tx so we can attempt the same test with decode_enveloped
+            let input_rlp = &mut &hex_data[..];
+            let res =
+                PooledTransactionsElement::decode_enveloped(Bytes::copy_from_slice(input_rlp));
+
+            assert!(
+                res.is_err(),
+                "expected err after decoding enveloped rlp input: {:x?}",
                 Bytes::copy_from_slice(hex_data)
             );
         }
@@ -580,11 +585,33 @@ mod tests {
     }
 
     #[test]
-    fn valid_pooled_decoding() {
-        let data = &mut &hex!("d30b02808083c5cdeb8783c5acfd9e407c565656")[..];
+    fn legacy_valid_pooled_decoding() {
+        // d3 <- payload length, d3 - c0 = 0x13 = 19
+        // 0b
+        // 02
+        // 80
+        // 80
+        // 83 c5cdeb
+        // 87 83c5acfd9e407c
+        // 56
+        // 56
+        // 56
+        let data = &hex!("d30b02808083c5cdeb8783c5acfd9e407c565656")[..];
 
-        let res = PooledTransactionsElement::decode(data);
+        let input_rlp = &mut &data[..];
+        let res = PooledTransactionsElement::decode(input_rlp);
         assert_matches!(res, Ok(_tx));
-        assert!(data.is_empty());
+        assert!(input_rlp.is_empty());
+
+        // this is a legacy tx so we can attempt the same test with
+        // decode_rlp_legacy_transaction_tuple
+        let input_rlp = &mut &data[..];
+        let res = TransactionSigned::decode_rlp_legacy_transaction_tuple(input_rlp);
+        assert_matches!(res, Ok(_tx));
+        assert!(input_rlp.is_empty());
+
+        // we can also decode_enveloped
+        let res = PooledTransactionsElement::decode_enveloped(Bytes::copy_from_slice(data));
+        assert_matches!(res, Ok(_tx));
     }
 }

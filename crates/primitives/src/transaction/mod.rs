@@ -958,8 +958,6 @@ impl TransactionSigned {
     ///
     /// Refer to the docs for [Self::decode_rlp_legacy_transaction] for details on the exact
     /// format expected.
-    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
-    // so decoding methods do not need to manually advance the buffer
     pub(crate) fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
@@ -967,6 +965,13 @@ impl TransactionSigned {
         let original_encoding = *data;
 
         let header = Header::decode(data)?;
+        let remaining_len = data.len();
+
+        let transaction_payload_len = header.payload_length;
+
+        if transaction_payload_len > remaining_len {
+            return Err(RlpError::InputTooShort)
+        }
 
         let mut transaction = TxLegacy {
             nonce: Decodable::decode(data)?,
@@ -979,6 +984,12 @@ impl TransactionSigned {
         };
         let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
         transaction.chain_id = extracted_id;
+
+        // check the new length, compared to the original length and the header length
+        let decoded = remaining_len - data.len();
+        if decoded != transaction_payload_len {
+            return Err(RlpError::UnexpectedLength)
+        }
 
         let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
