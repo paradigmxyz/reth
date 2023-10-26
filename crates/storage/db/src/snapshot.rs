@@ -9,6 +9,7 @@ use crate::{
 use reth_interfaces::RethResult;
 use reth_nippy_jar::{ColumnResult, NippyJar, PHFKey};
 use reth_tracing::tracing::*;
+use serde::{Deserialize, Serialize};
 use std::{error::Error as StdError, ops::RangeInclusive};
 
 /// Macro that generates snapshot creation functions that take an arbitratry number of [`Table`] and
@@ -34,7 +35,8 @@ macro_rules! generate_snapshot_func {
                 #[allow(non_snake_case)]
                 pub fn [<create_snapshot$(_ $tbl)+>]<
                     $($tbl: Table<Key=K>,)+
-                    K
+                    K,
+                    H: for<'a> Deserialize<'a> + Send + Serialize + Sync + std::fmt::Debug
                 >
                 (
                     tx: &impl DbTx,
@@ -43,7 +45,7 @@ macro_rules! generate_snapshot_func {
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
                     keys: Option<impl Iterator<Item = ColumnResult<impl PHFKey>>>,
                     row_count: usize,
-                    nippy_jar: &mut NippyJar
+                    nippy_jar: &mut NippyJar<H>
                 ) -> RethResult<()>
                     where K: Key + Copy
                 {

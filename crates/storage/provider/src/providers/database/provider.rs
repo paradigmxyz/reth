@@ -6,7 +6,8 @@ use crate::{
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader,
-    StorageReader, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    StorageReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -24,7 +25,7 @@ use reth_db::{
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
-    RethResult,
+    RethError, RethResult,
 };
 use reth_primitives::{
     keccak256,
@@ -46,7 +47,7 @@ use std::{
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
-    sync::Arc,
+    sync::{mpsc, Arc},
 };
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
@@ -1139,6 +1140,65 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(blocks)
     }
 }
+
+impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
+    /// Recovers transaction hashes by walking through `Transactions` table and
+    /// calculating them in a parallel manner. Returned unsorted.
+    fn transaction_hashes_by_range(
+        &self,
+        tx_range: Range<TxNumber>,
+    ) -> RethResult<Vec<(TxHash, TxNumber)>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        let tx_range_size = tx_range.clone().count();
+        let tx_walker = tx_cursor.walk_range(tx_range)?;
+
+        let chunk_size = (tx_range_size / rayon::current_num_threads()).max(1);
+        let mut channels = Vec::with_capacity(chunk_size);
+        let mut transaction_count = 0;
+
+        #[inline]
+        fn calculate_hash(
+            entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
+            rlp_buf: &mut Vec<u8>,
+        ) -> Result<(B256, TxNumber), Box<RethError>> {
+            let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
+            tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+            Ok((keccak256(rlp_buf), tx_id))
+        }
+
+        for chunk in &tx_walker.chunks(chunk_size) {
+            let (tx, rx) = mpsc::channel();
+            channels.push(rx);
+
+            // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
+            let chunk: Vec<_> = chunk.collect();
+            transaction_count += chunk.len();
+
+            // Spawn the task onto the global rayon pool
+            // This task will send the results through the channel after it has calculated the hash.
+            rayon::spawn(move || {
+                let mut rlp_buf = Vec::with_capacity(128);
+                for entry in chunk {
+                    rlp_buf.clear();
+                    let _ = tx.send(calculate_hash(entry, &mut rlp_buf));
+                }
+            });
+        }
+        let mut tx_list = Vec::with_capacity(transaction_count);
+
+        // Iterate over channels and append the tx hashes unsorted
+        for channel in channels {
+            while let Ok(tx) = channel.recv() {
+                let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
+                tx_list.push((tx_hash, tx_id));
+            }
+        }
+
+        Ok(tx_list)
+    }
+}
+
+/// Calculates the hash of the given transaction
 
 impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     fn transaction_id(&self, tx_hash: TxHash) -> RethResult<Option<TxNumber>> {

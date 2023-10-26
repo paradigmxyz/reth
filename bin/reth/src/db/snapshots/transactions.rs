@@ -1,28 +1,34 @@
 use super::{
     bench::{bench, BenchKind},
-    Command,
+    Command, Compression, PerfectHashingFunction,
 };
 use rand::{seq::SliceRandom, Rng};
 use reth_db::{database::Database, open_db_read_only, table::Decompress};
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
-    ChainSpec, Header, SnapshotSegment,
+    snapshot::{Filters, InclusionFilter},
+    ChainSpec, SnapshotSegment, TransactionSignedNoHash,
 };
-use reth_provider::{DatabaseProviderRO, HeaderProvider, ProviderError, ProviderFactory};
-use reth_snapshot::segments::{get_snapshot_segment_file_name, Headers, Segment};
+use reth_provider::{
+    DatabaseProviderRO, ProviderError, ProviderFactory, TransactionsProvider,
+    TransactionsProviderExt,
+};
+use reth_snapshot::{
+    segments,
+    segments::{get_snapshot_segment_file_name, Segment},
+};
 use std::{path::Path, sync::Arc};
 
 impl Command {
-    pub(crate) fn generate_headers_snapshot<DB: Database>(
+    pub(crate) fn generate_transactions_snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<'_, DB>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let segment = Headers::new(
+        let segment = segments::Transactions::new(
             compression,
             if self.with_filters {
                 Filters::WithFilters(inclusion_filter, phf)
@@ -35,7 +41,7 @@ impl Command {
         Ok(())
     }
 
-    pub(crate) fn bench_headers_snapshot(
+    pub(crate) fn bench_transactions_snapshot(
         &self,
         db_path: &Path,
         log_level: Option<LogLevel>,
@@ -50,17 +56,22 @@ impl Command {
             Filters::WithoutFilters
         };
 
-        let range = self.from..=(self.from + self.block_interval - 1);
+        let block_range = self.from..=(self.from + self.block_interval - 1);
 
-        let mut row_indexes = range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
         let mut dictionaries = None;
         let mut jar = NippyJar::load(&get_snapshot_segment_file_name(
-            SnapshotSegment::Headers,
+            SnapshotSegment::Transactions,
             filters,
             compression,
-            &range,
+            &block_range,
         ))?;
+
+        let tx_range = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
+            .provider()?
+            .transaction_range_by_block_range(block_range)?;
+
+        let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
         let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
         let mut cursor = if !decompressors.is_empty() {
@@ -73,27 +84,30 @@ impl Command {
             bench(
                 bench_kind,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                SnapshotSegment::Headers,
+                SnapshotSegment::Transactions,
                 filters,
                 compression,
                 || {
                     for num in row_indexes.iter() {
-                        Header::decompress(
+                        TransactionSignedNoHash::decompress(
                             cursor
-                                .row_by_number_with_cols::<0b01, 2>((num - self.from) as usize)?
-                                .ok_or(ProviderError::HeaderNotFound((*num).into()))?[0],
-                        )?;
+                                .row_by_number_with_cols::<0b1, 1>(
+                                    (num - tx_range.start()) as usize,
+                                )?
+                                .ok_or(ProviderError::TransactionNotFound((*num).into()))?[0],
+                        )?
+                        .with_hash();
                         // TODO: replace with below when eventually SnapshotProvider re-uses cursor
-                        // provider.header_by_number(num as
-                        // u64)?.ok_or(ProviderError::HeaderNotFound((*num as u64).into()))?;
+                        // provider.transaction_by_id(num as
+                        // u64)?.ok_or(ProviderError::TransactionNotFound((*num).into()))?;
                     }
                     Ok(())
                 },
                 |provider| {
                     for num in row_indexes.iter() {
                         provider
-                            .header_by_number(*num)?
-                            .ok_or(ProviderError::HeaderNotFound((*num).into()))?;
+                            .transaction_by_id(*num)?
+                            .ok_or(ProviderError::TransactionNotFound((*num).into()))?;
                     }
                     Ok(())
                 },
@@ -103,60 +117,60 @@ impl Command {
             row_indexes.shuffle(&mut rng);
         }
 
-        // BENCHMARK QUERYING A RANDOM HEADER BY NUMBER
+        // BENCHMARK QUERYING A RANDOM TRANSACTION BY NUMBER
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())];
             bench(
                 BenchKind::RandomOne,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                SnapshotSegment::Headers,
+                SnapshotSegment::Transactions,
                 filters,
                 compression,
                 || {
-                    Ok(Header::decompress(
+                    Ok(TransactionSignedNoHash::decompress(
                         cursor
-                            .row_by_number_with_cols::<0b01, 2>((num - self.from) as usize)?
-                            .ok_or(ProviderError::HeaderNotFound((num as u64).into()))?[0],
-                    )?)
+                            .row_by_number_with_cols::<0b1, 1>((num - tx_range.start()) as usize)?
+                            .ok_or(ProviderError::TransactionNotFound((num as u64).into()))?[0],
+                    )?
+                    .with_hash())
                 },
                 |provider| {
                     Ok(provider
-                        .header_by_number(num as u64)?
-                        .ok_or(ProviderError::HeaderNotFound((num as u64).into()))?)
+                        .transaction_by_id(num as u64)?
+                        .ok_or(ProviderError::TransactionNotFound((num as u64).into()))?)
                 },
             )?;
         }
 
-        // BENCHMARK QUERYING A RANDOM HEADER BY HASH
+        // BENCHMARK QUERYING A RANDOM TRANSACTION BY HASH
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
-            let header_hash =
+            let transaction_hash =
                 ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
-                    .header_by_number(num)?
-                    .ok_or(ProviderError::HeaderNotFound(num.into()))?
-                    .hash_slow();
+                    .transaction_by_id(num)?
+                    .ok_or(ProviderError::TransactionNotFound(num.into()))?
+                    .hash();
 
             bench(
                 BenchKind::RandomHash,
                 (open_db_read_only(db_path, log_level)?, chain.clone()),
-                SnapshotSegment::Headers,
+                SnapshotSegment::Transactions,
                 filters,
                 compression,
                 || {
-                    let header = Header::decompress(
+                    let transaction = TransactionSignedNoHash::decompress(
                         cursor
-                            .row_by_key_with_cols::<0b01, 2>(header_hash.as_slice())?
-                            .ok_or(ProviderError::HeaderNotFound(header_hash.into()))?[0],
+                            .row_by_key_with_cols::<0b1, 1>(transaction_hash.as_slice())?
+                            .ok_or(ProviderError::TransactionNotFound(transaction_hash.into()))?[0],
                     )?;
 
                     // Might be a false positive, so in the real world we have to validate it
-                    assert_eq!(header.hash_slow(), header_hash);
-                    Ok(header)
+                    Ok(transaction.with_hash())
                 },
                 |provider| {
                     Ok(provider
-                        .header(&header_hash)?
-                        .ok_or(ProviderError::HeaderNotFound(header_hash.into()))?)
+                        .transaction_by_hash(transaction_hash)?
+                        .ok_or(ProviderError::TransactionNotFound(transaction_hash.into()))?)
                 },
             )?;
         }
