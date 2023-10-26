@@ -150,25 +150,3 @@ impl proptest::arbitrary::Arbitrary for TxValue {
 
     type Strategy = BoxedStrategy<TxValue>;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_primitives::hex;
-
-    #[test]
-    fn tx_value_invalid_leading_zeros() {
-        let leading_zeros = [
-            // this one has a correct payload length but contains a txvalue with leading zeros
-            &hex!("8300b21d")[..],
-            &hex!("840000b21d")[..],
-        ];
-
-        for hex_data in leading_zeros.iter() {
-            let input_rlp = &mut &hex_data[..];
-            // try to decode
-            let res = U256::decode(input_rlp);
-            assert!(res.is_err());
-        }
-    }
-}

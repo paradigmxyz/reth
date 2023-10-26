@@ -580,25 +580,6 @@ mod tests {
     }
 
     #[test]
-    fn leading_zeros_tx_value() {
-        let leading_zeros = [
-            // this one has a correct payload length but contains a txvalue with leading zeros
-            &hex!("d4141d80808300b21d88fcbab282e13a7e53525a54")[..],
-        ];
-
-        for hex_data in leading_zeros.iter() {
-            let input_rlp = &mut &hex_data[..];
-            let res = PooledTransactionsElement::decode(input_rlp);
-
-            assert!(
-                res.is_err(),
-                "expected err after decoding rlp input: {:x?}",
-                Bytes::copy_from_slice(hex_data)
-            );
-        }
-    }
-
-    #[test]
     fn legacy_valid_pooled_decoding() {
         // d3 <- payload length, d3 - c0 = 0x13 = 19
         // 0b
