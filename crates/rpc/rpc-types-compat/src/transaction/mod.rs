@@ -132,6 +132,11 @@ fn fill(
     }
 }
 
+/// Converts a [reth_primitives::BlobTransactionSidecar] to [reth_rpc_types::BlobTransactionSidecar]
+pub fn from_primitive_sidecar(sidecar: reth_primitives::BlobTransactionSidecar) -> reth_rpc_types::BlobTransactionSidecar {
+    reth_rpc_types::BlobTransactionSidecar { blobs: sidecar.blobs, commitments: sidecar.commitments, proofs: sidecar.proofs }
+}
+
 /// Convert [reth_primitives::AccessList] to [reth_rpc_types::AccessList]
 pub fn from_primitive_access_list(access_list: reth_primitives::AccessList) -> reth_rpc_types::AccessList {
     reth_rpc_types::AccessList(

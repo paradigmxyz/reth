@@ -27,7 +27,7 @@ pub use fee::{FeeHistory, TxGasAndReward};
 pub use filter::*;
 pub use index::Index;
 pub use log::Log;
-pub use raw_log::*;
+pub use raw_log::{Log as RawLog, logs_bloom};
 pub use syncing::*;
 pub use transaction::*;
 pub use withdrawal::Withdrawal;
