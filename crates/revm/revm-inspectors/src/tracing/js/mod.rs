@@ -274,8 +274,7 @@ impl JsInspector {
         if !self.precompiles_registered {
             return
         }
-        let precompiles =
-            PrecompileList(precompiles.addresses().into_iter().map(Into::into).collect());
+        let precompiles = PrecompileList(precompiles.addresses().into_iter().copied().collect());
 
         let _ = precompiles.register_callable(&mut self.ctx);
 
@@ -511,9 +510,9 @@ struct CallStackItem {
 pub enum JsInspectorError {
     #[error(transparent)]
     JsError(#[from] JsError),
-    #[error("Failed to eval js code: {0}")]
+    #[error("failed to evaluate JS code: {0}")]
     EvalCode(JsError),
-    #[error("The evaluated code is not a JS object")]
+    #[error("the evaluated code is not a JS object")]
     ExpectedJsObject,
     #[error("trace object must expose a function result()")]
     ResultFunctionMissing,
@@ -521,8 +520,8 @@ pub enum JsInspectorError {
     FaultFunctionMissing,
     #[error("setup object must be a function")]
     SetupFunctionNotCallable,
-    #[error("Failed to call setup(): {0}")]
+    #[error("failed to call setup(): {0}")]
     SetupCallFailed(JsError),
-    #[error("Invalid JSON config: {0}")]
+    #[error("invalid JSON config: {0}")]
     InvalidJsonConfig(JsError),
 }

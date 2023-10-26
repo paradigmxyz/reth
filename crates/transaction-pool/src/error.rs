@@ -17,52 +17,65 @@ pub trait PoolTransactionError: std::error::Error + Send + Sync {
     fn is_bad_transaction(&self) -> bool;
 }
 
-/// All errors the Transaction pool can throw.
+// Needed for `#[error(transparent)]`
+impl std::error::Error for Box<dyn PoolTransactionError> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        (**self).source()
+    }
+}
+
+/// Transaction pool error.
 #[derive(Debug, thiserror::Error)]
-pub enum PoolError {
+#[error("[{hash}]: {kind}")]
+pub struct PoolError {
+    /// The transaction hash that caused the error.
+    pub hash: TxHash,
+    /// The error kind.
+    pub kind: PoolErrorKind,
+}
+
+/// Transaction pool error kind.
+#[derive(Debug, thiserror::Error)]
+pub enum PoolErrorKind {
     /// Same transaction already imported
-    #[error("[{0:?}] Already imported")]
-    AlreadyImported(TxHash),
+    #[error("already imported")]
+    AlreadyImported,
     /// Thrown if a replacement transaction's gas price is below the already imported transaction
-    #[error("[{0:?}]: insufficient gas price to replace existing transaction.")]
-    ReplacementUnderpriced(TxHash),
+    #[error("insufficient gas price to replace existing transaction")]
+    ReplacementUnderpriced,
     /// The fee cap of the transaction is below the minimum fee cap determined by the protocol
-    #[error("[{0:?}] Transaction feeCap {1} below chain minimum.")]
-    FeeCapBelowMinimumProtocolFeeCap(TxHash, u128),
+    #[error("transaction feeCap {0} below chain minimum")]
+    FeeCapBelowMinimumProtocolFeeCap(u128),
     /// Thrown when the number of unique transactions of a sender exceeded the slot capacity.
-    #[error("{0:?} identified as spammer. Transaction {1:?} rejected.")]
-    SpammerExceededCapacity(Address, TxHash),
+    #[error("rejected due to {0} being identified as a spammer")]
+    SpammerExceededCapacity(Address),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the size limits of the pool.
-    #[error("[{0:?}] Transaction discarded outright due to pool size constraints.")]
-    DiscardedOnInsert(TxHash),
+    #[error("transaction discarded outright due to pool size constraints")]
+    DiscardedOnInsert,
     /// Thrown when the transaction is considered invalid.
-    #[error("[{0:?}] {1:?}")]
-    InvalidTransaction(TxHash, InvalidPoolTransactionError),
+    #[error(transparent)]
+    InvalidTransaction(#[from] InvalidPoolTransactionError),
     /// Thrown if the mutual exclusivity constraint (blob vs normal transaction) is violated.
-    #[error("[{1:?}] Transaction type {2} conflicts with existing transaction for {0:?}")]
-    ExistingConflictingTransactionType(Address, TxHash, u8),
+    #[error("transaction type {1} conflicts with existing transaction for {0}")]
+    ExistingConflictingTransactionType(Address, u8),
     /// Any other error that occurred while inserting/validating a transaction. e.g. IO database
     /// error
-    #[error("[{0:?}] {1:?}")]
-    Other(TxHash, Box<dyn std::error::Error + Send + Sync>),
+    #[error(transparent)]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
 // === impl PoolError ===
 
 impl PoolError {
-    /// Returns the hash of the transaction that resulted in this error.
-    pub fn hash(&self) -> &TxHash {
-        match self {
-            PoolError::AlreadyImported(hash) => hash,
-            PoolError::ReplacementUnderpriced(hash) => hash,
-            PoolError::FeeCapBelowMinimumProtocolFeeCap(hash, _) => hash,
-            PoolError::SpammerExceededCapacity(_, hash) => hash,
-            PoolError::DiscardedOnInsert(hash) => hash,
-            PoolError::InvalidTransaction(hash, _) => hash,
-            PoolError::Other(hash, _) => hash,
-            PoolError::ExistingConflictingTransactionType(_, hash, _) => hash,
-        }
+    /// Creates a new pool error.
+    pub fn new(hash: TxHash, kind: impl Into<PoolErrorKind>) -> Self {
+        Self { hash, kind: kind.into() }
+    }
+
+    /// Creates a new pool error with the `Other` kind.
+    pub fn other(hash: TxHash, error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        Self { hash, kind: PoolErrorKind::Other(error.into()) }
     }
 
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
@@ -79,42 +92,42 @@ impl PoolError {
     /// erroneous transaction.
     #[inline]
     pub fn is_bad_transaction(&self) -> bool {
-        match self {
-            PoolError::AlreadyImported(_) => {
+        match &self.kind {
+            PoolErrorKind::AlreadyImported => {
                 // already imported but not bad
                 false
             }
-            PoolError::ReplacementUnderpriced(_) => {
+            PoolErrorKind::ReplacementUnderpriced => {
                 // already imported but not bad
                 false
             }
-            PoolError::FeeCapBelowMinimumProtocolFeeCap(_, _) => {
+            PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(_) => {
                 // fee cap of the tx below the technical minimum determined by the protocol, see
                 // [MINIMUM_PROTOCOL_FEE_CAP](reth_primitives::constants::MIN_PROTOCOL_BASE_FEE)
                 // although this transaction will always be invalid, we do not want to penalize the
                 // sender because this check simply could not be implemented by the client
                 false
             }
-            PoolError::SpammerExceededCapacity(_, _) => {
+            PoolErrorKind::SpammerExceededCapacity(_) => {
                 // the sender exceeded the slot capacity, we should not penalize the peer for
                 // sending the tx because we don't know if all the transactions are sent from the
                 // same peer, there's also a chance that old transactions haven't been cleared yet
                 // (pool lags behind) and old transaction still occupy a slot in the pool
                 false
             }
-            PoolError::DiscardedOnInsert(_) => {
+            PoolErrorKind::DiscardedOnInsert => {
                 // valid tx but dropped due to size constraints
                 false
             }
-            PoolError::InvalidTransaction(_, err) => {
+            PoolErrorKind::InvalidTransaction(err) => {
                 // transaction rejected because it violates constraints
                 err.is_bad_transaction()
             }
-            PoolError::Other(_, _) => {
+            PoolErrorKind::Other(_) => {
                 // internal error unrelated to the transaction
                 false
             }
-            PoolError::ExistingConflictingTransactionType(_, _, _) => {
+            PoolErrorKind::ExistingConflictingTransactionType(_, _) => {
                 // this is not a protocol error but an implementation error since the pool enforces
                 // exclusivity (blob vs normal tx) for all senders
                 false
@@ -150,7 +163,7 @@ pub enum Eip4844PoolTransactionError {
     ///
     /// This error is thrown on validation if a valid blob transaction arrives with a nonce that
     /// would introduce gap in the nonce sequence.
-    #[error("Nonce too high.")]
+    #[error("nonce too high")]
     Eip4844NonceGap,
 }
 
@@ -164,16 +177,16 @@ pub enum InvalidPoolTransactionError {
     Consensus(#[from] InvalidTransactionError),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the size limits of the pool.
-    #[error("Transaction's gas limit {0} exceeds block's gas limit {1}.")]
+    #[error("transaction's gas limit {0} exceeds block's gas limit {1}")]
     ExceedsGasLimit(u64, u64),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the max_init_code_size.
-    #[error("Transaction's size {0} exceeds max_init_code_size {1}.")]
+    #[error("transaction's size {0} exceeds max_init_code_size {1}")]
     ExceedsMaxInitCodeSize(usize, usize),
     /// Thrown if the input data of a transaction is greater
     /// than some meaningful limit a user might use. This is not a consensus error
     /// making the transaction invalid, rather a DOS protection.
-    #[error("Input data too large")]
+    #[error("input data too large")]
     OversizedData(usize, usize),
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
@@ -185,7 +198,7 @@ pub enum InvalidPoolTransactionError {
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
     /// Any other error that occurred while inserting/validating that is transaction specific
-    #[error("{0:?}")]
+    #[error(transparent)]
     Other(Box<dyn PoolTransactionError>),
     /// The transaction is specified to use less gas than required to start the
     /// invocation.

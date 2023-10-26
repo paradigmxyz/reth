@@ -19,6 +19,6 @@ impl Compress for IntegerList {
 
 impl Decompress for IntegerList {
     fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        IntegerList::from_bytes(value.as_ref()).map_err(|_| DatabaseError::DecodeError)
+        IntegerList::from_bytes(value.as_ref()).map_err(|_| DatabaseError::Decode)
     }
 }
