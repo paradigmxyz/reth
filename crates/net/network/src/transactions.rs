@@ -1079,7 +1079,9 @@ impl TransactionFetcher {
                     // response but present in the request
                     let missing_hashes: Vec<TxHash> = requested_hashes
                         .iter()
-                        .filter(|&&hash| !received_hashes_iter.clone().any(|&received| &&hash == received))
+                        .filter(|&&hash| {
+                            !received_hashes_iter.clone().any(|&received| hash == received)
+                        })
                         .cloned()
                         .collect();
 
