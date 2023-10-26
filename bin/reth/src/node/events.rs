@@ -273,24 +273,24 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            if let Some(stage_id) = this.state.current_stage {
+            if let Some(stage) = this.state.current_stage {
                 if let Some(progress) = this.state.current_checkpoint.entities() {
                     info!(
                         target: "reth::cli",
                         connected_peers = this.state.num_connected_peers(),
-                        stage = %stage_id.to_string(),
+                        %stage,
                         checkpoint = %this.state.current_checkpoint.block_number,
                         %progress,
-                        eta = %this.state.eta.fmt_for_stage(stage_id),
+                        eta = %this.state.eta.fmt_for_stage(stage),
                         "Status"
                     );
                 } else {
                     info!(
                         target: "reth::cli",
                         connected_peers = this.state.num_connected_peers(),
-                        stage = %stage_id.to_string(),
+                        %stage,
                         checkpoint = %this.state.current_checkpoint.block_number,
-                        eta = %this.state.eta.fmt_for_stage(stage_id),
+                        eta = %this.state.eta.fmt_for_stage(stage),
                         "Status"
                     );
                 }
