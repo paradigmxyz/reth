@@ -193,7 +193,3 @@ tempfile = "3.8"
 proptest = "1.0"
 proptest-derive = "0.4"
 serial_test = "2"
-
-[patch.crates-io]
-revm = { git = "https://github.com/anton-rs/op-revm", branch = "cl/patch-op" }
-revm-primitives = { git = "https://github.com/anton-rs/op-revm", branch = "cl/patch-op" }
