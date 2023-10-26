@@ -56,7 +56,7 @@ impl NodeState {
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
-            PipelineEvent::Running { pipeline_position, pipeline_total, stage_id, checkpoint } => {
+            PipelineEvent::Running { pipeline_stages_progress, stage_id, checkpoint } => {
                 let notable = self.current_stage.is_none();
                 self.current_stage = Some(stage_id);
                 self.current_checkpoint = checkpoint.unwrap_or_default();
@@ -64,7 +64,7 @@ impl NodeState {
                 if notable {
                     if let Some(progress) = self.current_checkpoint.entities() {
                         info!(
-                            pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
+                            pipeline_stages = %pipeline_stages_progress,
                             stage = %stage_id,
                             from = self.current_checkpoint.block_number,
                             checkpoint = %self.current_checkpoint.block_number,
@@ -74,7 +74,7 @@ impl NodeState {
                         );
                     } else {
                         info!(
-                            pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
+                            pipeline_stages = %pipeline_stages_progress,
                             stage = %stage_id,
                             from = self.current_checkpoint.block_number,
                             checkpoint = %self.current_checkpoint.block_number,
@@ -85,8 +85,7 @@ impl NodeState {
                 }
             }
             PipelineEvent::Ran {
-                pipeline_position,
-                pipeline_total,
+                pipeline_stages_progress,
                 stage_id,
                 result: ExecOutput { checkpoint, done },
             } => {
@@ -101,7 +100,7 @@ impl NodeState {
 
                 if let Some(progress) = checkpoint.entities() {
                     info!(
-                        pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
+                        pipeline_stages = %pipeline_stages_progress,
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         %progress,
@@ -110,7 +109,7 @@ impl NodeState {
                     );
                 } else {
                     info!(
-                        pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
+                        pipeline_stages = %pipeline_stages_progress,
                         stage = %stage_id,
                         checkpoint = %checkpoint.block_number,
                         eta = %self.eta.fmt_for_stage(stage_id),
