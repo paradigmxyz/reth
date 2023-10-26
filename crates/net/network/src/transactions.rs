@@ -1070,9 +1070,7 @@ impl TransactionFetcher {
         {
             // Extract the requested hashes
             let request_hashes: Vec<TxHash> = match &result {
-                Ok(Ok(pooled_txs)) => {
-                    pooled_txs.0.iter().map(|tx_elem| *tx_elem.hash()).collect()
-                }
+                Ok(Ok(pooled_txs)) => pooled_txs.0.iter().map(|tx_elem| *tx_elem.hash()).collect(),
                 _ => Vec::new(),
             };
 
