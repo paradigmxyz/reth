@@ -35,7 +35,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -519,7 +519,7 @@ where
 
             if num_already_seen > 0 {
                 self.metrics.messages_with_already_seen_hashes.increment(1);
-                debug!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen hashes");
+                trace!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen hashes");
             }
         }
 
@@ -698,7 +698,7 @@ where
 
             if num_already_seen > 0 {
                 self.metrics.messages_with_already_seen_transactions.increment(1);
-                debug!(target: "net::tx", num_txs=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
+                trace!(target: "net::tx", num_txs=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
             }
         }
 

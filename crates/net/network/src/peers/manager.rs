@@ -27,7 +27,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, info, trace};
+use tracing::{info, trace};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -610,7 +610,7 @@ impl PeersManager {
         self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
 
         if peer.state.is_connected() {
-            debug!(target : "net::peers",  ?peer_id, "disconnecting on remove from discovery");
+            trace!(target : "net::peers",  ?peer_id, "disconnecting on remove from discovery");
             // we terminate the active session here, but only remove the peer after the session
             // was disconnected, this prevents the case where the session is scheduled for
             // disconnect but the node is immediately rediscovered, See also

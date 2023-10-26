@@ -29,7 +29,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: usize = 512;
@@ -259,13 +259,13 @@ where
 
     /// Bans the [`IpAddr`] in the discovery service.
     pub(crate) fn ban_ip_discovery(&self, ip: IpAddr) {
-        debug!(target: "net", ?ip, "Banning discovery");
+        trace!(target: "net", ?ip, "Banning discovery");
         self.discovery.ban_ip(ip)
     }
 
     /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
     pub(crate) fn ban_discovery(&self, peer_id: PeerId, ip: IpAddr) {
-        debug!(target: "net", ?peer_id, ?ip, "Banning discovery");
+        trace!(target: "net", ?peer_id, ?ip, "Banning discovery");
         self.discovery.ban(peer_id, ip)
     }
 

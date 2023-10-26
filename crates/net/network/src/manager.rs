@@ -678,7 +678,7 @@ where
                             let total_active =
                                 this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                             this.metrics.connected_peers.set(total_active as f64);
-                            debug!(
+                            trace!(
                                 target: "net",
                                 ?remote_addr,
                                 %client_version,
@@ -768,7 +768,7 @@ where
                                 .notify(NetworkEvent::SessionClosed { peer_id, reason });
                         }
                         SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
-                            debug!(
+                            trace!(
                                 target : "net",
                                 ?remote_addr,
                                 ?error,
