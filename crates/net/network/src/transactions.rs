@@ -1029,8 +1029,10 @@ struct Peer {
 }
 
 /// The type responsible for fetching missing transactions from peers.
+///
+/// This will keep track of unique transaction hashes that are currently being fetched and submits
+/// new requests on announced hashes.
 #[derive(Debug, Default)]
-#[warn(unused_variables)]
 struct TransactionFetcher {
     /// All currently active requests for pooled transactions.
     inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
@@ -1041,19 +1043,8 @@ struct TransactionFetcher {
 // === impl TransactionFetcher ===
 
 impl TransactionFetcher {
-    /// TODO: Implement the re-request logic...
-    fn re_request_hashes(&mut self, hashes: Vec<TxHash>, failed_peer: PeerId) {
-        for hash in &hashes {
-            if let Some(peers) = self.inflight_hash_to_fallback_peers.get_mut(hash) {
-                peers.retain(|&peer| peer != failed_peer); // Remove the failed peer from fallback peers for this hash.
-                if let Some(_next_peer) = peers.pop() {
-                    // Schedule a re-request using next_peer.
-                }
-            }
-        }
-    }
-
     /// Removes the specified hashes from inflight tracking.
+    #[inline]
     fn remove_inflight_hashes<'a, I>(&mut self, hashes: I)
     where
         I: IntoIterator<Item = &'a TxHash>,
@@ -1071,21 +1062,10 @@ impl TransactionFetcher {
             return match result {
                 Ok(Ok(txs)) => {
                     // clear received hashes
-                    let received_hashes_iter = txs.0.iter().map(|tx| tx.hash());
+                    self.remove_inflight_hashes(txs.hashes());
 
-                    self.remove_inflight_hashes(&requested_hashes);
-
-                    // check if we need to re-request any of the hashes missing from the
-                    // response but present in the request
-                    let missing_hashes: Vec<TxHash> = requested_hashes
-                        .iter()
-                        .filter(|&&hash| {
-                            !received_hashes_iter.clone().any(|&received| hash == received)
-                        })
-                        .cloned()
-                        .collect();
-
-                    self.re_request_hashes(missing_hashes, peer_id);
+                    // TODO: re-request missing hashes, for now clear all of them
+                    self.remove_inflight_hashes(requested_hashes.iter());
 
                     Poll::Ready(FetchEvent::TransactionsFetched {
                         peer_id,
@@ -1093,13 +1073,13 @@ impl TransactionFetcher {
                     })
                 }
                 Ok(Err(req_err)) => {
+                    // TODO: re-request missing hashes
                     self.remove_inflight_hashes(&requested_hashes);
-                    self.re_request_hashes(requested_hashes, peer_id);
                     Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
                 }
                 Err(_) => {
+                    // TODO: re-request missing hashes
                     self.remove_inflight_hashes(&requested_hashes);
-                    self.re_request_hashes(requested_hashes, peer_id);
                     // request channel closed/dropped
                     Poll::Ready(FetchEvent::FetchError {
                         peer_id,
@@ -1114,13 +1094,12 @@ impl TransactionFetcher {
     /// Removes the provided transaction hashes from the inflight requests set.
     ///
     /// This is called when we receive full transactions that are currently scheduled for fetching.
+    #[inline]
     fn on_received_full_transactions_broadcast<'a>(
         &mut self,
         hashes: impl IntoIterator<Item = &'a TxHash>,
     ) {
-        for hash in hashes.into_iter() {
-            self.inflight_hash_to_fallback_peers.remove(hash);
-        }
+        self.remove_inflight_hashes(hashes)
     }
 
     /// Requests the missing transactions from the announced hashes of the peer
