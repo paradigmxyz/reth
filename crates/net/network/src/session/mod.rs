@@ -710,7 +710,7 @@ impl PendingSessionHandshakeError {
 /// The error thrown when the max configured limit has been reached and no more connections are
 /// accepted.
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("Session limit reached {0}")]
+#[error("session limit reached {0}")]
 pub struct ExceedsSessionLimit(pub(crate) u32);
 
 /// Starts the authentication process for a connection initiated by a remote peer.
