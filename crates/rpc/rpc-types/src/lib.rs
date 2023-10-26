@@ -14,11 +14,22 @@
 mod admin;
 mod eth;
 mod mev;
+mod net;
 mod otterscan;
+mod peer;
 mod rpc;
+mod serde_helpers;
 
 pub use admin::*;
 pub use eth::*;
 pub use mev::*;
+pub use net::*;
 pub use otterscan::*;
+pub use peer::*;
 pub use rpc::*;
+pub use serde_helpers::*;
+
+/// EIP-4844 + KZG helpers
+pub mod kzg {
+    pub use c_kzg::*;
+}

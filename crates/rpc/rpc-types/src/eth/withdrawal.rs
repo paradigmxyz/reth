@@ -1,10 +1,13 @@
 //! Withdrawal type and serde helpers.
 
+use crate::serde_helpers::u64_hex;
 use alloy_primitives::{Address, U256};
 use alloy_rlp::RlpEncodable;
-use reth_primitives::{constants::GWEI_TO_WEI, serde_helper::u64_hex};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DeserializeAs, DisplayFromStr, SerializeAs};
+
+/// Multiplier for converting gwei to wei.
+pub const GWEI_TO_WEI: u64 = 1_000_000_000;
 
 /// Withdrawal represents a validator withdrawal from the consensus layer.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, Serialize, Deserialize)]
