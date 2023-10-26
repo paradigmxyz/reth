@@ -272,12 +272,23 @@ where
 
             let mut checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
             if checkpoint.block_number < to {
-                debug!(target: "sync::pipeline", from = %checkpoint, %to, "Unwind point too far for stage");
+                debug!(
+                    target: "sync::pipeline",
+                    from = %checkpoint.block_number,
+                    %to,
+                    "Unwind point too far for stage"
+                );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
                 continue
             }
 
-            debug!(target: "sync::pipeline", from = %checkpoint, %to, ?bad_block, "Starting unwind");
+            debug!(
+                target: "sync::pipeline",
+                from = %checkpoint.block_number,
+                %to,
+                ?bad_block,
+                "Starting unwind"
+            );
             while checkpoint.block_number > to {
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
@@ -373,14 +384,25 @@ where
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
-                    debug!(
-                        target: "sync::pipeline",
-                        stage = %stage_id,
-                        progress = checkpoint.block_number,
-                        %checkpoint,
-                        %done,
-                        "Stage committed progress"
-                    );
+
+                    if let Some(progress) = checkpoint.entities() {
+                        debug!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            %progress,
+                            %done,
+                            "Stage committed progress"
+                        );
+                    } else {
+                        debug!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            %done,
+                            "Stage committed progress"
+                        );
+                    }
                     if let Some(metrics_tx) = &mut self.metrics_tx {
                         let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
                             stage_id,
