@@ -9,14 +9,18 @@ use crate::{
 };
 use alloy_primitives::B256;
 use async_trait::async_trait;
+
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_interfaces::RethError;
 use reth_primitives::{BlockHashOrNumber, Receipt, SealedBlock, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
-use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log};
+use reth_rpc_types::{
+    Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
+    PendingTransactionFilterKind,
+};
 use reth_tasks::TaskSpawner;
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
     collections::HashMap,
     iter::StepBy,
@@ -215,6 +219,15 @@ where
         Ok(FilterChanges::Logs(logs))
     }
 }
+struct FullTransactionsReceiver<T: PoolTransaction> {
+    txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
+}
+
+impl<T: PoolTransaction> FullTransactionsReceiver<T> {
+    fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
+        FullTransactionsReceiver { txs_stream: Arc::new(Mutex::new(stream)) }
+    }
+}
 
 #[async_trait]
 impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
@@ -235,13 +248,43 @@ where
     }
 
     /// Handler for `eth_newPendingTransactionFilter`
-    async fn new_pending_transaction_filter(&self) -> RpcResult<FilterId> {
+    // async fn new_pending_transaction_filter(
+    //     &self,
+    //     kind: Option<PendingTransactionFilterKind>,
+    // ) -> RpcResult<FilterId> { trace!(target: "rpc::eth", "Serving
+    //   eth_newPendingTransactionFilter"); match
+    //   kind.unwrap_or(PendingTransactionFilterKind::Hashes) { PendingTransactionFilterKind::Hashes
+    //   => { let receiver = self.inner.pool.pending_transactions_listener(); let
+    //   pending_txs_receiver = PendingTransactionsReceiver::new(receiver); self.inner
+    //   .install_filter(FilterKind::PendingTransaction(pending_txs_receiver)) .await }
+    //   PendingTransactionFilterKind::Full => { let stream =
+    //   self.inner.pool.new_pending_pool_transactions_listener(); let full_txs_receiver =
+    //   FullTransactionsReceiver::new(stream);
+    //   self.inner.install_filter(FilterKind::PendingTransaction(full_txs_receiver)).await } }
+    // }
+    async fn new_pending_transaction_filter(
+        &self,
+        kind: Option<PendingTransactionFilterKind>,
+    ) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newPendingTransactionFilter");
-        let receiver = self.inner.pool.pending_transactions_listener();
+        let transaction_kind: PendingTransactionKind<<Pool as TransactionPool>::Transaction> =
+            match kind.unwrap_or(PendingTransactionFilterKind::Hashes) {
+                PendingTransactionFilterKind::Hashes => {
+                    let receiver = self.inner.pool.pending_transactions_listener();
+                    let pending_txs_receiver = PendingTransactionsReceiver::new(receiver);
+                    PendingTransactionKind::Hashes(pending_txs_receiver)
+                }
+                PendingTransactionFilterKind::Full => {
+                    let stream = self.inner.pool.new_pending_pool_transactions_listener();
+                    let full_txs_receiver = FullTransactionsReceiver::new(stream);
+                    PendingTransactionKind::FullTransaction(full_txs_receiver)
+                }
+            };
 
-        let pending_txs_receiver = PendingTransactionsReceiver::new(receiver);
-
-        self.inner.install_filter(FilterKind::PendingTransaction(pending_txs_receiver)).await
+        // Here, you would typically do something with `transaction_kind`
+        // to process or store the data, then return an appropriate result.
+        // This part of the code is pseudocode, as I'm not sure of your exact requirements:
+        self.inner.install_filter(transaction_kind).await
     }
 
     /// Handler for `eth_getFilterChanges`
@@ -500,14 +543,18 @@ impl PendingTransactionsReceiver {
         pending_txs
     }
 }
+enum PendingTransactionKind<T: PoolTransaction> {
+    Hashes(PendingTransactionsReceiver),
+    FullTransaction(FullTransactionsReceiver<T>),
+}
 
+use reth_transaction_pool::Pool;
 #[derive(Clone, Debug)]
 enum FilterKind {
     Log(Box<Filter>),
     Block,
     PendingTransaction(PendingTransactionsReceiver),
 }
-
 /// Errors that can occur in the handler implementation
 #[derive(Debug, thiserror::Error)]
 pub enum FilterError {
