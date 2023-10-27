@@ -39,8 +39,8 @@ pub trait DbTx: for<'a> DbTxGAT<'a> {
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
     fn commit(self) -> Result<bool, DatabaseError>;
-    /// Drops transaction
-    fn drop(self);
+    /// Aborts transaction
+    fn abort(self);
     /// Iterate over read only values in table.
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError>;
     /// Iterate over read only values in dup sorted table.
