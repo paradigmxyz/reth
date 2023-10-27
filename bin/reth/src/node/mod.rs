@@ -292,6 +292,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         .with_sync_metrics_tx(metrics_tx.clone());
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
+        debug!(target: "reth::cli", "configured blockchain tree");
 
         // fetch the head block from the database
         let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
