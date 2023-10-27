@@ -1223,7 +1223,7 @@ enum TransactionsCommand {
         tx: oneshot::Sender<HashMap<PeerId, HashSet<TxHash>>>,
     },
     /// Request specific transactions from a peer.
-    TransactionsHandle {
+    GetPeerSender {
         peer_id: PeerId,
         result: oneshot::Sender<Result<RequestResult<PooledTransactions>, RecvError>>,
     },
