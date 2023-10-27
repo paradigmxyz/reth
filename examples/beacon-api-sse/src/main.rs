@@ -23,7 +23,7 @@ use reth::{
         ext::{RethCliExt, RethNodeCommandConfig},
         Cli,
     },
-    rpc::types::engine::beacon_api::events::PayloadAttributesEvent,
+    rpc::types::engine::beacon_api::events::{HeadEvent, PayloadAttributesEvent},
     tasks::TaskSpawner,
 };
 use std::net::{IpAddr, Ipv4Addr};
@@ -52,6 +52,25 @@ struct BeaconEventsConfig {
     /// Beacon Node http server port to listen on
     #[arg(long = "cl.port", default_value_t = 5052)]
     pub cl_port: u16,
+
+    #[arg(long = "topic", value_enum)]
+    pub event_topic: BeaconNodeEventTopic,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum BeaconNodeEventTopic {
+    PayloadAtrributes,
+    Head,
+}
+
+impl BeaconNodeEventTopic {
+    fn to_string_representation(&self) -> String {
+        match self {
+            BeaconNodeEventTopic::PayloadAtrributes => "payload_attributes",
+            BeaconNodeEventTopic::Head => "head",
+        }
+        .to_string()
+    }
 }
 
 impl BeaconEventsConfig {
@@ -68,8 +87,23 @@ impl BeaconEventsConfig {
     /// Service that subscribes to beacon chain payload attributes events
     async fn run(self) {
         let client = EventClient::default();
+        let mut subscription = self.subscribe(&client).await;
 
-        let mut subscription = self.new_payload_attributes_subscription(&client).await;
+        match self.event_topic {
+            BeaconNodeEventTopic::PayloadAtrributes => {
+                while let Some(event) = subscription.next().await {
+                    let payload_attributes_event =
+                        serde_json::from_str::<PayloadAttributesEvent>(&event.unwrap()).unwrap();
+                    info!("Received payload attributes: {:?}", payload_attributes_event);
+                }
+            }
+            BeaconNodeEventTopic::Head => {
+                while let Some(event) = subscription.next().await {
+                    let head_event = serde_json::from_str::<HeadEvent>(&event.unwrap()).unwrap();
+                    info!("Received head event: {:?}", head_event);
+                }
+            }
+        };
 
         while let Some(event) = subscription.next().await {
             info!("Received payload attributes: {:?}", event);
@@ -77,16 +111,17 @@ impl BeaconEventsConfig {
     }
 
     // It can take a bit until the CL endpoint is live so we retry a few times
-    async fn new_payload_attributes_subscription(
-        &self,
-        client: &EventClient,
-    ) -> EventStream<PayloadAttributesEvent> {
-        let payloads_url = format!("{}?topics=payload_attributes", self.events_url());
+    async fn subscribe(&self, client: &EventClient) -> EventStream<String> {
+        let beacon_node_events_url =
+            format!("{}?topics={}", self.events_url(), self.event_topic.to_string_representation());
         loop {
-            match client.subscribe(&payloads_url).await {
+            match client.subscribe(&beacon_node_events_url).await {
                 Ok(subscription) => return subscription,
                 Err(err) => {
-                    warn!("Failed to subscribe to payload attributes events: {:?}\nRetrying in 5 seconds...", err);
+                    warn!(
+                        "Failed to subscribe to {:?} events: {:?}\nRetrying in 5 seconds...",
+                        self.event_topic, err
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             }
