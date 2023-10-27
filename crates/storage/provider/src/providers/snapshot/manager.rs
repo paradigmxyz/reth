@@ -4,8 +4,8 @@ use dashmap::DashMap;
 use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::SNAPSHOT_BLOCK_NUMBER_CHUNKS, Address, BlockHash, BlockHashOrNumber, BlockNumber,
-    ChainInfo, Header, SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned,
+    snapshot::BLOCKS_PER_SNAPSHOT, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo,
+    Header, SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
 use std::{ops::RangeBounds, path::PathBuf};
@@ -27,7 +27,7 @@ impl SnapshotProvider {
         mut path: Option<PathBuf>,
     ) -> RethResult<SnapshotJarProvider<'_>> {
         // TODO this invalidates custom length snapshots.
-        let snapshot = block / SNAPSHOT_BLOCK_NUMBER_CHUNKS;
+        let snapshot = block / BLOCKS_PER_SNAPSHOT;
         let key = (snapshot, segment);
 
         if let Some(jar) = self.map.get(&key) {
@@ -38,8 +38,7 @@ impl SnapshotProvider {
             self.map.insert(key, LoadedJar::new(NippyJar::load(path)?)?);
         } else {
             path = Some(segment.filename(
-                &((snapshot * SNAPSHOT_BLOCK_NUMBER_CHUNKS)..=
-                    ((snapshot + 1) * SNAPSHOT_BLOCK_NUMBER_CHUNKS - 1)),
+                &((snapshot * BLOCKS_PER_SNAPSHOT)..=((snapshot + 1) * BLOCKS_PER_SNAPSHOT - 1)),
             ));
         }
 
