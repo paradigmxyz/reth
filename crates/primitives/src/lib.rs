@@ -61,8 +61,8 @@ pub use chain::{
 };
 pub use compression::*;
 pub use constants::{
-    DEV_GENESIS, EMPTY_OMMER_ROOT, GOERLI_GENESIS, HOLESKY_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS,
-    SEPOLIA_GENESIS,
+    DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
+    KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use eip4844::{calculate_excess_blob_gas, kzg_to_versioned_hash};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
@@ -91,7 +91,7 @@ pub use transaction::{
     IntoRecoveredTransaction, InvalidTransactionError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionKind, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
-    TxEip4844, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    TxEip4844, TxHashOrNumber, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;
