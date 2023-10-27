@@ -1,10 +1,9 @@
 use crate::{
     compression::{Compression, Compressors, Zstd},
-    InclusionFilter, NippyJar, NippyJarError, PerfectHashingFunction, RefRow,
+    InclusionFilter, MmapHandle, NippyJar, NippyJarError, PerfectHashingFunction, RefRow,
 };
-use memmap2::Mmap;
 use serde::{de::Deserialize, ser::Serialize};
-use std::{fs::File, ops::Range, sync::Arc};
+use std::ops::Range;
 use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
@@ -14,10 +13,7 @@ pub struct NippyJarCursor<'a, H = ()> {
     /// [`NippyJar`] which holds most of the required configuration to read from the file.
     jar: &'a NippyJar<H>,
     /// Data file.
-    #[allow(unused)]
-    file_handle: Arc<File>,
-    /// Data file.
-    mmap_handle: Arc<Mmap>,
+    mmap_handle: MmapHandle,
     /// Internal buffer to unload data to without reallocating memory on each retrieval.
     internal_buffer: Vec<u8>,
     /// Cursor row position.
@@ -38,16 +34,24 @@ where
     H: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static,
 {
     pub fn new(jar: &'a NippyJar<H>) -> Result<Self, NippyJarError> {
-        let file = File::open(jar.data_path())?;
-
-        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let mmap = unsafe { Mmap::map(&file)? };
         let max_row_size = jar.max_row_size;
-
         Ok(NippyJarCursor {
             jar,
-            file_handle: Arc::new(file),
-            mmap_handle: Arc::new(mmap),
+            mmap_handle: jar.open_data()?,
+            // Makes sure that we have enough buffer capacity to decompress any row of data.
+            internal_buffer: Vec::with_capacity(max_row_size),
+            row: 0,
+        })
+    }
+
+    pub fn with_handle(
+        jar: &'a NippyJar<H>,
+        mmap_handle: MmapHandle,
+    ) -> Result<Self, NippyJarError> {
+        let max_row_size = jar.max_row_size;
+        Ok(NippyJarCursor {
+            jar,
+            mmap_handle,
             // Makes sure that we have enough buffer capacity to decompress any row of data.
             internal_buffer: Vec::with_capacity(max_row_size),
             row: 0,
