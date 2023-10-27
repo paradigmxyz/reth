@@ -358,7 +358,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         // penalize spammers first by equalizing txs count first
         let mut offenders = Vec::new();
-        let mut spammer_index = 0;
 
         // The point of this loop is to iterate through the list of spammers, sorted by tx count,
         // and find the sender where:
@@ -401,7 +400,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     }
                 }
             }
-            spammer_index += 1;
         }
 
         // If still above threshold, reduce to limit till each offenders tx count is below
@@ -672,11 +670,14 @@ mod tests {
         let c2 = c1.clone().with_nonce(1);
         let c3 = c1.clone().with_nonce(2);
 
-        // D is not a spammer
+        // D is not a spammer, it has `max_account_slots` txs
         let d1 = MockTransaction::eip1559().with_sender(d);
 
         // just construct a list of all txs to add
-        let expected_pending = vec![a1.clone(), b1.clone(), c1.clone(), d1.clone()];
+        let expected_pending = vec![a1.clone(), b1.clone(), c1.clone(), d1.clone()]
+            .into_iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
         let expected_removed = vec![
             a2.clone(),
             a3.clone(),
@@ -685,20 +686,22 @@ mod tests {
             b3.clone(),
             c2.clone(),
             c3.clone(),
-        ];
+        ]
+        .into_iter()
+        .map(|tx| (tx.sender(), tx.nonce()))
+        .collect::<HashSet<_>>();
         let all_txs = vec![a1, a2, a3, a4, b1, b2, b3, c1, c2, c3, d1];
 
         // add all the transactions to the pool
         for tx in all_txs {
-            println!("adding tx {:?}, has id: {:?}", tx, f.tx_id(&tx));
             pool.add_transaction(f.validated_arc(tx), 0);
         }
 
-        // let's set the max_account_slots to 2, and the max total txs to 3, we should end up with
+        // let's set the max_account_slots to 2, and the max total txs to 4, we should end up with
         // only the first transactions
-        let max_account_slots = 2;
+        let max_account_slots = 1;
         let pool_limit = SubPoolLimit {
-            max_txs: 3,
+            max_txs: 4,
             // TODO: size is going to make this complicated i think....
             max_size: usize::MAX,
         };
@@ -716,7 +719,8 @@ mod tests {
         assert_eq!(removed.len(), expected_removed.len());
 
         // get the inner txs from the removed txs
-        let removed = removed.into_iter().map(|tx| tx.transaction.clone()).collect::<Vec<_>>();
+        let removed =
+            removed.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(removed, expected_removed);
 
         // get the pending pool
@@ -724,7 +728,8 @@ mod tests {
         assert_eq!(pending.len(), expected_pending.len());
 
         // get the inner txs from the pending txs
-        let pending = pending.into_iter().map(|tx| tx.transaction.clone()).collect::<Vec<_>>();
+        let pending =
+            pending.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(pending, expected_pending);
     }
 }
