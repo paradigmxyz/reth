@@ -127,16 +127,11 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     fn execute_with_operation_metric<T: Table, R>(
         &self,
         operation: Operation,
+        value_size: Option<usize>,
         f: impl FnOnce(&Transaction<'_, K, E>) -> R,
     ) -> R {
         if self.metrics_handler.is_some() {
-            let start = Instant::now();
-            let result = f(&self.inner);
-            let duration = start.elapsed();
-
-            OperationMetrics::record(T::NAME, operation, duration);
-
-            result
+            OperationMetrics::record(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
         }
@@ -192,7 +187,7 @@ impl<E: EnvironmentKind> TableImporter for Tx<'_, RW, E> {}
 
 impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
-        self.execute_with_operation_metric::<T, _>(Operation::Get, |tx| {
+        self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
             tx.get(self.get_dbi::<T>()?, key.encode().as_ref())
                 .map_err(|e| DatabaseError::Read(e.into()))?
                 .map(decode_one::<T>)
@@ -237,15 +232,21 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
 impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.execute_with_operation_metric::<T, _>(Operation::Put, |tx| {
-            tx.put(self.get_dbi::<T>()?, key.as_ref(), &value.compress(), WriteFlags::UPSERT)
-                .map_err(|e| DatabaseError::Write {
-                    code: e.into(),
-                    operation: DatabaseWriteOperation::Put,
-                    table_name: T::NAME,
-                    key: Box::from(key.as_ref()),
+        let value = value.compress();
+        self.execute_with_operation_metric::<T, _>(
+            Operation::Put,
+            Some(value.as_ref().len()),
+            |tx| {
+                tx.put(self.get_dbi::<T>()?, key.as_ref(), value, WriteFlags::UPSERT).map_err(|e| {
+                    DatabaseError::Write {
+                        code: e.into(),
+                        operation: DatabaseWriteOperation::Put,
+                        table_name: T::NAME,
+                        key: Box::from(key.as_ref()),
+                    }
                 })
-        })
+            },
+        )
     }
 
     fn delete<T: Table>(
@@ -260,7 +261,7 @@ impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
             data = Some(value.as_ref());
         };
 
-        self.execute_with_operation_metric::<T, _>(Operation::Delete, |tx| {
+        self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
             tx.del(self.get_dbi::<T>()?, key.encode(), data)
                 .map_err(|e| DatabaseError::Delete(e.into()))
         })

@@ -1,7 +1,7 @@
 //! Cursor wrapper for libmdbx-sys.
 
 use reth_interfaces::db::DatabaseWriteOperation;
-use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, time::Instant};
+use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
 
 use crate::{
     common::{PairResult, ValueOnlyResult},
@@ -42,23 +42,17 @@ impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
         Self { inner, buf: Vec::new(), with_metrics, _dbi: PhantomData }
     }
 
-    /// If `self.with_metrics == true`, measure the time it takes to execute the closure and record
-    /// a metric with the provided operation.
+    /// If `self.with_metrics == true`, record a metric with the provided operation and value size.
     ///
     /// Otherwise, just execute the closure.
     fn execute_with_operation_metric<R>(
         &mut self,
         operation: Operation,
+        value_size: Option<usize>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
         if self.with_metrics {
-            let start = Instant::now();
-            let result = f(self);
-            let duration = start.elapsed();
-
-            OperationMetrics::record(T::NAME, operation, duration);
-
-            result
+            OperationMetrics::record(T::NAME, operation, value_size, || f(self))
         } else {
             f(self)
         }
@@ -75,14 +69,14 @@ macro_rules! decode {
 
 /// Some types don't support compression (eg. B256), and we don't want to be copying them to the
 /// allocated buffer when we can just use their reference.
-macro_rules! compress_or_ref {
+macro_rules! compress_to_buf_or_ref {
     ($self:expr, $value:expr) => {
         if let Some(value) = $value.uncompressable_ref() {
-            value
+            Some(value)
         } else {
             $self.buf.truncate(0);
             $value.compress_to_buf(&mut $self.buf);
-            $self.buf.as_ref()
+            None
         }
     };
 }
@@ -261,50 +255,65 @@ impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
     /// found, before calling `upsert`.
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.execute_with_operation_metric(Operation::CursorUpsert, |this| {
-            this.inner.put(key.as_ref(), compress_or_ref!(this, value), WriteFlags::UPSERT).map_err(
-                |e| DatabaseError::Write {
-                    code: e.into(),
-                    operation: DatabaseWriteOperation::CursorUpsert,
-                    table_name: T::NAME,
-                    key: Box::from(key.as_ref()),
-                },
-            )
-        })
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorUpsert,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
+                    .map_err(|e| DatabaseError::Write {
+                        code: e.into(),
+                        operation: DatabaseWriteOperation::CursorUpsert,
+                        table_name: T::NAME,
+                        key: Box::from(key.as_ref()),
+                    })
+            },
+        )
     }
 
     fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.execute_with_operation_metric(Operation::CursorInsert, |this| {
-            this.inner
-                .put(key.as_ref(), compress_or_ref!(this, value), WriteFlags::NO_OVERWRITE)
-                .map_err(|e| DatabaseError::Write {
-                    code: e.into(),
-                    operation: DatabaseWriteOperation::CursorInsert,
-                    table_name: T::NAME,
-                    key: Box::from(key.as_ref()),
-                })
-        })
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorInsert,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
+                    .map_err(|e| DatabaseError::Write {
+                        code: e.into(),
+                        operation: DatabaseWriteOperation::CursorInsert,
+                        table_name: T::NAME,
+                        key: Box::from(key.as_ref()),
+                    })
+            },
+        )
     }
 
     /// Appends the data to the end of the table. Consequently, the append operation
     /// will fail if the inserted key is less than the last table key
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.execute_with_operation_metric(Operation::CursorAppend, |this| {
-            this.inner.put(key.as_ref(), compress_or_ref!(this, value), WriteFlags::APPEND).map_err(
-                |e| DatabaseError::Write {
-                    code: e.into(),
-                    operation: DatabaseWriteOperation::CursorAppend,
-                    table_name: T::NAME,
-                    key: Box::from(key.as_ref()),
-                },
-            )
-        })
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorAppend,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
+                    .map_err(|e| DatabaseError::Write {
+                        code: e.into(),
+                        operation: DatabaseWriteOperation::CursorAppend,
+                        table_name: T::NAME,
+                        key: Box::from(key.as_ref()),
+                    })
+            },
+        )
     }
 
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
-        self.execute_with_operation_metric(Operation::CursorDeleteCurrent, |this| {
+        self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |this| {
             this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
@@ -312,22 +321,27 @@ impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
 
 impl<T: DupSort> DbDupCursorRW<T> for Cursor<'_, RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
-        self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, |this| {
+        self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, None, |this| {
             this.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.execute_with_operation_metric(Operation::CursorAppendDup, |this| {
-            this.inner
-                .put(key.as_ref(), compress_or_ref!(this, value), WriteFlags::APPEND_DUP)
-                .map_err(|e| DatabaseError::Write {
-                    code: e.into(),
-                    operation: DatabaseWriteOperation::CursorAppendDup,
-                    table_name: T::NAME,
-                    key: Box::from(key.as_ref()),
-                })
-        })
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorAppendDup,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
+                    .map_err(|e| DatabaseError::Write {
+                        code: e.into(),
+                        operation: DatabaseWriteOperation::CursorAppendDup,
+                        table_name: T::NAME,
+                        key: Box::from(key.as_ref()),
+                    })
+            },
+        )
     }
 }

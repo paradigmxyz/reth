@@ -1,6 +1,8 @@
 use metrics::{Gauge, Histogram};
 use reth_metrics::{metrics::Counter, Metrics};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 #[allow(missing_docs)]
@@ -130,18 +132,37 @@ impl TransactionMetrics {
 pub(crate) struct OperationMetrics {
     /// Total number of database operations made
     calls_total: Counter,
-    /// The time it took to execute a database operation
-    duration_seconds: Histogram,
+    /// The time it took to execute a database operation (put/upsert/insert/append/append_dup) with
+    /// value larger than [LARGE_VALUE_THRESHOLD_BYTES] bytes.
+    large_value_duration_seconds: Histogram,
 }
 
 impl OperationMetrics {
-    /// Record operation metric with the duration it took to execute.
-    pub(crate) fn record(table: &'static str, operation: Operation, duration: Duration) {
+    /// Record operation metric.
+    ///
+    /// The duration it took to execute the closure is recorded only if the provided `value_size` is
+    /// larger than [LARGE_VALUE_THRESHOLD_BYTES].
+    pub(crate) fn record<T>(
+        table: &'static str,
+        operation: Operation,
+        value_size: Option<usize>,
+        f: impl FnOnce() -> T,
+    ) -> T {
         let metrics = Self::new_with_labels(&[
             (Labels::Table.as_str(), table),
             (Labels::Operation.as_str(), operation.as_str()),
         ]);
-        metrics.duration_seconds.record(duration);
         metrics.calls_total.increment(1);
+
+        // Record duration only for large values to prevent the performance hit of clock syscall
+        // on small operations
+        if value_size.map_or(false, |size| size > LARGE_VALUE_THRESHOLD_BYTES) {
+            let start = Instant::now();
+            let result = f();
+            metrics.large_value_duration_seconds.record(start.elapsed());
+            result
+        } else {
+            f()
+        }
     }
 }

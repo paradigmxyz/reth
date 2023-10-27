@@ -628,7 +628,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_database_transaction_close_duration_seconds{instance=~\"$instance\", outcome=\"commit\"}[$__interval])) by (quantile)",
+          "expr": "avg(last_over_time(reth_database_transaction_close_duration_seconds{instance=~\"$instance\", outcome=\"commit\"}[$__interval])) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
@@ -825,7 +825,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_database_transaction_open_duration_seconds{instance=~\"$instance\", outcome!=\"\", quantile=\"1\"}[$__interval])) by (outcome, mode)",
+          "expr": "max(max_over_time(reth_database_transaction_open_duration_seconds{instance=~\"$instance\", outcome!=\"\", quantile=\"1\"}[$__interval])) by (outcome, mode)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{mode}}, {{outcome}}",
@@ -1025,7 +1025,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(reth_database_operation_duration_seconds{instance=~\"$instance\", quantile=\"1\"}[$__interval])) by (operation)",
+          "expr": "max(max_over_time(reth_database_operation_large_value_duration_seconds{instance=~\"$instance\", quantile=\"1\"}[$__interval])) by (operation)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{operation}}",
@@ -1733,7 +1733,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1826,7 +1827,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1944,7 +1946,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2248,7 +2251,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2355,7 +2359,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2510,7 +2515,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2628,7 +2634,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2748,7 +2755,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2948,7 +2956,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
