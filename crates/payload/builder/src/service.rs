@@ -185,7 +185,7 @@ where
         let service = Self {
             generator,
             payload_jobs: Vec::new(),
-            service_tx: service_tx.clone(),
+            service_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             metrics: Default::default(),
         };
