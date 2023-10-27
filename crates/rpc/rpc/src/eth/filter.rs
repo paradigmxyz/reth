@@ -248,20 +248,6 @@ where
     }
 
     /// Handler for `eth_newPendingTransactionFilter`
-    // async fn new_pending_transaction_filter(
-    //     &self,
-    //     kind: Option<PendingTransactionFilterKind>,
-    // ) -> RpcResult<FilterId> { trace!(target: "rpc::eth", "Serving
-    //   eth_newPendingTransactionFilter"); match
-    //   kind.unwrap_or(PendingTransactionFilterKind::Hashes) { PendingTransactionFilterKind::Hashes
-    //   => { let receiver = self.inner.pool.pending_transactions_listener(); let
-    //   pending_txs_receiver = PendingTransactionsReceiver::new(receiver); self.inner
-    //   .install_filter(FilterKind::PendingTransaction(pending_txs_receiver)) .await }
-    //   PendingTransactionFilterKind::Full => { let stream =
-    //   self.inner.pool.new_pending_pool_transactions_listener(); let full_txs_receiver =
-    //   FullTransactionsReceiver::new(stream);
-    //   self.inner.install_filter(FilterKind::PendingTransaction(full_txs_receiver)).await } }
-    // }
     async fn new_pending_transaction_filter(
         &self,
         kind: Option<PendingTransactionFilterKind>,
@@ -281,9 +267,6 @@ where
                 }
             };
 
-        // Here, you would typically do something with `transaction_kind`
-        // to process or store the data, then return an appropriate result.
-        // This part of the code is pseudocode, as I'm not sure of your exact requirements:
         self.inner.install_filter(transaction_kind).await
     }
 
