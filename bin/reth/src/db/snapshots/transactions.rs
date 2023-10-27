@@ -5,19 +5,15 @@ use super::{
 use rand::{seq::SliceRandom, Rng};
 use reth_db::{database::Database, open_db_read_only, table::Decompress};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{Filters, InclusionFilter},
     ChainSpec, SnapshotSegment, TransactionSignedNoHash,
 };
 use reth_provider::{
-    DatabaseProviderRO, ProviderError, ProviderFactory, TransactionsProvider,
-    TransactionsProviderExt,
+    providers::SnapshotProvider, DatabaseProviderRO, ProviderError, ProviderFactory,
+    TransactionsProvider, TransactionsProviderExt,
 };
-use reth_snapshot::{
-    segments,
-    segments::{get_snapshot_segment_file_name, Segment},
-};
+use reth_snapshot::{segments, segments::Segment};
 use std::{path::Path, sync::Arc};
 
 impl Command {
@@ -59,26 +55,22 @@ impl Command {
         let block_range = self.from..=(self.from + self.block_interval - 1);
 
         let mut rng = rand::thread_rng();
-        let mut dictionaries = None;
-        let mut jar = NippyJar::load(&get_snapshot_segment_file_name(
-            SnapshotSegment::Transactions,
-            filters,
-            compression,
-            &block_range,
-        ))?;
 
         let tx_range = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
             .provider()?
-            .transaction_range_by_block_range(block_range)?;
+            .transaction_range_by_block_range(block_range.clone())?;
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
-        let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
-        let mut cursor = if !decompressors.is_empty() {
-            provider.cursor_with_decompressors(decompressors)
-        } else {
-            provider.cursor()
-        };
+        let path = SnapshotSegment::Transactions.filename_with_configuration(
+            filters,
+            compression,
+            &block_range,
+        );
+        let provider = SnapshotProvider::default();
+        let jar_provider =
+            provider.get_segment_provider(SnapshotSegment::Transactions, self.from, Some(path))?;
+        let mut cursor = jar_provider.cursor()?;
 
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {
             bench(

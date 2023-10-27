@@ -5,13 +5,14 @@ use super::{
 use rand::{seq::SliceRandom, Rng};
 use reth_db::{database::Database, open_db_read_only, table::Decompress};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
     ChainSpec, Header, SnapshotSegment,
 };
-use reth_provider::{DatabaseProviderRO, HeaderProvider, ProviderError, ProviderFactory};
-use reth_snapshot::segments::{get_snapshot_segment_file_name, Headers, Segment};
+use reth_provider::{
+    providers::SnapshotProvider, DatabaseProviderRO, HeaderProvider, ProviderError, ProviderFactory,
+};
+use reth_snapshot::segments::{Headers, Segment};
 use std::{path::Path, sync::Arc};
 
 impl Command {
@@ -54,20 +55,12 @@ impl Command {
 
         let mut row_indexes = range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
-        let mut dictionaries = None;
-        let mut jar = NippyJar::load(&get_snapshot_segment_file_name(
-            SnapshotSegment::Headers,
-            filters,
-            compression,
-            &range,
-        ))?;
-
-        let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
-        let mut cursor = if !decompressors.is_empty() {
-            provider.cursor_with_decompressors(decompressors)
-        } else {
-            provider.cursor()
-        };
+        let path =
+            SnapshotSegment::Headers.filename_with_configuration(filters, compression, &range);
+        let provider = SnapshotProvider::default();
+        let jar_provider =
+            provider.get_segment_provider(SnapshotSegment::Headers, self.from, Some(path))?;
+        let mut cursor = jar_provider.cursor()?;
 
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {
             bench(

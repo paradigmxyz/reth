@@ -19,7 +19,7 @@ use reth_primitives::{
     BlockNumber, SnapshotSegment,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
-use std::{ops::RangeInclusive, path::PathBuf};
+use std::ops::RangeInclusive;
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
@@ -61,7 +61,7 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
     let mut nippy_jar = NippyJar::new(
         COLUMNS,
-        &get_snapshot_segment_file_name(segment, filters, compression, &block_range),
+        &segment.filename_with_configuration(filters, compression, &block_range),
         SegmentHeader::new(block_range, tx_range),
     );
 
@@ -89,44 +89,4 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     }
 
     Ok(nippy_jar)
-}
-
-/// Returns file name for the provided segment, filters, compression and range.
-pub fn get_snapshot_segment_file_name(
-    segment: SnapshotSegment,
-    filters: Filters,
-    compression: Compression,
-    range: &RangeInclusive<BlockNumber>,
-) -> PathBuf {
-    let segment_name = match segment {
-        SnapshotSegment::Headers => "headers",
-        SnapshotSegment::Transactions => "transactions",
-        SnapshotSegment::Receipts => "receipts",
-    };
-    let filters_name = match filters {
-        Filters::WithFilters(inclusion_filter, phf) => {
-            let inclusion_filter = match inclusion_filter {
-                InclusionFilter::Cuckoo => "cuckoo",
-            };
-            let phf = match phf {
-                PerfectHashingFunction::Fmph => "fmph",
-                PerfectHashingFunction::GoFmph => "gofmph",
-            };
-            format!("{inclusion_filter}-{phf}")
-        }
-        Filters::WithoutFilters => "none".to_string(),
-    };
-    let compression_name = match compression {
-        Compression::Lz4 => "lz4",
-        Compression::Zstd => "zstd",
-        Compression::ZstdWithDictionary => "zstd-dict",
-        Compression::Uncompressed => "uncompressed",
-    };
-
-    format!(
-        "snapshot_{segment_name}_{}_{}_{filters_name}_{compression_name}",
-        range.start(),
-        range.end(),
-    )
-    .into()
 }
