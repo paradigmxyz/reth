@@ -1,9 +1,8 @@
 //! Numeric serde helpers.
 
-use std::str::FromStr;
-
 use alloy_primitives::{U256, U64};
 use serde::{de, Deserialize, Deserializer, Serialize};
+use std::str::FromStr;
 
 /// A `u64` wrapper type that deserializes from hex or a u64 and serializes as hex.
 ///

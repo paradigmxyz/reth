@@ -11,7 +11,7 @@ use std::{
 };
 use url::{Host, Url};
 
-/// Represents a ENR in discv4.
+/// Represents a ENR in discovery.
 ///
 /// Note: this is only an excerpt of the [`NodeRecord`] data structure.
 #[derive(
