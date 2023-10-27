@@ -21,7 +21,6 @@ add_snapshot_mask!(
     0b110
 );
 
-
 // RECEIPT MASKS
 add_snapshot_mask!(ReceiptMask, <Receipts as Table>::Value, 0b1);
 

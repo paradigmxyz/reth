@@ -25,7 +25,7 @@ impl<'a> SnapshotCursor<'a> {
         mask: usize,
     ) -> RethResult<Option<Vec<&'_ [u8]>>> {
         let row = match key_or_num {
-            KeyOrNumber::Hash(k) => self.row_by_key_with_cols(k, mask),
+            KeyOrNumber::Key(k) => self.row_by_key_with_cols(k, mask),
             KeyOrNumber::Number(n) => {
                 let offset = self.jar().user_header().start();
                 if offset > n {
@@ -87,14 +87,14 @@ impl<'a> SnapshotCursor<'a> {
 #[derive(Debug)]
 pub enum KeyOrNumber<'a> {
     /// A slice used as a key. Usually a block/tx hash
-    Hash(&'a [u8]),
+    Key(&'a [u8]),
     /// A block/tx number
     Number(u64),
 }
 
 impl<'a> From<&'a B256> for KeyOrNumber<'a> {
     fn from(value: &'a B256) -> Self {
-        KeyOrNumber::Hash(value.as_slice())
+        KeyOrNumber::Key(value.as_slice())
     }
 }
 
