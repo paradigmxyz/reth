@@ -1,4 +1,4 @@
-//! Contains types that represent ethereum types in [reth_primitives] when used in RPC
+//! Contains types that represent ethereum types when used in RPC
 use crate::{Transaction, Withdrawal};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bloom, Bytes, B256, B64, U256, U64};
 use alloy_rlp::{bytes, Decodable, Encodable, Error as RlpError};
