@@ -55,7 +55,7 @@ pub trait ColumnSelectorTwo {
 pub trait ColumnSelectorThree {
     /// First desired column value
     type FIRST: Decompress;
-    /// Second cdesired olumn value
+    /// Second desired column value
     type SECOND: Decompress;
     /// Third desired column value
     type THIRD: Decompress;
