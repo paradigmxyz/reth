@@ -18,7 +18,7 @@ use crate::table::Decompress;
 /// Alongside, the column selector traits (eg. [`ColumnSelectorOne`]) this provides a structured way
 /// to tie the types to be decoded to the mask necessary to query them.
 #[derive(Debug)]
-pub struct Mask<T, J = (), K = ()>(std::marker::PhantomData<(T, J, K)>);
+pub struct Mask<FIRST, SECOND = (), THIRD = ()>(std::marker::PhantomData<(FIRST, SECOND, THIRD)>);
 
 macro_rules! add_segments {
     ($($segment:tt),+) => {
@@ -26,7 +26,7 @@ macro_rules! add_segments {
             $(
                 #[doc = concat!("Mask for ", stringify!($segment), " snapshot segment. See [`Mask`] for more.")]
                 #[derive(Debug)]
-                pub struct [<$segment Mask>]<T, J = (), K = ()>(Mask<T, J, K>);
+                pub struct [<$segment Mask>]<FIRST, SECOND = (), THIRD = ()>(Mask<FIRST, SECOND, THIRD>);
             )+
         }
     };
@@ -36,7 +36,7 @@ add_segments!(Header, Receipt, Transaction);
 ///  Trait for specifying a mask to select one column value.
 pub trait ColumnSelectorOne {
     /// First desired column value
-    type T: Decompress;
+    type FIRST: Decompress;
     /// Mask to obtain desired values, should correspond to the order of columns in a snapshot.
     const MASK: usize;
 }
@@ -44,9 +44,9 @@ pub trait ColumnSelectorOne {
 ///  Trait for specifying a mask to select two column values.
 pub trait ColumnSelectorTwo {
     /// First desired column value
-    type T: Decompress;
+    type FIRST: Decompress;
     /// Second desired column value
-    type J: Decompress;
+    type SECOND: Decompress;
     /// Mask to obtain desired values, should correspond to the order of columns in a snapshot.
     const MASK: usize;
 }
@@ -54,11 +54,11 @@ pub trait ColumnSelectorTwo {
 ///  Trait for specifying a mask to select three column values.
 pub trait ColumnSelectorThree {
     /// First desired column value
-    type T: Decompress;
+    type FIRST: Decompress;
     /// Second cdesired olumn value
-    type J: Decompress;
+    type SECOND: Decompress;
     /// Third desired column value
-    type K: Decompress;
+    type THIRD: Decompress;
     /// Mask to obtain desired values, should correspond to the order of columns in a snapshot.
     const MASK: usize;
 }
@@ -68,22 +68,22 @@ pub trait ColumnSelectorThree {
 macro_rules! add_snapshot_mask {
     ($mask_struct:tt, $type1:ty, $mask:expr) => {
         impl ColumnSelectorOne for $mask_struct<$type1> {
-            type T = $type1;
+            type FIRST = $type1;
             const MASK: usize = $mask;
         }
     };
     ($mask_struct:tt, $type1:ty, $type2:ty, $mask:expr) => {
         impl ColumnSelectorTwo for $mask_struct<$type1, $type2> {
-            type T = $type1;
-            type J = $type2;
+            type FIRST = $type1;
+            type SECOND = $type2;
             const MASK: usize = $mask;
         }
     };
     ($mask_struct:tt, $type1:ty, $type2:ty, $type3:ty, $mask:expr) => {
         impl ColumnSelectorTwo for $mask_struct<$type1, $type2, $type3> {
-            type T = $type1;
-            type J = $type2;
-            type K = $type3;
+            type FIRST = $type1;
+            type SECOND = $type2;
+            type THIRD = $type3;
             const MASK: usize = $mask;
         }
     };

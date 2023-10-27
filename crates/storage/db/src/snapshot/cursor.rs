@@ -42,11 +42,11 @@ impl<'a> SnapshotCursor<'a> {
     pub fn get_one<M: ColumnSelectorOne>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> RethResult<Option<M::T>> {
+    ) -> RethResult<Option<M::FIRST>> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
-            Some(row) => Ok(Some(M::T::decompress(row[0])?)),
+            Some(row) => Ok(Some(M::FIRST::decompress(row[0])?)),
             None => Ok(None),
         }
     }
@@ -55,11 +55,11 @@ impl<'a> SnapshotCursor<'a> {
     pub fn get_two<M: ColumnSelectorTwo>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> RethResult<Option<(M::T, M::J)>> {
+    ) -> RethResult<Option<(M::FIRST, M::SECOND)>> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
-            Some(row) => Ok(Some((M::T::decompress(row[0])?, M::J::decompress(row[1])?))),
+            Some(row) => Ok(Some((M::FIRST::decompress(row[0])?, M::SECOND::decompress(row[1])?))),
             None => Ok(None),
         }
     }
@@ -69,14 +69,14 @@ impl<'a> SnapshotCursor<'a> {
     pub fn get_three<M: ColumnSelectorThree>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> RethResult<Option<(M::T, M::J, M::K)>> {
+    ) -> RethResult<Option<(M::FIRST, M::SECOND, M::THIRD)>> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
             Some(row) => Ok(Some((
-                M::T::decompress(row[0])?,
-                M::J::decompress(row[1])?,
-                M::K::decompress(row[2])?,
+                M::FIRST::decompress(row[0])?,
+                M::SECOND::decompress(row[1])?,
+                M::THIRD::decompress(row[2])?,
             ))),
             None => Ok(None),
         }
