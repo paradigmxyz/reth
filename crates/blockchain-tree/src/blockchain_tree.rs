@@ -298,7 +298,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         let parent = block.parent_num_hash();
 
-        // check if block parent can be found in Tree
+        // check if block parent can be found in any side chain.
         if let Some(chain_id) = self.block_indices().get_blocks_chain_id(&parent.hash) {
             // found parent in side tree, try to insert there
             return self.try_insert_block_into_side_chain(block, chain_id, block_validation_kind)
@@ -917,6 +917,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         // If block is already canonical don't return error.
         if let Some(header) = self.find_canonical_header(block_hash)? {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
+            // TODO: this could be fetched from the chainspec first
             let td = self.externals.database().provider()?.header_td(block_hash)?.ok_or(
                 CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
                     hash: *block_hash,

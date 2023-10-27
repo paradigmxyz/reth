@@ -632,8 +632,9 @@ where
             return Ok(OnForkChoiceUpdated::invalid_state())
         }
 
+        // check if the new head hash is connected to any ancestor that we previously marked as
+        // invalid
         let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
-
         if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu) {
             return Ok(OnForkChoiceUpdated::with_invalid(status))
         }
@@ -659,6 +660,7 @@ where
         let start = Instant::now();
         let make_canonical_result = self.blockchain.make_canonical(&state.head_block_hash);
         let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
+
         let status = match make_canonical_result {
             Ok(outcome) => {
                 match outcome {
