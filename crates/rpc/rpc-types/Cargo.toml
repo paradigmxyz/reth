@@ -11,11 +11,8 @@ Reth RPC types
 """
 
 [dependencies]
-# reth
-reth-primitives.workspace = true
-
 # # ethereum
-alloy-rlp = { workspace = true, features = ["arrayvec"] }
+alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
 
 # misc
 thiserror.workspace = true
@@ -24,7 +21,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_with = "3.3"
 serde_json.workspace = true
 jsonrpsee-types = { workspace = true, optional = true }
-alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
+alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde"] }
 c-kzg = { workspace = true, features = ["serde"] }
 url = "2.3"
 # necessary so we don't hit a "undeclared 'std'":

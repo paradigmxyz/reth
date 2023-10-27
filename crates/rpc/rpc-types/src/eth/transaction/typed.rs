@@ -134,15 +134,6 @@ impl Decodable for TransactionKind {
     }
 }
 
-impl From<TransactionKind> for reth_primitives::TransactionKind {
-    fn from(kind: TransactionKind) -> Self {
-        match kind {
-            TransactionKind::Call(to) => reth_primitives::TransactionKind::Call(to),
-            TransactionKind::Create => reth_primitives::TransactionKind::Create,
-        }
-    }
-}
-
 /// This represents a set of blobs, and its corresponding commitments and proofs.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BlobTransactionSidecar {

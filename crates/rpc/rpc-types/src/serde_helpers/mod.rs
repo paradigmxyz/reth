@@ -3,6 +3,7 @@
 use alloy_primitives::U256;
 use serde::{Deserialize, Deserializer, Serializer};
 
+pub mod json_u256;
 pub mod num;
 /// Storage related helpers.
 pub mod storage;

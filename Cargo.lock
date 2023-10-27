@@ -6499,7 +6499,6 @@ dependencies = [
  "itertools 0.11.0",
  "jsonrpsee-types",
  "rand 0.8.5",
- "reth-primitives",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",

@@ -18,7 +18,7 @@ pub fn to_primitive_transaction(
             nonce: tx.nonce.to(),
             gas_price: tx.gas_price.to(),
             gas_limit: tx.gas_limit.try_into().ok()?,
-            to: tx.kind.into(),
+            to: to_primitive_transaction_kind(tx.kind),
             value: tx.value.into(),
             input: tx.input,
         }),
@@ -27,7 +27,7 @@ pub fn to_primitive_transaction(
             nonce: tx.nonce.to(),
             gas_price: tx.gas_price.to(),
             gas_limit: tx.gas_limit.try_into().ok()?,
-            to: tx.kind.into(),
+            to: to_primitive_transaction_kind(tx.kind),
             value: tx.value.into(),
             input: tx.input,
             access_list: to_primitive_access_list(tx.access_list),
@@ -37,7 +37,7 @@ pub fn to_primitive_transaction(
             nonce: tx.nonce.to(),
             max_fee_per_gas: tx.max_fee_per_gas.to(),
             gas_limit: tx.gas_limit.try_into().ok()?,
-            to: tx.kind.into(),
+            to: to_primitive_transaction_kind(tx.kind),
             value: tx.value.into(),
             input: tx.input,
             access_list: to_primitive_access_list(tx.access_list),
@@ -49,7 +49,7 @@ pub fn to_primitive_transaction(
             gas_limit: tx.gas_limit.to(),
             max_fee_per_gas: tx.max_fee_per_gas.to(),
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),
-            to: tx.kind.into(),
+            to: to_primitive_transaction_kind(tx.kind),
             value: tx.value.into(),
             access_list: to_primitive_access_list(tx.access_list),
             blob_versioned_hashes: tx.blob_versioned_hashes,
@@ -57,4 +57,14 @@ pub fn to_primitive_transaction(
             input: tx.input,
         }),
     })
+}
+
+/// Transforms a [reth_rpc_types::TransactionKind] into a [reth_primitives::TransactionKind]
+pub fn to_primitive_transaction_kind(
+    kind: reth_rpc_types::TransactionKind,
+) -> reth_primitives::TransactionKind {
+    match kind {
+        reth_rpc_types::TransactionKind::Call(to) => reth_primitives::TransactionKind::Call(to),
+        reth_rpc_types::TransactionKind::Create => reth_primitives::TransactionKind::Create,
+    }
 }
