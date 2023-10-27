@@ -42,7 +42,6 @@ type ReceiptsResponseSender = oneshot::Sender<RethResult<Option<Vec<Receipt>>>>;
 /// The type that can send the response to a requested env
 type EnvResponseSender = oneshot::Sender<RethResult<(CfgEnv, BlockEnv)>>;
 
-
 type BlockLruCache<L> = MultiConsumerLruCache<
     B256,
     Block,
@@ -53,7 +52,6 @@ type BlockLruCache<L> = MultiConsumerLruCache<
 type ReceiptsLruCache<L> = MultiConsumerLruCache<B256, Vec<Receipt>, L, ReceiptsResponseSender>;
 
 type EnvLruCache<L> = MultiConsumerLruCache<B256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
-
 
 /// Provides async access to cached eth data
 ///
@@ -202,7 +200,6 @@ impl EthStateCache {
         let _ = self.to_service.send(CacheAction::GetEnv { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
- 
 }
 
 /// A task than manages caches for data required by the `eth` rpc implementation.

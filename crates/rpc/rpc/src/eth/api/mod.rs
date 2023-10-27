@@ -10,12 +10,12 @@ use crate::eth::{
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
-use std::fmt::{self, Debug, Formatter};
 use async_trait::async_trait;
+use derive_more::{Deref, DerefMut};
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64, SealedHeader,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, Header, SealedHeader, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -24,14 +24,14 @@ use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnv};
+use schnellru::{ByLength, LruMap};
 use std::{
+    fmt::{self, Debug, Formatter},
     future::Future,
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::{oneshot, Mutex};
-use derive_more::{Deref, DerefMut};
-use schnellru::{ByLength, LruMap};
 
 mod block;
 mod call;
@@ -142,9 +142,7 @@ where
             task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
-            fee_history_cache: Mutex::new(FeeHistoryLruCache(LruMap::new(ByLength::new(
-               1024, 
-            ))))
+            fee_history_cache: Mutex::new(FeeHistoryLruCache(LruMap::new(ByLength::new(1024)))),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -455,7 +453,6 @@ struct EthApiInner<Provider, Pool, Network> {
     fee_history_cache: Mutex<FeeHistoryLruCache>,
 }
 
-
 /// The type that contains fees data for associated block in cache
 #[derive(Clone, Debug)]
 pub struct BlockFees {
@@ -467,15 +464,18 @@ pub struct BlockFees {
     pub gas_used: u64,
     /// Block data on gas_limit
     pub gas_limit: u64,
+    /// parent block hash
+    pub parent_hash: B256,
 }
 
 impl BlockFees {
-    fn from_header(header: SealedHeader) -> BlockFees {
+    fn from_header(header: Header) -> BlockFees {
         BlockFees {
             base_fee_per_gas: header.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: header.gas_used as f64 / header.gas_limit as f64,
             gas_used: header.gas_used,
             gas_limit: header.gas_limit,
+            parent_hash: header.parent_hash,
         }
     }
 }
@@ -492,4 +492,3 @@ impl Debug for FeeHistoryLruCache {
             .finish()
     }
 }
-
