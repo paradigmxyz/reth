@@ -146,6 +146,14 @@ impl PeerRequest {
             }
         }
     }
+
+    /// Consumes the type and returns the inner [`GetPooledTransactions`] variant.
+    pub fn into_get_pooled_transactions(self) -> Option<GetPooledTransactions> {
+        match self {
+            PeerRequest::GetPooledTransactions { request, .. } => Some(request),
+            _ => None,
+        }
+    }
 }
 
 /// Corresponding variant for [`PeerRequest`].

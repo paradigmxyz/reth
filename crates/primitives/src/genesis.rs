@@ -1,6 +1,6 @@
 use crate::{
+    constants::EMPTY_ROOT_HASH,
     keccak256,
-    proofs::EMPTY_ROOT,
     serde_helper::{
         deserialize_json_u256, deserialize_json_u256_opt, deserialize_storage_map,
         num::{u64_hex_or_decimal, u64_hex_or_decimal_opt},
@@ -159,7 +159,7 @@ impl GenesisAccount {
         len += self.balance.length();
         // rather than rlp-encoding the storage, we just return the length of a single hash
         // hashes are a fixed size, so it is safe to use the empty root for this
-        len += EMPTY_ROOT.length();
+        len += EMPTY_ROOT_HASH.length();
         // we are encoding a hash, so let's just use the length of the empty hash for the code hash
         len += KECCAK_EMPTY.length();
         len
@@ -199,9 +199,9 @@ impl Encodable for GenesisAccount {
         self.balance.encode(out);
         self.storage
             .as_ref()
-            .map_or(EMPTY_ROOT, |storage| {
+            .map_or(EMPTY_ROOT_HASH, |storage| {
                 if storage.is_empty() {
-                    return EMPTY_ROOT
+                    return EMPTY_ROOT_HASH
                 }
 
                 let storage_with_sorted_hashed_keys = storage

@@ -5,7 +5,7 @@ use reth_db::{
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::{Table, TableRow},
     tables,
-    test_utils::{create_test_rw_db, create_test_rw_db_with_path},
+    test_utils::{create_test_rw_db, create_test_rw_db_with_path, TempDatabase},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseEnv, DatabaseError as DbError,
 };
@@ -33,9 +33,9 @@ use std::{
 #[derive(Debug)]
 pub struct TestTransaction {
     /// DB
-    pub tx: Arc<DatabaseEnv>,
+    pub tx: Arc<TempDatabase<DatabaseEnv>>,
     pub path: Option<PathBuf>,
-    pub factory: ProviderFactory<Arc<DatabaseEnv>>,
+    pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
 }
 
 impl Default for TestTransaction {
@@ -57,17 +57,17 @@ impl TestTransaction {
     }
 
     /// Return a database wrapped in [DatabaseProviderRW].
-    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<DatabaseEnv>> {
+    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<TempDatabase<DatabaseEnv>>> {
         self.factory.provider_rw().expect("failed to create db container")
     }
 
     /// Return a database wrapped in [DatabaseProviderRO].
-    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<DatabaseEnv>> {
+    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<TempDatabase<DatabaseEnv>>> {
         self.factory.provider().expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
-    pub fn inner_raw(&self) -> Arc<DatabaseEnv> {
+    pub fn inner_raw(&self) -> Arc<TempDatabase<DatabaseEnv>> {
         self.tx.clone()
     }
 

@@ -12,8 +12,8 @@ use crate::{
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::{tables, transaction::DbTx};
 use reth_primitives::{
+    constants::EMPTY_ROOT_HASH,
     keccak256,
-    proofs::EMPTY_ROOT,
     trie::{HashBuilder, Nibbles},
     Address, BlockNumber, B256,
 };
@@ -438,7 +438,7 @@ where
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty(self.hashed_address)? {
             return Ok((
-                EMPTY_ROOT,
+                EMPTY_ROOT_HASH,
                 0,
                 TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),
             ))
@@ -671,7 +671,7 @@ mod tests {
 
         let tx = factory.provider_rw().unwrap();
         let got = StorageRoot::new(tx.tx_ref(), address).root().unwrap();
-        assert_eq!(got, EMPTY_ROOT);
+        assert_eq!(got, EMPTY_ROOT_HASH);
     }
 
     #[test]
@@ -1138,7 +1138,7 @@ mod tests {
     #[test]
     fn account_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.db(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
         let expected = extension_node_trie(&tx);
@@ -1164,7 +1164,7 @@ mod tests {
 
     fn account_trie_around_extension_node_with_dbtrie() {
         let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.db(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
         let expected = extension_node_trie(&tx);
@@ -1227,7 +1227,7 @@ mod tests {
     #[test]
     fn storage_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.db(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
         let hashed_address = B256::random();

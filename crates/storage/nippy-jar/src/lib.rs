@@ -506,7 +506,7 @@ pub struct MmapHandle {
 }
 
 impl MmapHandle {
-    pub fn new(path: PathBuf) -> Result<Self, NippyJarError> {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, NippyJarError> {
         let file = File::open(path)?;
 
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
@@ -883,7 +883,7 @@ mod tests {
                 .with_cuckoo_filter(col1.len())
                 .with_fmph();
 
-            nippy.prepare_compression(data.clone()).unwrap();
+            nippy.prepare_compression(data).unwrap();
             nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
