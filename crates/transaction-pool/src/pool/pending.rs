@@ -347,55 +347,80 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         let mut spammers =
             spammers_map.iter().map(|(addr, txs)| (*addr, txs.len())).collect::<Vec<_>>();
-        // sort by number of txs
+
+        // sort by number of txs, in ascending order
         spammers.sort_by(|(_, txs1_len), (_, txs2_len)| txs1_len.cmp(txs2_len));
+
+        for (_, txs) in spammers_map.iter_mut() {
+            // sort txs by nonce so we can pop the highest nonce element if necessary
+            txs.sort_by(|tx1, tx2| tx1.transaction.nonce().cmp(&tx2.transaction.nonce()));
+        }
 
         // penalize spammers first by equalizing txs count first
         let mut offenders = Vec::new();
         let mut spammer_index = 0;
+
+        // The point of this loop is to iterate through the list of spammers, sorted by tx count,
+        // and find the sender where:
+        //
+        // If all senders with more transactions than the current sender were set to the same
+        // number of transactions as the current sender, the pool would be below the limit.
+        //
+        // If many transactions have around the same number of transactions, not many transactions
+        // will be removed.
         while self.len() > limit.max_txs && !spammers.is_empty() {
-            let (offender, offenders_tx_count) = spammers.pop().unwrap();
-            offenders.push(offender);
+            // SAFETY: We know this will return Some due to `!spammers.is_empty()` above
+            let offender_pair = spammers.pop().unwrap();
+            offenders.push(offender_pair);
 
-            while offenders.len() > 1 {
-                let threshold = offenders_tx_count; // currenct spammer txs count
+            println!("offender_pair: {:?}", offender_pair);
+            if offenders.len() > 1 {
+                let threshold = offender_pair.1; // current spammer txs count
 
-                todo!()
-                // while self.len() > limit.max_txs && spammers[spammer_index - 1].1 > threshold {
-                //     for current_offender in &offenders {
-                //         // sort txs by nonce
-                //         todo!()
-                //         let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
+                println!("threshold: {}", threshold);
+                // SAFETY: The above condition means that `offenders.len() > 1`, the len will be 2
+                // or greater, so offenders[offenders.len() - 2] will not panic.
+                //
+                // We also know that the inside loop decrements that element's tx_count (`.1`)
+                // until is is less than or equal to the `threshold`, so this loop should always
+                // terminate.
+                while self.len() > limit.max_txs && offenders[offenders.len() - 2].1 > threshold {
+                    for current_offender in offenders.iter_mut() {
+                        // txs are already sorted by nonce, this should pop the highest nonce
+                        // SAFETY: all addresses from offenders are in spammers_map
+                        let offender_txs =
+                            spammers_map.get_mut(&current_offender.0).unwrap().split_off(threshold);
+                        current_offender.1 -= offender_txs.len();
 
-                //         let txs = txs.split_off(threshold);
-
-                //         // remove the txs exeeding the threshold
-                //         for tx_id in txs {
-                //             if let Some(tx) = self.remove_transaction(&tx_id) {
-                //                 removed.push(tx);
-                //             }
-                //         }
-                //     }
-                // }
+                        // remove the txs exeeding the threshold
+                        for tx in offender_txs {
+                            if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
+                                removed.push(tx);
+                            }
+                        }
+                    }
+                }
             }
             spammer_index += 1;
         }
 
         // If still above threshold, reduce to limit till each offenders tx count is below
-        // smax_account_slots
+        // max_account_slots
         while self.len() > limit.max_txs && !offenders.is_empty() {
             let offender = offenders.pop().unwrap();
 
-            todo!();
-            // let txs = self.get_txs_by_sender(&offender);
-            // let mut txs = txs.iter().map(|tx| tx.transaction_id).collect::<Vec<_>>();
+            // we do not need to decrement the offender tx_count because we're popping it and these
+            // should be removed
+            //
+            // SAFETY: all addresses from offenders are in spammers_map
+            let offender_txs =
+                spammers_map.get_mut(&offender.0).unwrap().split_off(max_account_slots);
 
-            // let txs = txs.split_off(max_account_slots);
-            // for tx_id in txs {
-            //     if let Some(tx) = self.remove_transaction(&tx_id) {
-            //         removed.push(tx);
-            //     }
-            // }
+            for tx in offender_txs {
+                if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
+                    removed.push(tx);
+                }
+            }
         }
 
         // penalize non-local txs if limit is still exceeded
