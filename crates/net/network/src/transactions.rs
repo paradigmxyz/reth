@@ -1225,7 +1225,7 @@ enum TransactionsCommand {
     /// Request specific transactions from a peer.
     GetPeerSender {
         peer_id: PeerId,
-        result: oneshot::Sender<Result<RequestResult<PooledTransactions>, RecvError>>,
+        result: oneshot::Sender<Option<PeerRequestSender>>,
     },
 }
 
