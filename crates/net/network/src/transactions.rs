@@ -1231,7 +1231,7 @@ enum TransactionsCommand {
     /// Request specific transactions from a peer.
     GetPeerSender {
         peer_id: PeerId,
-        result: oneshot::Sender<Option<PeerRequestSender>>,
+        peer_request_sender: oneshot::Sender<Option<PeerRequestSender>>,
     },
 }
 
