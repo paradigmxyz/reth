@@ -25,6 +25,7 @@ use clap::{value_parser, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
+use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
@@ -72,7 +73,6 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
-    MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{
@@ -247,12 +247,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // always store reth.toml in the data dir, not the chain specific data dir
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
+        let prometheus_handle = self.install_prometheus_recorder()?;
+
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics());
         info!(target: "reth::cli", "Database opened");
 
-        self.start_metrics_endpoint(Arc::clone(&db)).await?;
+        self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -269,10 +271,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         self.init_trusted_nodes(&mut config);
 
-        debug!(target: "reth::cli", "Spawning metrics listener task");
-        let (metrics_tx, metrics_rx) = unbounded_channel();
-        let metrics_listener = MetricsListener::new(metrics_rx);
-        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
+        debug!(target: "reth::cli", "Spawning stages metrics listener task");
+        let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
+        let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
+        ctx.task_executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
         let prune_config =
             self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
@@ -289,7 +291,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             BlockchainTreeConfig::default(),
             prune_config.clone().map(|config| config.segments),
         )?
-        .with_sync_metrics_tx(metrics_tx.clone());
+        .with_sync_metrics_tx(sync_metrics_tx.clone());
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
         debug!(target: "reth::cli", "configured blockchain tree");
@@ -409,7 +411,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
-                    metrics_tx,
+                    sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
                 )
@@ -429,7 +431,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
-                    metrics_tx,
+                    sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
                 )
@@ -565,7 +567,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         consensus: Arc<dyn Consensus>,
         db: DB,
         task_executor: &TaskExecutor,
-        metrics_tx: MetricEventsSender,
+        metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
     ) -> eyre::Result<Pipeline<DB>>
@@ -628,11 +630,24 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
-    async fn start_metrics_endpoint(&self, db: Arc<DatabaseEnv>) -> eyre::Result<()> {
+    fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
+        prometheus_exporter::install_recorder()
+    }
+
+    async fn start_metrics_endpoint(
+        &self,
+        prometheus_handle: PrometheusHandle,
+        db: Arc<DatabaseEnv>,
+    ) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::initialize(listen_addr, db, metrics_process::Collector::default())
-                .await?;
+            prometheus_exporter::serve(
+                listen_addr,
+                prometheus_handle,
+                db,
+                metrics_process::Collector::default(),
+            )
+            .await?;
         }
 
         Ok(())
@@ -790,7 +805,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
-        metrics_tx: MetricEventsSender,
+        metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
     ) -> eyre::Result<Pipeline<DB>>
     where
