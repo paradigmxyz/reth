@@ -23,7 +23,6 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*, tracerequest::TraceRequest},
     BlockError, CallRequest, Index,
 };
-use reth_rpc_types_compat::block::to_primitive_block_id;
 use revm::{db::CacheDB, primitives::Env};
 use revm_primitives::db::DatabaseCommit;
 use std::{collections::HashSet, sync::Arc};
@@ -76,20 +75,15 @@ where
         let mut inspector = TracingInspector::new(config);
         self.inner
             .eth_api
-            .spawn_with_call_at(
-                trace_request.call,
-                to_primitive_block_id(at),
-                overrides,
-                move |db, env| {
-                    let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
-                    let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
-                        &res,
-                        &trace_request.trace_types,
-                        &db,
-                    )?;
-                    Ok(trace_res)
-                },
-            )
+            .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
+                let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+                let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
+                    &res,
+                    &trace_request.trace_types,
+                    &db,
+                )?;
+                Ok(trace_res)
+            })
             .await
     }
 

@@ -21,10 +21,7 @@ use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
     StateContext,
 };
-use reth_rpc_types_compat::{
-    block::{from_primitive_block_id, to_primitive_block_id},
-    log::{from_primitive_access_list, to_primitive_access_list},
-};
+use reth_rpc_types_compat::log::{from_primitive_access_list, to_primitive_access_list};
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -89,10 +86,8 @@ where
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
 
-        let target_block = to_primitive_block_id(
-            block_number
-                .unwrap_or(from_primitive_block_id(BlockId::Number(BlockNumberOrTag::Latest))),
-        );
+        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+
         let ((cfg, block_env, _), block) =
             futures::try_join!(self.evm_env_at(target_block), self.block_by_id(target_block))?;
 

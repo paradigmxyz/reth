@@ -33,7 +33,6 @@ use reth_rpc_types::{
     },
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
-use reth_rpc_types_compat::block::to_primitive_block_id;
 use reth_tasks::TaskSpawner;
 use revm::{
     db::{CacheDB, EmptyDB},
@@ -355,10 +354,8 @@ where
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
 
-        let target_block =
-            to_primitive_block_id(block_number.unwrap_or(reth_rpc_types::BlockId::Number(
-                reth_rpc_types::BlockNumberOrTag::Latest,
-            )));
+        let target_block = block_number
+            .unwrap_or(reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Latest));
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(target_block),
             self.inner.eth_api.block_by_id(target_block),

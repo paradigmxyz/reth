@@ -5,7 +5,6 @@ use reth_network_api::{NetworkInfo, PeerKind, Peers};
 use reth_primitives::NodeRecord;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_types::{NodeInfo, PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo};
-use reth_rpc_types_compat::net::from_primitive_node_record;
 
 /// `admin` API implementation.
 ///
@@ -85,7 +84,7 @@ where
         let enr = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
 
-        Ok(NodeInfo::new(from_primitive_node_record(enr), status))
+        Ok(NodeInfo::new(enr, status))
     }
 
     /// Handler for `admin_peerEvents`

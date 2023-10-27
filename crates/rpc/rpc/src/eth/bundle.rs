@@ -12,7 +12,6 @@ use crate::{
 use reth_primitives::{keccak256, U256};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
-use reth_rpc_types_compat::block::to_primitive_block_id;
 use revm::{
     db::CacheDB,
     primitives::{Env, ResultAndState, TxEnv},
@@ -57,8 +56,7 @@ where
         let transactions =
             txs.into_iter().map(recover_raw_transaction).collect::<Result<Vec<_>, _>>()?;
         let block_id: reth_rpc_types::BlockId = state_block_number.into();
-        let (cfg, mut block_env, at) =
-            self.inner.eth_api.evm_env_at(to_primitive_block_id(block_id)).await?;
+        let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
