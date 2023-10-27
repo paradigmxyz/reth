@@ -1,47 +1,210 @@
 use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
+use dashmap::DashMap;
 use reth_db::{
     table::{Decompress, Table},
     HeaderTD,
 };
 use reth_interfaces::{provider::ProviderError, RethResult};
-use reth_nippy_jar::{compression::Decompressor, NippyJar, NippyJarCursor};
+use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_primitives::{
-    snapshot::SegmentHeader, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    snapshot::{SegmentHeader, BLOCKS_PER_SNAPSHOT},
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, SealedHeader,
+    SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
     B256, U256,
 };
-use std::ops::RangeBounds;
+use std::{ops::RangeBounds, path::PathBuf};
+
+/// Alias type for each specific `NippyJar`.
+type NippyJarRef<'a> =
+    dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), NippyJar<SegmentHeader>>;
 
 /// SnapshotProvider
-///
-///  WIP Rudimentary impl just for tests
-/// TODO: should be able to walk through snapshot files/block_ranges
-/// TODO: Arc over NippyJars and/or NippyJarCursors (LRU)
-#[derive(Debug)]
-pub struct SnapshotProvider<'a> {
-    /// NippyJar
-    pub jar: &'a NippyJar<SegmentHeader>,
+#[derive(Debug, Default)]
+pub struct SnapshotProvider {
+    /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
+    /// segments and ranges.
+    map: DashMap<(BlockNumber, SnapshotSegment), NippyJar<SegmentHeader>>,
 }
 
-impl<'a> SnapshotProvider<'a> {
-    /// Creates cursor
-    pub fn cursor(&self) -> NippyJarCursor<'a, SegmentHeader> {
-        NippyJarCursor::new(self.jar, None).unwrap()
-    }
-
-    /// Creates cursor with zstd decompressors
-    pub fn cursor_with_decompressors(
+impl SnapshotProvider {
+    /// Gets the provider of the requested segment and range.
+    pub fn get_segment_provider(
         &self,
-        decompressors: Vec<Decompressor<'a>>,
-    ) -> NippyJarCursor<'a, SegmentHeader> {
-        NippyJarCursor::new(self.jar, Some(decompressors)).unwrap()
+        segment: SnapshotSegment,
+        block: BlockNumber,
+        mut path: Option<PathBuf>,
+    ) -> RethResult<SnapshotJarProvider<'_>> {
+        // TODO this invalidates custom length snapshots.
+        let snapshot = block / BLOCKS_PER_SNAPSHOT;
+        let key = (snapshot, segment);
+
+        if let Some(jar) = self.map.get(&key) {
+            return Ok(SnapshotJarProvider { jar })
+        }
+
+        if let Some(path) = &path {
+            let jar = NippyJar::load(path)?;
+            self.map.insert(key, jar);
+        } else {
+            path = Some(segment.filename(
+                &((snapshot * BLOCKS_PER_SNAPSHOT)..=((snapshot + 1) * BLOCKS_PER_SNAPSHOT - 1)),
+            ));
+        }
+
+        self.get_segment_provider(segment, block, path)
     }
 }
 
-impl<'a> HeaderProvider for SnapshotProvider<'a> {
+impl HeaderProvider for SnapshotProvider {
+    fn header(&self, _block_hash: &BlockHash) -> RethResult<Option<Header>> {
+        todo!()
+    }
+
+    fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
+        self.get_segment_provider(SnapshotSegment::Headers, num, None)?.header_by_number(num)
+    }
+
+    fn header_td(&self, _block_hash: &BlockHash) -> RethResult<Option<U256>> {
+        todo!()
+    }
+
+    fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
+        todo!();
+    }
+
+    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+        todo!();
+    }
+
+    fn sealed_headers_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> RethResult<Vec<SealedHeader>> {
+        todo!();
+    }
+
+    fn sealed_header(&self, _number: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        todo!();
+    }
+}
+
+impl BlockHashReader for SnapshotProvider {
+    fn block_hash(&self, _number: u64) -> RethResult<Option<B256>> {
+        todo!()
+    }
+
+    fn canonical_hashes_range(
+        &self,
+        _start: BlockNumber,
+        _end: BlockNumber,
+    ) -> RethResult<Vec<B256>> {
+        todo!()
+    }
+}
+
+impl BlockNumReader for SnapshotProvider {
+    fn chain_info(&self) -> RethResult<ChainInfo> {
+        todo!()
+    }
+
+    fn best_block_number(&self) -> RethResult<BlockNumber> {
+        todo!()
+    }
+
+    fn last_block_number(&self) -> RethResult<BlockNumber> {
+        todo!()
+    }
+
+    fn block_number(&self, _hash: B256) -> RethResult<Option<BlockNumber>> {
+        todo!()
+    }
+}
+
+impl TransactionsProvider for SnapshotProvider {
+    fn transaction_id(&self, _tx_hash: TxHash) -> RethResult<Option<TxNumber>> {
+        todo!()
+    }
+
+    fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
+        // TODO `num` is provided after checking the index
+        let block_num = num;
+        self.get_segment_provider(SnapshotSegment::Transactions, block_num, None)?
+            .transaction_by_id(num)
+    }
+
+    fn transaction_by_id_no_hash(
+        &self,
+        _id: TxNumber,
+    ) -> RethResult<Option<TransactionSignedNoHash>> {
+        todo!()
+    }
+
+    fn transaction_by_hash(&self, _hash: TxHash) -> RethResult<Option<TransactionSigned>> {
+        todo!()
+    }
+
+    fn transaction_by_hash_with_meta(
+        &self,
+        _hash: TxHash,
+    ) -> RethResult<Option<(TransactionSigned, TransactionMeta)>> {
+        todo!()
+    }
+
+    fn transaction_block(&self, _id: TxNumber) -> RethResult<Option<BlockNumber>> {
+        todo!()
+    }
+
+    fn transactions_by_block(
+        &self,
+        _block_id: BlockHashOrNumber,
+    ) -> RethResult<Option<Vec<TransactionSigned>>> {
+        todo!()
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> RethResult<Vec<Vec<TransactionSigned>>> {
+        todo!()
+    }
+
+    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+        todo!()
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> RethResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+        todo!()
+    }
+
+    fn transaction_sender(&self, _id: TxNumber) -> RethResult<Option<Address>> {
+        todo!()
+    }
+}
+
+/// Provider over a specific `NippyJar` and range.
+#[derive(Debug)]
+pub struct SnapshotJarProvider<'a> {
+    /// Reference to a value on [`SnapshotProvider`]
+    pub jar: NippyJarRef<'a>,
+}
+
+impl<'a> SnapshotJarProvider<'a> {
+    /// Provides a cursor for more granular data access.
+    pub fn cursor<'b>(&'b self) -> RethResult<NippyJarCursor<'a, SegmentHeader>>
+    where
+        'b: 'a,
+    {
+        Ok(NippyJarCursor::new(self.jar.value())?)
+    }
+}
+
+impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
         // WIP
-        let mut cursor = self.cursor();
+        let mut cursor = NippyJarCursor::new(self.jar.value())?;
 
         let header = Header::decompress(
             cursor.row_by_key_with_cols::<0b01, 2>(&block_hash.0).unwrap().unwrap()[0],
@@ -58,7 +221,7 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
 
     fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
         Header::decompress(
-            self.cursor()
+            NippyJarCursor::new(self.jar.value())?
                 .row_by_number_with_cols::<0b01, 2>(
                     (num - self.jar.user_header().block_start()) as usize,
                 )?
@@ -70,7 +233,7 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
 
     fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
         // WIP
-        let mut cursor = self.cursor();
+        let mut cursor = NippyJarCursor::new(self.jar.value())?;
 
         let row = cursor.row_by_key_with_cols::<0b11, 2>(&block_hash.0).unwrap().unwrap();
 
@@ -105,7 +268,7 @@ impl<'a> HeaderProvider for SnapshotProvider<'a> {
     }
 }
 
-impl<'a> BlockHashReader for SnapshotProvider<'a> {
+impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
     fn block_hash(&self, _number: u64) -> RethResult<Option<B256>> {
         todo!()
     }
@@ -119,7 +282,7 @@ impl<'a> BlockHashReader for SnapshotProvider<'a> {
     }
 }
 
-impl<'a> BlockNumReader for SnapshotProvider<'a> {
+impl<'a> BlockNumReader for SnapshotJarProvider<'a> {
     fn chain_info(&self) -> RethResult<ChainInfo> {
         todo!()
     }
@@ -137,14 +300,14 @@ impl<'a> BlockNumReader for SnapshotProvider<'a> {
     }
 }
 
-impl<'a> TransactionsProvider for SnapshotProvider<'a> {
+impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     fn transaction_id(&self, _tx_hash: TxHash) -> RethResult<Option<TxNumber>> {
         todo!()
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
         TransactionSignedNoHash::decompress(
-            self.cursor()
+            NippyJarCursor::new(self.jar.value())?
                 .row_by_number_with_cols::<0b1, 1>(
                     (num - self.jar.user_header().tx_start()) as usize,
                 )?
@@ -164,7 +327,7 @@ impl<'a> TransactionsProvider for SnapshotProvider<'a> {
 
     fn transaction_by_hash(&self, hash: TxHash) -> RethResult<Option<TransactionSigned>> {
         // WIP
-        let mut cursor = self.cursor();
+        let mut cursor = NippyJarCursor::new(self.jar.value())?;
 
         let tx = TransactionSignedNoHash::decompress(
             cursor.row_by_key_with_cols::<0b1, 1>(&hash.0).unwrap().unwrap()[0],
@@ -315,10 +478,11 @@ mod test {
 
         // Use providers to query Header data and compare if it matches
         {
-            let jar = NippyJar::load(snap_file.path()).unwrap();
-
             let db_provider = factory.provider().unwrap();
-            let snap_provider = SnapshotProvider { jar: &jar };
+            let manager = SnapshotProvider::default();
+            let jar_provider = manager
+                .get_segment_provider(SnapshotSegment::Headers, 0, Some(snap_file.path().into()))
+                .unwrap();
 
             assert!(!headers.is_empty());
 
@@ -331,12 +495,12 @@ mod test {
 
                 // Compare Header
                 assert_eq!(header, db_provider.header(&header_hash).unwrap().unwrap());
-                assert_eq!(header, snap_provider.header(&header_hash).unwrap().unwrap());
+                assert_eq!(header, jar_provider.header(&header_hash).unwrap().unwrap());
 
                 // Compare HeaderTD
                 assert_eq!(
                     db_provider.header_td(&header_hash).unwrap().unwrap(),
-                    snap_provider.header_td(&header_hash).unwrap().unwrap()
+                    jar_provider.header_td(&header_hash).unwrap().unwrap()
                 );
             }
         }
