@@ -123,7 +123,12 @@ where
         let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..]) {
             Ok(P2PMessage::Hello(hello)) => Ok(hello),
             Ok(P2PMessage::Disconnect(reason)) => {
-                tracing::debug!("Disconnected by peer during handshake: {}", reason);
+                if matches!(reason, DisconnectReason::TooManyPeers) {
+                    // Too many peers is a very common disconnect reason that spams the DEBUG logs
+                    tracing::trace!("Disconnected by peer during handshake: {}", reason)
+                } else {
+                    tracing::debug!("Disconnected by peer during handshake: {}", reason)
+                }
                 counter!("p2pstream.disconnected_errors", 1);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
