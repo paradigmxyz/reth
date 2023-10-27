@@ -497,7 +497,6 @@
             }
           },
           "mappings": [],
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -539,7 +538,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(rate(reth_database_transaction_close_duration_seconds_sum{instance=~\"$instance\", outcome=\"commit\"}[$__rate_interval]) / rate(reth_database_transaction_close_duration_seconds_count{instance=~\"$instance\", outcome=\"commit\"}[$__rate_interval]))",
+          "expr": "avg(rate(reth_database_transaction_close_duration_seconds_sum{instance=~\"$instance\", outcome=\"commit\"}[$__rate_interval]) / rate(reth_database_transaction_close_duration_seconds_count{instance=~\"$instance\", outcome=\"commit\"}[$__rate_interval]) >= 0)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "Commit time",
@@ -628,7 +627,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg(last_over_time(reth_database_transaction_close_duration_seconds{instance=~\"$instance\", outcome=\"commit\"}[$__interval])) by (quantile)",
+          "expr": "avg(avg_over_time(reth_database_transaction_close_duration_seconds{instance=~\"$instance\", outcome=\"commit\"}[$__interval])) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
@@ -683,7 +682,6 @@
             }
           },
           "mappings": [],
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -785,10 +783,6 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           },
@@ -803,7 +797,6 @@
         "y": 26
       },
       "id": 116,
-      "maxDataPoints": 25,
       "options": {
         "legend": {
           "calcs": [],
@@ -903,7 +896,6 @@
         "y": 34
       },
       "id": 119,
-      "maxDataPoints": 25,
       "options": {
         "legend": {
           "calcs": [],
@@ -941,7 +933,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "The maximum time the database transaction operation took.",
+      "description": "The maximum time the database transaction operation which inserts a large value took.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -950,7 +942,6 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "points",
@@ -1003,7 +994,6 @@
         "y": 34
       },
       "id": 118,
-      "maxDataPoints": 25,
       "options": {
         "legend": {
           "calcs": [],
@@ -1025,15 +1015,15 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "max(max_over_time(reth_database_operation_large_value_duration_seconds{instance=~\"$instance\", quantile=\"1\"}[$__interval])) by (operation)",
+          "expr": "max(max_over_time(reth_database_operation_large_value_duration_seconds{instance=~\"$instance\", quantile=\"1\"}[$__interval]) > 0) by (table)",
           "format": "time_series",
           "instant": false,
-          "legendFormat": "{{operation}}",
+          "legendFormat": "{{table}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Max operation time",
+      "title": "Max insertion operation time",
       "type": "timeseries"
     },
     {
