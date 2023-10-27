@@ -313,6 +313,11 @@ impl Transaction {
     ///
     /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
     pub fn effective_tip_per_gas(&self, base_fee: Option<u64>) -> Option<u128> {
+        if base_fee.is_none() {
+            // If base_fee is None, then return the priority fee or the gas price.
+            return Some(self.priority_fee_or_price());
+        }
+
         // Convert the base fee to u128 if present, or provide a default value
         let base_fee = base_fee.unwrap_or_default() as u128;
 
@@ -320,7 +325,7 @@ impl Transaction {
 
         // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
-            return None
+            return None;
         }
 
         // Calculate the difference between max_fee_per_gas and base_fee
