@@ -1,4 +1,4 @@
-use crate::Log as RpcLog;
+use crate::{Log as RpcLog, Transaction};
 use alloy_primitives::{keccak256, Address, Bloom, BloomInput, B256, U256, U64};
 use itertools::{EitherOrBoth::*, Itertools};
 use reth_primitives::{BlockNumberOrTag, Log};
@@ -821,7 +821,6 @@ impl FilteredParams {
         true
     }
 }
-use crate::Transaction;
 /// Response of the `eth_getFilterChanges` RPC.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FilterChanges {
