@@ -441,6 +441,7 @@ mod tests {
         let mut gas_used_ratios = Vec::new();
         let mut base_fees_per_gas = Vec::new();
         let mut last_header = None;
+        let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
             let hash = rng.gen();
@@ -454,9 +455,11 @@ mod tests {
                 gas_limit,
                 gas_used,
                 base_fee_per_gas,
+                parent_hash,
                 ..Default::default()
             };
             last_header = Some(header.clone());
+            parent_hash = hash;
 
             let mut transactions = vec![];
             for _ in 0..100 {
