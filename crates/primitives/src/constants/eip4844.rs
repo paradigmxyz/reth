@@ -59,11 +59,11 @@ pub fn load_trusted_setup_from_bytes(bytes: &[u8]) -> Result<KzgSettings, LoadKz
 pub enum LoadKzgSettingsError {
     /// Failed to create temp file to store bytes for loading [KzgSettings] via
     /// [KzgSettings::load_trusted_setup_file].
-    #[error("Failed to setup temp file: {0:?}")]
+    #[error("failed to setup temp file: {0}")]
     TempFileErr(#[from] std::io::Error),
     /// Kzg error
-    #[error("Kzg error: {0:?}")]
-    KzgError(c_kzg::Error),
+    #[error("KZG error: {0:?}")]
+    KzgError(#[from] c_kzg::Error),
 }
 
 #[cfg(test)]

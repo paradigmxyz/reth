@@ -41,7 +41,7 @@ pub(crate) fn stage_unwind<S: Clone + Stage<DatabaseEnv>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
         // Clear previous run
@@ -69,7 +69,7 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<DatabaseEnv>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
         StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
