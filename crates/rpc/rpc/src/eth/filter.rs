@@ -219,11 +219,15 @@ where
         Ok(FilterChanges::Logs(logs))
     }
 }
+/// A structure to manage and provide access to a stream of full transaction details.
+
 struct FullTransactionsReceiver<T: PoolTransaction> {
     txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
 }
 
 impl<T: PoolTransaction> FullTransactionsReceiver<T> {
+    /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
+
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
         FullTransactionsReceiver { txs_stream: Arc::new(Mutex::new(stream)) }
     }
