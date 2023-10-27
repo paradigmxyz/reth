@@ -44,7 +44,7 @@ pub use bundle_state_provider::BundleStateProvider;
 pub use database::*;
 use reth_db::models::AccountBeforeTx;
 use reth_interfaces::blockchain_tree::{
-    error::InsertBlockError, CanonicalOutcome, InsertPayloadOk,
+    error::InsertBlockError, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
 };
 
 /// The main type for interacting with the blockchain.
@@ -574,8 +574,9 @@ where
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
+        validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
-        self.tree.insert_block(block)
+        self.tree.insert_block(block, validation_kind)
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) {

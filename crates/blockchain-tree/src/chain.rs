@@ -6,7 +6,10 @@ use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
 use reth_db::database::Database;
 use reth_interfaces::{
-    blockchain_tree::error::{BlockchainTreeError, InsertBlockError},
+    blockchain_tree::{
+        error::{BlockchainTreeError, InsertBlockError},
+        BlockValidationKind,
+    },
     consensus::{Consensus, ConsensusError},
     RethResult,
 };
@@ -54,15 +57,17 @@ impl AppendableChain {
         self.chain
     }
 
-    /// Create a new chain that forks off the canonical.
+    /// Create a new chain that forks off the canonical chain.
     ///
-    /// This will also verify the state root of the block extending the canonical chain.
+    /// if [BlockValidationKind::Exhaustive] is provides this will verify the state root of the
+    /// block extending the canonical chain.
     pub fn new_canonical_head_fork<DB, EF>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, EF>,
+        block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockError>
     where
         DB: Database,
@@ -78,11 +83,13 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let bundle_state = Self::validate_and_execute_canonical_head_descendant(
+        let bundle_state = Self::validate_and_execute(
             block.clone(),
             parent_header,
             state_provider,
             externals,
+            BlockKind::ExtendsCanonicalHead,
+            block_validation_kind,
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
@@ -170,13 +177,21 @@ impl AppendableChain {
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
-    /// state root after execution.
+    /// state root after execution if possible and requested.
+    ///
+    /// Note: State root validation is limited to blocks that extend the canonical chain and is
+    /// optional, see [BlockValidationKind]. So this function takes two parameters to determine
+    /// if the state can and should be validated.
+    ///   - [BlockKind] represents if the block extends the canonical chain, and thus if the state
+    ///     root __can__ be validated.
+    ///   - [BlockValidationKind] determines if the state root __should__ be validated.
     fn validate_and_execute<BSDP, DB, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         post_state_data_provider: BSDP,
         externals: &TreeExternals<DB, EF>,
         block_kind: BlockKind,
+        block_validation_kind: BlockValidationKind,
     ) -> RethResult<BundleStateWithReceipts>
     where
         BSDP: BundleStateDataProvider,
@@ -200,8 +215,9 @@ impl AppendableChain {
         executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
         let bundle_state = executor.take_output_state();
 
-        // check state root if the block extends the canonical chain.
-        if block_kind.extends_canonical_head() {
+        // check state root if the block extends the canonical chain __and__ if state root
+        // validation was requested.
+        if block_kind.extends_canonical_head() && block_validation_kind.is_exhaustive() {
             // check state root
             let state_root = provider.state_root(&bundle_state)?;
             if block.state_root != state_root {
@@ -214,28 +230,6 @@ impl AppendableChain {
         }
 
         Ok(bundle_state)
-    }
-
-    /// Validate and execute the given block that _extends the canonical chain_, validating its
-    /// state root after execution.
-    fn validate_and_execute_canonical_head_descendant<BSDP, DB, EF>(
-        block: SealedBlockWithSenders,
-        parent_block: &SealedHeader,
-        post_state_data_provider: BSDP,
-        externals: &TreeExternals<DB, EF>,
-    ) -> RethResult<BundleStateWithReceipts>
-    where
-        BSDP: BundleStateDataProvider,
-        DB: Database,
-        EF: ExecutorFactory,
-    {
-        Self::validate_and_execute(
-            block,
-            parent_block,
-            post_state_data_provider,
-            externals,
-            BlockKind::ExtendsCanonicalHead,
-        )
     }
 
     /// Validate and execute the given sidechain block, skipping state root validation.
@@ -256,6 +250,7 @@ impl AppendableChain {
             post_state_data_provider,
             externals,
             BlockKind::ForksHistoricalBlock,
+            BlockValidationKind::SkipStateRootValidation,
         )
     }
 
@@ -271,6 +266,7 @@ impl AppendableChain {
     /// is the canonical head, or: state root check can't be performed if the given canonical is
     /// __not__ the canonical head.
     #[track_caller]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn append_block<DB, EF>(
         &mut self,
         block: SealedBlockWithSenders,
@@ -279,6 +275,7 @@ impl AppendableChain {
         externals: &TreeExternals<DB, EF>,
         canonical_fork: ForkBlock,
         block_kind: BlockKind,
+        block_validation_kind: BlockValidationKind,
     ) -> Result<(), InsertBlockError>
     where
         DB: Database,
@@ -299,6 +296,7 @@ impl AppendableChain {
             post_state_data,
             externals,
             block_kind,
+            block_validation_kind,
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         // extend the state.
