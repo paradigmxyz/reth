@@ -9,17 +9,20 @@ use std::{fmt, str::FromStr};
 #[derive(Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct JsonU256(pub U256);
 
+/// Convert from `JsonU256` to `U256`.
 impl From<JsonU256> for U256 {
     fn from(value: JsonU256) -> Self {
         value.0
     }
 }
+/// Convert from `U256` to `JsonU256`.
 
 impl From<U256> for JsonU256 {
     fn from(value: U256) -> Self {
         JsonU256(value)
     }
 }
+/// Serde serialization for `JsonU256`.
 
 impl Serialize for JsonU256 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -29,7 +32,9 @@ impl Serialize for JsonU256 {
         self.0.serialize(serializer)
     }
 }
-
+/// Serde deserialization for `JsonU256`.
+///
+/// This deserializes `U256` numbers represented in both hex and decimal formats.
 impl<'a> Deserialize<'a> for JsonU256 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -38,6 +43,28 @@ impl<'a> Deserialize<'a> for JsonU256 {
         deserializer.deserialize_any(JsonU256Visitor)
     }
 }
+/// Implementation of the `Display` trait for `JsonU256`.
+///
+/// This allows instances of `JsonU256` to be easily printed and formatted as strings.
+/// The default representation is the decimal format of the `U256` value.
+impl fmt::Display for JsonU256 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl JsonU256 {
+    /// Returns the hexadecimal representation of the `JsonU256` value.
+
+    pub fn to_hex_string(&self) -> String {
+        format!("{:x}", self.0)
+    }
+    /// Returns the decimal representation of the `JsonU256` value.
+
+    pub fn to_dec_string(&self) -> String {
+        format!("{}", self.0)
+    }
+}
+/// Visitor pattern for `JsonU256` deserialization.
 
 struct JsonU256Visitor;
 
