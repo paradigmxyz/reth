@@ -253,19 +253,18 @@ where
         kind: Option<PendingTransactionFilterKind>,
     ) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newPendingTransactionFilter");
-        let transaction_kind: PendingTransactionKind<<Pool as TransactionPool>::Transaction> =
-            match kind.unwrap_or(PendingTransactionFilterKind::Hashes) {
-                PendingTransactionFilterKind::Hashes => {
-                    let receiver = self.inner.pool.pending_transactions_listener();
-                    let pending_txs_receiver = PendingTransactionsReceiver::new(receiver);
-                    PendingTransactionKind::Hashes(pending_txs_receiver)
-                }
-                PendingTransactionFilterKind::Full => {
-                    let stream = self.inner.pool.new_pending_pool_transactions_listener();
-                    let full_txs_receiver = FullTransactionsReceiver::new(stream);
-                    PendingTransactionKind::FullTransaction(full_txs_receiver)
-                }
-            };
+        let transaction_kind = match kind.unwrap_or(PendingTransactionFilterKind::Hashes) {
+            PendingTransactionFilterKind::Hashes => {
+                let receiver = self.inner.pool.pending_transactions_listener();
+                let pending_txs_receiver = PendingTransactionsReceiver::new(receiver);
+                PendingTransactionKind::Hashes(pending_txs_receiver)
+            }
+            PendingTransactionFilterKind::Full => {
+                let stream = self.inner.pool.new_pending_pool_transactions_listener();
+                let full_txs_receiver = FullTransactionsReceiver::new(stream);
+                PendingTransactionKind::FullTransaction(full_txs_receiver)
+            }
+        };
 
         self.inner.install_filter(transaction_kind).await
     }
@@ -526,12 +525,16 @@ impl PendingTransactionsReceiver {
         pending_txs
     }
 }
+/// Represents the kind of pending transaction data that can be retrieved.
+///
+/// This enum differentiates between two kinds of pending transaction data:
+/// - Just the transaction hashes.
+/// - Full transaction details.
 enum PendingTransactionKind<T: PoolTransaction> {
     Hashes(PendingTransactionsReceiver),
     FullTransaction(FullTransactionsReceiver<T>),
 }
 
-use reth_transaction_pool::Pool;
 #[derive(Clone, Debug)]
 enum FilterKind {
     Log(Box<Filter>),
