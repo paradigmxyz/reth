@@ -592,18 +592,24 @@ where
             }
             TransactionsCommand::TransactionsHandle { peer_id, requested_hashes, result } => {
                 if let Some(peer) = self.peers.get(&peer_id) {
-                    match peer
-                        .request_tx
-                        .send(RequestMessage::GetTransactions(requested_hashes))
-                        .await
-                    {
-                        Ok(transactions) => {
-                            let _ = result.send(Ok(RequestResult::Fulfilled(transactions)));
+                    let to_session_tx = peer.request_tx.to_session_tx.clone();
+
+                    tokio::spawn(async move {
+                        let request = PeerRequest::GetTransactions(requested_hashes);
+                        match to_session_tx.send(request).await {
+                            Ok(_) => {
+                                let pooled_transactions = PooledTransactions {
+                                    // populate transactions...
+                                };
+                                let request_result = RequestResult::Fulfilled(pooled_transactions);
+                                let _ = result.send(Ok(request_result));
+                            }
+                            Err(e) => {
+                                let _ = result
+                                    .send(Err(RecvError::new("Failed to send request to peer")));
+                            }
                         }
-                        Err(e) => {
-                            let _ = result.send(Err(e));
-                        }
-                    }
+                    });
                 } else {
                     let _ = result.send(Err(RecvError::new("Peer not found")));
                 }
@@ -1223,7 +1229,7 @@ enum TransactionsCommand {
         tx: oneshot::Sender<HashMap<PeerId, HashSet<TxHash>>>,
     },
     /// Request specific transactions from a peer.
-    TransactionsHandle {
+    GetPeerSender {
         peer_id: PeerId,
         requested_hashes: Vec<TxHash>,
         result: oneshot::Sender<Result<RequestResult<PooledTransactions>, RecvError>>,
