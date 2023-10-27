@@ -206,7 +206,12 @@ where
 
         // Nothing to sync
         if gap.is_closed() {
-            info!(target: "sync::stages::headers", checkpoint = %current_checkpoint, target = ?tip, "Target block already reached");
+            info!(
+                target: "sync::stages::headers",
+                checkpoint = %current_checkpoint.block_number,
+                target = ?tip,
+                "Target block already reached"
+            );
             return Ok(ExecOutput::done(current_checkpoint))
         }
 
