@@ -1031,6 +1031,10 @@ pub struct PoolSize {
     pub pending: usize,
     /// Reported size of transactions in the _pending_ sub-pool.
     pub pending_size: usize,
+    /// Number of transactions in the _blob_ pool.
+    pub blob: usize,
+    /// Reported size of transactions in the _blob_ pool.
+    pub blob_size: usize,
     /// Number of transactions in the _basefee_ pool.
     pub basefee: usize,
     /// Reported size of transactions in the _basefee_ sub-pool.
@@ -1051,7 +1055,7 @@ impl PoolSize {
     /// Asserts that the invariants of the pool size are met.
     #[cfg(test)]
     pub(crate) fn assert_invariants(&self) {
-        assert_eq!(self.total, self.pending + self.basefee + self.queued);
+        assert_eq!(self.total, self.pending + self.basefee + self.queued + self.blob);
     }
 }
 
