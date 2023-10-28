@@ -262,12 +262,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
-        let consensus: Arc<dyn Consensus> = if self.dev.dev {
-            debug!(target: "reth::cli", "Using auto seal");
-            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
-        } else {
-            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
-        };
+        let consensus = self.consensus();
 
         self.init_trusted_nodes(&mut config);
 
@@ -555,6 +550,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             // The pipeline has finished downloading blocks up to `--debug.tip` or
             // `--debug.max-block`. Keep other node components alive for further usage.
             futures::future::pending().await
+        }
+    }
+
+    /// Returns the [Consensus] instance to use.
+    ///
+    /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
+    /// will be an [AutoSealConsensus] instance.
+    pub fn consensus(&self) -> Arc<dyn Consensus> {
+        if self.dev.dev {
+            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
+        } else {
+            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
         }
     }
 
