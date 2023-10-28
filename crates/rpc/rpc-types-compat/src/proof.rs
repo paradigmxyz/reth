@@ -1,11 +1,10 @@
 //! Compatibility functions for rpc proof related types.
 
 use reth_primitives::{
-    serde_helper::JsonStorageKey,
     trie::{AccountProof, StorageProof},
     U64,
 };
-use reth_rpc_types::{EIP1186AccountProofResponse, EIP1186StorageProof};
+use reth_rpc_types::{storage::JsonStorageKey, EIP1186AccountProofResponse, EIP1186StorageProof};
 
 /// Creates a new rpc storage proof from a primitive storage proof type.
 pub fn from_primitive_storage_proof(proof: StorageProof) -> EIP1186StorageProof {

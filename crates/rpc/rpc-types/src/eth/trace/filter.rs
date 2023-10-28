@@ -1,6 +1,6 @@
 //! `trace_filter` types and support
+use crate::serde_helpers::num::u64_hex_or_decimal_opt;
 use alloy_primitives::Address;
-use reth_primitives::serde_helper::num::u64_hex_or_decimal_opt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

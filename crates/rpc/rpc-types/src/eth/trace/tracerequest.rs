@@ -1,7 +1,9 @@
 //! Builder style functions for `trace_call`
 
-use crate::{state::StateOverride, trace::parity::TraceType, BlockOverrides, CallRequest};
-use reth_primitives::BlockId;
+use crate::{
+    eth::block::BlockId, state::StateOverride, trace::parity::TraceType, BlockOverrides,
+    CallRequest,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

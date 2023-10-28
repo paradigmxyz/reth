@@ -11,6 +11,7 @@ description = "Commonly used types in reth."
 [dependencies]
 # reth
 reth-codecs = { path = "../storage/codecs" }
+reth-rpc-types.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
@@ -89,7 +90,7 @@ pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterio
 
 [features]
 default = []
-arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+arbitrary = ["revm-primitives/arbitrary", "reth-rpc-types/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 # value-256 controls whether transaction Value fields are DB-encoded as 256 bits instead of the
 # default of 128 bits.

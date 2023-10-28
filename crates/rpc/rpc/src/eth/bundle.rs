@@ -55,9 +55,8 @@ where
 
         let transactions =
             txs.into_iter().map(recover_raw_transaction).collect::<Result<Vec<_>, _>>()?;
-
-        let (cfg, mut block_env, at) =
-            self.inner.eth_api.evm_env_at(state_block_number.into()).await?;
+        let block_id: reth_rpc_types::BlockId = state_block_number.into();
+        let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {

@@ -51,7 +51,7 @@ mod withdrawal;
 pub use account::{Account, Bytecode};
 pub use block::{
     Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
-    BlockWithSenders, ForkBlock, SealedBlock, SealedBlockWithSenders,
+    BlockWithSenders, ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
 pub use bytes::{Buf, BufMut, BytesMut};
 pub use chain::{
