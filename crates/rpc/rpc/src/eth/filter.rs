@@ -7,7 +7,7 @@ use crate::{
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
-use alloy_primitives::B256;
+
 use async_trait::async_trait;
 
 use jsonrpsee::{core::RpcResult, server::IdProvider};
@@ -38,14 +38,15 @@ use tracing::trace;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
-pub struct EthFilter<Provider, Pool> {
-    /// All nested fields bundled together.
-    inner: Arc<EthFilterInner<Provider, Pool>>,
+pub struct EthFilter<Provider, Pool, D: PoolTransaction + Clone> {
+    /// All nested fields bundled together
+    inner: Arc<EthFilterInner<Provider, Pool, D>>,
 }
 
-impl<Provider, Pool> EthFilter<Provider, Pool>
+impl<Provider, Pool, D> EthFilter<Provider, Pool, D>
 where
     Provider: Send + Sync + 'static,
+    D: PoolTransaction + std::default::Default + Clone,
     Pool: Send + Sync + 'static,
 {
     /// Creates a new, shareable instance.
@@ -90,7 +91,10 @@ where
     }
 
     /// Returns all currently active filters
-    pub fn active_filters(&self) -> &ActiveFilters {
+    pub fn active_filters(&self) -> &ActiveFilters<D>
+    where
+        D: PoolTransaction + Clone,
+    {
         &self.inner.active_filters
     }
 
@@ -120,8 +124,9 @@ where
     }
 }
 
-impl<Provider, Pool> EthFilter<Provider, Pool>
+impl<Provider, Pool, D> EthFilter<Provider, Pool, D>
 where
+    D: PoolTransaction + Clone + 'static,
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
@@ -152,9 +157,11 @@ where
         };
 
         match kind {
-            FilterKind::PendingTransaction(receiver) => {
-                let pending_txs = receiver.drain().await;
-                Ok(FilterChanges::Hashes(pending_txs))
+            FilterKind::PendingTransaction(PendingTransactionKind::Hashes(receiver)) => {
+                Ok(receiver.drain().await)
+            }
+            FilterKind::PendingTransaction(PendingTransactionKind::FullTransaction(_)) => {
+                todo!() // or some actual handling code for this variant
             }
             FilterKind::Block => {
                 // Note: we need to fetch the block hashes from inclusive range
@@ -220,7 +227,7 @@ where
     }
 }
 /// A structure to manage and provide access to a stream of full transaction details.
-
+#[derive(Debug, Clone)]
 struct FullTransactionsReceiver<T: PoolTransaction> {
     txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
 }
@@ -234,21 +241,22 @@ impl<T: PoolTransaction> FullTransactionsReceiver<T> {
 }
 
 #[async_trait]
-impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
+impl<Provider, Pool, D> EthFilterApiServer for EthFilter<Provider, Pool, D>
 where
+    D: PoolTransaction + 'static + Clone,
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newFilter");
-        self.inner.install_filter(FilterKind::Log(Box::new(filter))).await
+        self.inner.install_filter::<D>(FilterKind::Log(Box::new(filter))).await
     }
 
     /// Handler for `eth_newBlockFilter`
     async fn new_block_filter(&self) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newBlockFilter");
-        self.inner.install_filter(FilterKind::Block).await
+        self.inner.install_filter::<D>(FilterKind::Block).await
     }
 
     /// Handler for `eth_newPendingTransactionFilter`
@@ -257,19 +265,25 @@ where
         kind: Option<PendingTransactionFilterKind>,
     ) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newPendingTransactionFilter");
+
         let transaction_kind = match kind.unwrap_or(PendingTransactionFilterKind::Hashes) {
             PendingTransactionFilterKind::Hashes => {
                 let receiver = self.inner.pool.pending_transactions_listener();
                 let pending_txs_receiver = PendingTransactionsReceiver::new(receiver);
-                PendingTransactionKind::Hashes(pending_txs_receiver)
+                FilterKind::PendingTransaction(PendingTransactionKind::Hashes(pending_txs_receiver))
             }
             PendingTransactionFilterKind::Full => {
                 let stream = self.inner.pool.new_pending_pool_transactions_listener();
                 let full_txs_receiver = FullTransactionsReceiver::new(stream);
-                PendingTransactionKind::FullTransaction(full_txs_receiver)
+                FilterKind::PendingTransaction(PendingTransactionKind::FullTransaction(
+                    full_txs_receiver,
+                ))
             }
         };
 
+        //let filter = FilterKind::PendingTransaction(transaction_kind);
+
+        // Install the filter and propagate any errors
         self.inner.install_filter(transaction_kind).await
     }
 
@@ -310,13 +324,13 @@ where
     }
 }
 
-impl<Provider, Pool> std::fmt::Debug for EthFilter<Provider, Pool> {
+impl<Provider, Pool, D: PoolTransaction + Clone> std::fmt::Debug for EthFilter<Provider, Pool, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthFilter").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Pool> Clone for EthFilter<Provider, Pool> {
+impl<Provider, Pool, D: PoolTransaction + Clone> Clone for EthFilter<Provider, Pool, D> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
@@ -324,13 +338,13 @@ impl<Provider, Pool> Clone for EthFilter<Provider, Pool> {
 
 /// Container type `EthFilter`
 #[derive(Debug)]
-struct EthFilterInner<Provider, Pool> {
+struct EthFilterInner<Provider, Pool, D: PoolTransaction + Clone> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
     provider: Provider,
     /// All currently installed filters.
-    active_filters: ActiveFilters,
+    active_filters: ActiveFilters<D>,
     /// Provides ids to identify filters
     id_provider: Arc<dyn IdProvider>,
     /// Maximum number of logs that can be returned in a response
@@ -345,8 +359,9 @@ struct EthFilterInner<Provider, Pool> {
     stale_filter_ttl: Duration,
 }
 
-impl<Provider, Pool> EthFilterInner<Provider, Pool>
+impl<Provider, Pool, D> EthFilterInner<Provider, Pool, D>
 where
+    D: PoolTransaction + Clone + 'static,
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
@@ -392,7 +407,10 @@ where
     }
 
     /// Installs a new filter and returns the new identifier.
-    async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
+    async fn install_filter<A: PoolTransaction + Clone>(
+        &self,
+        kind: FilterKind<D>,
+    ) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
         let id = FilterId::from(self.id_provider.next_id());
         let mut filters = self.active_filters.inner.lock().await;
@@ -492,19 +510,19 @@ where
 
 /// All active filters
 #[derive(Debug, Clone, Default)]
-pub struct ActiveFilters {
-    inner: Arc<Mutex<HashMap<FilterId, ActiveFilter>>>,
+pub struct ActiveFilters<C: PoolTransaction + Clone> {
+    inner: Arc<Mutex<HashMap<FilterId, ActiveFilter<C>>>>,
 }
 
 /// An installed filter
 #[derive(Debug)]
-struct ActiveFilter {
+struct ActiveFilter<B: PoolTransaction + Clone> {
     /// At which block the filter was polled last.
     block: u64,
     /// Last time this filter was polled.
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
-    kind: FilterKind,
+    kind: FilterKind<B>,
 }
 
 /// A receiver for pending transactions that returns all new transactions since the last poll.
@@ -519,14 +537,16 @@ impl PendingTransactionsReceiver {
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> Vec<B256> {
+    async fn drain(&self) -> FilterChanges {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_receiver.lock().await;
 
         while let Ok(tx_hash) = prepared_stream.try_recv() {
             pending_txs.push(tx_hash);
         }
-        pending_txs
+
+        // Convert the vector of hashes into FilterChanges::Hashes
+        FilterChanges::Hashes(pending_txs)
     }
 }
 /// Represents the kind of pending transaction data that can be retrieved.
@@ -534,16 +554,17 @@ impl PendingTransactionsReceiver {
 /// This enum differentiates between two kinds of pending transaction data:
 /// - Just the transaction hashes.
 /// - Full transaction details.
+#[derive(Debug, Clone)]
 enum PendingTransactionKind<T: PoolTransaction> {
     Hashes(PendingTransactionsReceiver),
     FullTransaction(FullTransactionsReceiver<T>),
 }
 
 #[derive(Clone, Debug)]
-enum FilterKind {
+enum FilterKind<A: PoolTransaction + Clone> {
     Log(Box<Filter>),
     Block,
-    PendingTransaction(PendingTransactionsReceiver),
+    PendingTransaction(PendingTransactionKind<A>),
 }
 /// Errors that can occur in the handler implementation
 #[derive(Debug, thiserror::Error)]
