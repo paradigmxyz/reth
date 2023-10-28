@@ -85,18 +85,6 @@ pub fn from_block_full(
     ))
 }
 
-/// Converts a [reth_primitives::BlockHashOrNumber] to a [reth_rpc_types::BlockHashOrNumber]
-pub fn from_primitive_block_hash_or_number(
-    block_hash_or_num: reth_primitives::BlockHashOrNumber,
-) -> reth_rpc_types::BlockHashOrNumber {
-    match block_hash_or_num {
-        reth_primitives::BlockHashOrNumber::Hash(h) => reth_rpc_types::BlockHashOrNumber::Hash(h),
-        reth_primitives::BlockHashOrNumber::Number(n) => {
-            reth_rpc_types::BlockHashOrNumber::Number(n)
-        }
-    }
-}
-
 /// Converts from a [reth_primitives::SealedHeader] to a [reth_rpc_types::BlockNumberOrTag]
 pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader) -> Header {
     let reth_primitives::SealedHeader {

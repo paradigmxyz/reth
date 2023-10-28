@@ -656,6 +656,33 @@ impl Decodable for BlockHashOrNumber {
     }
 }
 
+/// Error thrown when parsing a [BlockHashOrNumber] from a string.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to parse {input:?} as a number: {parse_int_error} or hash: {hex_error}")]
+pub struct ParseBlockHashOrNumberError {
+    input: String,
+    parse_int_error: ParseIntError,
+    hex_error: alloy_primitives::hex::FromHexError,
+}
+
+impl FromStr for BlockHashOrNumber {
+    type Err = ParseBlockHashOrNumberError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match u64::from_str(s) {
+            Ok(val) => Ok(val.into()),
+            Err(pares_int_error) => match B256::from_str(s) {
+                Ok(val) => Ok(val.into()),
+                Err(hex_error) => Err(ParseBlockHashOrNumberError {
+                    input: s.to_string(),
+                    parse_int_error: pares_int_error,
+                    hex_error,
+                }),
+            },
+        }
+    }
+}
+
 /// A Block representation that allows to include additional fields
 pub type RichBlock = Rich<Block>;
 

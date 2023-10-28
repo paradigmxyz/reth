@@ -1,10 +1,12 @@
 use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, B256};
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
 use serde::{Deserialize, Serialize};
-use std::{num::ParseIntError, ops::Deref, str::FromStr};
+use std::ops::Deref;
 
-pub use reth_rpc_types::{BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash};
+pub use reth_rpc_types::{
+    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
+};
 
 /// Ethereum full block.
 ///
@@ -265,105 +267,6 @@ impl std::ops::DerefMut for SealedBlockWithSenders {
     }
 }
 
-/// Either a block hash _or_ a block number
-#[derive_arbitrary(rlp)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum BlockHashOrNumber {
-    /// A block hash
-    Hash(B256),
-    /// A block number
-    Number(u64),
-}
-
-// === impl BlockHashOrNumber ===
-
-impl BlockHashOrNumber {
-    /// Returns the block number if it is a [`BlockHashOrNumber::Number`].
-    #[inline]
-    pub fn as_number(self) -> Option<u64> {
-        match self {
-            BlockHashOrNumber::Hash(_) => None,
-            BlockHashOrNumber::Number(num) => Some(num),
-        }
-    }
-}
-
-impl From<B256> for BlockHashOrNumber {
-    fn from(value: B256) -> Self {
-        BlockHashOrNumber::Hash(value)
-    }
-}
-
-impl From<u64> for BlockHashOrNumber {
-    fn from(value: u64) -> Self {
-        BlockHashOrNumber::Number(value)
-    }
-}
-
-/// Allows for RLP encoding of either a block hash or block number
-impl Encodable for BlockHashOrNumber {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        match self {
-            Self::Hash(block_hash) => block_hash.encode(out),
-            Self::Number(block_number) => block_number.encode(out),
-        }
-    }
-    fn length(&self) -> usize {
-        match self {
-            Self::Hash(block_hash) => block_hash.length(),
-            Self::Number(block_number) => block_number.length(),
-        }
-    }
-}
-
-/// Allows for RLP decoding of a block hash or block number
-impl Decodable for BlockHashOrNumber {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let header: u8 = *buf.first().ok_or(RlpError::InputTooShort)?;
-        // if the byte string is exactly 32 bytes, decode it into a Hash
-        // 0xa0 = 0x80 (start of string) + 0x20 (32, length of string)
-        if header == 0xa0 {
-            // strip the first byte, parsing the rest of the string.
-            // If the rest of the string fails to decode into 32 bytes, we'll bubble up the
-            // decoding error.
-            let hash = B256::decode(buf)?;
-            Ok(Self::Hash(hash))
-        } else {
-            // a block number when encoded as bytes ranges from 0 to any number of bytes - we're
-            // going to accept numbers which fit in less than 64 bytes.
-            // Any data larger than this which is not caught by the Hash decoding should error and
-            // is considered an invalid block number.
-            Ok(Self::Number(u64::decode(buf)?))
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("failed to parse {input:?} as a number: {parse_int_error} or hash: {hex_error}")]
-pub struct ParseBlockHashOrNumberError {
-    input: String,
-    parse_int_error: ParseIntError,
-    hex_error: crate::hex::FromHexError,
-}
-
-impl FromStr for BlockHashOrNumber {
-    type Err = ParseBlockHashOrNumberError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match u64::from_str(s) {
-            Ok(val) => Ok(val.into()),
-            Err(pares_int_error) => match B256::from_str(s) {
-                Ok(val) => Ok(val.into()),
-                Err(hex_error) => Err(ParseBlockHashOrNumberError {
-                    input: s.to_string(),
-                    parse_int_error: pares_int_error,
-                    hex_error,
-                }),
-            },
-        }
-    }
-}
-
 /// A response to `GetBlockBodies`, containing bodies if any bodies were found.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
@@ -466,10 +369,11 @@ pub struct BlockBodyRoots {
 
 #[cfg(test)]
 mod test {
-    use reth_rpc_types::HexStringMissingPrefixError;
-
     use super::{BlockId, BlockNumberOrTag::*, *};
     use crate::hex_literal::hex;
+    use alloy_rlp::{Decodable, Encodable};
+    use reth_rpc_types::HexStringMissingPrefixError;
+    use std::str::FromStr;
 
     /// Check parsing according to EIP-1898.
     #[test]

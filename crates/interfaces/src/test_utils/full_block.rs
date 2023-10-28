@@ -10,7 +10,6 @@ use reth_primitives::{
     BlockBody, BlockHashOrNumber, BlockNumHash, Header, HeadersDirection, PeerId, SealedBlock,
     SealedHeader, WithPeerId, B256,
 };
-use reth_rpc_types_compat::block::from_primitive_block_hash_or_number;
 use std::{collections::HashMap, sync::Arc};
 
 /// A headers+bodies client implementation that does nothing.
@@ -125,8 +124,7 @@ impl HeadersClient for TestFullBlockClient {
         for _ in 0..request.limit {
             // fetch from storage
             if let Some((_, header)) = headers.iter().find(|(hash, header)| {
-                BlockNumHash::new(header.number, **hash)
-                    .matches_block_or_num(&from_primitive_block_hash_or_number(block))
+                BlockNumHash::new(header.number, **hash).matches_block_or_num(&block)
             }) {
                 match request.direction {
                     HeadersDirection::Falling => block = header.parent_hash.into(),
