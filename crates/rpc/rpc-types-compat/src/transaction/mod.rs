@@ -1,11 +1,13 @@
 //! Compatibility functions for rpc `Transaction` type.
 mod signature;
+mod typed;
 use reth_primitives::{
     BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
     TransactionSignedEcRecovered, TxType, B256, U128, U256, U64,
 };
 use reth_rpc_types::{AccessListItem, CallInput, CallRequest, Transaction};
 use signature::from_primitive_signature;
+pub use typed::*;
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.
 ///
@@ -132,6 +134,38 @@ fn fill(
     }
 }
 
+/// Convert [reth_primitives::AccessList] to [reth_rpc_types::AccessList]
+pub fn from_primitive_access_list(
+    access_list: reth_primitives::AccessList,
+) -> reth_rpc_types::AccessList {
+    reth_rpc_types::AccessList(
+        access_list
+            .0
+            .into_iter()
+            .map(|item| reth_rpc_types::AccessListItem {
+                address: item.address.0.into(),
+                storage_keys: item.storage_keys.into_iter().map(|key| key.0.into()).collect(),
+            })
+            .collect(),
+    )
+}
+
+/// Convert [reth_rpc_types::AccessList] to [reth_primitives::AccessList]
+pub fn to_primitive_access_list(
+    access_list: reth_rpc_types::AccessList,
+) -> reth_primitives::AccessList {
+    reth_primitives::AccessList(
+        access_list
+            .0
+            .into_iter()
+            .map(|item| reth_primitives::AccessListItem {
+                address: item.address.0.into(),
+                storage_keys: item.storage_keys.into_iter().map(|key| key.0.into()).collect(),
+            })
+            .collect(),
+    )
+}
+
 /// Convert [TransactionSignedEcRecovered] to [CallRequest]
 pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequest {
     let from = tx.signer();
@@ -141,7 +175,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequ
     let input = tx.transaction.input().clone();
     let nonce = tx.transaction.nonce();
     let chain_id = tx.transaction.chain_id();
-    let access_list = tx.transaction.access_list().cloned();
+    let access_list = tx.transaction.access_list().cloned().map(from_primitive_access_list);
     let max_fee_per_blob_gas = tx.transaction.max_fee_per_blob_gas();
     let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
     let tx_type = tx.transaction.tx_type();

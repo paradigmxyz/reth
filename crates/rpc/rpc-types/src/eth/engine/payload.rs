@@ -1,10 +1,7 @@
-use crate::eth::withdrawal::BeaconAPIWithdrawal;
+use crate::eth::{transaction::BlobTransactionSidecar, withdrawal::BeaconAPIWithdrawal};
 pub use crate::Withdrawal;
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
-use reth_primitives::{
-    kzg::{Blob, Bytes48},
-    BlobTransactionSidecar, SealedBlock,
-};
+use c_kzg::{Blob, Bytes48};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -138,36 +135,6 @@ pub struct ExecutionPayloadV1 {
     pub base_fee_per_gas: U256,
     pub block_hash: B256,
     pub transactions: Vec<Bytes>,
-}
-
-impl From<SealedBlock> for ExecutionPayloadV1 {
-    fn from(value: SealedBlock) -> Self {
-        let transactions = value
-            .body
-            .iter()
-            .map(|tx| {
-                let mut encoded = Vec::new();
-                tx.encode_enveloped(&mut encoded);
-                encoded.into()
-            })
-            .collect();
-        ExecutionPayloadV1 {
-            parent_hash: value.parent_hash,
-            fee_recipient: value.beneficiary,
-            state_root: value.state_root,
-            receipts_root: value.receipts_root,
-            logs_bloom: value.logs_bloom,
-            prev_randao: value.mix_hash,
-            block_number: U64::from(value.number),
-            gas_limit: U64::from(value.gas_limit),
-            gas_used: U64::from(value.gas_used),
-            timestamp: U64::from(value.timestamp),
-            extra_data: value.extra_data.clone(),
-            base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-            block_hash: value.hash(),
-            transactions,
-        }
-    }
 }
 
 /// This structure maps on the ExecutionPayloadV2 structure of the beacon chain spec.

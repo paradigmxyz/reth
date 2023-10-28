@@ -2,7 +2,7 @@
 
 use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
-use reth_primitives::{Block as PrimitiveBlock, Header as PrimitiveHeader, B256, U256};
+use reth_primitives::{Block as PrimitiveBlock, Header as PrimitiveHeader, B256, U256, U64};
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
 /// Converts the given primitive block into a [Block] response with the given
@@ -85,6 +85,71 @@ pub fn from_block_full(
     ))
 }
 
+/// Converts from a [reth_primitives::SealedHeader] to a [reth_rpc_types::BlockNumberOrTag]
+pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader) -> Header {
+    let reth_primitives::SealedHeader {
+        header:
+            PrimitiveHeader {
+                parent_hash,
+                ommers_hash,
+                beneficiary,
+                state_root,
+                transactions_root,
+                receipts_root,
+                logs_bloom,
+                difficulty,
+                number,
+                gas_limit,
+                gas_used,
+                timestamp,
+                mix_hash,
+                nonce,
+                base_fee_per_gas,
+                extra_data,
+                withdrawals_root,
+                blob_gas_used,
+                excess_blob_gas,
+                parent_beacon_block_root,
+            },
+        hash,
+    } = primitive_header;
+
+    Header {
+        hash: Some(hash),
+        parent_hash,
+        uncles_hash: ommers_hash,
+        miner: beneficiary,
+        state_root,
+        transactions_root,
+        receipts_root,
+        withdrawals_root,
+        number: Some(U256::from(number)),
+        gas_used: U256::from(gas_used),
+        gas_limit: U256::from(gas_limit),
+        extra_data,
+        logs_bloom,
+        timestamp: U256::from(timestamp),
+        difficulty,
+        mix_hash,
+        nonce: Some(nonce.to_be_bytes().into()),
+        base_fee_per_gas: base_fee_per_gas.map(U256::from),
+        blob_gas_used: blob_gas_used.map(U64::from),
+        excess_blob_gas: excess_blob_gas.map(U64::from),
+        parent_beacon_block_root,
+    }
+}
+
+fn from_primitive_withdrawal(
+    withdrawal: reth_primitives::Withdrawal,
+) -> reth_rpc_types::Withdrawal {
+    reth_rpc_types::Withdrawal {
+        index: withdrawal.validator_index,
+        address: withdrawal.address,
+        validator_index: withdrawal.validator_index,
+        amount: withdrawal.amount,
+    }
+}
+
 #[inline]
 fn from_block_with_transactions(
     block_length: usize,
@@ -94,8 +159,14 @@ fn from_block_with_transactions(
     transactions: BlockTransactions,
 ) -> Block {
     let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
-    let header = Header::from_primitive_with_hash(block.header.seal(block_hash));
-    let withdrawals = if header.withdrawals_root.is_some() { block.withdrawals } else { None };
+    let header = from_primitive_with_hash(block.header.seal(block_hash));
+    let withdrawals = if header.withdrawals_root.is_some() {
+        block
+            .withdrawals
+            .map(|withdrawals| withdrawals.into_iter().map(from_primitive_withdrawal).collect())
+    } else {
+        None
+    };
     Block {
         header,
         uncles,
@@ -110,7 +181,7 @@ fn from_block_with_transactions(
 /// an Uncle from its header.
 pub fn uncle_block_from_header(header: PrimitiveHeader) -> Block {
     let hash = header.hash_slow();
-    let rpc_header = Header::from_primitive_with_hash(header.clone().seal(hash));
+    let rpc_header = from_primitive_with_hash(header.clone().seal(hash));
     let uncle_block = PrimitiveBlock { header, ..Default::default() };
     let size = Some(U256::from(uncle_block.length()));
     Block {
