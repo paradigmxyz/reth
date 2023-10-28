@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
+use crate::serde_helpers::storage::JsonStorageKey;
 use alloy_primitives::{Address, Bytes, B256, B512, U256, U64};
-use reth_primitives::serde_helper::JsonStorageKey;
 use serde::{Deserialize, Serialize};
 
 /// Account information.

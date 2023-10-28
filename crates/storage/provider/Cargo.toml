@@ -30,6 +30,7 @@ auto_impl = "1.0"
 itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
+dashmap = { version = "5.5", features = ["inline"] }
 
 # test-utils
 alloy-rlp = { workspace = true, optional = true }

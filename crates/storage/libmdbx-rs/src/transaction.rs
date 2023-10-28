@@ -23,12 +23,15 @@ mod private {
     impl Sealed for RW {}
 }
 
-pub trait TransactionKind: private::Sealed + Debug + 'static {
+pub trait TransactionKind: private::Sealed + Send + Sync + Debug + 'static {
     #[doc(hidden)]
     const ONLY_CLEAN: bool;
 
     #[doc(hidden)]
     const OPEN_FLAGS: MDBX_txn_flags_t;
+
+    #[doc(hidden)]
+    const IS_READ_ONLY: bool;
 }
 
 #[derive(Debug)]
@@ -42,10 +45,12 @@ pub struct RW;
 impl TransactionKind for RO {
     const ONLY_CLEAN: bool = true;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_RDONLY;
+    const IS_READ_ONLY: bool = true;
 }
 impl TransactionKind for RW {
     const ONLY_CLEAN: bool = false;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_READWRITE;
+    const IS_READ_ONLY: bool = false;
 }
 
 /// An MDBX transaction.

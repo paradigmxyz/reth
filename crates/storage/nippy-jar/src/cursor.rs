@@ -1,24 +1,19 @@
 use crate::{
-    compression::{Compression, Zstd},
-    InclusionFilter, NippyJar, NippyJarError, PerfectHashingFunction, RefRow,
+    compression::{Compression, Compressors, Zstd},
+    InclusionFilter, MmapHandle, NippyJar, NippyJarError, PerfectHashingFunction, RefRow,
 };
-use memmap2::Mmap;
 use serde::{de::Deserialize, ser::Serialize};
-use std::{fs::File, ops::Range};
+use std::ops::Range;
 use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
 /// Simple cursor implementation to retrieve data from [`NippyJar`].
+#[derive(Clone)]
 pub struct NippyJarCursor<'a, H = ()> {
     /// [`NippyJar`] which holds most of the required configuration to read from the file.
     jar: &'a NippyJar<H>,
-    /// Optional dictionary decompressors.
-    zstd_decompressors: Option<Vec<Decompressor<'a>>>,
     /// Data file.
-    #[allow(unused)]
-    file_handle: File,
-    /// Data file.
-    mmap_handle: Mmap,
+    mmap_handle: MmapHandle,
     /// Internal buffer to unload data to without reallocating memory on each retrieval.
     internal_buffer: Vec<u8>,
     /// Cursor row position.
@@ -36,24 +31,29 @@ where
 
 impl<'a, H> NippyJarCursor<'a, H>
 where
-    H: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug,
+    H: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static,
 {
-    pub fn new(
-        jar: &'a NippyJar<H>,
-        zstd_decompressors: Option<Vec<Decompressor<'a>>>,
-    ) -> Result<Self, NippyJarError> {
-        let file = File::open(jar.data_path())?;
-
-        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let mmap = unsafe { Mmap::map(&file)? };
-
+    pub fn new(jar: &'a NippyJar<H>) -> Result<Self, NippyJarError> {
+        let max_row_size = jar.max_row_size;
         Ok(NippyJarCursor {
             jar,
-            zstd_decompressors,
-            file_handle: file,
-            mmap_handle: mmap,
+            mmap_handle: jar.open_data()?,
             // Makes sure that we have enough buffer capacity to decompress any row of data.
-            internal_buffer: Vec::with_capacity(jar.max_row_size),
+            internal_buffer: Vec::with_capacity(max_row_size),
+            row: 0,
+        })
+    }
+
+    pub fn with_handle(
+        jar: &'a NippyJar<H>,
+        mmap_handle: MmapHandle,
+    ) -> Result<Self, NippyJarError> {
+        let max_row_size = jar.max_row_size;
+        Ok(NippyJarCursor {
+            jar,
+            mmap_handle,
+            // Makes sure that we have enough buffer capacity to decompress any row of data.
+            internal_buffer: Vec::with_capacity(max_row_size),
             row: 0,
         })
     }
@@ -218,23 +218,32 @@ where
             value_offset..next_value_offset
         };
 
-        if let Some(zstd_dict_decompressors) = self.zstd_decompressors.as_mut() {
-            let from: usize = self.internal_buffer.len();
-            if let Some(decompressor) = zstd_dict_decompressors.get_mut(column) {
-                Zstd::decompress_with_dictionary(
-                    &self.mmap_handle[column_offset_range],
-                    &mut self.internal_buffer,
-                    decompressor,
-                )?;
-            }
-            let to = self.internal_buffer.len();
-
-            row.push(ValueRange::Internal(from..to));
-        } else if let Some(compression) = self.jar.compressor() {
-            // Uses the chosen default decompressor
+        if let Some(compression) = self.jar.compressor() {
             let from = self.internal_buffer.len();
-            compression
-                .decompress_to(&self.mmap_handle[column_offset_range], &mut self.internal_buffer)?;
+            match compression {
+                Compressors::Zstd(z) if z.use_dict => {
+                    // If we are here, then for sure we have the necessary dictionaries and they're
+                    // loaded (happens during deserialization). Otherwise, there's an issue
+                    // somewhere else and we can't recover here anyway.
+                    let dictionaries = z.dictionaries.as_ref().expect("dictionaries to exist")
+                        [column]
+                        .loaded()
+                        .expect("dictionary to be loaded");
+                    let mut decompressor = Decompressor::with_prepared_dictionary(dictionaries)?;
+                    Zstd::decompress_with_dictionary(
+                        &self.mmap_handle[column_offset_range],
+                        &mut self.internal_buffer,
+                        &mut decompressor,
+                    )?;
+                }
+                _ => {
+                    // Uses the chosen default decompressor
+                    compression.decompress_to(
+                        &self.mmap_handle[column_offset_range],
+                        &mut self.internal_buffer,
+                    )?;
+                }
+            }
             let to = self.internal_buffer.len();
 
             row.push(ValueRange::Internal(from..to));
