@@ -28,8 +28,3 @@ pub use otterscan::*;
 pub use peer::*;
 pub use rpc::*;
 pub use serde_helpers::*;
-
-/// EIP-4844 + KZG helpers
-pub mod kzg {
-    pub use c_kzg::*;
-}

@@ -1,9 +1,7 @@
+use crate::eth::{transaction::BlobTransactionSidecar, withdrawal::BeaconAPIWithdrawal};
 pub use crate::Withdrawal;
-use crate::{
-    eth::{transaction::BlobTransactionSidecar, withdrawal::BeaconAPIWithdrawal},
-    kzg::{Blob, Bytes48},
-};
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
+use c_kzg::{Blob, Bytes48};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
 
