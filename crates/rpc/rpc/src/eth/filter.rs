@@ -142,7 +142,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty);
+                return Ok(FilterChanges::Empty)
             }
 
             // update filter
@@ -217,7 +217,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(FilterError::FilterNotFound(id));
+                return Err(FilterError::FilterNotFound(id))
             }
         };
 
@@ -480,8 +480,8 @@ where
                     .unwrap_or_else(|| header.number.into());
 
                 // only if filter matches
-                if FilteredParams::matches_address(header.logs_bloom, &address_filter)
-                    && FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
+                if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
+                    FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
                     if let Some((block, receipts)) =
                         self.block_and_receipts_by_number(num_hash).await?
@@ -501,7 +501,7 @@ where
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
-                            ));
+                            ))
                         }
                     }
                 }
@@ -630,7 +630,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None;
+            return None
         }
         Some((start, end))
     }
