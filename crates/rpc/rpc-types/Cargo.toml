@@ -29,9 +29,13 @@ url = "2.3"
 secp256k1.workspace = true
 bytes.workspace = true
 
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
 
 [features]
 default = ["jsonrpsee-types"]
+arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary"]
 
 [dev-dependencies]
 # misc

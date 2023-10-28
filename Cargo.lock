@@ -6499,10 +6499,13 @@ version = "0.1.0-alpha.10"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "bytes",
  "c-kzg",
  "itertools 0.11.0",
  "jsonrpsee-types",
+ "proptest",
+ "proptest-derive",
  "rand 0.8.5",
  "secp256k1 0.27.0",
  "serde",

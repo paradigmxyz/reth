@@ -586,6 +586,10 @@ impl From<(BlockHash, BlockNumber)> for BlockNumHash {
 
 /// Either a block hash _or_ a block number
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(
+    any(test, feature = "arbitrary"),
+    derive(proptest_derive::Arbitrary, arbitrary::Arbitrary)
+)]
 pub enum BlockHashOrNumber {
     /// A block hash
     Hash(B256),
