@@ -38,16 +38,18 @@ use tracing::trace;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
-pub struct EthFilter<Provider, Pool, D: PoolTransaction + Clone> {
+pub struct EthFilter<Provider, Pool>
+where
+    Pool: PoolTransaction + Clone,
+{
     /// All nested fields bundled together
-    inner: Arc<EthFilterInner<Provider, Pool, D>>,
+    inner: Arc<EthFilterInner<Provider, Pool>>,
 }
 
-impl<Provider, Pool, D> EthFilter<Provider, Pool, D>
+impl<Provider, Pool> EthFilter<Provider, Pool>
 where
     Provider: Send + Sync + 'static,
-    D: PoolTransaction + std::default::Default + Clone,
-    Pool: Send + Sync + 'static,
+    Pool: Send + Sync + 'static + TransactionPool + PoolTransaction + std::default::Default,
 {
     /// Creates a new, shareable instance.
     ///
@@ -91,10 +93,7 @@ where
     }
 
     /// Returns all currently active filters
-    pub fn active_filters(&self) -> &ActiveFilters<D>
-    where
-        D: PoolTransaction + Clone,
-    {
+    pub fn active_filters(&self) -> &ActiveFilters<Pool> {
         &self.inner.active_filters
     }
 
@@ -124,11 +123,11 @@ where
     }
 }
 
-impl<Provider, Pool, D> EthFilter<Provider, Pool, D>
+impl<Provider, Pool> EthFilter<Provider, Pool>
 where
-    D: PoolTransaction + Clone + 'static,
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
+    Pool: PoolTransaction,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(&self, id: FilterId) -> Result<FilterChanges, FilterError> {
@@ -143,7 +142,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
+                return Ok(FilterChanges::Empty);
             }
 
             // update filter
@@ -218,7 +217,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(FilterError::FilterNotFound(id))
+                return Err(FilterError::FilterNotFound(id));
             }
         };
 
@@ -241,22 +240,22 @@ impl<T: PoolTransaction> FullTransactionsReceiver<T> {
 }
 
 #[async_trait]
-impl<Provider, Pool, D> EthFilterApiServer for EthFilter<Provider, Pool, D>
+impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
 where
-    D: PoolTransaction + 'static + Clone,
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
+    Pool: PoolTransaction,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newFilter");
-        self.inner.install_filter::<D>(FilterKind::Log(Box::new(filter))).await
+        self.inner.install_filter(FilterKind::Log(Box::new(filter))).await
     }
 
     /// Handler for `eth_newBlockFilter`
     async fn new_block_filter(&self) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newBlockFilter");
-        self.inner.install_filter::<D>(FilterKind::Block).await
+        self.inner.install_filter(FilterKind::Block).await
     }
 
     /// Handler for `eth_newPendingTransactionFilter`
@@ -324,13 +323,19 @@ where
     }
 }
 
-impl<Provider, Pool, D: PoolTransaction + Clone> std::fmt::Debug for EthFilter<Provider, Pool, D> {
+impl<Provider, Pool> std::fmt::Debug for EthFilter<Provider, Pool>
+where
+    Pool: PoolTransaction + Clone,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthFilter").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Pool, D: PoolTransaction + Clone> Clone for EthFilter<Provider, Pool, D> {
+impl<Provider, Pool> Clone for EthFilter<Provider, Pool>
+where
+    Pool: PoolTransaction + Clone,
+{
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
@@ -338,13 +343,16 @@ impl<Provider, Pool, D: PoolTransaction + Clone> Clone for EthFilter<Provider, P
 
 /// Container type `EthFilter`
 #[derive(Debug)]
-struct EthFilterInner<Provider, Pool, D: PoolTransaction + Clone> {
+struct EthFilterInner<Provider, Pool>
+where
+    Pool: PoolTransaction + Clone,
+{
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
     provider: Provider,
     /// All currently installed filters.
-    active_filters: ActiveFilters<D>,
+    active_filters: ActiveFilters<Pool>,
     /// Provides ids to identify filters
     id_provider: Arc<dyn IdProvider>,
     /// Maximum number of logs that can be returned in a response
@@ -359,11 +367,10 @@ struct EthFilterInner<Provider, Pool, D: PoolTransaction + Clone> {
     stale_filter_ttl: Duration,
 }
 
-impl<Provider, Pool, D> EthFilterInner<Provider, Pool, D>
+impl<Provider, Pool> EthFilterInner<Provider, Pool>
 where
-    D: PoolTransaction + Clone + 'static,
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + 'static + PoolTransaction,
 {
     /// Returns logs matching given filter object.
     async fn logs_for_filter(&self, filter: Filter) -> Result<Vec<Log>, FilterError> {
@@ -407,10 +414,7 @@ where
     }
 
     /// Installs a new filter and returns the new identifier.
-    async fn install_filter<A: PoolTransaction + Clone>(
-        &self,
-        kind: FilterKind<D>,
-    ) -> RpcResult<FilterId> {
+    async fn install_filter(&self, kind: FilterKind<Pool>) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
         let id = FilterId::from(self.id_provider.next_id());
         let mut filters = self.active_filters.inner.lock().await;
@@ -476,8 +480,8 @@ where
                     .unwrap_or_else(|| header.number.into());
 
                 // only if filter matches
-                if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
-                    FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
+                if FilteredParams::matches_address(header.logs_bloom, &address_filter)
+                    && FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
                     if let Some((block, receipts)) =
                         self.block_and_receipts_by_number(num_hash).await?
@@ -497,7 +501,7 @@ where
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
-                            ))
+                            ));
                         }
                     }
                 }
@@ -510,19 +514,19 @@ where
 
 /// All active filters
 #[derive(Debug, Clone, Default)]
-pub struct ActiveFilters<C: PoolTransaction + Clone> {
-    inner: Arc<Mutex<HashMap<FilterId, ActiveFilter<C>>>>,
+pub struct ActiveFilters<A: PoolTransaction + Clone> {
+    inner: Arc<Mutex<HashMap<FilterId, ActiveFilter<A>>>>,
 }
 
 /// An installed filter
 #[derive(Debug)]
-struct ActiveFilter<B: PoolTransaction + Clone> {
+struct ActiveFilter<Pool: PoolTransaction + Clone> {
     /// At which block the filter was polled last.
     block: u64,
     /// Last time this filter was polled.
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
-    kind: FilterKind<B>,
+    kind: FilterKind<Pool>,
 }
 
 /// A receiver for pending transactions that returns all new transactions since the last poll.
@@ -626,7 +630,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None
+            return None;
         }
         Some((start, end))
     }
