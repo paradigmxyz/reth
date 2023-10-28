@@ -32,21 +32,6 @@ pub mod u64_hex {
     }
 }
 
-/// serde functions for handling `Option<u64>` as [U64]
-pub mod option_u64_hex {
-    use crate::U64;
-    use serde::{Deserialize, Deserializer};
-
-    /// Deserializes an `Option` from [U64] accepting a hex quantity string with optional 0x prefix
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Ok(U64::deserialize(deserializer)
-            .map_or(None, |v| Some(u64::from_be_bytes(v.to_be_bytes()))))
-    }
-}
-
 /// Serialize a byte vec as a hex string _without_ the "0x" prefix.
 ///
 /// This behaves the same as [`hex::encode`](crate::hex::encode).

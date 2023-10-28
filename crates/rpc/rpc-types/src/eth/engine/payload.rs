@@ -6,7 +6,7 @@ use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
 
 #[cfg(feature = "optimism")]
-use reth_primitives::serde_helper::option_u64_hex;
+use crate::serde_helpers::u64_hex::option_u64_hex;
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
