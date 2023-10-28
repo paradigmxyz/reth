@@ -949,11 +949,10 @@ impl<'a> Deserialize<'a> for PendingTransactionFilterKind {
     where
         D: Deserializer<'a>,
     {
-        let val = bool::deserialize(deserializer)?;
-        if val {
-            Ok(PendingTransactionFilterKind::Full)
-        } else {
-            Ok(PendingTransactionFilterKind::Hashes)
+        let val = Option::<bool>::deserialize(deserializer)?;
+        match val {
+            Some(true) => Ok(PendingTransactionFilterKind::Full),
+            _ => Ok(PendingTransactionFilterKind::Hashes),
         }
     }
 }
