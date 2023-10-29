@@ -5812,7 +5812,6 @@ dependencies = [
  "reth-net-nat",
  "reth-network",
  "reth-primitives",
- "reth-stages",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
@@ -6021,7 +6020,6 @@ dependencies = [
  "clap",
  "futures",
  "modular-bitfield",
- "parity-scale-codec",
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "reth-codecs",
@@ -6031,7 +6029,6 @@ dependencies = [
  "reth-nippy-jar",
  "reth-primitives",
  "reth-rpc-types",
- "reth-rpc-types-compat",
  "revm-primitives",
  "secp256k1 0.27.0",
  "thiserror",
@@ -6206,10 +6203,8 @@ version = "0.1.0-alpha.10"
 dependencies = [
  "anyhow",
  "bincode",
- "bytes",
  "cuckoofilter",
  "derive_more",
- "hex",
  "lz4_flex",
  "memmap2 0.7.1",
  "ph",
@@ -6219,7 +6214,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
- "tracing-appender",
  "zstd 0.12.4",
 ]
 
@@ -6251,7 +6245,6 @@ version = "0.1.0-alpha.10"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "alloy-sol-types",
  "arbitrary",
  "assert_matches",
  "byteorder",
