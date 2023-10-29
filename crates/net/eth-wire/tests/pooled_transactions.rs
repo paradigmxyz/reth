@@ -7,9 +7,12 @@ use test_fuzz::test_fuzz;
 
 /// Helper function to ensure encode-decode roundtrip works for [`PooledTransactions`].
 #[test_fuzz]
-fn roundtrip_pooled_transactions(hex_data: Vec<u8>) {
+fn roundtrip_pooled_transactions(hex_data: Vec<u8>) -> Result<(), alloy_rlp::Error> {
     let input_rlp = &mut &hex_data[..];
-    let Ok(txs) = PooledTransactions::decode(input_rlp) else { return };
+    let txs = match PooledTransactions::decode(input_rlp) {
+        Ok(txs) => txs,
+        Err(e) => return Err(e),
+    };
 
     // get the amount of bytes decoded in `decode` by subtracting the length of the original buf,
     // from the length of the remaining bytes
@@ -29,6 +32,8 @@ fn roundtrip_pooled_transactions(hex_data: Vec<u8>) {
 
     // ensure that the length is equal to the length of the encoded data
     assert_eq!(txs.length(), buf.len());
+
+    Ok(())
 }
 
 #[test]
@@ -36,8 +41,8 @@ fn decode_pooled_transactions_data() {
     let network_data_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/pooled_transactions_with_blob");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
-    let hex_data = hex::decode(data.trim()).unwrap();
-    roundtrip_pooled_transactions(hex_data);
+    let hex_data = hex::decode(data.trim()).expect("Unable to decode hex");
+    assert!(roundtrip_pooled_transactions(hex_data).is_ok());
 }
 
 #[test]
