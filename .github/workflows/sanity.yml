@@ -34,6 +34,7 @@ jobs:
             mkdir -p "$HOME/bin"
             wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
             tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
+            rm geth-linux-amd64-$GETH_BUILD.tar.gz
             mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
             chmod u+x "$HOME/bin/geth"
             export PATH=$HOME/bin:$PATH
