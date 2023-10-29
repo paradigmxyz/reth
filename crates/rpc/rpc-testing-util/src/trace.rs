@@ -1,7 +1,8 @@
 //! Helpers for testing trace calls.
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::Error as RpcError;
-use reth_primitives::{BlockId, TxHash};
+
+use reth_primitives::{BlockId, Bytes, TxHash};
 use reth_rpc_api::clients::TraceApiClient;
 use reth_rpc_types::trace::parity::{LocalizedTransactionTrace, TraceResults, TraceType};
 use std::{
@@ -47,6 +48,34 @@ pub trait TraceApiExt {
     ) -> ReplayTransactionStream<'_>
     where
         I: IntoIterator<Item = TxHash>;
+
+    /// Returns a new stream that traces the provided raw transaction data.
+    fn trace_raw_transaction_stream(
+        &self,
+        data: Bytes,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+    ) -> RawTransactionTraceStream<'_>;
+}
+/// A stream that traces the provided raw transaction data.
+
+#[must_use = "streams do nothing unless polled"]
+pub struct RawTransactionTraceStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>> + 'a>>,
+}
+
+impl<'a> Stream for RawTransactionTraceStream<'a> {
+    type Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl<'a> std::fmt::Debug for RawTransactionTraceStream<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawTransactionTraceStream").finish()
+    }
 }
 
 /// A stream that replays the transactions for the requested hashes.
@@ -124,6 +153,20 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         }))
         .buffered(10);
         ReplayTransactionStream { stream: Box::pin(stream) }
+    }
+    fn trace_raw_transaction_stream(
+        &self,
+        data: Bytes,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+    ) -> RawTransactionTraceStream<'_> {
+        let stream = futures::stream::once(async move {
+            match self.trace_raw_transaction(data.clone(), trace_types, block_id).await {
+                Ok(result) => Ok((result, data)),
+                Err(err) => Err((err, data)),
+            }
+        });
+        RawTransactionTraceStream { stream: Box::pin(stream) }
     }
 }
 
