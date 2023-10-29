@@ -20,8 +20,9 @@ use reth_revm::{
 };
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
-    trace::{filter::TraceFilter, parity::*, tracerequest::TraceRequest},
-    BlockError, CallRequest, Index,
+    state::StateOverride,
+    trace::{filter::TraceFilter, parity::*, tracerequest::TraceCallRequest},
+    BlockError, BlockOverrides, CallRequest, Index,
 };
 use revm::{db::CacheDB, primitives::Env};
 use revm_primitives::db::DatabaseCommit;
@@ -65,10 +66,8 @@ where
     Eth: EthTransactions + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
-    pub async fn trace_call(&self, trace_request: TraceRequest) -> EthResult<TraceResults> {
-        let at = trace_request
-            .block_id
-            .unwrap_or(reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Latest));
+    pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
+        let at = trace_request.block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let config = tracing_config(&trace_request.trace_types);
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
@@ -435,9 +434,18 @@ where
     /// Executes the given call and returns a number of possible traces for it.
     ///
     /// Handler for `trace_call`
-    async fn trace_call(&self, trace_request: TraceRequest) -> Result<TraceResults> {
+    async fn trace_call(
+        &self,
+        call: CallRequest,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
+    ) -> Result<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_call(self, trace_request).await?)
+        let request =
+            TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
+        Ok(TraceApi::trace_call(self, request).await?)
     }
 
     /// Handler for `trace_callMany`
