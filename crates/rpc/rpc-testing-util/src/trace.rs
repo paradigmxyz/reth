@@ -10,6 +10,9 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+/// A type alias that represents the result of a raw transaction trace stream.
+type RawTransactionTraceResult<'a> =
+    Pin<Box<dyn Stream<Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>> + 'a>>;
 /// A result type for the `trace_block` method that also captures the requested block.
 pub type TraceBlockResult = Result<(Vec<LocalizedTransactionTrace>, BlockId), (RpcError, BlockId)>;
 /// Type alias representing the result of replaying a transaction.
@@ -61,7 +64,7 @@ pub trait TraceApiExt {
 
 #[must_use = "streams do nothing unless polled"]
 pub struct RawTransactionTraceStream<'a> {
-    stream: Pin<Box<dyn Stream<Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>> + 'a>>,
+    stream: RawTransactionTraceResult<'a>,
 }
 
 impl<'a> Stream for RawTransactionTraceStream<'a> {
