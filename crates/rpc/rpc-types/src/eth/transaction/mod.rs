@@ -72,6 +72,16 @@ pub struct Transaction {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub transaction_type: Option<U64>,
 
+    /// Optimism specific transaction fields
+    #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    pub optimism: OptimismTransactionFields,
+}
+
+/// Optimism specific transaction fields
+#[cfg(feature = "optimism")]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OptimismTransactionFields {
     /// Hash that uniquely identifies the source of the deposit.
     #[cfg(feature = "optimism")]
     #[serde(rename = "sourceHash", skip_serializing_if = "Option::is_none")]
@@ -120,11 +130,7 @@ mod tests {
             max_priority_fee_per_gas: Some(U128::from(22)),
             max_fee_per_blob_gas: None,
             #[cfg(feature = "optimism")]
-            source_hash: None,
-            #[cfg(feature = "optimism")]
-            mint: None,
-            #[cfg(feature = "optimism")]
-            is_system_tx: None,
+            optimism: Default::default(),
         };
         let serialized = serde_json::to_string(&transaction).unwrap();
         assert_eq!(
@@ -163,11 +169,7 @@ mod tests {
             max_priority_fee_per_gas: Some(U128::from(22)),
             max_fee_per_blob_gas: None,
             #[cfg(feature = "optimism")]
-            source_hash: None,
-            #[cfg(feature = "optimism")]
-            mint: None,
-            #[cfg(feature = "optimism")]
-            is_system_tx: None,
+            optimism: Default::default(),
         };
         let serialized = serde_json::to_string(&transaction).unwrap();
         assert_eq!(

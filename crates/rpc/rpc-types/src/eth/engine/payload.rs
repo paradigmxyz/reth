@@ -400,7 +400,7 @@ pub struct OptimismPayloadAttributes {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::serde_helpers::u64_hex::option_u64_hex::deserialize"
+        deserialize_with = "crate::serde_helpers::u64_hex::u64_hex_opt::deserialize"
     )]
     pub gas_limit: Option<u64>,
 }
