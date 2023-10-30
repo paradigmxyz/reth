@@ -1,6 +1,7 @@
 //! Optimism's [PayloadBuilder] implementation.
 
 use super::*;
+use reth_payload_builder::error::OptimismPayloadBuilderError;
 use reth_primitives::Hardfork;
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
@@ -56,17 +57,16 @@ where
     for sequencer_tx in attributes.transactions {
         // Check if the job was cancelled, if so we can exit early.
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
+            return Ok(BuildOutcome::Cancelled);
         }
 
         // Convert the transaction to a [TransactionSignedEcRecovered]. This is
         // purely for the purposes of utilizing the [tx_env_with_recovered] function.
         // Deposit transactions do not have signatures, so if the tx is a deposit, this
         // will just pull in its `from` address.
-        let sequencer_tx = sequencer_tx
-            .clone()
-            .try_into_ecrecovered()
-            .map_err(|_| PayloadBuilderError::TransactionEcRecoverFailed)?;
+        let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|_| {
+            PayloadBuilderError::Optimism(OptimismPayloadBuilderError::TransactionEcRecoverFailed)
+        })?;
 
         // Cache the depositor account prior to the state transition for the deposit nonce.
         //
@@ -79,7 +79,11 @@ where
                     .map(|acc| acc.account_info().unwrap_or_default())
             })
             .transpose()
-            .map_err(|_| PayloadBuilderError::AccountLoadFailed(sequencer_tx.signer()))?;
+            .map_err(|_| {
+                PayloadBuilderError::Optimism(OptimismPayloadBuilderError::AccountLoadFailed(
+                    sequencer_tx.signer(),
+                ))
+            })?;
 
         // Configure the environment for the block.
         let env = Env {
@@ -97,11 +101,11 @@ where
                 match err {
                     EVMError::Transaction(err) => {
                         trace!(target: "optimism_payload_builder", ?err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                        continue
+                        continue;
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                        return Err(PayloadBuilderError::EvmExecutionError(err));
                     }
                 }
             }
@@ -137,12 +141,12 @@ where
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             // check if the job was cancelled, if so we can exit early
             if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled)
+                return Ok(BuildOutcome::Cancelled);
             }
 
             // convert tx to a signed transaction
@@ -173,11 +177,11 @@ where
                                 best_txs.mark_invalid(&pool_tx);
                             }
 
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                            return Err(PayloadBuilderError::EvmExecutionError(err));
                         }
                     }
                 }
@@ -215,7 +219,7 @@ where
     // check if we have a better block
     if !is_better_payload(best_payload.as_deref(), total_fees) {
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
     }
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
