@@ -304,16 +304,16 @@ impl BundleStateWithReceipts {
         // detached number should be included so we are adding +1 to it.
         // for example if block number is same as first_block then
         // number of detached block shoud be 1.
-        let num_of_detached_block = (block_number - first_block) + 1;
+        let first_detached_block_idx = (block_number - first_block) + 1;
 
         let mut detached_bundle_state: BundleStateWithReceipts = self.clone();
         detached_bundle_state.revert_to(block_number);
 
         // split is done as [0, num) and [num, len]
-        let (_, this) = self.receipts.split_at(num_of_detached_block as usize);
+        let (_, this) = self.receipts.split_at(first_detached_block_idx as usize);
 
         self.receipts = Receipts::from_vec(this.to_vec().clone());
-        self.bundle.take_n_reverts(num_of_detached_block as usize);
+        self.bundle.take_n_reverts(first_detached_block_idx as usize);
 
         self.first_block = block_number + 1;
 
