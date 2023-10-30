@@ -313,7 +313,7 @@ pub fn fill_tx_env<T>(
                 TransactionKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
                 TransactionKind::Create => tx_env.transact_to = TransactTo::create(),
             }
-            tx_env.value = tx.value.0;
+            tx_env.value = tx.value.into();
             tx_env.data = tx.input.clone();
             tx_env.chain_id = None;
             tx_env.nonce = None;

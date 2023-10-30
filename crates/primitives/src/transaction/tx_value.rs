@@ -19,7 +19,7 @@ use proptest::{
 /// this full precision, hence we use a wrapper type to allow for overriding of encoding.
 #[add_arbitrary_tests(compact, rlp)]
 #[derive(Default, Debug, Copy, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TxValue(pub U256);
+pub struct TxValue(U256);
 
 impl From<TxValue> for U256 {
     /// unwrap Value to U256
