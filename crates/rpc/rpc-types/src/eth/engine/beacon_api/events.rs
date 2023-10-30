@@ -44,9 +44,10 @@ pub struct PayloadAttributesEvent {
 /// Event for the `Head` topic of the beacon API node event stream.
 ///
 /// The node has finished processing, resulting in a new head. previous_duty_dependent_root is
-/// `get_block_root_at_slot(state, compute_start_slot_at_epoch(epoch - 1) - 1)` and
-/// current_duty_dependent_root is `get_block_root_at_slot(state, compute_start_slot_at_epoch(epoch)
-/// - 1)`. Both dependent roots use the genesis block root in the case of underflow.
+/// \`get_block_root_at_slot(state, compute_start_slot_at_epoch(epoch - 1) - 1)\` and
+/// current_duty_dependent_root is \`get_block_root_at_slot(state,
+/// compute_start_slot_at_epoch(epoch)
+/// - 1)\`. Both dependent roots use the genesis block root in the case of underflow.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HeadEvent {
     pub slot: String,
