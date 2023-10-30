@@ -142,6 +142,14 @@ pub struct PayloadBuilderAttributes {
     pub withdrawals: Vec<Withdrawal>,
     /// Root of the parent beacon block
     pub parent_beacon_block_root: Option<B256>,
+    /// Optimism Payload Builder Attributes
+    #[cfg(feature = "optimism")]
+    pub optimism_payload_attributes: OptimismPayloadBuilderAttributes,
+}
+
+/// Optimism Payload Builder Attributes
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptimismPayloadBuilderAttributes {
     /// NoTxPool option for the generated payload
     #[cfg(feature = "optimism")]
     pub no_tx_pool: bool,
@@ -166,6 +174,7 @@ impl PayloadBuilderAttributes {
         #[cfg(feature = "optimism")]
         let (id, transactions) = {
             let transactions = attributes
+                .optimism_payload_attributes
                 .transactions
                 .as_ref()
                 .unwrap_or(&Vec::default())
@@ -193,11 +202,11 @@ impl PayloadBuilderAttributes {
             withdrawals: withdraw.unwrap_or_default(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             #[cfg(feature = "optimism")]
-            no_tx_pool: attributes.no_tx_pool.unwrap_or_default(),
-            #[cfg(feature = "optimism")]
-            transactions,
-            #[cfg(feature = "optimism")]
-            gas_limit: attributes.gas_limit,
+            optimism_payload_attributes: OptimismPayloadBuilderAttributes {
+                no_tx_pool: attributes.optimism_payload_attributes.no_tx_pool.unwrap_or_default(),
+                transactions,
+                gas_limit: attributes.optimism_payload_attributes.gas_limit,
+            },
         })
     }
     /// Returns the configured [CfgEnv] and [BlockEnv] for the targeted payload (that has the
@@ -289,14 +298,14 @@ pub(crate) fn payload_id(
 
     #[cfg(feature = "optimism")]
     {
-        let no_tx_pool = attributes.no_tx_pool.unwrap_or_default();
+        let no_tx_pool = attributes.optimism_payload_attributes.no_tx_pool.unwrap_or_default();
         if no_tx_pool || !txs.is_empty() {
             hasher.update([no_tx_pool as u8]);
             hasher.update(txs.len().to_be_bytes());
             txs.iter().for_each(|tx| hasher.update(tx.hash()));
         }
 
-        if let Some(gas_limit) = attributes.gas_limit {
+        if let Some(gas_limit) = attributes.optimism_payload_attributes.gas_limit {
             hasher.update(gas_limit.to_be_bytes());
         }
     }
