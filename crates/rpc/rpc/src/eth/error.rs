@@ -120,17 +120,6 @@ pub enum OptimismEthApiError {
     HttpError(#[from] http::Error),
 }
 
-impl From<OptimismEthApiError> for EthApiError {
-    fn from(error: OptimismEthApiError) -> Self {
-        match error {
-            #[cfg(feature = "optimism")]
-            OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
-            #[cfg(feature = "optimism")]
-            OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
-        }
-    }
-}
-
 impl From<EthApiError> for ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
@@ -166,7 +155,10 @@ impl From<EthApiError> for ErrorObject<'static> {
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
             err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
             #[cfg(feature = "optimism")]
-            EthApiError::Optimism(err) => err.into(),
+            EthApiError::Optimism(err) => match error {
+                OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
+                OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
+            },
         }
     }
 }
