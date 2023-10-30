@@ -131,15 +131,16 @@ where
     }
 
     /// Returns a row, searching it by a key used during [`NippyJar::prepare_index`]  by using a
-    /// `MASK` to only read certain columns from the row.
+    /// `mask` to only read certain columns from the row.
     ///
     /// **May return false positives.**
     ///
     /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
     /// stored in file.
-    pub fn row_by_key_with_cols<const MASK: usize, const COLUMNS: usize>(
+    pub fn row_by_key_with_cols(
         &mut self,
         key: &[u8],
+        mask: usize,
     ) -> Result<Option<RefRow<'_>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
             // TODO: is it worth to parallize both?
@@ -153,7 +154,7 @@ where
                         .offsets_index
                         .access(row_index as usize)
                         .expect("built from same set") as u64;
-                    return self.next_row_with_cols::<MASK, COLUMNS>()
+                    return self.next_row_with_cols(mask)
                 }
             }
         } else {
@@ -163,21 +164,20 @@ where
         Ok(None)
     }
 
-    /// Returns a row by its number by using a `MASK` to only read certain columns from the row.
-    pub fn row_by_number_with_cols<const MASK: usize, const COLUMNS: usize>(
+    /// Returns a row by its number by using a `mask` to only read certain columns from the row.
+    pub fn row_by_number_with_cols(
         &mut self,
         row: usize,
+        mask: usize,
     ) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.row = row as u64;
-        self.next_row_with_cols::<MASK, COLUMNS>()
+        self.next_row_with_cols(mask)
     }
 
     /// Returns the current value and advances the row.
     ///
-    /// Uses a `MASK` to only read certain columns from the row.
-    pub fn next_row_with_cols<const MASK: usize, const COLUMNS: usize>(
-        &mut self,
-    ) -> Result<Option<RefRow<'_>>, NippyJarError> {
+    /// Uses a `mask` to only read certain columns from the row.
+    pub fn next_row_with_cols(&mut self, mask: usize) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.internal_buffer.clear();
 
         if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
@@ -185,10 +185,11 @@ where
             return Ok(None)
         }
 
-        let mut row = Vec::with_capacity(COLUMNS);
+        let columns = self.jar.columns;
+        let mut row = Vec::with_capacity(columns);
 
-        for column in 0..COLUMNS {
-            if MASK & (1 << column) != 0 {
+        for column in 0..columns {
+            if mask & (1 << column) != 0 {
                 self.read_value(column, &mut row)?
             }
         }

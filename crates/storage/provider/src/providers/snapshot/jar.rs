@@ -1,12 +1,9 @@
 use super::LoadedJarRef;
 use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
 use reth_db::{
-    snapshot::{
-        SnapshotCursor, HEADER_COLUMNS, S_HEADER, S_HEADER_HASH, S_HEADER_TD,
-        S_HEADER_TD_WITH_HASH, S_HEADER_WITH_HASH,
-    },
-    table::{Decompress, Table},
-    CanonicalHeaders, HeaderTD,
+    codecs::CompactU256,
+    snapshot::{HeaderMask, SnapshotCursor},
+    table::Decompress,
 };
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{
@@ -46,30 +43,25 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
         Ok(self
             .cursor()?
-            .get_two::<Header, <CanonicalHeaders as Table>::Value, S_HEADER_WITH_HASH, HEADER_COLUMNS>(block_hash.into())?
+            .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(header, _)| header))
     }
 
     fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
-        self.cursor()?.get_one::<Header, S_HEADER, HEADER_COLUMNS>(num.into())
+        self.cursor()?.get_one::<HeaderMask<Header>>(num.into())
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
         Ok(self
             .cursor()?
-            .get_two::<<HeaderTD as Table>::Value, <CanonicalHeaders as Table>::Value, S_HEADER_TD_WITH_HASH, HEADER_COLUMNS>(
-                block_hash.into(),
-            )?
+            .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(td, _)| td.into()))
     }
 
     fn header_td_by_number(&self, num: BlockNumber) -> RethResult<Option<U256>> {
-        Ok(self
-            .cursor()?
-            .get_one::<<HeaderTD as Table>::Value, S_HEADER_TD, HEADER_COLUMNS>(num.into())?
-            .map(Into::into))
+        Ok(self.cursor()?.get_one::<HeaderMask<CompactU256>>(num.into())?.map(Into::into))
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
@@ -79,7 +71,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range.start..range.end {
-            match cursor.get_one::<Header, S_HEADER, HEADER_COLUMNS>(num.into())? {
+            match cursor.get_one::<HeaderMask<Header>>(num.into())? {
                 Some(header) => headers.push(header),
                 None => return Ok(headers),
             }
@@ -98,9 +90,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
         for number in range.start..range.end {
-            match cursor
-                .get_two::<Header, <CanonicalHeaders as Table>::Value, S_HEADER_WITH_HASH, HEADER_COLUMNS>(number.into())?
-            {
+            match cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())? {
                 Some((header, hash)) => headers.push(header.seal(hash)),
                 None => return Ok(headers),
             }
@@ -111,16 +101,14 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
         Ok(self
             .cursor()?
-            .get_two::<Header, <CanonicalHeaders as Table>::Value, S_HEADER_WITH_HASH, HEADER_COLUMNS>(number.into())?
+            .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
             .map(|(header, hash)| header.seal(hash)))
     }
 }
 
 impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
     fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
-        self.cursor()?.get_one::<<CanonicalHeaders as Table>::Value, S_HEADER_HASH, HEADER_COLUMNS>(
-            number.into(),
-        )
+        self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
     }
 
     fn canonical_hashes_range(
@@ -158,7 +146,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
         TransactionSignedNoHash::decompress(
             self.cursor()?
-                .row_by_number_with_cols::<0b1, 1>((num - self.user_header().tx_start()) as usize)?
+                .row_by_number_with_cols((num - self.user_header().tx_start()) as usize, 0b1)?
                 .ok_or_else(|| ProviderError::TransactionNotFound(num.into()))?[0],
         )
         .map(Into::into)
@@ -178,7 +166,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
         let mut cursor = self.cursor()?;
 
         let tx = TransactionSignedNoHash::decompress(
-            cursor.row_by_key_with_cols::<0b1, 1>(&hash.0).unwrap().unwrap()[0],
+            cursor.row_by_key_with_cols(&hash.0, 0b1).unwrap().unwrap()[0],
         )
         .unwrap()
         .with_hash();
