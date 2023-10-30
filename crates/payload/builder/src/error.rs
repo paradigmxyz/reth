@@ -30,6 +30,15 @@ pub enum PayloadBuilderError {
     /// Thrown if the payload requests withdrawals before Shanghai activation.
     #[error("withdrawals set before Shanghai activation")]
     WithdrawalsBeforeShanghai,
+    /// Optimism specific payload building errors.
+    #[cfg(feature = "optimism")]
+    #[error(transparent)]
+    Optimism(#[from] OptimismPayloadBuilderError),
+}
+
+/// Optimism specific payload building errors.
+#[derive(Debug, thiserror::Error)]
+pub enum OptimismPayloadBuilderError {
     /// Thrown when a transaction fails to convert to a
     /// [reth_primitives::TransactionSignedEcRecovered].
     #[cfg(feature = "optimism")]
