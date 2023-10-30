@@ -1113,6 +1113,22 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
     pub fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
         Self { st, subpool }
     }
+
+    /// Tries to receive the next value for this stream.
+    pub fn try_recv(
+        &mut self,
+    ) -> Result<NewTransactionEvent<Tx>, tokio::sync::mpsc::error::TryRecvError> {
+        loop {
+            match self.st.try_recv() {
+                Ok(event) => {
+                    if event.subpool == self.subpool {
+                        return Ok(event)
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
 }
 
 impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
