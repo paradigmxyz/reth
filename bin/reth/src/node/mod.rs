@@ -555,7 +555,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         self.ext.on_node_started(&components)?;
 
         #[cfg(feature = "optimism")]
-        if self.chain.optimism && !self.rollup.enable_genesis_walkback {
+        if self.chain.is_optimism() && !self.rollup.enable_genesis_walkback {
             let client = _rpc_server_handles.auth.http_client();
             EngineApiClient::fork_choice_updated_v2(
                 &client,
