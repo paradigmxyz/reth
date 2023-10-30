@@ -191,14 +191,14 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[clap(flatten)]
     pub pruning: PruningArgs,
 
-    /// Additional cli arguments
-    #[clap(flatten)]
-    pub ext: Ext::Node,
-
     /// Rollup related arguments
     #[cfg(feature = "optimism")]
     #[clap(flatten)]
-    rollup: crate::args::RollupArgs,
+    pub rollup: crate::args::RollupArgs,
+
+    /// Additional cli arguments
+    #[clap(flatten)]
+    pub ext: Ext::Node,
 }
 
 impl<Ext: RethCliExt> NodeCommand<Ext> {
@@ -238,9 +238,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
-            ext,
             #[cfg(feature = "optimism")]
             rollup,
+            ext,
         }
     }
 
@@ -554,6 +554,12 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         self.ext.on_node_started(&components)?;
 
+        // If `enable_genesis_walkback` is set to true, the rollup client will need to
+        // perform the derivation pipeline from genesis, validating the data dir.
+        // When set to false, set the finalized, safe, and unsafe head block hashes
+        // on the rollup client using a fork choice update. This prevents the rollup
+        // client from performing the derivation pipeline from genesis, and instead
+        // starts syncing from the current tip in the DB.
         #[cfg(feature = "optimism")]
         if self.chain.optimism && !self.rollup.enable_genesis_walkback {
             let client = _rpc_server_handles.auth.http_client();
@@ -788,7 +794,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -796,7 +802,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
