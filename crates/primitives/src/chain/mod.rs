@@ -123,25 +123,21 @@ impl Chain {
     }
 
     /// Returns the optimism goerli chain.
-    #[cfg(feature = "optimism")]
     pub const fn optimism_goerli() -> Self {
         Chain::Named(NamedChain::OptimismGoerli)
     }
 
     /// Returns the optimism mainnet chain.
-    #[cfg(feature = "optimism")]
     pub const fn optimism_mainnet() -> Self {
         Chain::Named(NamedChain::Optimism)
     }
 
     /// Returns the base goerli chain.
-    #[cfg(feature = "optimism")]
     pub const fn base_goerli() -> Self {
         Chain::Named(NamedChain::BaseGoerli)
     }
 
     /// Returns the base mainnet chain.
-    #[cfg(feature = "optimism")]
     pub const fn base_mainnet() -> Self {
         Chain::Named(NamedChain::Base)
     }
@@ -149,6 +145,18 @@ impl Chain {
     /// Returns the dev chain.
     pub const fn dev() -> Self {
         Chain::Named(NamedChain::Dev)
+    }
+
+    /// Returns true if the chain is contains Optimism configuration.
+    pub fn is_optimism(self) -> bool {
+        matches!(
+            self,
+            Chain::Named(NamedChain::Optimism) |
+                Chain::Named(NamedChain::OptimismGoerli) |
+                Chain::Named(NamedChain::OptimismKovan) |
+                Chain::Named(NamedChain::Base) |
+                Chain::Named(NamedChain::BaseGoerli)
+        )
     }
 
     /// The id of the chain
