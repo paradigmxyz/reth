@@ -121,9 +121,9 @@ use reth_rpc::{
         cache::{cache_new_blocks_task, EthStateCache},
         gas_oracle::GasPriceOracle,
     },
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TracingCallPool, TxPoolApi,
-    Web3Api,
+    AdminApi, AuthLayer, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
+    EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi, OtterscanApi, RPCApi, RethApi,
+    TraceApi, TracingCallGuard, TracingCallPool, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -1070,7 +1070,7 @@ where
 /// Http and WS share the same settings: [`ServerBuilder`].
 ///
 /// Once the [RpcModule] is built via [RpcModuleBuilder] the servers can be started, See also
-/// [ServerBuilder::build] and [Server::start](jsonrpsee::server::Server::start).
+/// [ServerBuilder::build] and [Server::start](jsonrpc::server::Server::start).
 #[derive(Default)]
 pub struct RpcServerConfig {
     /// Configs for JSON-RPC Http.
@@ -1089,6 +1089,8 @@ pub struct RpcServerConfig {
     ipc_server_config: Option<IpcServerBuilder>,
     /// The Endpoint where to launch the ipc server
     ipc_endpoint: Option<Endpoint>,
+    /// JWT secret for authentication
+    jwt_secret: Option<JwtSecret>,
 }
 
 impl fmt::Debug for RpcServerConfig {
@@ -1216,9 +1218,9 @@ impl RpcServerConfig {
     ///
     /// If no server is configured, no server will be be launched on [RpcServerConfig::start].
     pub fn has_server(&self) -> bool {
-        self.http_server_config.is_some() ||
-            self.ws_server_config.is_some() ||
-            self.ipc_server_config.is_some()
+        self.http_server_config.is_some()
+            || self.ws_server_config.is_some()
+            || self.ipc_server_config.is_some()
     }
 
     /// Returns the [SocketAddr] of the http server
@@ -1255,9 +1257,9 @@ impl RpcServerConfig {
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
         let metrics = RpcServerMetrics::default();
         // If both are configured on the same port, we combine them into one server.
-        if self.http_addr == self.ws_addr &&
-            self.http_server_config.is_some() &&
-            self.ws_server_config.is_some()
+        if self.http_addr == self.ws_addr
+            && self.http_server_config.is_some()
+            && self.ws_server_config.is_some()
         {
             let cors = match (self.ws_cors_domains.as_ref(), self.http_cors_domains.as_ref()) {
                 (Some(ws_cors), Some(http_cors)) => {
@@ -1266,7 +1268,7 @@ impl RpcServerConfig {
                             http_cors_domains: Some(http_cors.clone()),
                             ws_cors_domains: Some(ws_cors.clone()),
                         }
-                        .into())
+                        .into());
                     }
                     Some(ws_cors)
                 }
@@ -1292,7 +1294,7 @@ impl RpcServerConfig {
                 http_local_addr: Some(addr),
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
-            })
+            });
         }
 
         let mut http_local_addr = None;
@@ -1487,7 +1489,7 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
+            return http.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1502,7 +1504,7 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true)
+            return ws.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1517,7 +1519,7 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true)
+            return ipc.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1615,6 +1617,8 @@ enum WsHttpServerKind {
     Plain(Server<Identity, RpcServerMetrics>),
     /// Http server with cors
     WithCors(Server<Stack<CorsLayer, Identity>, RpcServerMetrics>),
+    /// Http server with auth
+    WithAuth(Server<Stack<AuthLayer<JwtAuthValidator>, Identity>, RpcServerMetrics>),
 }
 
 // === impl WsHttpServerKind ===
@@ -1625,6 +1629,7 @@ impl WsHttpServerKind {
         match self {
             WsHttpServerKind::Plain(server) => server.start(module),
             WsHttpServerKind::WithCors(server) => server.start(module),
+            WsHttpServerKind::WithAuth(server) => server.start(module),
         }
     }
 
@@ -1633,6 +1638,7 @@ impl WsHttpServerKind {
         builder: ServerBuilder,
         socket_addr: SocketAddr,
         cors_domains: Option<String>,
+        auth_secret: Option<JwtSecret>,
         server_kind: ServerKind,
         metrics: RpcServerMetrics,
     ) -> Result<(Self, SocketAddr), RpcError> {
@@ -1648,6 +1654,17 @@ impl WsHttpServerKind {
             let local_addr = server.local_addr()?;
             let server = WsHttpServerKind::WithCors(server);
             Ok((server, local_addr))
+        }
+        if let Some(secret) = auth_secret {
+            let middleware = tower::ServiceBuilder::new()
+                .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+            let server =
+                builder.set_middleware(middleware).build(socket_addr).await.map_err(|err| {
+                    RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr))
+                })?;
+            let local_addr = server.local_addr()?;
+            let server = WsHttpServerKind::WithAuth(server);
+            Ok((server, local_addr))
         } else {
             let server = builder
                 .set_logger(metrics)
@@ -1659,6 +1676,25 @@ impl WsHttpServerKind {
             Ok((server, local_addr))
         }
     }
+
+    // pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
+    //     let Self { socket_addr, secret, server_config } = self;
+
+    //     // Create auth middleware.
+    // let middleware = tower::ServiceBuilder::new()
+    //     .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+
+    //     // By default, both http and ws are enabled.
+    // let server =
+    //     server_config.set_middleware(middleware).build(socket_addr).await.map_err(|err| {
+    //         RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr))
+    //     })?;
+
+    //     let local_addr = server.local_addr()?;
+
+    //     let handle = server.start(module.inner);
+    //     Ok(AuthServerHandle { handle, local_addr, secret })
+    // }
 }
 
 /// Container type for each transport ie. http, ws, and ipc server

@@ -127,7 +127,7 @@ where
 pub struct AuthServerConfig {
     /// Where the server should listen.
     pub(crate) socket_addr: SocketAddr,
-    /// The secrete for the auth layer of the server.
+    /// The secret for the auth layer of the server.
     pub(crate) secret: JwtSecret,
     /// Configs for JSON-RPC Http.
     pub(crate) server_config: ServerBuilder,
@@ -305,8 +305,8 @@ impl AuthServerHandle {
             "Bearer {}",
             self.secret
                 .encode(&Claims {
-                    iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                        Duration::from_secs(60))
+                    iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+                        + Duration::from_secs(60))
                     .as_secs(),
                     exp: None,
                 })
