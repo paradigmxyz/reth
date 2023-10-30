@@ -155,7 +155,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
             err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
             #[cfg(feature = "optimism")]
-            EthApiError::Optimism(err) => match error {
+            EthApiError::Optimism(err) => match err {
                 OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
                 OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
             },
