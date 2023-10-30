@@ -238,9 +238,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
-            ext,
             #[cfg(feature = "optimism")]
             rollup,
+            ext,
         }
     }
 
