@@ -471,6 +471,11 @@ impl ChainSpec {
         self.chain
     }
 
+    /// Returns `true` if this chain contains Optimism configuration.
+    pub fn is_optimism(&self) -> bool {
+        self.chain.is_optimism()
+    }
+
     /// Get the genesis block specification.
     ///
     /// To get the header for the genesis block, use [`Self::genesis_header`] instead.

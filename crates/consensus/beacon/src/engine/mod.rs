@@ -679,7 +679,7 @@ where
                         ignore_update_log(header.number, self.blockchain.canonical_tip().number);
 
                         #[cfg(feature = "optimism")]
-                        if self.chain_spec().optimism {
+                        if self.chain_spec().is_optimism() {
                             debug!(
                                 target: "consensus::engine",
                                 fcu_head_num=?header.number,

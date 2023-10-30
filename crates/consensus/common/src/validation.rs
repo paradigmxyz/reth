@@ -32,11 +32,7 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::BaseFeeMissing)
     }
 
-    #[cfg(feature = "optimism")]
-    let wd_root_missing = header.withdrawals_root.is_none() && !chain_spec.optimism;
-
-    #[cfg(not(feature = "optimism"))]
-    let wd_root_missing = header.withdrawals_root.is_none();
+    let wd_root_missing = header.withdrawals_root.is_none() && !chain_spec.is_optimism();
 
     // EIP-4895: Beacon chain push withdrawals as operations
     if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) && wd_root_missing
@@ -321,11 +317,7 @@ pub fn validate_header_regarding_parent(
         Ok(())
     }
 
-    #[cfg(not(feature = "optimism"))]
-    check_gas_limit(parent, child, chain_spec)?;
-
-    #[cfg(feature = "optimism")]
-    if !chain_spec.optimism {
+    if !chain_spec.is_optimism() {
         check_gas_limit(parent, child, chain_spec)?;
     }
 

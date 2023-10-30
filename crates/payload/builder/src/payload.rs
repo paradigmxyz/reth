@@ -225,7 +225,7 @@ impl PayloadBuilderAttributes {
 
         #[cfg(feature = "optimism")]
         {
-            cfg.optimism = chain_spec.optimism;
+            cfg.optimism = chain_spec.is_optimism();
         }
 
         // ensure we're not missing any timestamp based hardforks

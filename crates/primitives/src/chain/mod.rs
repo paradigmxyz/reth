@@ -147,7 +147,7 @@ impl Chain {
         Chain::Named(NamedChain::Dev)
     }
 
-    /// Returns true if the chain is contains Optimism configuration.
+    /// Returns true if the chain contains Optimism configuration.
     pub fn is_optimism(self) -> bool {
         matches!(
             self,

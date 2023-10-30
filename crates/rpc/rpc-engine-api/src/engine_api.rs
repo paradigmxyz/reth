@@ -308,7 +308,7 @@ where
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let len = hashes.len() as u64;
         if len > MAX_PAYLOAD_BODIES_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len });
+            return Err(EngineApiError::PayloadRequestTooLarge { len })
         }
 
         let mut result = Vec::with_capacity(hashes.len());
@@ -348,7 +348,7 @@ where
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            });
+            })
         }
 
         self.inner.beacon_consensus.transition_configuration_exchanged().await;
@@ -358,7 +358,7 @@ where
             return Ok(TransitionConfiguration {
                 terminal_total_difficulty: merge_terminal_td,
                 ..Default::default()
-            });
+            })
         }
 
         // Attempt to look up terminal block hash
@@ -413,7 +413,7 @@ where
             // 1. Client software **MUST** return `-38005: Unsupported fork` error if the
             //    `timestamp` of payload or payloadAttributes greater or equal to the Cancun
             //    activation timestamp.
-            return Err(EngineApiError::UnsupportedFork);
+            return Err(EngineApiError::UnsupportedFork)
         }
 
         if version == EngineApiMessageVersion::V3 && !is_cancun {
@@ -423,7 +423,7 @@ where
             // 1. Client software **MUST** return `-38005: Unsupported fork` error if the
             //    `timestamp` of the built payload does not fall within the time frame of the Cancun
             //    fork.
-            return Err(EngineApiError::UnsupportedFork);
+            return Err(EngineApiError::UnsupportedFork)
         }
         Ok(())
     }
@@ -443,18 +443,18 @@ where
         match version {
             EngineApiMessageVersion::V1 => {
                 if has_withdrawals {
-                    return Err(EngineApiError::WithdrawalsNotSupportedInV1);
+                    return Err(EngineApiError::WithdrawalsNotSupportedInV1)
                 }
                 if is_shanghai {
-                    return Err(EngineApiError::NoWithdrawalsPostShanghai);
+                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
                 }
             }
             EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
                 if is_shanghai && !has_withdrawals {
-                    return Err(EngineApiError::NoWithdrawalsPostShanghai);
+                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
                 }
                 if !is_shanghai && has_withdrawals {
-                    return Err(EngineApiError::HasWithdrawalsPreShanghai);
+                    return Err(EngineApiError::HasWithdrawalsPreShanghai)
                 }
             }
         };
@@ -498,12 +498,12 @@ where
         match version {
             EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
                 if has_parent_beacon_block_root {
-                    return Err(EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3);
+                    return Err(EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3)
                 }
             }
             EngineApiMessageVersion::V3 => {
                 if !has_parent_beacon_block_root {
-                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun);
+                    return Err(EngineApiError::NoParentBeaconBlockRootPostCancun)
                 }
             }
         };
@@ -559,9 +559,9 @@ where
 
             #[cfg(feature = "optimism")]
             if attrs.optimism_payload_attributes.gas_limit.is_none() &&
-                self.inner.chain_spec.optimism
+                self.inner.chain_spec.is_optimism()
             {
-                return Err(EngineApiError::MissingGasLimitInPayloadAttributes);
+                return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
             }
 
             // From the engine API spec:
@@ -582,9 +582,9 @@ where
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
-                    return Ok(fcu_res);
+                    return Ok(fcu_res)
                 }
-                return Err(err);
+                return Err(err)
             }
         }
 
