@@ -101,12 +101,34 @@ pub enum EthApiError {
     InternalJsTracerError(String),
     #[error(transparent)]
     CallInputError(#[from] CallInputError),
+    /// Optimism related error
+    #[error(transparent)]
+    #[cfg(feature = "optimism")]
+    Optimism(#[from] OptimismEthApiError),
+}
+
+/// Eth Optimism Api Error
+#[derive(Debug, thiserror::Error)]
+pub enum OptimismEthApiError {
+    /// Wrapper around a [hyper::Error].
     #[cfg(feature = "optimism")]
     #[error(transparent)]
     HyperError(#[from] hyper::Error),
+    /// Wrapper around an [http::Error].
     #[cfg(feature = "optimism")]
     #[error(transparent)]
     HttpError(#[from] http::Error),
+}
+
+impl From<OptimismEthApiError> for EthApiError {
+    fn from(error: OptimismEthApiError) -> Self {
+        match error {
+            #[cfg(feature = "optimism")]
+            OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
+            #[cfg(feature = "optimism")]
+            OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
+        }
+    }
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -144,9 +166,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
             err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
             #[cfg(feature = "optimism")]
-            EthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
-            #[cfg(feature = "optimism")]
-            EthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
+            EthApiError::Optimism(err) => err.into(),
         }
     }
 }
