@@ -665,11 +665,11 @@ where
             Ok(outcome) => {
                 match outcome {
                     CanonicalOutcome::AlreadyCanonical { ref header } => {
-                        let optimism = cfg_if::cfg_if! {
+                        cfg_if::cfg_if! {
                             if #[cfg(feautre = "optimism")] {
-                                self.chain_spec().optimism
+                                let optimism = self.chain_spec().optimism;
                             } else {
-                                false
+                                let optimism = false;
                             }
                         };
                         if optimism {
