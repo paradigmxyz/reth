@@ -558,8 +558,8 @@ where
             let attr_validation_res = self.validate_version_specific_fields(version, &attrs.into());
 
             #[cfg(feature = "optimism")]
-            if attrs.optimism_payload_attributes.gas_limit.is_none()
-                && self.inner.chain_spec.optimism
+            if attrs.optimism_payload_attributes.gas_limit.is_none() &&
+                self.inner.chain_spec.optimism
             {
                 return Err(EngineApiError::MissingGasLimitInPayloadAttributes);
             }
@@ -920,8 +920,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number)
-                            && !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number) &&
+                            !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().unseal())),
             );
@@ -950,8 +950,8 @@ mod tests {
                 // ensure we still return trailing `None`s here because by-hash will not be aware
                 // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
-                    if first_missing_range.contains(&b.number)
-                        || second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number) ||
+                        second_missing_range.contains(&b.number)
                     {
                         None
                     } else {
@@ -977,8 +977,8 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap()
-                    + U256::from(1),
+                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
+                    U256::from(1),
                 ..Default::default()
             };
 
