@@ -6,7 +6,7 @@ use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
 
 #[cfg(feature = "optimism")]
-use crate::serde_helpers::u64_hex::option_u64_hex;
+use crate::serde_helpers::u64_hex::u64_hex_opt;
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
@@ -396,7 +396,7 @@ pub struct PayloadAttributes {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "option_u64_hex::deserialize"
+        deserialize_with = "u64_hex_opt::deserialize"
     )]
     pub gas_limit: Option<u64>,
 }

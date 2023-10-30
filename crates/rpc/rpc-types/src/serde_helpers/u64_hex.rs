@@ -18,7 +18,7 @@ pub fn serialize<S: Serializer>(value: &u64, s: S) -> Result<S::Ok, S::Error> {
 }
 
 /// serde functions for handling `Option<u64>` as [U64]
-pub mod option_u64_hex {
+pub mod u64_hex_opt {
     use alloy_primitives::U64;
     use serde::{Deserialize, Deserializer};
 
