@@ -69,6 +69,14 @@ pub struct NetworkConfig<C> {
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
     pub hello_message: HelloMessage,
+    /// Optimism Network Config
+    #[cfg(feature = "optimism")]
+    pub optimism_network_config: OptimismNetworkConfig,
+}
+
+/// Optimmism Network Config
+#[derive(Debug)]
+pub struct OptimismNetworkConfig {
     /// The sequencer HTTP endpoint, if provided via CLI flag
     #[cfg(feature = "optimism")]
     pub sequencer_endpoint: Option<String>,
@@ -456,9 +464,10 @@ impl NetworkConfigBuilder {
             hello_message,
             fork_filter,
             #[cfg(feature = "optimism")]
-            sequencer_endpoint,
-            #[cfg(feature = "optimism")]
-            tx_gossip_disabled,
+            optimism_network_config: OptimismNetworkConfig {
+                sequencer_endpoint,
+                tx_gossip_disabled,
+            },
         }
     }
 }
