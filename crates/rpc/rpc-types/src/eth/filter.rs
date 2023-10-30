@@ -1,7 +1,6 @@
-use crate::Log as RpcLog;
+use crate::{eth::log::Log as RpcLog, BlockNumberOrTag, Log};
 use alloy_primitives::{keccak256, Address, Bloom, BloomInput, B256, U256, U64};
 use itertools::{EitherOrBoth::*, Itertools};
-use reth_primitives::{BlockNumberOrTag, Log};
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
     ser::SerializeStruct,
@@ -283,7 +282,7 @@ impl Filter {
     /// Match the latest block only
     ///
     /// ```rust
-    /// # use reth_primitives::BlockNumberOrTag;
+    /// # use reth_rpc_types::BlockNumberOrTag;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
     /// let filter = Filter::new().select(BlockNumberOrTag::Latest);

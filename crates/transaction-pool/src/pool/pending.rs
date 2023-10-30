@@ -150,6 +150,51 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.by_id.values().map(|tx| tx.transaction.clone())
     }
 
+    /// Updates the pool with the new blob fee. Removes
+    /// from the subpool all transactions and their dependents that no longer satisfy the given
+    /// base fee (`tx.max_blob_fee < blob_fee`).
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    ///
+    /// # Returns
+    ///
+    /// Removed transactions that no longer satisfy the blob fee.
+    pub(crate) fn update_blob_fee(
+        &mut self,
+        blob_fee: u128,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        // Create a collection for removed transactions.
+        let mut removed = Vec::new();
+
+        // Drain and iterate over all transactions.
+        let mut transactions_iter = self.clear_transactions().into_iter().peekable();
+        while let Some((id, tx)) = transactions_iter.next() {
+            if tx.transaction.max_fee_per_blob_gas() < Some(blob_fee) {
+                // Add this tx to the removed collection since it no longer satisfies the blob fee
+                // condition. Decrease the total pool size.
+                removed.push(Arc::clone(&tx.transaction));
+
+                // Remove all dependent transactions.
+                'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
+                    if next_id.sender != id.sender {
+                        break 'this
+                    }
+                    removed.push(Arc::clone(&next_tx.transaction));
+                    transactions_iter.next();
+                }
+            } else {
+                self.size_of += tx.transaction.size();
+                if self.ancestor(&id).is_none() {
+                    self.independent_transactions.insert(tx.clone());
+                }
+                self.all.insert(tx.clone());
+                self.by_id.insert(id, tx);
+            }
+        }
+
+        removed
+    }
+
     /// Updates the pool with the new base fee. Reorders transactions by new priorities. Removes
     /// from the subpool all transactions and their dependents that no longer satisfy the given
     /// base fee (`tx.fee < base_fee`).

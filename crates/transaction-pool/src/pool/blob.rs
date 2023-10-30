@@ -9,10 +9,12 @@ use std::{
     sync::Arc,
 };
 
-/// A set of __all__ validated blob transactions in the pool.
+use super::txpool::PendingFees;
+
+/// A set of validated blob transactions in the pool that are __not pending__.
 ///
-/// The purpose of this pool is keep track of blob transactions that are either pending or queued
-/// and to evict the worst blob transactions once the sub-pool is full.
+/// The purpose of this pool is keep track of blob transactions that are queued and to evict the
+/// worst blob transactions once the sub-pool is full.
 ///
 /// This expects that certain constraints are met:
 ///   - blob transactions are always gap less
@@ -22,7 +24,7 @@ pub(crate) struct BlobTransactions<T: PoolTransaction> {
     /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: BTreeMap<TransactionId, Arc<ValidPoolTransaction<T>>>,
+    by_id: BTreeMap<TransactionId, BlobTransaction<T>>,
     /// _All_ transactions sorted by blob priority.
     all: BTreeSet<BlobTransaction<T>>,
     /// Keeps track of the size of this pool.
@@ -53,10 +55,10 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         // keep track of size
         self.size_of += tx.size();
 
-        self.by_id.insert(id, tx.clone());
-
         let ord = BlobOrd { submission_id };
         let transaction = BlobTransaction { ord, transaction: tx };
+
+        self.by_id.insert(id, transaction.clone());
         self.all.insert(transaction);
     }
 
@@ -68,13 +70,12 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         // remove from queues
         let tx = self.by_id.remove(id)?;
 
-        // TODO: remove from ordered set
-        // self.best.remove(&tx);
+        self.all.remove(&tx);
 
         // keep track of size
         self.size_of -= tx.transaction.size();
 
-        Some(tx)
+        Some(tx.transaction)
     }
 
     /// Returns all transactions that satisfy the given basefee and blob_fee.
@@ -99,6 +100,59 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     /// Number of transactions in the entire pool
     pub(crate) fn len(&self) -> usize {
         self.by_id.len()
+    }
+
+    /// Returns whether the pool is empty
+    #[cfg(test)]
+    #[allow(unused)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
+
+    /// Returns all transactions which:
+    ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`, _and_
+    ///  * have a `max_fee_per_gas` greater than or equal to the given `base_fee`
+    fn satisfy_pending_fee_ids(&self, pending_fees: &PendingFees) -> Vec<TransactionId> {
+        let mut transactions = Vec::new();
+        {
+            let mut iter = self.by_id.iter().peekable();
+
+            while let Some((id, tx)) = iter.next() {
+                if tx.transaction.max_fee_per_blob_gas() < Some(pending_fees.blob_fee) ||
+                    tx.transaction.max_fee_per_gas() < pending_fees.base_fee as u128
+                {
+                    // still parked in blob pool -> skip descendant transactions
+                    'this: while let Some((peek, _)) = iter.peek() {
+                        if peek.sender != id.sender {
+                            break 'this
+                        }
+                        iter.next();
+                    }
+                } else {
+                    transactions.push(*id);
+                }
+            }
+        }
+        transactions
+    }
+
+    /// Removes all transactions (and their descendants) which:
+    ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`, _and_
+    ///  * have a `max_fee_per_gas` greater than or equal to the given `base_fee`
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    pub(crate) fn enforce_pending_fees(
+        &mut self,
+        pending_fees: &PendingFees,
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let to_remove = self.satisfy_pending_fee_ids(pending_fees);
+
+        let mut removed = Vec::with_capacity(to_remove.len());
+        for id in to_remove {
+            removed.push(self.remove_transaction(&id).expect("transaction exists"));
+        }
+
+        removed
     }
 
     /// Returns `true` if the transaction with the given id is already included in this pool.
@@ -134,6 +188,12 @@ struct BlobTransaction<T: PoolTransaction> {
     ord: BlobOrd,
 }
 
+impl<T: PoolTransaction> Clone for BlobTransaction<T> {
+    fn clone(&self) -> Self {
+        Self { transaction: self.transaction.clone(), ord: self.ord.clone() }
+    }
+}
+
 impl<T: PoolTransaction> Eq for BlobTransaction<T> {}
 
 impl<T: PoolTransaction> PartialEq<Self> for BlobTransaction<T> {
@@ -154,7 +214,7 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BlobOrd {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,
