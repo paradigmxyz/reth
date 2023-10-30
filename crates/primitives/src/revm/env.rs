@@ -184,15 +184,19 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
 }
 
 /// Fill transaction environment from [TransactionSignedEcRecovered].
+#[cfg(not(feature = "optimism"))]
+pub fn fill_tx_env_with_recovered(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
+    #[cfg(not(feature = "optimism"))]
+    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
+}
+
+/// Fill transaction environment from [TransactionSignedEcRecovered] and the given envelope.
+#[cfg(feature = "optimism")]
 pub fn fill_tx_env_with_recovered(
     tx_env: &mut TxEnv,
     transaction: &TransactionSignedEcRecovered,
-    #[cfg(feature = "optimism")] envelope: Bytes,
+    envelope: Bytes,
 ) {
-    #[cfg(not(feature = "optimism"))]
-    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
-
-    #[cfg(feature = "optimism")]
     fill_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
 }
 
