@@ -52,7 +52,7 @@ pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 /// Default max response size in MB.
 ///
 /// This is only relevant for very large trace responses.
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 115;
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 150;
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
