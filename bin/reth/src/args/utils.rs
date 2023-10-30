@@ -117,7 +117,7 @@ mod tests {
     use secp256k1::rand::thread_rng;
 
     #[test]
-    fn parse_chain_spec_from_path() {
+    fn parse_known_chain_spec() {
         for chain in ["mainnet", "sepolia", "goerli", "holesky"] {
             chain_spec_value_parser(chain).unwrap();
             genesis_value_parser(chain).unwrap();
