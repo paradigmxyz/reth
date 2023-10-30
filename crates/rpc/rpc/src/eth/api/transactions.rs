@@ -494,25 +494,7 @@ where
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
         #[cfg(feature = "optimism")]
-        if let Some(endpoint) = self.network().sequencer_endpoint() {
-            let body = serde_json::to_string(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "eth_sendRawTransaction",
-                "params": [format!("0x{}", hex::encode(tx.clone()))],
-                "id": self.network().chain_id()
-            }))
-            .map_err(|_| EthApiError::InternalEthError)?;
-
-            let client = reqwest::Client::new();
-
-            client
-                .post(endpoint)
-                .header(CONTENT_TYPE, "application/json")
-                .body(body)
-                .send()
-                .await
-                .map_err(|_| EthApiError::InternalEthError)?;
-        }
+        self.forward_to_sequencer(&tx).await?;
 
         let recovered = recover_raw_transaction(tx)?;
         let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
@@ -880,7 +862,7 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
+    Network: NetworkInfo + 'static,
 {
     /// Helper function for `eth_getTransactionReceipt`
     ///
@@ -955,6 +937,34 @@ where
             #[cfg(feature = "optimism")]
             l1_data_gas,
         )
+    }
+
+    /// Helper function for `eth_send_raw_transaction` for Optimism.
+    ///
+    /// Forwards the raw transaction bytes to the configured sequencer endpoint.
+    /// This is a no-op if the sequencer endpoint is not configured.
+    #[cfg(feature = "optimism")]
+    pub async fn forward_to_sequencer(&self, tx: &Bytes) -> EthResult<()> {
+        if let Some(endpoint) = self.network().sequencer_endpoint() {
+            let body = serde_json::to_string(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "eth_sendRawTransaction",
+                "params": [format!("0x{}", hex::encode(tx))],
+                "id": self.network().chain_id()
+            }))
+            .map_err(|_| EthApiError::InternalEthError)?;
+
+            let client = reqwest::Client::new();
+
+            client
+                .post(endpoint)
+                .header(CONTENT_TYPE, "application/json")
+                .body(body)
+                .send()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
+        }
+        Ok(())
     }
 }
 

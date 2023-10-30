@@ -324,6 +324,16 @@ pub enum RpcInvalidTransactionError {
     /// Blob transaction is a create transaction
     #[error("blob transaction is a create transaction")]
     BlobTransactionIsCreate,
+    /// Optimism related error
+    #[error(transparent)]
+    #[cfg(feature = "optimism")]
+    Optimism(#[from] OptimismInvalidTransactionError),
+}
+
+/// Optimism specific invalid transaction errors
+#[cfg(feature = "optimism")]
+#[derive(thiserror::Error, Debug)]
+pub enum OptimismInvalidTransactionError {
     /// A deposit transaction was submitted as a system transaction post-regolith.
     #[error("no system transactions allowed after regolith")]
     #[cfg(feature = "optimism")]
@@ -442,12 +452,14 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             }
             #[cfg(feature = "optimism")]
             InvalidTransaction::DepositSystemTxPostRegolith => {
-                RpcInvalidTransactionError::DepositSystemTxPostRegolith
+                RpcInvalidTransactionError::Optimism(
+                    OptimismInvalidTransactionError::DepositSystemTxPostRegolith,
+                )
             }
             #[cfg(feature = "optimism")]
-            InvalidTransaction::HaltedDepositPostRegolith => {
-                RpcInvalidTransactionError::HaltedDepositPostRegolith
-            }
+            InvalidTransaction::HaltedDepositPostRegolith => RpcInvalidTransactionError::Optimism(
+                OptimismInvalidTransactionError::HaltedDepositPostRegolith,
+            ),
         }
     }
 }
