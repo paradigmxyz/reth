@@ -292,15 +292,13 @@ impl BundleStateWithReceipts {
     /// This plain state will contains some additional information that
     /// are is a artifacts of the lower part state.
     ///
-    /// If block number is in future, return None.
-    pub fn split_at(&mut self, block_number: BlockNumber) -> Option<Self> {
+    /// If block number is not within state range, return [None].
+    pub fn split_after(&mut self, block_number: BlockNumber) -> Option<Self> {
         let last_block = self.last_block();
         let first_block = self.first_block;
-        if block_number >= last_block {
+
+        if block_number < first_block || last_block <= block_number {
             return None
-        }
-        if block_number < first_block {
-            return Some(Self::default())
         }
 
         // detached number should be included so we are adding +1 to it.

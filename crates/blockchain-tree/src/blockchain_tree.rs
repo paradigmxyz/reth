@@ -21,7 +21,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    chain::{ChainSplit, SplitAt},
+    chain::{ChainSplit, SplitAfter},
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     DatabaseProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider,
@@ -844,10 +844,10 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         &mut self,
         chain_id: BlockChainId,
         chain: AppendableChain,
-        split_at: SplitAt,
+        split_after: SplitAfter,
     ) -> Chain {
         let chain = chain.into_inner();
-        match chain.split(split_at) {
+        match chain.split(split_after) {
             ChainSplit::Split { canonical, pending } => {
                 trace!(target: "blockchain_tree", ?canonical, ?pending, "Split chain");
                 // rest of split chain is inserted back with same chain_id.
@@ -944,7 +944,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         trace!(target: "blockchain_tree", ?chain, "Found chain to make canonical");
 
         // we are splitting chain at the block hash that we want to make canonical
-        let canonical = self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash));
+        let canonical = self.split_chain(chain_id, chain, SplitAfter::Hash(*block_hash));
 
         let mut block_fork = canonical.fork_block();
         let mut block_fork_number = canonical.fork_block_number();
@@ -955,7 +955,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             let chain = self.state.chains.remove(&chain_id).expect("To fork to be present");
             block_fork = chain.fork_block();
             // canonical chain is lower part of the chain.
-            let canonical = self.split_chain(chain_id, chain, SplitAt::Number(block_fork_number));
+            let canonical =
+                self.split_chain(chain_id, chain, SplitAfter::Number(block_fork_number));
             block_fork_number = canonical.fork_block_number();
             chains_to_promote.push(canonical);
         }

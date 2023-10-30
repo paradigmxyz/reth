@@ -197,27 +197,31 @@ impl Chain {
     /// it retains the up to date state as if the chains were one, i.e. the second chain is an
     /// extension of the first.
     #[track_caller]
-    pub fn split(mut self, split_at: SplitAt) -> ChainSplit {
+    pub fn split(mut self, split_after: SplitAfter) -> ChainSplit {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
-        let block_number = match split_at {
-            SplitAt::Hash(block_hash) => {
-                let Some(block_number) = self.block_number(block_hash) else {
+
+        // Check that the chain split is viable.
+        let block_number = match split_after {
+            SplitAfter::Hash(block_hash) => {
+                let Some(after_block_number) = self.block_number(block_hash) else {
                     return ChainSplit::NoSplitPending(self)
                 };
                 // If block number is same as tip whole chain is becoming canonical.
-                if block_number == chain_tip {
+                if after_block_number == chain_tip {
                     return ChainSplit::NoSplitCanonical(self)
                 }
-                block_number
+                after_block_number
             }
-            SplitAt::Number(block_number) => {
-                if block_number >= chain_tip {
+            SplitAfter::Number(after_block_number) => {
+                if after_block_number >= chain_tip {
                     return ChainSplit::NoSplitCanonical(self)
                 }
-                if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
+                if after_block_number <
+                    *self.blocks.first_entry().expect("chain is never empty").key()
+                {
                     return ChainSplit::NoSplitPending(self)
                 }
-                block_number
+                after_block_number
             }
         };
 
@@ -225,7 +229,7 @@ impl Chain {
 
         let mut state = std::mem::take(&mut self.state);
         let canonical_state =
-            state.split_at(block_number).expect("Detach block number to be in range");
+            state.split_after(block_number).expect("Detach block number to be in range");
 
         ChainSplit::Split {
             canonical: Chain { state: canonical_state, blocks: self.blocks },
@@ -325,12 +329,12 @@ pub struct BlockReceipts {
     pub tx_receipts: Vec<(TxHash, Receipt)>,
 }
 
-/// Used in spliting the chain.
+/// The block after which the chain should be split.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SplitAt {
-    /// Split at block number.
+pub enum SplitAfter {
+    /// Split after block number.
     Number(BlockNumber),
-    /// Split at block hash.
+    /// Split after block hash.
     Hash(BlockHash),
 }
 
@@ -448,7 +452,7 @@ mod tests {
         let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended);
 
         let mut split2_state = chain.state.clone();
-        let split1_state = split2_state.split_at(1).unwrap();
+        let split1_state = split2_state.split_after(1).unwrap();
 
         let chain_split1 =
             Chain { state: split1_state, blocks: BTreeMap::from([(1, block1.clone())]) };
@@ -464,23 +468,23 @@ mod tests {
 
         // split in two
         assert_eq!(
-            chain.clone().split(SplitAt::Hash(block1_hash)),
+            chain.clone().split(SplitAfter::Hash(block1_hash)),
             ChainSplit::Split { canonical: chain_split1, pending: chain_split2 }
         );
 
         // split at unknown block hash
         assert_eq!(
-            chain.clone().split(SplitAt::Hash(B256::new([100; 32]))),
+            chain.clone().split(SplitAfter::Hash(B256::new([100; 32]))),
             ChainSplit::NoSplitPending(chain.clone())
         );
 
         // split at higher number
         assert_eq!(
-            chain.clone().split(SplitAt::Number(10)),
+            chain.clone().split(SplitAfter::Number(10)),
             ChainSplit::NoSplitCanonical(chain.clone())
         );
 
         // split at lower number
-        assert_eq!(chain.clone().split(SplitAt::Number(0)), ChainSplit::NoSplitPending(chain));
+        assert_eq!(chain.clone().split(SplitAfter::Number(0)), ChainSplit::NoSplitPending(chain));
     }
 }
