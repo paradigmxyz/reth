@@ -665,7 +665,14 @@ where
             Ok(outcome) => {
                 match outcome {
                     CanonicalOutcome::AlreadyCanonical { ref header } => {
-                        if cfg!(feature = "optimism") && self.chain_spec().optimism {
+                        cfg_if::cfg_if! {
+                            if #[cfg(feautre = "optimism")] {
+                                let optimism = self.chain_spec().optimism;
+                            } else {
+                                let optimism = false;
+                            }
+                        };
+                        if optimism {
                             debug!(
                                 target: "consensus::engine",
                                 fcu_head_num=?header.number,
