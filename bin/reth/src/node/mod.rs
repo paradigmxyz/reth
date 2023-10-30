@@ -25,6 +25,7 @@ use clap::{value_parser, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
+use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
@@ -72,7 +73,6 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
-    MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{
@@ -247,12 +247,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // always store reth.toml in the data dir, not the chain specific data dir
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
+        let prometheus_handle = self.install_prometheus_recorder()?;
+
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics());
         info!(target: "reth::cli", "Database opened");
 
-        self.start_metrics_endpoint(Arc::clone(&db)).await?;
+        self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -260,19 +262,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
-        let consensus: Arc<dyn Consensus> = if self.dev.dev {
-            debug!(target: "reth::cli", "Using auto seal");
-            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
-        } else {
-            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
-        };
+        let consensus = self.consensus();
 
         self.init_trusted_nodes(&mut config);
 
-        debug!(target: "reth::cli", "Spawning metrics listener task");
-        let (metrics_tx, metrics_rx) = unbounded_channel();
-        let metrics_listener = MetricsListener::new(metrics_rx);
-        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
+        debug!(target: "reth::cli", "Spawning stages metrics listener task");
+        let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
+        let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
+        ctx.task_executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
         let prune_config =
             self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
@@ -289,7 +286,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             BlockchainTreeConfig::default(),
             prune_config.clone().map(|config| config.segments),
         )?
-        .with_sync_metrics_tx(metrics_tx.clone());
+        .with_sync_metrics_tx(sync_metrics_tx.clone());
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
         debug!(target: "reth::cli", "configured blockchain tree");
@@ -409,7 +406,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
-                    metrics_tx,
+                    sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
                 )
@@ -429,7 +426,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
-                    metrics_tx,
+                    sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
                 )
@@ -556,6 +553,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
+    /// Returns the [Consensus] instance to use.
+    ///
+    /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
+    /// will be an [AutoSealConsensus] instance.
+    pub fn consensus(&self) -> Arc<dyn Consensus> {
+        if self.dev.dev {
+            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
+        } else {
+            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
+        }
+    }
+
     /// Constructs a [Pipeline] that's wired to the network
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
@@ -565,7 +574,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         consensus: Arc<dyn Consensus>,
         db: DB,
         task_executor: &TaskExecutor,
-        metrics_tx: MetricEventsSender,
+        metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
     ) -> eyre::Result<Pipeline<DB>>
@@ -628,11 +637,24 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
-    async fn start_metrics_endpoint(&self, db: Arc<DatabaseEnv>) -> eyre::Result<()> {
+    fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
+        prometheus_exporter::install_recorder()
+    }
+
+    async fn start_metrics_endpoint(
+        &self,
+        prometheus_handle: PrometheusHandle,
+        db: Arc<DatabaseEnv>,
+    ) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::initialize(listen_addr, db, metrics_process::Collector::default())
-                .await?;
+            prometheus_exporter::serve(
+                listen_addr,
+                prometheus_handle,
+                db,
+                metrics_process::Collector::default(),
+            )
+            .await?;
         }
 
         Ok(())
@@ -790,7 +812,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
-        metrics_tx: MetricEventsSender,
+        metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -892,34 +914,41 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(pipeline)
     }
 
+    /// Builds a [Pruner] with the given config.
     fn build_pruner<DB: Database>(
         &self,
         config: &PruneConfig,
         db: DB,
         highest_snapshots_rx: HighestSnapshotsTracker,
     ) -> Pruner<DB> {
-        let mut segments = SegmentSet::new();
-
-        if let Some(mode) = config.segments.receipts {
-            segments = segments.add_segment(reth_prune::segments::Receipts::new(mode));
-        }
-        if !config.segments.receipts_log_filter.is_empty() {
-            segments = segments.add_segment(reth_prune::segments::ReceiptsByLogs::new(
-                config.segments.receipts_log_filter.clone(),
-            ));
-        }
-        if let Some(mode) = config.segments.transaction_lookup {
-            segments = segments.add_segment(reth_prune::segments::TransactionLookup::new(mode));
-        }
-        if let Some(mode) = config.segments.sender_recovery {
-            segments = segments.add_segment(reth_prune::segments::SenderRecovery::new(mode));
-        }
-        if let Some(mode) = config.segments.account_history {
-            segments = segments.add_segment(reth_prune::segments::AccountHistory::new(mode));
-        }
-        if let Some(mode) = config.segments.storage_history {
-            segments = segments.add_segment(reth_prune::segments::StorageHistory::new(mode));
-        }
+        let segments = SegmentSet::default()
+            // Receipts
+            .segment_opt(config.segments.receipts.map(reth_prune::segments::Receipts::new))
+            // Receipts by logs
+            .segment_opt((!config.segments.receipts_log_filter.is_empty()).then(|| {
+                reth_prune::segments::ReceiptsByLogs::new(
+                    config.segments.receipts_log_filter.clone(),
+                )
+            }))
+            // Transaction lookup
+            .segment_opt(
+                config
+                    .segments
+                    .transaction_lookup
+                    .map(reth_prune::segments::TransactionLookup::new),
+            )
+            // Sender recovery
+            .segment_opt(
+                config.segments.sender_recovery.map(reth_prune::segments::SenderRecovery::new),
+            )
+            // Account history
+            .segment_opt(
+                config.segments.account_history.map(reth_prune::segments::AccountHistory::new),
+            )
+            // Storage history
+            .segment_opt(
+                config.segments.storage_history.map(reth_prune::segments::StorageHistory::new),
+            );
 
         Pruner::new(
             db,

@@ -18,7 +18,6 @@ reth-eth-wire = { path = "../net/eth-wire" }
 
 # eth
 revm-primitives.workspace = true
-parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 
 # async
 async-trait.workspace = true

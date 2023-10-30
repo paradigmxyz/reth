@@ -376,6 +376,7 @@ mod tests {
     use crate::{AccountReader, BundleStateWithReceipts, ProviderFactory};
     use reth_db::{
         cursor::{DbCursorRO, DbDupCursorRO},
+        database::Database,
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         test_utils::create_test_rw_db,
@@ -384,6 +385,7 @@ mod tests {
     use reth_primitives::{
         revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256,
     };
+    use reth_trie::test_utils::state_root;
     use revm::{
         db::{
             states::{
@@ -391,13 +393,15 @@ mod tests {
                 changes::PlainStorageRevert,
                 PlainStorageChangeset,
             },
-            BundleState,
+            BundleState, EmptyDB,
         },
         primitives::{
-            Account, AccountInfo as RevmAccountInfo, AccountStatus, HashMap, StorageSlot,
+            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, HashMap,
+            StorageSlot,
         },
-        CacheState, DatabaseCommit, State,
+        DatabaseCommit, State,
     };
+    use std::collections::BTreeMap;
 
     #[test]
     fn write_to_db_account_info() {
@@ -413,16 +417,14 @@ mod tests {
         let account_b_changed =
             RevmAccountInfo { balance: U256::from(3), nonce: 3, ..Default::default() };
 
-        let mut cache_state = CacheState::new(true);
-        cache_state.insert_not_existing(address_a);
-        cache_state.insert_account(address_b, account_b.clone());
-        let mut state =
-            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
+        let mut state = State::builder().with_bundle_update().build();
+        state.insert_not_existing(address_a);
+        state.insert_account(address_b, account_b.clone());
 
         // 0x00.. is created
         state.commit(HashMap::from([(
             address_a,
-            Account {
+            RevmAccount {
                 info: account_a.clone(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 storage: HashMap::default(),
@@ -432,7 +434,7 @@ mod tests {
         // 0xff.. is changed (balance + 1, nonce + 1)
         state.commit(HashMap::from([(
             address_b,
-            Account {
+            RevmAccount {
                 info: account_b_changed.clone(),
                 status: AccountStatus::Touched,
                 storage: HashMap::default(),
@@ -488,15 +490,13 @@ mod tests {
             "Account B changeset is wrong"
         );
 
-        let mut cache_state = CacheState::new(true);
-        cache_state.insert_account(address_b, account_b_changed.clone());
-        let mut state =
-            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
+        let mut state = State::builder().with_bundle_update().build();
+        state.insert_account(address_b, account_b_changed.clone());
 
         // 0xff.. is destroyed
         state.commit(HashMap::from([(
             address_b,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account_b_changed,
                 storage: HashMap::default(),
@@ -553,20 +553,18 @@ mod tests {
 
         let account_b = RevmAccountInfo { balance: U256::from(2), nonce: 2, ..Default::default() };
 
-        let mut cache_state = CacheState::new(true);
-        cache_state.insert_not_existing(address_a);
-        cache_state.insert_account_with_storage(
+        let mut state = State::builder().with_bundle_update().build();
+        state.insert_not_existing(address_a);
+        state.insert_account_with_storage(
             address_b,
             account_b.clone(),
             HashMap::from([(U256::from(1), U256::from(1))]),
         );
-        let mut state =
-            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
 
         state.commit(HashMap::from([
             (
                 address_a,
-                Account {
+                RevmAccount {
                     status: AccountStatus::Touched | AccountStatus::Created,
                     info: RevmAccountInfo::default(),
                     // 0x00 => 0 => 1
@@ -585,7 +583,7 @@ mod tests {
             ),
             (
                 address_b,
-                Account {
+                RevmAccount {
                     status: AccountStatus::Touched,
                     info: account_b,
                     // 0x01 => 1 => 2
@@ -687,14 +685,12 @@ mod tests {
         );
 
         // Delete account A
-        let mut cache_state = CacheState::new(true);
-        cache_state.insert_account(address_a, RevmAccountInfo::default());
-        let mut state =
-            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
+        let mut state = State::builder().with_bundle_update().build();
+        state.insert_account(address_a, RevmAccountInfo::default());
 
         state.commit(HashMap::from([(
             address_a,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: RevmAccountInfo::default(),
                 storage: HashMap::default(),
@@ -745,13 +741,11 @@ mod tests {
         let account_info = RevmAccountInfo { nonce: 1, ..Default::default() };
 
         // Block #0: initial state.
-        let mut cache_state = CacheState::new(true);
-        cache_state.insert_not_existing(address1);
-        let mut init_state =
-            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
+        let mut init_state = State::builder().with_bundle_update().build();
+        init_state.insert_not_existing(address1);
         init_state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 info: account_info.clone(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 // 0x00 => 0 => 1
@@ -773,19 +767,17 @@ mod tests {
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
-        let mut cache_state = CacheState::new(true);
-        cache_state.insert_account_with_storage(
+        let mut state = State::builder().with_bundle_update().build();
+        state.insert_account_with_storage(
             address1,
             account_info.clone(),
             HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
-        let mut state =
-            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
 
         // Block #1: change storage.
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched,
                 info: account_info.clone(),
                 // 0x00 => 1 => 2
@@ -803,7 +795,7 @@ mod tests {
         // Block #2: destroy account.
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account_info.clone(),
                 storage: HashMap::default(),
@@ -814,7 +806,7 @@ mod tests {
         // Block #3: re-create account and change storage.
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 info: account_info.clone(),
                 storage: HashMap::default(),
@@ -825,7 +817,7 @@ mod tests {
         // Block #4: change storage.
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched,
                 info: account_info.clone(),
                 // 0x00 => 0 => 2
@@ -852,7 +844,7 @@ mod tests {
         // Block #5: Destroy account again.
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account_info.clone(),
                 storage: HashMap::default(),
@@ -863,7 +855,7 @@ mod tests {
         // Block #6: Create, change, destroy and re-create in the same block.
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 info: account_info.clone(),
                 storage: HashMap::default(),
@@ -871,7 +863,7 @@ mod tests {
         )]));
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched,
                 info: account_info.clone(),
                 // 0x00 => 0 => 2
@@ -883,7 +875,7 @@ mod tests {
         )]));
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account_info.clone(),
                 storage: HashMap::default(),
@@ -891,7 +883,7 @@ mod tests {
         )]));
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 info: account_info.clone(),
                 storage: HashMap::default(),
@@ -902,7 +894,7 @@ mod tests {
         // Block #7: Change storage.
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched,
                 info: account_info.clone(),
                 // 0x00 => 0 => 9
@@ -1058,13 +1050,11 @@ mod tests {
         let account1 = RevmAccountInfo { nonce: 1, ..Default::default() };
 
         // Block #0: initial state.
-        let mut cache_state = CacheState::new(true);
-        cache_state.insert_not_existing(address1);
-        let mut init_state =
-            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
+        let mut init_state = State::builder().with_bundle_update().build();
+        init_state.insert_not_existing(address1);
         init_state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 info: account1.clone(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 // 0x00 => 0 => 1
@@ -1086,19 +1076,17 @@ mod tests {
             .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
-        let mut cache_state = CacheState::new(true);
-        cache_state.insert_account_with_storage(
+        let mut state = State::builder().with_bundle_update().build();
+        state.insert_account_with_storage(
             address1,
             account1.clone(),
             HashMap::from([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
-        let mut state =
-            State::builder().with_cached_prestate(cache_state).with_bundle_update().build();
 
         // Block #1: Destroy, re-create, change storage.
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account1.clone(),
                 storage: HashMap::default(),
@@ -1107,7 +1095,7 @@ mod tests {
 
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 info: account1.clone(),
                 storage: HashMap::default(),
@@ -1116,7 +1104,7 @@ mod tests {
 
         state.commit(HashMap::from([(
             address1,
-            Account {
+            RevmAccount {
                 status: AccountStatus::Touched,
                 info: account1.clone(),
                 // 0x01 => 0 => 5
@@ -1184,5 +1172,169 @@ mod tests {
         let mut this = base.clone();
         assert!(!this.revert_to(17));
         assert_eq!(this.receipts.len(), 7);
+    }
+
+    #[test]
+    fn bundle_state_state_root() {
+        type PreState = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
+        let mut prestate: PreState = (0..10)
+            .map(|key| {
+                let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
+                let storage =
+                    (1..11).map(|key| (B256::with_last_byte(key), U256::from(key))).collect();
+                (Address::with_last_byte(key), (account, storage))
+            })
+            .collect();
+
+        let db = create_test_rw_db();
+
+        // insert initial state to the database
+        db.update(|tx| {
+            for (address, (account, storage)) in prestate.iter() {
+                let hashed_address = keccak256(address);
+                tx.put::<tables::HashedAccount>(hashed_address, *account).unwrap();
+                for (slot, value) in storage {
+                    tx.put::<tables::HashedStorage>(
+                        hashed_address,
+                        StorageEntry { key: keccak256(slot), value: *value },
+                    )
+                    .unwrap();
+                }
+            }
+
+            let (_, updates) = StateRoot::new(tx).root_with_updates().unwrap();
+            updates.flush(tx).unwrap();
+        })
+        .unwrap();
+
+        let tx = db.tx().unwrap();
+        let mut state = State::builder().with_bundle_update().build();
+
+        let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
+            assert_eq!(
+                BundleStateWithReceipts::new(state.bundle_state.clone(), Receipts::default(), 0)
+                    .state_root_slow(&tx)
+                    .unwrap(),
+                state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
+                    address,
+                    (account, storage.into_iter())
+                ))),
+                "{msg}"
+            );
+        };
+
+        // database only state root is correct
+        assert_state_root(&state, &prestate, "empty");
+
+        // destroy account 1
+        let address1 = Address::with_last_byte(1);
+        let account1_old = prestate.remove(&address1).unwrap();
+        state.insert_account(address1, into_revm_acc(account1_old.0));
+        state.commit(HashMap::from([(
+            address1,
+            RevmAccount {
+                status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+                info: RevmAccountInfo::default(),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.merge_transitions(BundleRetention::PlainState);
+        assert_state_root(&state, &prestate, "destroyed account");
+
+        // change slot 2 in account 2
+        let address2 = Address::with_last_byte(2);
+        let slot2 = U256::from(2);
+        let slot2_key = B256::from(slot2);
+        let account2 = prestate.get_mut(&address2).unwrap();
+        let account2_slot2_old_value = *account2.1.get(&slot2_key).unwrap();
+        state.insert_account_with_storage(
+            address2,
+            into_revm_acc(account2.0),
+            HashMap::from([(slot2, account2_slot2_old_value)]),
+        );
+
+        let account2_slot2_new_value = U256::from(100);
+        account2.1.insert(slot2_key, account2_slot2_new_value);
+        state.commit(HashMap::from([(
+            address2,
+            RevmAccount {
+                status: AccountStatus::Touched,
+                info: into_revm_acc(account2.0),
+                storage: HashMap::from_iter([(
+                    slot2,
+                    StorageSlot::new_changed(account2_slot2_old_value, account2_slot2_new_value),
+                )]),
+            },
+        )]));
+        state.merge_transitions(BundleRetention::PlainState);
+        assert_state_root(&state, &prestate, "changed storage");
+
+        // change balance of account 3
+        let address3 = Address::with_last_byte(3);
+        let account3 = prestate.get_mut(&address3).unwrap();
+        state.insert_account(address3, into_revm_acc(account3.0));
+
+        account3.0.balance = U256::from(24);
+        state.commit(HashMap::from([(
+            address3,
+            RevmAccount {
+                status: AccountStatus::Touched,
+                info: into_revm_acc(account3.0),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.merge_transitions(BundleRetention::PlainState);
+        assert_state_root(&state, &prestate, "changed balance");
+
+        // change nonce of account 4
+        let address4 = Address::with_last_byte(4);
+        let account4 = prestate.get_mut(&address4).unwrap();
+        state.insert_account(address4, into_revm_acc(account4.0));
+
+        account4.0.nonce = 128;
+        state.commit(HashMap::from([(
+            address4,
+            RevmAccount {
+                status: AccountStatus::Touched,
+                info: into_revm_acc(account4.0),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.merge_transitions(BundleRetention::PlainState);
+        assert_state_root(&state, &prestate, "changed nonce");
+
+        // recreate account 1
+        let account1_new =
+            Account { nonce: 56, balance: U256::from(123), bytecode_hash: Some(B256::random()) };
+        prestate.insert(address1, (account1_new, BTreeMap::default()));
+        state.commit(HashMap::from([(
+            address1,
+            RevmAccount {
+                status: AccountStatus::Touched | AccountStatus::Created,
+                info: into_revm_acc(account1_new),
+                storage: HashMap::default(),
+            },
+        )]));
+        state.merge_transitions(BundleRetention::PlainState);
+        assert_state_root(&state, &prestate, "recreated");
+
+        // update storage for account 1
+        let slot20 = U256::from(20);
+        let slot20_key = B256::from(slot20);
+        let account1_slot20_value = U256::from(12345);
+        prestate.get_mut(&address1).unwrap().1.insert(slot20_key, account1_slot20_value);
+        state.commit(HashMap::from([(
+            address1,
+            RevmAccount {
+                status: AccountStatus::Touched | AccountStatus::Created,
+                info: into_revm_acc(account1_new),
+                storage: HashMap::from_iter([(
+                    slot20,
+                    StorageSlot::new_changed(U256::ZERO, account1_slot20_value),
+                )]),
+            },
+        )]));
+        state.merge_transitions(BundleRetention::PlainState);
+        assert_state_root(&state, &prestate, "recreated changed storage");
     }
 }
