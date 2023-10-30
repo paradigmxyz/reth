@@ -44,10 +44,11 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
         _ => {
-            let genesis: AllGenesisFormats = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
-                Ok(raw) => serde_json::from_str(&raw)?,
-                Err(_) => serde_json::from_str(&s)?,
-            };
+            let genesis: AllGenesisFormats =
+                match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
+                    Ok(raw) => serde_json::from_str(&raw)?,
+                    Err(_) => serde_json::from_str(&s)?,
+                };
             Arc::new(genesis.into())
         }
     })
@@ -158,7 +159,7 @@ mod tests {
     }
 }
 "#;
-    genesis_value_parser(&custom_genesis_str).unwrap();
+        genesis_value_parser(&custom_genesis_str).unwrap();
     }
 
     #[test]
