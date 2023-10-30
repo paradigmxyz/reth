@@ -914,34 +914,41 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(pipeline)
     }
 
+    /// Builds a [Pruner] with the given config.
     fn build_pruner<DB: Database>(
         &self,
         config: &PruneConfig,
         db: DB,
         highest_snapshots_rx: HighestSnapshotsTracker,
     ) -> Pruner<DB> {
-        let mut segments = SegmentSet::new();
-
-        if let Some(mode) = config.segments.receipts {
-            segments = segments.add_segment(reth_prune::segments::Receipts::new(mode));
-        }
-        if !config.segments.receipts_log_filter.is_empty() {
-            segments = segments.add_segment(reth_prune::segments::ReceiptsByLogs::new(
-                config.segments.receipts_log_filter.clone(),
-            ));
-        }
-        if let Some(mode) = config.segments.transaction_lookup {
-            segments = segments.add_segment(reth_prune::segments::TransactionLookup::new(mode));
-        }
-        if let Some(mode) = config.segments.sender_recovery {
-            segments = segments.add_segment(reth_prune::segments::SenderRecovery::new(mode));
-        }
-        if let Some(mode) = config.segments.account_history {
-            segments = segments.add_segment(reth_prune::segments::AccountHistory::new(mode));
-        }
-        if let Some(mode) = config.segments.storage_history {
-            segments = segments.add_segment(reth_prune::segments::StorageHistory::new(mode));
-        }
+        let segments = SegmentSet::default()
+            // Receipts
+            .segment_opt(config.segments.receipts.map(reth_prune::segments::Receipts::new))
+            // Receipts by logs
+            .segment_opt((!config.segments.receipts_log_filter.is_empty()).then(|| {
+                reth_prune::segments::ReceiptsByLogs::new(
+                    config.segments.receipts_log_filter.clone(),
+                )
+            }))
+            // Transaction lookup
+            .segment_opt(
+                config
+                    .segments
+                    .transaction_lookup
+                    .map(reth_prune::segments::TransactionLookup::new),
+            )
+            // Sender recovery
+            .segment_opt(
+                config.segments.sender_recovery.map(reth_prune::segments::SenderRecovery::new),
+            )
+            // Account history
+            .segment_opt(
+                config.segments.account_history.map(reth_prune::segments::AccountHistory::new),
+            )
+            // Storage history
+            .segment_opt(
+                config.segments.storage_history.map(reth_prune::segments::StorageHistory::new),
+            );
 
         Pruner::new(
             db,
