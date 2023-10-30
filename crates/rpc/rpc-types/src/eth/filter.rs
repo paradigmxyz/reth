@@ -916,11 +916,11 @@ impl From<jsonrpsee_types::SubscriptionId<'_>> for FilterId {
 /// When this type is used in a request, it determines whether the client wishes to receive:
 /// - Only the transaction hashes (`Hashes` variant), or
 /// - Full transaction details (`Full` variant).
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PendingTransactionFilterKind {
     /// Receive only the hashes of the transactions.
+    #[default]
     Hashes,
-
     /// Receive full details of the transactions.
     Full,
 }
