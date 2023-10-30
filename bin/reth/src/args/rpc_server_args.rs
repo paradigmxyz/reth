@@ -140,7 +140,11 @@ pub struct RpcServerArgs {
     #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_TRACING_REQUESTS)]
     pub rpc_max_tracing_requests: u32,
 
-    /// Maximum number of logs that can be returned in a single response.
+    /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
+    #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_BLOCKS_PER_FILTER)]
+    pub rpc_max_blocks_per_filter: u64,
+
+    /// Maximum number of logs that can be returned in a single response. (0 = no limit)
     #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_LOGS_PER_RESPONSE)]
     pub rpc_max_logs_per_response: usize,
 
@@ -326,6 +330,7 @@ impl RethRpcConfig for RpcServerArgs {
     fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
+            .max_blocks_per_filter(self.rpc_max_blocks_per_filter)
             .max_logs_per_response(self.rpc_max_logs_per_response)
             .rpc_gas_cap(self.rpc_gas_cap)
             .gpo_config(self.gas_price_oracle_config())

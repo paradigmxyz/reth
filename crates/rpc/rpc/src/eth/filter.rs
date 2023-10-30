@@ -51,7 +51,8 @@ where
     /// Creates a new, shareable instance.
     ///
     /// This uses the given pool to get notified about new transactions, the provider to interact
-    /// with the blockchain, the cache to fetch cacheable data, like the logs and the
+    /// with the blockchain, the cache to fetch cacheable data, like the logs,
+    /// max_blocks_per_filter to limit the amount of blocks to scan for logs and the
     /// max_logs_per_response to limit the amount of logs returned in a single response
     /// `eth_getLogs`
     ///
@@ -60,6 +61,7 @@ where
         provider: Provider,
         pool: Pool,
         eth_cache: EthStateCache,
+        max_blocks_per_filter: u64,
         max_logs_per_response: usize,
         task_spawner: Box<dyn TaskSpawner>,
         stale_filter_ttl: Duration,
@@ -69,6 +71,7 @@ where
             active_filters: Default::default(),
             pool,
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
+            max_blocks_per_filter,
             max_logs_per_response,
             eth_cache,
             max_headers_range: MAX_HEADERS_RANGE,
@@ -324,6 +327,8 @@ struct EthFilterInner<Provider, Pool> {
     active_filters: ActiveFilters,
     /// Provides ids to identify filters
     id_provider: Arc<dyn IdProvider>,
+    /// Maximum number of blocks that could be scanned per filter
+    max_blocks_per_filter: u64,
     /// Maximum number of logs that can be returned in a response
     max_logs_per_response: usize,
     /// The async cache frontend for eth related data
@@ -423,6 +428,14 @@ where
         to_block: u64,
     ) -> Result<Vec<Log>, FilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
+        let is_multi_block_range = from_block != to_block;
+
+        if is_multi_block_range
+            && self.max_blocks_per_filter != 0
+            && to_block - from_block > self.max_blocks_per_filter
+        {
+            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
+        }
 
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
@@ -430,8 +443,6 @@ where
         // derive bloom filters from filter input
         let address_filter = FilteredParams::address_filter(&filter.address);
         let topics_filter = FilteredParams::topics_filter(&filter.topics);
-
-        let is_multi_block_range = from_block != to_block;
 
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
@@ -467,7 +478,10 @@ where
 
                         // size check but only if range is multiple blocks, so we always return all
                         // logs of a single block
-                        if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
+                        if is_multi_block_range
+                            && self.max_logs_per_response != 0
+                            && all_logs.len() > self.max_logs_per_response
+                        {
                             return Err(FilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
                             ))
@@ -599,6 +613,8 @@ enum FilterKind {
 pub enum FilterError {
     #[error("filter not found")]
     FilterNotFound(FilterId),
+    #[error("query exceeds max block range {0}")]
+    QueryExceedsMaxBlocks(u64),
     #[error("query exceeds max results {0}")]
     QueryExceedsMaxResults(usize),
     #[error(transparent)]
@@ -620,6 +636,9 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             FilterError::EthAPIError(err) => err.into(),
+            err @ FilterError::QueryExceedsMaxBlocks(_) => {
+                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
+            }
             err @ FilterError::QueryExceedsMaxResults(_) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }

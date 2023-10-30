@@ -1,6 +1,6 @@
 use crate::{
     constants,
-    constants::DEFAULT_MAX_LOGS_PER_RESPONSE,
+    constants::{DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE},
     error::{RpcError, ServerKind},
     EthConfig,
 };
@@ -72,6 +72,7 @@ where
         provider,
         pool,
         eth_cache.clone(),
+        DEFAULT_MAX_BLOCKS_PER_FILTER,
         DEFAULT_MAX_LOGS_PER_RESPONSE,
         Box::new(executor.clone()),
         EthConfig::default().stale_filter_ttl,
