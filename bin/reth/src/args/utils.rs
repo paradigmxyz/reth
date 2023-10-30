@@ -44,8 +44,10 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
         _ => {
-            let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
-            let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
+            let genesis: AllGenesisFormats = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
+                Ok(raw) => serde_json::from_str(&raw)?,
+                Err(_) => serde_json::from_str(&s)?,
+            };
             Arc::new(genesis.into())
         }
     })
@@ -111,11 +113,52 @@ mod tests {
     use secp256k1::rand::thread_rng;
 
     #[test]
-    fn parse_chain_spec() {
+    fn parse_chain_spec_from_path() {
         for chain in ["mainnet", "sepolia", "goerli", "holesky"] {
             chain_spec_value_parser(chain).unwrap();
             genesis_value_parser(chain).unwrap();
         }
+    }
+
+    #[test]
+    fn parse_chain_spec_from_memory() {
+        let custom_genesis_str = r#"
+{
+    "nonce": "0x0",
+    "timestamp": "0x653FEE9E",
+    "extraData": "0x5343",
+    "gasLimit": "0x1388",
+    "difficulty": "0x400000000",
+    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "alloc": {
+        "0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b": {
+            "balance": "0x4a47e3c12448f4ad000000"
+        }
+    },
+    "number": "0x0",
+    "gasUsed": "0x0",
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "config": {
+        "ethash": {},
+        "chainId": 2600,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "terminalTotalDifficulty": 0,
+        "terminalTotalDifficultyPassed": true,
+        "shanghaiTime": 0
+    }
+}
+"#;
+    genesis_value_parser(&custom_genesis_str).unwrap();
     }
 
     #[test]
