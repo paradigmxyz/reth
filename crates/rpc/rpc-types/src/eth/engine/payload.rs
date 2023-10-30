@@ -422,7 +422,7 @@ struct BeaconAPIPayloadAttributes {
     parent_beacon_block_root: Option<B256>,
     #[cfg(feature = "optimism")]
     #[serde(flatten)]
-    pub optimism_payload_attributes: OptimismPayloadAttributes,
+    optimism_payload_attributes: OptimismPayloadAttributes,
 }
 
 /// A helper module for serializing and deserializing the payload attributes for the beacon API.
