@@ -88,7 +88,7 @@ criterion = "0.5"
 pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
-default = []
+default = ["c-kzg"]
 arbitrary = ["revm-primitives/arbitrary", "reth-rpc-types/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 c-kzg = ["revm-primitives/c-kzg", "dep:c-kzg"]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]

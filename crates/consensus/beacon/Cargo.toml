@@ -10,7 +10,7 @@ repository.workspace = true
 [dependencies]
 # reth
 reth-consensus-common = { path = "../common" }
-reth-primitives = { workspace = true, features = ["c-kzg"] }
+reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-stages = { path = "../../stages" }
 reth-db.workspace = true
