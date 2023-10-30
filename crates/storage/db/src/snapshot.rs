@@ -1,13 +1,15 @@
-//! reth's snapshot creation from database tables
+//! reth's snapshot creation from database tables and access
 
 use crate::{
     abstraction::cursor::DbCursorRO,
-    table::{Key, Table},
+    table::{Decompress, Key, Table},
     transaction::DbTx,
     RawKey, RawTable,
 };
-use reth_interfaces::RethResult;
-use reth_nippy_jar::{ColumnResult, NippyJar, PHFKey};
+use derive_more::{Deref, DerefMut};
+use reth_interfaces::{RethError, RethResult};
+use reth_nippy_jar::{ColumnResult, MmapHandle, NippyJar, NippyJarCursor, PHFKey};
+use reth_primitives::{snapshot::SegmentHeader, B256};
 use reth_tracing::tracing::*;
 use serde::{Deserialize, Serialize};
 use std::{error::Error as StdError, ops::RangeInclusive};
@@ -102,3 +104,117 @@ macro_rules! generate_snapshot_func {
 }
 
 generate_snapshot_func!((T1), (T1, T2), (T1, T2, T3), (T1, T2, T3, T4), (T1, T2, T3, T4, T5),);
+
+/// Cursor of a snapshot segment.
+#[derive(Debug, Deref, DerefMut)]
+pub struct SnapshotCursor<'a>(NippyJarCursor<'a, SegmentHeader>);
+
+impl<'a> SnapshotCursor<'a> {
+    /// Returns a new [`SnapshotCursor`].
+    pub fn new(
+        jar: &'a NippyJar<SegmentHeader>,
+        mmap_handle: MmapHandle,
+    ) -> Result<Self, RethError> {
+        Ok(Self(NippyJarCursor::with_handle(jar, mmap_handle)?))
+    }
+
+    /// Gets a row of values.
+    pub fn get<const SELECTOR: usize, const COLUMNS: usize>(
+        &mut self,
+        key_or_num: KeyOrNumber<'_>,
+    ) -> RethResult<Option<Vec<&'_ [u8]>>> {
+        let row = match key_or_num {
+            KeyOrNumber::Hash(k) => self.row_by_key_with_cols::<SELECTOR, COLUMNS>(k),
+            KeyOrNumber::Number(n) => {
+                let offset = self.jar().user_header().start();
+                if offset > n {
+                    return Ok(None)
+                }
+                self.row_by_number_with_cols::<SELECTOR, COLUMNS>((n - offset) as usize)
+            }
+        }?;
+
+        Ok(row)
+    }
+
+    /// Gets one column value from a row.
+    pub fn get_one<T: Decompress, const SELECTOR: usize, const COLUMNS: usize>(
+        &mut self,
+        key_or_num: KeyOrNumber<'_>,
+    ) -> RethResult<Option<T>> {
+        let row = self.get::<SELECTOR, COLUMNS>(key_or_num)?;
+
+        match row {
+            Some(row) => Ok(Some(T::decompress(row[0])?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Gets two column values from a row.
+    pub fn get_two<T: Decompress, K: Decompress, const SELECTOR: usize, const COLUMNS: usize>(
+        &mut self,
+        key_or_num: KeyOrNumber<'_>,
+    ) -> RethResult<Option<(T, K)>> {
+        let row = self.get::<SELECTOR, COLUMNS>(key_or_num)?;
+
+        match row {
+            Some(row) => Ok(Some((T::decompress(row[0])?, K::decompress(row[1])?))),
+            None => Ok(None),
+        }
+    }
+
+    /// Gets three column values from a row.
+    pub fn get_three<
+        T: Decompress,
+        K: Decompress,
+        J: Decompress,
+        const SELECTOR: usize,
+        const COLUMNS: usize,
+    >(
+        &mut self,
+        key_or_num: KeyOrNumber<'_>,
+    ) -> RethResult<Option<(T, K, J)>> {
+        let row = self.get::<SELECTOR, COLUMNS>(key_or_num)?;
+
+        match row {
+            Some(row) => {
+                Ok(Some((T::decompress(row[0])?, K::decompress(row[1])?, J::decompress(row[2])?)))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+/// Either a key _or_ a block number
+#[derive(Debug)]
+pub enum KeyOrNumber<'a> {
+    /// A slice used as a key. Usually a block hash
+    Hash(&'a [u8]),
+    /// A block number
+    Number(u64),
+}
+
+impl<'a> From<&'a B256> for KeyOrNumber<'a> {
+    fn from(value: &'a B256) -> Self {
+        KeyOrNumber::Hash(value.as_slice())
+    }
+}
+
+impl<'a> From<u64> for KeyOrNumber<'a> {
+    fn from(value: u64) -> Self {
+        KeyOrNumber::Number(value)
+    }
+}
+
+/// Snapshot segment total columns.
+pub const HEADER_COLUMNS: usize = 3;
+/// Selector for header.
+pub const S_HEADER: usize = 0b001;
+/// Selector for header td.
+pub const S_HEADER_TD: usize = 0b010;
+/// Selector for header hash.
+pub const S_HEADER_HASH: usize = 0b100;
+/// Selector for header td and header hash.
+pub const S_HEADER_TD_WITH_HASH: usize = 0b110;
+/// Selector for header and header hash.
+pub const S_HEADER_WITH_HASH: usize = 0b101;
