@@ -52,13 +52,9 @@ pub struct HeadEvent {
     pub slot: String,
     pub block: String,
     pub state: String,
-    #[serde(rename = "epoch_transition")]
     pub epoch_transition: bool,
-    #[serde(rename = "previous_duty_dependent_root")]
     pub previous_duty_dependent_root: String,
-    #[serde(rename = "current_duty_dependent_root")]
     pub current_duty_dependent_root: String,
-    #[serde(rename = "execution_optimistic")]
     pub execution_optimistic: bool,
 }
 
@@ -66,11 +62,9 @@ pub struct HeadEvent {
 ///
 /// The node has received a valid block (from P2P or API)
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BlockEvent {
     pub slot: String,
     pub block: String,
-    #[serde(rename = "execution_optimistic")]
     pub execution_optimistic: bool,
 }
 
@@ -78,9 +72,7 @@ pub struct BlockEvent {
 ///
 /// The node has received a valid attestation (from P2P or API)
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AttestationEvent {
-    #[serde(rename = "aggregation_bits")]
     pub aggregation_bits: String,
     pub signature: String,
     pub data: AttestationData,
@@ -90,17 +82,14 @@ pub struct AttestationEvent {
 ///
 /// The node has received a valid voluntary exit (from P2P or API)
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct VoluntaryExitEvent {
     pub message: VoluntaryExitMessage,
     pub signature: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct VoluntaryExitMessage {
     pub epoch: String,
-    #[serde(rename = "validator_index")]
     pub validator_index: String,
 }
 
@@ -108,20 +97,15 @@ pub struct VoluntaryExitMessage {
 ///
 /// The node has received a BLS to execution change (from P2P or API)
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BlsToExecutionChangeEvent {
     pub message: BlsToExecutionChangeMessage,
     pub signature: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BlsToExecutionChangeMessage {
-    #[serde(rename = "validator_index")]
     pub validator_index: String,
-    #[serde(rename = "from_bls_pubkey")]
     pub from_bls_pubkey: String,
-    #[serde(rename = "to_execution_address")]
     pub to_execution_address: String,
 }
 
@@ -129,12 +113,10 @@ pub struct BlsToExecutionChangeMessage {
 ///
 /// Finalized checkpoint has been updated
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct FinalizedCheckpointEvent {
     pub block: String,
     pub state: String,
     pub epoch: String,
-    #[serde(rename = "execution_optimistic")]
     pub execution_optimistic: bool,
 }
 
@@ -142,20 +124,14 @@ pub struct FinalizedCheckpointEvent {
 ///
 /// The node has reorganized its chain
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ChainReorgEvent {
     pub slot: String,
     pub depth: String,
-    #[serde(rename = "old_head_block")]
     pub old_head_block: String,
-    #[serde(rename = "new_head_block")]
     pub new_head_block: String,
-    #[serde(rename = "old_head_state")]
     pub old_head_state: String,
-    #[serde(rename = "new_head_state")]
     pub new_head_state: String,
     pub epoch: String,
-    #[serde(rename = "execution_optimistic")]
     pub execution_optimistic: bool,
 }
 
@@ -163,31 +139,23 @@ pub struct ChainReorgEvent {
 ///
 /// The node has received a valid sync committee SignedContributionAndProof (from P2P or API)
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ContributionAndProofEvent {
     pub message: ContributionAndProofMessage,
     pub signature: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ContributionAndProofMessage {
-    #[serde(rename = "aggregator_index")]
     pub aggregator_index: String,
     pub contribution: Contribution,
-    #[serde(rename = "selection_proof")]
     pub selection_proof: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Contribution {
     pub slot: String,
-    #[serde(rename = "beacon_block_root")]
     pub beacon_block_root: String,
-    #[serde(rename = "subcommittee_index")]
     pub subcommittee_index: String,
-    #[serde(rename = "aggregation_bits")]
     pub aggregation_bits: String,
     pub signature: String,
 }
@@ -196,7 +164,6 @@ pub struct Contribution {
 ///
 /// The node's latest known `LightClientFinalityUpdate` has been updated
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct LightClientFinalityUpdateEvent {
     pub version: String,
     pub data: LightClientFinalityData,
@@ -206,7 +173,6 @@ pub struct LightClientFinalityUpdateEvent {
 ///
 /// The node's latest known `LightClientOptimisticUpdate` has been updated
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct LightClientOptimisticUpdateEvent {
     pub version: String,
     pub data: LightClientOptimisticData,
@@ -217,15 +183,11 @@ pub struct LightClientOptimisticUpdateEvent {
 /// The node has received a BlobSidecar (from P2P or API) that passes all gossip validations on the
 /// blob_sidecar_{subnet_id} topic
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BlobSidecarEvent {
-    #[serde(rename = "block_root")]
     pub block_root: String,
     pub index: String,
     pub slot: String,
-    #[serde(rename = "kzg_commitment")]
     pub kzg_commitment: String,
-    #[serde(rename = "versioned_hash")]
     pub versioned_hash: String,
 }
 
