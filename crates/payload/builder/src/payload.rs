@@ -176,8 +176,8 @@ impl PayloadBuilderAttributes {
             let transactions = attributes
                 .optimism_payload_attributes
                 .transactions
-                .as_ref()
-                .unwrap_or(&Vec::default())
+                .as_deref()
+                .unwrap_or(&[])
                 .iter()
                 .map(|tx| TransactionSigned::decode_enveloped(tx.clone()))
                 .collect::<Result<_, _>>()?;
