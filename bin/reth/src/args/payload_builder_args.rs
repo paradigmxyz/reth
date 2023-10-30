@@ -41,6 +41,9 @@ pub struct PayloadBuilderArgs {
     /// to save resources and not leak txs from the tx-pool,
     /// this flag enables computing of the pending block
     /// from the tx-pool instead.
+    ///
+    /// If `compute_pending_block` is not enabled, the payload builder
+    /// will use the payload attributes from the latest block.
     #[cfg(feature = "optimism")]
     #[arg(long = "rollup.compute-pending-block")]
     pub compute_pending_block: bool,
