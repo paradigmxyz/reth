@@ -589,8 +589,9 @@ where
             let account_code = load_account_code(&db, &changed_acc.info).unwrap_or_default();
             entry.code = Delta::Added(account_code);
 
-            // new storage values
-            for (key, slot) in changed_acc.storage.iter() {
+            // new storage values are marked as added,
+            // however we're filtering changed here to avoid adding entries for the zero value
+            for (key, slot) in changed_acc.storage.iter().filter(|(_, slot)| slot.is_changed()) {
                 entry.storage.insert((*key).into(), Delta::Added(slot.present_value.into()));
             }
         } else {
