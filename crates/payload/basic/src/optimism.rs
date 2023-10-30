@@ -39,6 +39,7 @@ where
     debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let block_gas_limit: u64 = attributes
+        .optimism_payload_attributes
         .gas_limit
         .unwrap_or(initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX));
     let base_fee = initialized_block_env.basefee.to::<u64>();
@@ -54,7 +55,7 @@ where
         chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp);
 
     let mut receipts = Vec::new();
-    for sequencer_tx in attributes.transactions {
+    for sequencer_tx in attributes.optimism_payload_attributes.transactions {
         // Check if the job was cancelled, if so we can exit early.
         if cancel.is_cancelled() {
             return Ok(BuildOutcome::Cancelled);
@@ -133,7 +134,7 @@ where
         executed_txs.push(sequencer_tx.into_signed());
     }
 
-    if !attributes.no_tx_pool {
+    if !attributes.optimism_payload_attributes.no_tx_pool {
         while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
             if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
