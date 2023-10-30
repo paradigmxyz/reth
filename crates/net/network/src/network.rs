@@ -278,8 +278,8 @@ impl NetworkInfo for NetworkHandle {
     }
 
     #[cfg(feature = "optimism")]
-    fn sequencer_endpoint(&self) -> &Option<String> {
-        &self.inner.sequencer_endpoint
+    fn sequencer_endpoint(&self) -> Option<&str> {
+        self.inner.sequencer_endpoint.as_deref()
     }
 }
 
@@ -290,7 +290,7 @@ impl SyncStateProvider for NetworkHandle {
     // used to guard the txpool
     fn is_initially_syncing(&self) -> bool {
         if self.inner.initial_sync_done.load(Ordering::Relaxed) {
-            return false
+            return false;
         }
         self.inner.is_syncing.load(Ordering::Relaxed)
     }

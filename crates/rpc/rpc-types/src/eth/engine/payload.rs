@@ -5,9 +5,6 @@ use c_kzg::{Blob, Bytes48};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
 
-#[cfg(feature = "optimism")]
-use crate::serde_helpers::u64_hex::u64_hex_opt;
-
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
 
@@ -381,22 +378,29 @@ pub struct PayloadAttributes {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
-
-    /// Transactions is a field for rollups: the transactions list is forced into the block
+    /// Optimism Payload Attributes
     #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    pub optimism_payload_attributes: OptimismPayloadAttributes,
+}
+
+/// Optimism Payload Attributes
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(feature = "optimism")]
+pub struct OptimismPayloadAttributes {
+    /// Transactions is a field for rollups: the transactions list is forced into the block
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transactions: Option<Vec<Bytes>>,
     /// If true, the no transactions are taken out of the tx-pool, only transactions from the above
     /// Transactions list will be included.
-    #[cfg(feature = "optimism")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_tx_pool: Option<bool>,
     /// If set, this sets the exact gas limit the block produced with.
-    #[cfg(feature = "optimism")]
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "u64_hex_opt::deserialize"
+        deserialize_with = "crate::serde_helpers::u64_hex::u64_hex_opt::deserialize"
     )]
     pub gas_limit: Option<u64>,
 }
@@ -414,15 +418,10 @@ struct BeaconAPIPayloadAttributes {
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_beacon_block_root: Option<B256>,
     #[cfg(feature = "optimism")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    transactions: Option<Vec<Bytes>>,
-    #[cfg(feature = "optimism")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    no_tx_pool: Option<bool>,
-    #[cfg(feature = "optimism")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    gas_limit: Option<u64>,
+    #[serde(flatten)]
+    optimism_payload_attributes: OptimismPayloadAttributes,
 }
+
 /// A helper module for serializing and deserializing the payload attributes for the beacon API.
 ///
 /// The beacon API encoded object has equivalent fields to the [PayloadAttributes] with two
@@ -448,11 +447,7 @@ pub mod beacon_api_payload_attributes {
             withdrawals: payload_attributes.withdrawals.clone(),
             parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
             #[cfg(feature = "optimism")]
-            transactions: payload_attributes.transactions.clone(),
-            #[cfg(feature = "optimism")]
-            no_tx_pool: payload_attributes.no_tx_pool,
-            #[cfg(feature = "optimism")]
-            gas_limit: payload_attributes.gas_limit,
+            optimism_payload_attributes: payload_attributes.optimism_payload_attributes.clone(),
         };
         beacon_api_payload_attributes.serialize(serializer)
     }
@@ -470,11 +465,7 @@ pub mod beacon_api_payload_attributes {
             withdrawals: beacon_api_payload_attributes.withdrawals,
             parent_beacon_block_root: beacon_api_payload_attributes.parent_beacon_block_root,
             #[cfg(feature = "optimism")]
-            gas_limit: beacon_api_payload_attributes.gas_limit,
-            #[cfg(feature = "optimism")]
-            no_tx_pool: beacon_api_payload_attributes.no_tx_pool,
-            #[cfg(feature = "optimism")]
-            transactions: beacon_api_payload_attributes.transactions,
+            optimism_payload_attributes: beacon_api_payload_attributes.optimism_payload_attributes,
         })
     }
 }
