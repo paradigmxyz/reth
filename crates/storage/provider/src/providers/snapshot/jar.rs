@@ -1,17 +1,19 @@
 use super::LoadedJarRef;
 use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
 use reth_db::{
+    snapshot::{
+        SnapshotCursor, HEADER_COLUMNS, S_HEADER, S_HEADER_HASH, S_HEADER_TD,
+        S_HEADER_TD_WITH_HASH, S_HEADER_WITH_HASH,
+    },
     table::{Decompress, Table},
-    HeaderTD,
+    CanonicalHeaders, HeaderTD,
 };
 use reth_interfaces::{provider::ProviderError, RethResult};
-use reth_nippy_jar::NippyJarCursor;
 use reth_primitives::{
-    snapshot::SegmentHeader, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    B256, U256,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, SealedHeader,
+    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
-use std::ops::{Deref, RangeBounds};
+use std::ops::{Deref, Range, RangeBounds};
 
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
@@ -32,84 +34,93 @@ impl<'a> From<LoadedJarRef<'a>> for SnapshotJarProvider<'a> {
 
 impl<'a> SnapshotJarProvider<'a> {
     /// Provides a cursor for more granular data access.
-    pub fn cursor<'b>(&'b self) -> RethResult<NippyJarCursor<'a, SegmentHeader>>
+    pub fn cursor<'b>(&'b self) -> RethResult<SnapshotCursor<'a>>
     where
         'b: 'a,
     {
-        Ok(NippyJarCursor::with_handle(self.value(), self.mmap_handle())?)
+        SnapshotCursor::new(self.value(), self.mmap_handle())
     }
 }
 
 impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
-        // WIP
-        let mut cursor = self.cursor()?;
-
-        let header = Header::decompress(
-            cursor.row_by_key_with_cols::<0b01, 2>(&block_hash.0).unwrap().unwrap()[0],
-        )
-        .unwrap();
-
-        if &header.hash_slow() == block_hash {
-            return Ok(Some(header))
-        } else {
-            // check next snapshot
-        }
-        Ok(None)
+        Ok(self
+            .cursor()?
+            .get_two::<Header, <CanonicalHeaders as Table>::Value, S_HEADER_WITH_HASH, HEADER_COLUMNS>(block_hash.into())?
+            .filter(|(_, hash)| hash == block_hash)
+            .map(|(header, _)| header))
     }
 
     fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
-        Header::decompress(
-            self.cursor()?
-                .row_by_number_with_cols::<0b01, 2>(
-                    (num - self.user_header().block_start()) as usize,
-                )?
-                .ok_or(ProviderError::HeaderNotFound(num.into()))?[0],
-        )
-        .map(Some)
-        .map_err(Into::into)
+        self.cursor()?.get_one::<Header, S_HEADER, HEADER_COLUMNS>(num.into())
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
-        // WIP
-        let mut cursor = NippyJarCursor::with_handle(self.value(), self.mmap_handle())?;
+        Ok(self
+            .cursor()?
+            .get_two::<<HeaderTD as Table>::Value, <CanonicalHeaders as Table>::Value, S_HEADER_TD_WITH_HASH, HEADER_COLUMNS>(
+                block_hash.into(),
+            )?
+            .filter(|(_, hash)| hash == block_hash)
+            .map(|(td, _)| td.into()))
+    }
 
-        let row = cursor.row_by_key_with_cols::<0b11, 2>(&block_hash.0).unwrap().unwrap();
+    fn header_td_by_number(&self, num: BlockNumber) -> RethResult<Option<U256>> {
+        Ok(self
+            .cursor()?
+            .get_one::<<HeaderTD as Table>::Value, S_HEADER_TD, HEADER_COLUMNS>(num.into())?
+            .map(Into::into))
+    }
 
-        let header = Header::decompress(row[0]).unwrap();
-        let td = <HeaderTD as Table>::Value::decompress(row[1]).unwrap();
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+        let range = to_range(range);
 
-        if &header.hash_slow() == block_hash {
-            return Ok(Some(td.0))
-        } else {
-            // check next snapshot
+        let mut cursor = self.cursor()?;
+        let mut headers = Vec::with_capacity((range.end - range.start) as usize);
+
+        for num in range.start..range.end {
+            match cursor.get_one::<Header, S_HEADER, HEADER_COLUMNS>(num.into())? {
+                Some(header) => headers.push(header),
+                None => return Ok(headers),
+            }
         }
-        Ok(None)
-    }
 
-    fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
-        unimplemented!();
-    }
-
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
-        unimplemented!();
+        Ok(headers)
     }
 
     fn sealed_headers_range(
         &self,
-        _range: impl RangeBounds<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> RethResult<Vec<SealedHeader>> {
-        unimplemented!();
+        let range = to_range(range);
+
+        let mut cursor = self.cursor()?;
+        let mut headers = Vec::with_capacity((range.end - range.start) as usize);
+
+        for number in range.start..range.end {
+            match cursor
+                .get_two::<Header, <CanonicalHeaders as Table>::Value, S_HEADER_WITH_HASH, HEADER_COLUMNS>(number.into())?
+            {
+                Some((header, hash)) => headers.push(header.seal(hash)),
+                None => return Ok(headers),
+            }
+        }
+        Ok(headers)
     }
 
-    fn sealed_header(&self, _number: BlockNumber) -> RethResult<Option<SealedHeader>> {
-        unimplemented!();
+    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        Ok(self
+            .cursor()?
+            .get_two::<Header, <CanonicalHeaders as Table>::Value, S_HEADER_WITH_HASH, HEADER_COLUMNS>(number.into())?
+            .map(|(header, hash)| header.seal(hash)))
     }
 }
 
 impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
-    fn block_hash(&self, _number: u64) -> RethResult<Option<B256>> {
-        todo!()
+    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
+        self.cursor()?.get_one::<<CanonicalHeaders as Table>::Value, S_HEADER_HASH, HEADER_COLUMNS>(
+            number.into(),
+        )
     }
 
     fn canonical_hashes_range(
@@ -148,7 +159,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
         TransactionSignedNoHash::decompress(
             self.cursor()?
                 .row_by_number_with_cols::<0b1, 1>((num - self.user_header().tx_start()) as usize)?
-                .ok_or(ProviderError::TransactionNotFound(num.into()))?[0],
+                .ok_or_else(|| ProviderError::TransactionNotFound(num.into()))?[0],
         )
         .map(Into::into)
         .map(Some)
@@ -219,4 +230,20 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     fn transaction_sender(&self, _id: TxNumber) -> RethResult<Option<Address>> {
         todo!()
     }
+}
+
+fn to_range<R: RangeBounds<u64>>(bounds: R) -> Range<u64> {
+    let start = match bounds.start_bound() {
+        std::ops::Bound::Included(&v) => v,
+        std::ops::Bound::Excluded(&v) => v + 1,
+        std::ops::Bound::Unbounded => 0,
+    };
+
+    let end = match bounds.end_bound() {
+        std::ops::Bound::Included(&v) => v + 1,
+        std::ops::Bound::Excluded(&v) => v,
+        std::ops::Bound::Unbounded => u64::MAX,
+    };
+
+    start..end
 }

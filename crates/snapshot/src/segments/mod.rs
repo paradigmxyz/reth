@@ -62,7 +62,7 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     let mut nippy_jar = NippyJar::new(
         COLUMNS,
         &segment.filename_with_configuration(filters, compression, &block_range),
-        SegmentHeader::new(block_range, tx_range),
+        SegmentHeader::new(block_range, tx_range, segment),
     );
 
     nippy_jar = match compression {

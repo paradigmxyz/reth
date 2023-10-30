@@ -46,7 +46,7 @@ mod test {
     use reth_db::{
         cursor::DbCursorRO,
         database::Database,
-        snapshot::create_snapshot_T1_T2,
+        snapshot::create_snapshot_T1_T2_T3,
         test_utils::create_test_rw_db,
         transaction::{DbTx, DbTxMut},
         CanonicalHeaders, DatabaseError, HeaderNumbers, HeaderTD, Headers, RawTable,
@@ -60,7 +60,8 @@ mod test {
         // Ranges
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
-        let segment_header = SegmentHeader::new(range.clone(), range.clone());
+        let segment_header =
+            SegmentHeader::new(range.clone(), range.clone(), SnapshotSegment::Headers);
 
         // Data sources
         let db = create_test_rw_db();
@@ -95,7 +96,7 @@ mod test {
             let with_compression = true;
             let with_filter = true;
 
-            let mut nippy_jar = NippyJar::new(2, snap_file.path(), segment_header);
+            let mut nippy_jar = NippyJar::new(3, snap_file.path(), segment_header);
 
             if with_compression {
                 nippy_jar = nippy_jar.with_zstd(false, 0);
@@ -118,14 +119,14 @@ mod test {
                 .unwrap()
                 .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into()));
 
-            create_snapshot_T1_T2::<Headers, HeaderTD, BlockNumber, SegmentHeader>(
-                &tx,
-                range,
-                None,
-                none_vec,
-                Some(hashes),
-                row_count as usize,
-                &mut nippy_jar,
+            create_snapshot_T1_T2_T3::<
+                Headers,
+                HeaderTD,
+                CanonicalHeaders,
+                BlockNumber,
+                SegmentHeader,
+            >(
+                &tx, range, None, none_vec, Some(hashes), row_count as usize, &mut nippy_jar
             )
             .unwrap();
         }
