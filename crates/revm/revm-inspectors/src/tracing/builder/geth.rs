@@ -2,6 +2,7 @@
 
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
+    utils::load_account_code,
     TracingInspectorConfig,
 };
 use reth_primitives::{Address, Bytes, B256, U256};
@@ -9,10 +10,7 @@ use reth_rpc_types::trace::geth::{
     AccountChangeKind, AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode,
     GethDefaultTracingOptions, PreStateConfig, PreStateFrame, PreStateMode, StructLog,
 };
-use revm::{
-    db::DatabaseRef,
-    primitives::{AccountInfo, ResultAndState, KECCAK_EMPTY},
-};
+use revm::{db::DatabaseRef, primitives::ResultAndState};
 use std::collections::{btree_map::Entry, BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces
@@ -185,25 +183,6 @@ impl GethTraceBuilder {
         prestate_config: PreStateConfig,
         db: DB,
     ) -> Result<PreStateFrame, DB::Error> {
-        // loads the code from the account or the database
-        // Geth always includes the contract code in the prestate. However,
-        // the code hash will be KECCAK_EMPTY if the account is an EOA. Therefore
-        // we need to filter it out.
-        let load_account_code = |db_acc: &AccountInfo| {
-            db_acc
-                .code
-                .as_ref()
-                .map(|code| code.original_bytes())
-                .or_else(|| {
-                    if db_acc.code_hash == KECCAK_EMPTY {
-                        None
-                    } else {
-                        db.code_by_hash_ref(db_acc.code_hash).ok().map(|code| code.original_bytes())
-                    }
-                })
-                .map(Into::into)
-        };
-
         let account_diffs = state.into_iter().map(|(addr, acc)| (*addr, acc));
 
         if prestate_config.is_default_mode() {
@@ -215,7 +194,7 @@ impl GethTraceBuilder {
                 let acc_state = match prestate.0.entry(addr) {
                     Entry::Vacant(entry) => {
                         let db_acc = db.basic_ref(addr)?.unwrap_or_default();
-                        let code = load_account_code(&db_acc);
+                        let code = load_account_code(&db, &db_acc);
                         let acc_state =
                             AccountState::from_account_info(db_acc.nonce, db_acc.balance, code);
                         entry.insert(acc_state)
@@ -240,7 +219,7 @@ impl GethTraceBuilder {
                 let acc_state = match prestate.0.entry(addr) {
                     Entry::Vacant(entry) => {
                         let db_acc = db.basic_ref(addr)?.unwrap_or_default();
-                        let code = load_account_code(&db_acc);
+                        let code = load_account_code(&db, &db_acc);
                         let acc_state =
                             AccountState::from_account_info(db_acc.nonce, db_acc.balance, code);
                         entry.insert(acc_state)
@@ -272,7 +251,7 @@ impl GethTraceBuilder {
             for (addr, changed_acc) in account_diffs {
                 let db_acc = db.basic_ref(addr)?.unwrap_or_default();
 
-                let pre_code = load_account_code(&db_acc);
+                let pre_code = load_account_code(&db, &db_acc);
 
                 let mut pre_state =
                     AccountState::from_account_info(db_acc.nonce, db_acc.balance, pre_code);
