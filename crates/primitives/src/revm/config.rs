@@ -134,7 +134,7 @@ mod tests {
         {
             #[inline(always)]
             fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-                let cs = ChainSpecBuilder::mainnet().optimism_activated();
+                let cs = ChainSpecBuilder::mainnet().chain(crate::Chain::Id(10));
                 f(cs).build()
             }
 
