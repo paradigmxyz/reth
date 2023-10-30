@@ -85,8 +85,8 @@ pub struct SegmentHeader {
     block_range: RangeInclusive<BlockNumber>,
     /// Transaction range of the snapshot segment
     tx_range: RangeInclusive<TxNumber>,
-    /// Whether this segment rows are block based
-    block_based: bool,
+    /// Segment type
+    segment: SnapshotSegment,
 }
 
 impl SegmentHeader {
@@ -94,9 +94,9 @@ impl SegmentHeader {
     pub fn new(
         block_range: RangeInclusive<BlockNumber>,
         tx_range: RangeInclusive<TxNumber>,
-        block_based: bool,
+        segment: SnapshotSegment,
     ) -> Self {
-        Self { block_range, tx_range, block_based }
+        Self { block_range, tx_range, segment }
     }
 
     /// Returns the first block number of the segment.
@@ -109,11 +109,11 @@ impl SegmentHeader {
         *self.tx_range.start()
     }
 
-    /// Returns the row offset.
+    /// Returns the row offset which depends on whether the segment is block or transaction based.
     pub fn start(&self) -> u64 {
-        if self.block_based {
-            return self.block_start()
+        match self.segment {
+            SnapshotSegment::Headers => self.block_start(),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => self.tx_start(),
         }
-        self.tx_start()
     }
 }
