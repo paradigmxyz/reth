@@ -58,8 +58,14 @@ where
         })
     }
 
+    /// Returns a reference to the related [`NippyJar`]
     pub fn jar(&self) -> &NippyJar<H> {
         self.jar
+    }
+
+    /// Returns current row index of the cursor
+    pub fn row_index(&self) -> u64 {
+        self.row
     }
 
     /// Resets cursor to the beginning.
