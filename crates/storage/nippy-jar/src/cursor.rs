@@ -58,6 +58,10 @@ where
         })
     }
 
+    pub fn jar(&self) -> &NippyJar<H> {
+        self.jar
+    }
+
     /// Resets cursor to the beginning.
     pub fn reset(&mut self) {
         self.row = 0;
