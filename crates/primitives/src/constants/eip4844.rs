@@ -1,4 +1,6 @@
 //! [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) protocol constants and utils for shard Blob Transactions.
+#[cfg(feature = "c-kzg")]
+pub use trusted_setup::*;
 
 /// Size a single field element in bytes.
 pub const FIELD_ELEMENT_BYTES: u64 = 32;
@@ -82,6 +84,3 @@ mod trusted_setup {
         }
     }
 }
-
-#[cfg(feature = "c-kzg")]
-pub use trusted_setup::*;
