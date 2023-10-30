@@ -554,6 +554,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         self.ext.on_node_started(&components)?;
 
+        // On startup, set the finalized, safe, and unsafe head block hashes to prevent
+        // the rollup client from walking back from genesis if `enable_genesis_walkback`
+        // is false. Effectively, this will cause the rollup client to start syncing from
+        // the current tip in the DB.
         #[cfg(feature = "optimism")]
         if self.chain.optimism && !self.rollup.enable_genesis_walkback {
             let client = _rpc_server_handles.auth.http_client();
