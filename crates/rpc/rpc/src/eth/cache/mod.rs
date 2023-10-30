@@ -1,6 +1,5 @@
 //! Async caching support for eth RPC
 
-use alloy_primitives::BlockNumber;
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{Block, Receipt, SealedBlock, TransactionSigned, B256};
@@ -484,6 +483,7 @@ where
 
             // also cache all receipts of the blocks
             let mut receipts = Vec::with_capacity(blocks.len());
+
             for block in &blocks {
                 let block_receipts = BlockReceipts {
                     block_hash: block.hash,

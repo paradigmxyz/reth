@@ -1,5 +1,3 @@
-//! Provides everything related to `eth_` namespace
-//!
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
@@ -11,27 +9,35 @@ use crate::eth::{
     signer::EthSigner,
 };
 use async_trait::async_trait;
-use derive_more::{Deref, DerefMut};
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, Header, SealedHeader, B256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, Header, SealedBlock, SealedHeader, B256, U256,
+    U64,
 };
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, EvmEnvProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnv};
-use schnellru::{ByLength, LruMap};
+use serde::{Deserialize, Serialize};
 use std::{
-    fmt::{self, Debug, Formatter},
+    collections::BTreeMap,
+    fmt::Debug,
     future::Future,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{oneshot, Mutex};
+
+use futures::{future::Either, Stream, StreamExt};
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedSender},
+    oneshot, Mutex,
+};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 mod block;
 mod call;
@@ -97,6 +103,7 @@ where
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
         blocking_task_pool: BlockingTaskPool,
+        fee_history_cache: FeeHistoryCache,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -107,6 +114,7 @@ where
             gas_cap.into().into(),
             Box::<TokioTaskExecutor>::default(),
             blocking_task_pool,
+            fee_history_cache,
         )
     }
 
@@ -121,6 +129,7 @@ where
         gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
+        fee_history_cache: FeeHistoryCache,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -142,9 +151,12 @@ where
             task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
-            fee_history_cache: Mutex::new(FeeHistoryLruCache(LruMap::new(ByLength::new(1024)))),
+            fee_history_cache,
         };
-        Self { inner: Arc::new(inner) }
+
+        let eth_api = Self { inner: Arc::new(inner) };
+
+        eth_api
     }
 
     /// Executes the future on a new blocking task.
@@ -198,7 +210,7 @@ where
     }
 
     /// Returns fee history cache
-    pub fn fee_history_cache(&self) -> &Mutex<FeeHistoryLruCache> {
+    pub fn fee_history_cache(&self) -> &FeeHistoryCache {
         &self.inner.fee_history_cache
     }
 }
@@ -450,7 +462,7 @@ struct EthApiInner<Provider, Pool, Network> {
     /// A pool dedicated to blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
-    fee_history_cache: Mutex<FeeHistoryLruCache>,
+    fee_history_cache: FeeHistoryCache,
 }
 
 /// The type that contains fees data for associated block in cache
@@ -464,8 +476,6 @@ pub struct BlockFees {
     pub gas_used: u64,
     /// Block data on gas_limit
     pub gas_limit: u64,
-    /// parent block hash
-    pub parent_hash: B256,
 }
 
 impl BlockFees {
@@ -475,20 +485,67 @@ impl BlockFees {
             gas_used_ratio: header.gas_used as f64 / header.gas_limit as f64,
             gas_used: header.gas_used,
             gas_limit: header.gas_limit,
-            parent_hash: header.parent_hash,
         }
     }
 }
 
-/// Wrapper struct for LruMap
-#[derive(Deref, DerefMut)]
-pub struct FeeHistoryLruCache(LruMap<B256, BlockFees, ByLength>);
+/// Settings for the [EthStateCache](crate::eth::cache::EthStateCache).
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeeHistoryCacheConfig {
+    /// Max number of blocks in cache.
+    ///
+    /// Default is 1024.
+    pub max_blocks: u32,
+}
 
-impl Debug for FeeHistoryLruCache {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FeeHistoryLruCache")
-            .field("cache_length", &self.len())
-            .field("cache_memory_usage", &self.memory_usage())
-            .finish()
+impl Default for FeeHistoryCacheConfig {
+    fn default() -> Self {
+        FeeHistoryCacheConfig { max_blocks: 1024 }
+    }
+}
+
+/// Wrapper struct for BTreeMap
+pub(crate) struct FeeHistoryCache {
+    config: FeeHistoryCacheConfig,
+    entries: tokio::sync::RwLock<BTreeMap<u64, SealedHeader>>,
+}
+
+impl FeeHistoryCache {
+    pub fn new(config: FeeHistoryCacheConfig) -> Self {
+        let mut entries = tokio::sync::RwLock::new(BTreeMap::new());
+        let cache = FeeHistoryCache { config, entries };
+
+        cache
+    }
+
+    pub async fn on_new_block(&self, block: &SealedBlock) {
+        let mut entries = self.entries.write().await;
+        entries.insert(block.number, block.header.clone());
+        while entries.len() > self.config.max_blocks as usize {
+            entries.pop_first();
+        }
+    }
+}
+
+/// Awaits for new chain events and directly inserts them into the cache so they're available
+/// immediately before they need to be fetched from disk.
+pub(crate) async fn fee_history_cache_new_blocks_task<St>(
+    fee_history_cache: FeeHistoryCache,
+    mut events: St,
+) where
+    St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+{
+    while let Some(event) = events.next().await {
+        if let Some(committed) = event.committed() {
+            // we're only interested in new committed blocks
+            let (blocks, _) = committed.inner();
+
+            let blocks = blocks.iter().map(|(_, block)| block.block.clone()).collect::<Vec<_>>();
+
+            for block in blocks {
+                fee_history_cache.on_new_block(&block).await;
+            }
+        }
     }
 }

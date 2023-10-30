@@ -115,7 +115,9 @@ use reth_provider::{
 use reth_rpc::{
     eth::{
         cache::{cache_new_blocks_task, EthStateCache},
+        fee_history_cache_new_blocks_task,
         gas_oracle::GasPriceOracle,
+        FeeHistoryCache,
     },
     AdminApi, BlockingTaskGuard, BlockingTaskPool, DebugApi, EngineEthApi, EthApi, EthFilter,
     EthPubSub, EthSubscriptionIdProvider, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
@@ -1019,13 +1021,22 @@ where
             );
             let new_canonical_blocks = self.events.canonical_state_stream();
             let c = cache.clone();
+
+            let fee_history_cache = FeeHistoryCache::new(self.config.eth.fee_history_cache.clone());
+            let fhc = fee_history_cache.clone();
+
             self.executor.spawn_critical(
                 "cache canonical blocks task",
                 Box::pin(async move {
                     cache_new_blocks_task(c, new_canonical_blocks).await;
                 }),
             );
-
+            self.executor.spawn_critical(
+                "cache canonical blocks for fee history task",
+                Box::pin(async move {
+                    fee_history_cache_new_blocks_task(fhc, new_canonical_blocks).await;
+                }),
+            );
             let executor = Box::new(self.executor.clone());
             let blocking_task_pool =
                 BlockingTaskPool::build().expect("failed to build tracing pool");
