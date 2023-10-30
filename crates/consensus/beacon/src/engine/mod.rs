@@ -665,10 +665,14 @@ where
             Ok(outcome) => {
                 match outcome {
                     CanonicalOutcome::AlreadyCanonical { ref header } => {
-                        let mut optimism = false;
-                        #[cfg(feature = "optimism")]
-                        optimism = self.chain_spec().optimism;
-                        if cfg!(feature = "optimism") && optimism {
+                        let optimism = cfg_if::cfg_if! {
+                            if #[cfg(feautre = "optimism")] {
+                                self.chain_spec().optimism
+                            } else {
+                                false
+                            }
+                        };
+                        if optimism {
                             debug!(
                                 target: "consensus::engine",
                                 fcu_head_num=?header.number,
@@ -825,8 +829,8 @@ where
         //
         // This ensures that the finalized block is consistent with the head block, i.e. the
         // finalized block is an ancestor of the head block.
-        if !state.finalized_block_hash.is_zero() &&
-            !self.blockchain.is_canonical(state.finalized_block_hash)?
+        if !state.finalized_block_hash.is_zero()
+            && && !self.blockchain.is_canonical(state.finalized_block_hash)?
         {
             return Ok(Some(OnForkChoiceUpdated::invalid_state()));
         }
@@ -839,8 +843,8 @@ where
         //
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
-        if !state.safe_block_hash.is_zero() &&
-            !self.blockchain.is_canonical(state.safe_block_hash)?
+        if !state.safe_block_hash.is_zero()
+            && && !self.blockchain.is_canonical(state.safe_block_hash)?
         {
             return Ok(Some(OnForkChoiceUpdated::invalid_state()));
         }
@@ -991,8 +995,8 @@ where
         let target = if self.forkchoice_state_tracker.is_empty() {
             // find the appropriate target to sync to, if we don't have the safe block hash then we
             // start syncing to the safe block via pipeline first
-            let target = if !state.safe_block_hash.is_zero() &&
-                self.blockchain.block_number(state.safe_block_hash).ok().flatten().is_none()
+            let target = if !state.safe_block_hash.is_zero()
+                && && self.blockchain.block_number(state.safe_block_hash).ok().flatten().is_none()
             {
                 state.safe_block_hash
             } else {
@@ -1184,8 +1188,8 @@ where
         ) {
             Ok(block) => {
                 // make sure there are no blob transactions in the payload if it is pre-cancun
-                if !self.chain_spec().is_cancun_active_at_timestamp(block.timestamp) &&
-                    block.has_blob_transactions()
+                if !self.chain_spec().is_cancun_active_at_timestamp(block.timestamp)
+                    && && block.has_blob_transactions()
                 {
                     Err(PayloadError::PreCancunBlockWithBlobTransactions)
                 } else {
@@ -1334,8 +1338,8 @@ where
                 self.listeners.notify(BeaconConsensusEngineEvent::ForkBlockAdded(block));
                 PayloadStatusEnum::Accepted
             }
-            InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
-            InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
+            InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. })
+            | | InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                 // check if the block's parent is already marked as invalid
                 if let Some(status) =
                     self.check_invalid_ancestor_with_head(block.parent_hash, block.hash)
