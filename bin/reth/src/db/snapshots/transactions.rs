@@ -3,7 +3,7 @@ use super::{
     Command, Compression, PerfectHashingFunction,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{database::Database, open_db_read_only, table::Decompress};
+use reth_db::{database::Database, open_db_read_only, snapshot::TransactionMask};
 use reth_interfaces::db::LogLevel;
 use reth_primitives::{
     snapshot::{Filters, InclusionFilter},
@@ -81,17 +81,10 @@ impl Command {
                 compression,
                 || {
                     for num in row_indexes.iter() {
-                        TransactionSignedNoHash::decompress(
-                            cursor
-                                .row_by_number_with_cols::<0b1, 1>(
-                                    (num - tx_range.start()) as usize,
-                                )?
-                                .ok_or(ProviderError::TransactionNotFound((*num).into()))?[0],
-                        )?
-                        .with_hash();
-                        // TODO: replace with below when eventually SnapshotProvider re-uses cursor
-                        // provider.transaction_by_id(num as
-                        // u64)?.ok_or(ProviderError::TransactionNotFound((*num).into()))?;
+                        cursor
+                            .get_one::<TransactionMask<TransactionSignedNoHash>>((*num).into())?
+                            .ok_or(ProviderError::TransactionNotFound((*num).into()))?
+                            .with_hash();
                     }
                     Ok(())
                 },
@@ -119,12 +112,10 @@ impl Command {
                 filters,
                 compression,
                 || {
-                    Ok(TransactionSignedNoHash::decompress(
-                        cursor
-                            .row_by_number_with_cols::<0b1, 1>((num - tx_range.start()) as usize)?
-                            .ok_or(ProviderError::TransactionNotFound((num as u64).into()))?[0],
-                    )?
-                    .with_hash())
+                    Ok(cursor
+                        .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
+                        .ok_or(ProviderError::TransactionNotFound(num.into()))?
+                        .with_hash())
                 },
                 |provider| {
                     Ok(provider
@@ -150,14 +141,12 @@ impl Command {
                 filters,
                 compression,
                 || {
-                    let transaction = TransactionSignedNoHash::decompress(
-                        cursor
-                            .row_by_key_with_cols::<0b1, 1>(transaction_hash.as_slice())?
-                            .ok_or(ProviderError::TransactionNotFound(transaction_hash.into()))?[0],
-                    )?;
-
-                    // Might be a false positive, so in the real world we have to validate it
-                    Ok(transaction.with_hash())
+                    Ok(cursor
+                        .get_one::<TransactionMask<TransactionSignedNoHash>>(
+                            (&transaction_hash).into(),
+                        )?
+                        .ok_or(ProviderError::TransactionNotFound(transaction_hash.into()))?
+                        .with_hash())
                 },
                 |provider| {
                     Ok(provider

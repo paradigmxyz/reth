@@ -3,7 +3,7 @@ use super::{
     Command, Compression, PerfectHashingFunction,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{database::Database, open_db_read_only, table::Decompress};
+use reth_db::{database::Database, open_db_read_only, snapshot::ReceiptMask};
 use reth_interfaces::db::LogLevel;
 use reth_primitives::{
     snapshot::{Filters, InclusionFilter},
@@ -81,16 +81,9 @@ impl Command {
                 compression,
                 || {
                     for num in row_indexes.iter() {
-                        Receipt::decompress(
-                            cursor
-                                .row_by_number_with_cols::<0b1, 1>(
-                                    (num - tx_range.start()) as usize,
-                                )?
-                                .ok_or(ProviderError::ReceiptNotFound((*num).into()))?[0],
-                        )?;
-                        // TODO: replace with below when eventually SnapshotProvider re-uses cursor
-                        // provider.receipt(num as
-                        // u64)?.ok_or(ProviderError::ReceiptNotFound((*num).into()))?;
+                        cursor
+                            .get_one::<ReceiptMask<Receipt>>((*num).into())?
+                            .ok_or(ProviderError::ReceiptNotFound((*num).into()))?;
                     }
                     Ok(())
                 },
@@ -118,11 +111,9 @@ impl Command {
                 filters,
                 compression,
                 || {
-                    Ok(Receipt::decompress(
-                        cursor
-                            .row_by_number_with_cols::<0b1, 1>((num - tx_range.start()) as usize)?
-                            .ok_or(ProviderError::ReceiptNotFound((num as u64).into()))?[0],
-                    )?)
+                    Ok(cursor
+                        .get_one::<ReceiptMask<Receipt>>(num.into())?
+                        .ok_or(ProviderError::ReceiptNotFound(num.into()))?)
                 },
                 |provider| {
                     Ok(provider
@@ -148,13 +139,9 @@ impl Command {
                 filters,
                 compression,
                 || {
-                    let receipt = Receipt::decompress(
-                        cursor
-                            .row_by_key_with_cols::<0b1, 1>(tx_hash.as_slice())?
-                            .ok_or(ProviderError::ReceiptNotFound(tx_hash.into()))?[0],
-                    )?;
-
-                    Ok(receipt)
+                    Ok(cursor
+                        .get_one::<ReceiptMask<Receipt>>((&tx_hash).into())?
+                        .ok_or(ProviderError::ReceiptNotFound(tx_hash.into()))?)
                 },
                 |provider| {
                     Ok(provider

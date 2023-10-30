@@ -903,14 +903,13 @@ mod tests {
 
                 // Imagine `Blocks` snapshot file has two columns: `Block | StoredWithdrawals`
                 const BLOCKS_FULL_MASK: usize = 0b11;
-                const BLOCKS_COLUMNS: usize = 2;
 
                 // Read both columns
                 for (row_num, (v0, v1)) in &data {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_key_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols(v0, BLOCKS_FULL_MASK)
                         .unwrap()
                         .unwrap()
                         .iter()
@@ -920,7 +919,7 @@ mod tests {
 
                     // Simulates `by_number` queries
                     let row_by_num = cursor
-                        .row_by_number_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .row_by_number_with_cols(*row_num, BLOCKS_FULL_MASK)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_value, row_by_num);
@@ -932,7 +931,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_key_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols(v0, BLOCKS_BLOCK_MASK)
                         .unwrap()
                         .unwrap()
                         .iter()
@@ -943,7 +942,7 @@ mod tests {
 
                     // Simulates `by_number` queries
                     let row_by_num = cursor
-                        .row_by_number_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .row_by_number_with_cols(*row_num, BLOCKS_BLOCK_MASK)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_num.len(), 1);
@@ -956,7 +955,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_key_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols(v0, BLOCKS_WITHDRAWAL_MASK)
                         .unwrap()
                         .unwrap()
                         .iter()
@@ -967,7 +966,7 @@ mod tests {
 
                     // Simulates `by_number` queries
                     let row_by_num = cursor
-                        .row_by_number_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .row_by_number_with_cols(*row_num, BLOCKS_WITHDRAWAL_MASK)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_num.len(), 1);
@@ -980,14 +979,14 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     assert!(cursor
-                        .row_by_key_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols(v0, BLOCKS_EMPTY_MASK)
                         .unwrap()
                         .unwrap()
                         .is_empty());
 
                     // Simulates `by_number` queries
                     assert!(cursor
-                        .row_by_number_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .row_by_number_with_cols(*row_num, BLOCKS_EMPTY_MASK)
                         .unwrap()
                         .unwrap()
                         .is_empty());
