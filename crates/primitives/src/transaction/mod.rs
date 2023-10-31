@@ -1,6 +1,6 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
-    keccak256, Address, Bytes, TxHash, B256,
+    keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256,
 };
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -8,10 +8,11 @@ use alloy_rlp::{
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 use std::mem;
+use tokio::sync::mpsc;
 
 pub use access_list::{AccessList, AccessListItem};
 pub use eip1559::TxEip1559;
@@ -871,7 +872,49 @@ impl TransactionSigned {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
         } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+            let mut recovered_signers: Vec<Address> = Vec::new();
+
+            let chunks = rayon::current_num_threads();
+            let chunk_size: usize = num_txes / chunks;
+            let chunk_size = chunk_size.max(16);
+
+            let mut iter = txes.into_iter();
+            let vectors: Vec<Vec<&TransactionSigned>> =
+                (0..chunks).map(|_| iter.by_ref().take(chunk_size).collect()).collect();
+
+            let mut channels = Vec::new();
+
+            rayon::scope(|s| {
+                for chunk in vectors {
+                    let (recovered_senders_tx, recovered_senders_rx) = mpsc::unbounded_channel();
+                    channels.push(recovered_senders_rx);
+
+                    // Spawn the sender recovery task onto the global rayon pool
+                    // This task will send the results through the channel after it recovered the
+                    // senders.
+                    s.spawn(move |_| {
+                        for tx in chunk {
+                            let recovery_result = tx.recover_signer();
+                            let _ = recovered_senders_tx.send(recovery_result);
+                        }
+                    });
+                }
+            });
+
+            for mut channel in channels {
+                while let Some(recovered) = channel.blocking_recv() {
+                    match recovered {
+                        Some(signer) => {
+                            recovered_signers.push(signer);
+                        }
+                        None => {
+                            return None;
+                        }
+                    }
+                }
+            }
+
+            Some(recovered_signers)
         }
     }
 
@@ -1306,6 +1349,9 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
         self.clone()
     }
 }
+
+/// Either a transaction hash or number.
+pub type TxHashOrNumber = BlockHashOrNumber;
 
 #[cfg(test)]
 mod tests {

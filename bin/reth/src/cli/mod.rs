@@ -79,7 +79,8 @@ impl<Ext: RethCliExt> Cli<Ext> {
     /// Execute the configured cli command.
     pub fn run(mut self) -> eyre::Result<()> {
         // add network name to logs dir
-        self.logs.log_directory = self.logs.log_directory.join(self.chain.chain.to_string());
+        self.logs.log_file_directory =
+            self.logs.log_file_directory.join(self.chain.chain.to_string());
 
         let _guard = self.init_tracing()?;
 
@@ -105,13 +106,12 @@ impl<Ext: RethCliExt> Cli<Ext> {
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut layers =
             vec![reth_tracing::stdout(self.verbosity.directive(), &self.logs.color.to_string())];
-        let guard = self.logs.layer()?.map(|(layer, guard)| {
-            layers.push(layer);
-            guard
-        });
+
+        let (additional_layers, guard) = self.logs.layers()?;
+        layers.extend(additional_layers);
 
         reth_tracing::init(layers);
-        Ok(guard.flatten())
+        Ok(guard)
     }
 
     /// Configures the given node extension.
@@ -181,31 +181,34 @@ impl<Ext: RethCliExt> Commands<Ext> {
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
     /// The path to put log files in.
-    #[arg(
-        long = "log.directory",
-        value_name = "PATH",
-        global = true,
-        default_value_t,
-        conflicts_with = "journald"
-    )]
-    log_directory: PlatformPath<LogsDir>,
+    #[arg(long = "log.file.directory", value_name = "PATH", global = true, default_value_t)]
+    log_file_directory: PlatformPath<LogsDir>,
 
-    /// The maximum size (in MB) of log files.
-    #[arg(long = "log.max-size", value_name = "SIZE", global = true, default_value_t = 200)]
-    log_max_size: u64,
+    /// The maximum size (in MB) of one log file.
+    #[arg(long = "log.file.max-size", value_name = "SIZE", global = true, default_value_t = 200)]
+    log_file_max_size: u64,
 
     /// The maximum amount of log files that will be stored. If set to 0, background file logging
     /// is disabled.
-    #[arg(long = "log.max-files", value_name = "COUNT", global = true, default_value_t = 5)]
-    log_max_files: usize,
-
-    /// Log events to journald.
-    #[arg(long = "log.journald", global = true, conflicts_with = "log_directory")]
-    journald: bool,
+    #[arg(long = "log.file.max-files", value_name = "COUNT", global = true, default_value_t = 5)]
+    log_file_max_files: usize,
 
     /// The filter to use for logs written to the log file.
-    #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "error")]
-    filter: String,
+    #[arg(long = "log.file.filter", value_name = "FILTER", global = true, default_value = "debug")]
+    log_file_filter: String,
+
+    /// Write logs to journald.
+    #[arg(long = "log.journald", global = true)]
+    journald: bool,
+
+    /// The filter to use for logs written to journald.
+    #[arg(
+        long = "log.journald.filter",
+        value_name = "FILTER",
+        global = true,
+        default_value = "error"
+    )]
+    journald_filter: String,
 
     /// Sets whether or not the formatter emits ANSI terminal escape codes for colors and other
     /// text formatting.
@@ -222,28 +225,36 @@ pub struct Logs {
 const MB_TO_BYTES: u64 = 1024 * 1024;
 
 impl Logs {
-    /// Builds a tracing layer from the current log options.
-    pub fn layer<S>(&self) -> eyre::Result<Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>>
+    /// Builds tracing layers from the current log options.
+    pub fn layers<S>(&self) -> eyre::Result<(Vec<BoxedLayer<S>>, Option<FileWorkerGuard>)>
     where
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
     {
-        let filter = EnvFilter::builder().parse(&self.filter)?;
+        let mut layers = Vec::new();
 
         if self.journald {
-            Ok(Some((reth_tracing::journald(filter).expect("Could not connect to journald"), None)))
-        } else if self.log_max_files > 0 {
-            let (layer, guard) = reth_tracing::file(
-                filter,
-                &self.log_directory,
-                "reth.log",
-                self.log_max_size * MB_TO_BYTES,
-                self.log_max_files,
+            layers.push(
+                reth_tracing::journald(EnvFilter::builder().parse(&self.journald_filter)?)
+                    .expect("Could not connect to journald"),
             );
-            Ok(Some((layer, Some(guard))))
-        } else {
-            Ok(None)
         }
+
+        let file_guard = if self.log_file_max_files > 0 {
+            let (layer, guard) = reth_tracing::file(
+                EnvFilter::builder().parse(&self.log_file_filter)?,
+                &self.log_file_directory,
+                "reth.log",
+                self.log_file_max_size * MB_TO_BYTES,
+                self.log_file_max_files,
+            );
+            layers.push(layer);
+            Some(guard)
+        } else {
+            None
+        };
+
+        Ok((layers, file_guard))
     }
 }
 
@@ -342,13 +353,15 @@ mod tests {
     #[test]
     fn parse_logs_path() {
         let mut reth = Cli::<()>::try_parse_from(["reth", "node"]).unwrap();
-        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
-        let log_dir = reth.logs.log_directory;
+        reth.logs.log_file_directory =
+            reth.logs.log_file_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_file_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/mainnet"), "{:?}", log_dir);
 
         let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--chain", "sepolia"]).unwrap();
-        reth.logs.log_directory = reth.logs.log_directory.join(reth.chain.chain.to_string());
-        let log_dir = reth.logs.log_directory;
+        reth.logs.log_file_directory =
+            reth.logs.log_file_directory.join(reth.chain.chain.to_string());
+        let log_dir = reth.logs.log_file_directory;
         assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
     }
 

@@ -1,44 +1,22 @@
-use crate::{db::genesis_value_parser, utils::DbTool};
 use clap::Parser;
 use itertools::Itertools;
-use reth_db::open_db_read_only;
+use reth_db::{open_db_read_only, DatabaseEnvRO};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::{
-    compression::{DecoderDictionary, Decompressor},
-    NippyJar,
-};
 use reth_primitives::{
     snapshot::{Compression, InclusionFilter, PerfectHashingFunction},
     BlockNumber, ChainSpec, SnapshotSegment,
 };
-use reth_provider::providers::SnapshotProvider;
+use reth_provider::ProviderFactory;
 use std::{path::Path, sync::Arc};
 
 mod bench;
 mod headers;
+mod receipts;
+mod transactions;
 
 #[derive(Parser, Debug)]
 /// Arguments for the `reth db snapshot` command.
 pub struct Command {
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
-        value_parser = genesis_value_parser,
-        global = true,
-    )]
-    chain: Arc<ChainSpec>,
-
     /// Snapshot segments to generate.
     segments: Vec<SnapshotSegment>,
 
@@ -87,19 +65,33 @@ impl Command {
 
         {
             let db = open_db_read_only(db_path, None)?;
-            let tool = DbTool::new(&db, chain.clone())?;
+            let factory = ProviderFactory::new(db, chain.clone());
+            let provider = factory.provider()?;
 
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
                     match mode {
-                        SnapshotSegment::Headers => self.generate_headers_snapshot(
-                            &tool,
-                            *compression,
-                            InclusionFilter::Cuckoo,
-                            *phf,
-                        )?,
-                        SnapshotSegment::Transactions => todo!(),
-                        SnapshotSegment::Receipts => todo!(),
+                        SnapshotSegment::Headers => self
+                            .generate_headers_snapshot::<DatabaseEnvRO>(
+                                &provider,
+                                *compression,
+                                InclusionFilter::Cuckoo,
+                                *phf,
+                            )?,
+                        SnapshotSegment::Transactions => self
+                            .generate_transactions_snapshot::<DatabaseEnvRO>(
+                                &provider,
+                                *compression,
+                                InclusionFilter::Cuckoo,
+                                *phf,
+                            )?,
+                        SnapshotSegment::Receipts => self
+                            .generate_receipts_snapshot::<DatabaseEnvRO>(
+                                &provider,
+                                *compression,
+                                InclusionFilter::Cuckoo,
+                                *phf,
+                            )?,
                     }
                 }
             }
@@ -116,30 +108,26 @@ impl Command {
                         InclusionFilter::Cuckoo,
                         *phf,
                     )?,
-                    SnapshotSegment::Transactions => todo!(),
-                    SnapshotSegment::Receipts => todo!(),
+                    SnapshotSegment::Transactions => self.bench_transactions_snapshot(
+                        db_path,
+                        log_level,
+                        chain.clone(),
+                        *compression,
+                        InclusionFilter::Cuckoo,
+                        *phf,
+                    )?,
+                    SnapshotSegment::Receipts => self.bench_receipts_snapshot(
+                        db_path,
+                        log_level,
+                        chain.clone(),
+                        *compression,
+                        InclusionFilter::Cuckoo,
+                        *phf,
+                    )?,
                 }
             }
         }
 
         Ok(())
-    }
-
-    /// Returns a [`SnapshotProvider`] of the provided [`NippyJar`], alongside a list of
-    /// [`DecoderDictionary`] and [`Decompressor`] if necessary.
-    fn prepare_jar_provider<'a>(
-        &self,
-        jar: &'a mut NippyJar,
-        dictionaries: &'a mut Option<Vec<DecoderDictionary<'_>>>,
-    ) -> eyre::Result<(SnapshotProvider<'a>, Vec<Decompressor<'a>>)> {
-        let mut decompressors: Vec<Decompressor<'_>> = vec![];
-        if let Some(reth_nippy_jar::compression::Compressors::Zstd(zstd)) = jar.compressor_mut() {
-            if zstd.use_dict {
-                *dictionaries = zstd.generate_decompress_dictionaries();
-                decompressors = zstd.generate_decompressors(dictionaries.as_ref().expect("qed"))?;
-            }
-        }
-
-        Ok((SnapshotProvider { jar: &*jar, jar_start_block: self.from }, decompressors))
     }
 }

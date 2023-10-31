@@ -53,7 +53,7 @@ num-traits = "0.2.15"
 
 [dev-dependencies]
 # reth
-reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }

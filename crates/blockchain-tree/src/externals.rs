@@ -1,10 +1,10 @@
 //! Blockchain tree externals.
 
-use reth_db::database::Database;
-use reth_interfaces::consensus::Consensus;
-use reth_primitives::ChainSpec;
+use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
+use reth_interfaces::{consensus::Consensus, RethResult};
+use reth_primitives::{BlockHash, BlockNumber, ChainSpec};
 use reth_provider::ProviderFactory;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 /// A container for external components.
 ///
@@ -43,5 +43,21 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
     /// Return shareable database helper structure.
     pub fn database(&self) -> ProviderFactory<&DB> {
         ProviderFactory::new(&self.db, self.chain_spec.clone())
+    }
+
+    /// Fetches the latest canonical block hashes by walking backwards from the head.
+    ///
+    /// Returns the hashes sorted by increasing block numbers
+    pub(crate) fn fetch_latest_canonical_hashes(
+        &self,
+        num_hashes: usize,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        Ok(self
+            .db
+            .tx()?
+            .cursor_read::<tables::CanonicalHeaders>()?
+            .walk_back(None)?
+            .take(num_hashes)
+            .collect::<Result<BTreeMap<BlockNumber, BlockHash>, _>>()?)
     }
 }

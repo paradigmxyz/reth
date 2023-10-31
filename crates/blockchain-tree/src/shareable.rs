@@ -4,8 +4,8 @@ use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
-        error::InsertBlockError, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
+        error::InsertBlockError, BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer,
+        CanonicalOutcome, InsertPayloadOk,
     },
     RethResult,
 };
@@ -48,10 +48,11 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTreeEngine for ShareableBlockc
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
+        validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         trace!(target: "blockchain_tree", hash=?block.hash, number=block.number, parent_hash=?block.parent_hash, "Inserting block");
         let mut tree = self.tree.write();
-        let res = tree.insert_block(block);
+        let res = tree.insert_block(block, validation_kind);
         tree.update_chains_metrics();
         res
     }
