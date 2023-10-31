@@ -491,6 +491,8 @@ where
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
+        // On optimism, transactions are forwarded directly to the sequencer to be included in
+        // blocks that it builds.
         #[cfg(feature = "optimism")]
         self.forward_to_sequencer(&tx).await?;
 
