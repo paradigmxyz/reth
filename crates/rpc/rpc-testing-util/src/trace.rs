@@ -326,8 +326,8 @@ mod tests {
     async fn can_create_trace_call_many_stream() {
         let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
 
-        let call_request_1 = CallRequest { from: None, to: None, gas: None, ..Default::default() };
-        let call_request_2 = CallRequest { from: None, to: None, gas: None, ..Default::default() };
+        let call_request_1 = CallRequest::default();
+        let call_request_2 = CallRequest::default();
         let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
         let calls = vec![(call_request_1, trace_types.clone()), (call_request_2, trace_types)];
 
