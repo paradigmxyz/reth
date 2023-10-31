@@ -320,8 +320,7 @@ pub fn validate_header_regarding_parent(
 
     cfg_if::cfg_if! {
         if #[cfg(feature = "optimism")] {
-            // On Optimism, the gas limit can adjust instantly, so we skip this check if the optimism
-            // flag is enabled in the chainspec.
+            // On Optimism, the gas limit can adjust instantly, so we skip this check
         } else {
             check_gas_limit(parent, child, chain_spec)?;
         }
