@@ -1,5 +1,6 @@
 use crate::{
     bundle_state::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
+    providers::SnapshotProvider,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
@@ -96,12 +97,18 @@ pub struct DatabaseProvider<TX> {
     tx: TX,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
+    /// Snapshot provider
+    snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
-    pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { tx, chain_spec }
+    pub fn new_rw(
+        tx: TX,
+        chain_spec: Arc<ChainSpec>,
+        snapshot_provider: Option<Arc<SnapshotProvider>>,
+    ) -> Self {
+        Self { tx, chain_spec, snapshot_provider }
     }
 }
 
@@ -155,8 +162,12 @@ where
 
 impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
-    pub fn new(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { tx, chain_spec }
+    pub fn new(
+        tx: TX,
+        chain_spec: Arc<ChainSpec>,
+        snapshot_provider: Option<Arc<SnapshotProvider>>,
+    ) -> Self {
+        Self { tx, chain_spec, snapshot_provider }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
