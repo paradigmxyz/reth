@@ -19,7 +19,7 @@ use reth_revm::{
     database::StateProviderDatabase,
     db::{
         states::{bundle_state::BundleRetention, CacheAccount},
-        AccountRevert, AccountStatus, State,
+        AccountRevert, State,
     },
     parallel::{
         executor::{DatabaseRefBox, ParallelExecutor},
@@ -113,6 +113,7 @@ impl Command {
             eyre::bail!("Block range end is higher than the node block height")
         }
 
+        let mut account_status_mismatches = 0;
         let mut queues = BTreeMap::<BlockNumber, BlockQueue>::default();
         for block_number in self.from..=self.to {
             debug!(target: "reth::cli", block_number, "Executing transactions");
@@ -150,13 +151,18 @@ impl Command {
             if self.validate {
                 tracing::debug!(target: "reth::cli", block_number = block.number, ?queue, "Validating parallel execution");
                 state.merge_transitions(BundleRetention::Reverts);
-                self.validate(sp_database, &block, td, senders, queue.clone(), state).await?;
+                account_status_mismatches +=
+                    self.validate(sp_database, &block, td, senders, queue.clone(), state).await?;
                 tracing::debug!(target: "reth::cli", block_number = block.number, ?queue, "Successfully validated parallel execution");
             }
 
             if queue.len() != block.body.len() {
                 queues.insert(block_number, queue);
             }
+        }
+
+        if self.validate && account_status_mismatches > 0 {
+            tracing::warn!(target: "reth::cli", count = account_status_mismatches, "Account status mismatches were observed");
         }
 
         let out_path = self.out.join(format!("parallel-{}-{}.json", self.from, self.to));
@@ -166,6 +172,7 @@ impl Command {
         Ok(())
     }
 
+    /// Returns the number of times the account status was mismatched.
     async fn validate(
         &self,
         database: DatabaseRefBox<'_, RethError>,
@@ -174,7 +181,9 @@ impl Command {
         senders: Vec<Address>,
         queue: BlockQueue,
         mut expected: State<Box<dyn reth_revm::Database<Error = RethError> + Send + '_>>,
-    ) -> eyre::Result<()> {
+    ) -> eyre::Result<u64> {
+        let mut account_status_mismatches = 0;
+
         let mut parallel_executor = ParallelExecutor::new(
             self.chain.clone(),
             BlockQueueStore::new(HashMap::from_iter([(block.number, queue.clone())])),
@@ -189,7 +198,7 @@ impl Command {
 
         // Patch expected state
         let mut removed = 0;
-        for (address, account) in &mut expected.bundle_state.state {
+        for (_, account) in &mut expected.bundle_state.state {
             // PATCH: remove unchanged storage entries.
             account.storage.retain(|_, value| {
                 if value.is_changed() {
@@ -229,7 +238,15 @@ impl Command {
             if parallel_account_status != expected_account_status {
                 // Account status mismatch is a soft error.
                 // Most importantly the transitions should match.
-                tracing::warn!(target: "reth::cli", ?parallel_account_status, ?expected_account_status, "Cache account status mismatch");
+                account_status_mismatches += 1;
+                tracing::warn!(
+                    target: "reth::cli",
+                    block_number = block.number,
+                    address = ?expected_address,
+                    ?parallel_account_status,
+                    ?expected_account_status,
+                    "Cache account status mismatch"
+                );
             }
             pretty_assertions::assert_eq!(
                 parallel_account.map(|acc| acc.account),
@@ -275,8 +292,19 @@ impl Command {
             "Bundle state mismatch"
         );
         pretty_assertions::assert_eq!(
-            BTreeMap::from_iter(parallel_bundle_state.contracts),
-            BTreeMap::from_iter(expected.bundle_state.contracts),
+            BTreeMap::from_iter(
+                parallel_bundle_state
+                    .contracts
+                    .into_iter()
+                    .filter(|(code_hash, _)| *code_hash != KECCAK_EMPTY)
+            ),
+            BTreeMap::from_iter(
+                expected
+                    .bundle_state
+                    .contracts
+                    .into_iter()
+                    .filter(|(code_hash, _)| *code_hash != KECCAK_EMPTY)
+            ),
             "Bundle contracts mismatch"
         );
 
@@ -290,6 +318,6 @@ impl Command {
             "Reverts size mismatch"
         );
 
-        Ok(())
+        Ok(account_status_mismatches)
     }
 }
