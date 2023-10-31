@@ -54,8 +54,8 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
                     Ok(raw) => serde_json::from_str(&raw)?,
                     Err(io_err) => {
                         // valid json may start with "\n", but must contain "{"
-                        if s.contains("{") {
-                            serde_json::from_str(&s)?
+                        if s.contains('{') {
+                            serde_json::from_str(s)?
                         } else {
                             return Err(io_err.into()) // assume invalid path
                         }
