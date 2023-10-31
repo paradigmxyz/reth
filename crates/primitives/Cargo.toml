@@ -80,7 +80,6 @@ hash-db = "~0.15"
 # value-256 is needed for the main_codec proptests to pass
 reth-primitives = { path = ".", features = ["value-256"] }
 
-
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 secp256k1.workspace = true
@@ -95,7 +94,7 @@ test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 # default of 128 bits.
 value-256 = ["reth-codecs/value-256"]
 clap = ["dep:clap"]
-optimism = []
+optimism = ["value-256"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

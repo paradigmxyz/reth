@@ -385,7 +385,7 @@ pub struct PayloadAttributes {
 }
 
 /// Optimism Payload Attributes
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg(feature = "optimism")]
 pub struct OptimismPayloadAttributes {
