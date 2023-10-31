@@ -143,7 +143,7 @@ fn from_primitive_withdrawal(
     withdrawal: reth_primitives::Withdrawal,
 ) -> reth_rpc_types::Withdrawal {
     reth_rpc_types::Withdrawal {
-        index: withdrawal.validator_index,
+        index: withdrawal.index,
         address: withdrawal.address,
         validator_index: withdrawal.validator_index,
         amount: withdrawal.amount,
