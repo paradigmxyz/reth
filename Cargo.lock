@@ -6269,7 +6269,6 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-codecs",
- "reth-primitives",
  "reth-rpc-types",
  "revm",
  "revm-primitives",
