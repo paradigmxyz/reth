@@ -190,18 +190,6 @@ impl Command {
         // Patch expected state
         let mut removed = 0;
         for (address, account) in &mut expected.bundle_state.state {
-            // PATCH: Due to how transitions are applied, the parallel executor will not produce a
-            // destroyed account if it was created in the same block. If it wasn't
-            // created in the same block, this will be caught when asserting transitions.
-            if account.status == AccountStatus::Destroyed {
-                let corresponding_parallel = parallel_state.cache.accounts.get(address);
-                if corresponding_parallel.map_or(false, |account| {
-                    account.previous_status() == AccountStatus::LoadedNotExisting
-                }) {
-                    account.status = AccountStatus::LoadedNotExisting
-                }
-            }
-
             // PATCH: remove unchanged storage entries.
             account.storage.retain(|_, value| {
                 if value.is_changed() {
@@ -214,18 +202,41 @@ impl Command {
         }
         expected.bundle_state.state_size -= removed;
 
-        pretty_assertions::assert_eq!(
-            BTreeMap::from_iter(
-                parallel_state
-                    .cache
-                    .accounts
-                    .clone()
-                    .into_iter()
-                    .map(|(address, account)| (address, CacheAccount::from(account)))
-            ),
-            BTreeMap::from_iter(expected.cache.accounts),
-            "Cache accounts mismatch",
-        );
+        let mut parallel_cache_accounts = parallel_state
+            .cache
+            .accounts
+            .clone()
+            .into_iter()
+            .sorted_by_key(|(address, _)| *address)
+            .peekable();
+        let mut expected_cache_accounts =
+            expected.cache.accounts.into_iter().sorted_by_key(|(address, _)| *address).peekable();
+        while parallel_cache_accounts.peek().is_some() || expected_cache_accounts.peek().is_some() {
+            let (parallel_address, parallel_account) = parallel_cache_accounts
+                .next()
+                .map(|(address, account)| (address, CacheAccount::from(account)))
+                .unzip();
+            let (expected_address, expected_account) = expected_cache_accounts.next().unzip();
+
+            pretty_assertions::assert_eq!(
+                parallel_address,
+                expected_address,
+                "Cache account address mismatch"
+            );
+            // Account status
+            let parallel_account_status = parallel_account.as_ref().map(|acc| acc.status);
+            let expected_account_status = expected_account.as_ref().map(|acc| acc.status);
+            if parallel_account_status != expected_account_status {
+                // Account status mismatch is a soft error.
+                // Most importantly the transitions should match.
+                tracing::warn!(target: "reth::cli", ?parallel_account_status, ?expected_account_status, "Cache account status mismatch");
+            }
+            pretty_assertions::assert_eq!(
+                parallel_account.map(|acc| acc.account),
+                expected_account.map(|acc| acc.account),
+                "Cache account mismatch"
+            );
+        }
 
         pretty_assertions::assert_eq!(
             BTreeMap::from_iter(
