@@ -1,7 +1,7 @@
 //! Clap parser utilities
 
 use reth_primitives::{
-    fs::{self, FsPathError}, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, GOERLI, HOLESKY, MAINNET,
+    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, GOERLI, HOLESKY, MAINNET,
     SEPOLIA,
 };
 use std::{
@@ -49,15 +49,16 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         _ => {
             // both serialized Genesis and ChainSpec structs supported
             let genesis: AllGenesisFormats =
-                // try to read from a path first
+                // try to read json from path first
                 match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
-                    // try use json from path
                     Ok(raw) => serde_json::from_str(&raw)?,
-                    // see if s contains common json character
-                    // note: valid json may start with "\n"
-                    Err(io_err) => match s.contains("{") {
-                        true => serde_json::from_str(s)?,
-                        false => return Err(io_err.into()), // assume invalid path
+                    Err(io_err) => {
+                        // valid json may start with "\n", but must contain "{"
+                        if s.contains("{") {
+                            serde_json::from_str(&s)?
+                        } else {
+                            return Err(io_err.into()) // assume invalid path
+                        }
                     }
                 };
 
@@ -121,9 +122,8 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
+    use std::collections::HashMap;
     use proptest::prelude::Rng;
     use reth_primitives::{ChainSpecBuilder, Genesis, U256, Address, GenesisAccount, hex, ChainConfig};
     use secp256k1::rand::thread_rng;
@@ -173,8 +173,6 @@ mod tests {
 }
 "#;
 
-        println!("raw: {:?}", custom_genesis_from_json);
-        println!("this should be true then: {:?}", custom_genesis_from_json.starts_with("\n"));
         let chain_from_json = genesis_value_parser(&custom_genesis_from_json).unwrap();
 
         // using structs
@@ -213,8 +211,6 @@ mod tests {
             [(address, account)]
         ));
 
-        println!("\n\ngenesis: {genesis:?}\n\n");
-
         let custom_genesis_from_struct = serde_json::to_string(&genesis).unwrap();
         let chain_from_struct = genesis_value_parser(&custom_genesis_from_struct).unwrap();
         assert_eq!(chain_from_json.genesis(), chain_from_struct.genesis());
@@ -226,18 +222,9 @@ mod tests {
             .cancun_activated()
             .build();
 
-        println!("\n\nchain_spec: {chain_spec:?}\n\n");
-
         let chain_spec_json = serde_json::to_string(&chain_spec).unwrap();
-        println!("\n\nchain_spec_json: {chain_spec_json:?}\n\n");
         let custom_genesis_from_spec = genesis_value_parser(&chain_spec_json).unwrap();
 
-        println!("custom_genesis_from_spec: {:?}", custom_genesis_from_spec.chain());
-        println!("chain_from_struct: {:?}", chain_from_struct.chain());
-        println!("\n\nchain_from_struct: {chain_from_struct:?}\n\n");
-        println!("\n\ncustom_genesis_from_spec {custom_genesis_from_spec:?}\n\n");
-
-        // TODO: currently failing
         assert_eq!(custom_genesis_from_spec.chain(), chain_from_struct.chain());
     }
 
