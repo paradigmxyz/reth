@@ -33,7 +33,6 @@ mod integer_list;
 mod log;
 mod net;
 mod peer;
-mod precaution;
 pub mod proofs;
 mod prune;
 mod receipt;

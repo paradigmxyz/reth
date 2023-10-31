@@ -4,8 +4,9 @@
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 fn main() {
-    // ensure we have the correct features enabled
-    reth::primitives::ensure_ethereum!();
+    // Ensure feature flags are set correctly for different chains
+    reth::precaution::ensure_ethereum!();
+    reth::precaution::ensure_optimism!();
 
     if let Err(err) = reth::cli::run() {
         eprintln!("Error: {err:?}");
