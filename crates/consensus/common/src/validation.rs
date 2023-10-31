@@ -253,9 +253,8 @@ pub fn validate_block_standalone(
 
 // Check gas limit, max diff between child/parent gas_limit should be  max_diff=parent_gas/1024
 // On Optimism, the gas limit can adjust instantly, so we skip this check if the optimism
-// feature flag is enabled.
+// flag is enabled in the chain spec.
 #[inline(always)]
-#[cfg(not(feature = "optimism"))]
 fn check_gas_limit(
     parent: &SealedHeader,
     child: &SealedHeader,
@@ -321,6 +320,10 @@ pub fn validate_header_regarding_parent(
     cfg_if::cfg_if! {
         if #[cfg(feature = "optimism")] {
             // On Optimism, the gas limit can adjust instantly, so we skip this check
+            // if the optimism feature is enabled in the chain spec.
+            if !chain_spec.is_optimism() {
+                check_gas_limit(parent, child, chain_spec)?;
+            }
         } else {
             check_gas_limit(parent, child, chain_spec)?;
         }
