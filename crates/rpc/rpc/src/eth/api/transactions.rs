@@ -42,13 +42,7 @@ use revm::{
 use revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State};
 
 #[cfg(feature = "optimism")]
-use alloy_primitives::hex;
-#[cfg(feature = "optimism")]
-use bytes::BytesMut;
-#[cfg(feature = "optimism")]
-use http::header::CONTENT_TYPE;
-#[cfg(feature = "optimism")]
-use reth_revm::optimism::RethL1BlockInfo;
+use crate::eth::api::block::OptimismBlockMeta;
 #[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
@@ -893,7 +887,7 @@ where
             )
             .map_err(|_| EthApiError::InternalEthError)
             .ok();
-            let mut buf = BytesMut::default();
+            let mut buf = bytes::BytesMut::default();
             tx.encode_enveloped(&mut buf);
             let data = &buf.freeze().into();
             if let Some(l1_block_info) = l1_block_info {
@@ -931,11 +925,7 @@ where
             receipt,
             &all_receipts,
             #[cfg(feature = "optimism")]
-            &l1_block_info,
-            #[cfg(feature = "optimism")]
-            l1_fee,
-            #[cfg(feature = "optimism")]
-            l1_data_gas,
+            OptimismBlockMeta::new(l1_block_info, l1_fee, l1_data_gas),
         )
     }
 
@@ -949,7 +939,7 @@ where
             let body = serde_json::to_string(&serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "eth_sendRawTransaction",
-                "params": [format!("0x{}", hex::encode(tx))],
+                "params": [format!("0x{}", alloy_primitives::hex::encode(tx))],
                 "id": self.network().chain_id()
             }))
             .map_err(|_| EthApiError::InternalEthError)?;
@@ -958,7 +948,7 @@ where
 
             client
                 .post(endpoint)
-                .header(CONTENT_TYPE, "application/json")
+                .header(http::header::CONTENT_TYPE, "application/json")
                 .body(body)
                 .send()
                 .await
@@ -1109,15 +1099,15 @@ impl From<TransactionSource> for Transaction {
     }
 }
 
+/// Optimism
+
 /// Helper function to construct a transaction receipt
 pub(crate) fn build_transaction_receipt_with_block_receipts(
     tx: TransactionSigned,
     meta: TransactionMeta,
     receipt: Receipt,
     all_receipts: &[Receipt],
-    #[cfg(feature = "optimism")] l1_block_info: &Option<L1BlockInfo>,
-    #[cfg(feature = "optimism")] l1_fee: Option<U256>,
-    #[cfg(feature = "optimism")] data_gas: Option<U256>,
+    #[cfg(feature = "optimism")] optimism_block_meta: OptimismBlockMeta,
 ) -> EthResult<TransactionReceipt> {
     let transaction =
         tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
@@ -1161,10 +1151,11 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     };
 
     #[cfg(feature = "optimism")]
-    if let Some(l1_block_info) = l1_block_info {
+    if let Some(l1_block_info) = optimism_block_meta.l1_block_info {
         if !tx.is_deposit() {
-            res_receipt.l1_fee = l1_fee;
-            res_receipt.l1_gas_used = data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
+            res_receipt.l1_fee = optimism_block_meta.l1_fee;
+            res_receipt.l1_gas_used =
+                optimism_block_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
             res_receipt.l1_fee_scalar =
                 Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
             res_receipt.l1_gas_price = Some(l1_block_info.l1_base_fee);

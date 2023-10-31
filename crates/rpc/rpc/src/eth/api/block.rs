@@ -17,11 +17,37 @@ use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
 
 #[cfg(feature = "optimism")]
-use bytes::BytesMut;
+use reth_primitives::U256;
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
 #[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
+
+/// Optimism Block Meta
+///
+/// Includes the l1 fee and data gas for the block along with the l1 block info.
+#[cfg(feature = "optimism")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptimismBlockMeta<'a> {
+    /// The L1 block info.
+    pub l1_block_info: Option<&'a L1BlockInfo>,
+    /// The L1 fee for the block.
+    pub l1_fee: Option<U256>,
+    /// The L1 data gas for the block.
+    pub l1_data_gas: Option<U256>,
+}
+
+#[cfg(feature = "optimism")]
+impl OptimismBlockMeta<'_> {
+    /// Creates a new OptimismBlockMeta.
+    pub fn new(
+        l1_block_info: Option<&'_ L1BlockInfo>,
+        l1_fee: Option<U256>,
+        l1_data_gas: Option<U256>,
+    ) -> Self {
+        Self { l1_block_info, l1_fee, l1_data_gas }
+    }
+}
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -109,7 +135,7 @@ where
                     #[cfg(feature = "optimism")]
                     let (l1_fee, l1_data_gas) = {
                         if let Some(l1_block_info) = &l1_block_info {
-                            let mut buf = BytesMut::default();
+                            let mut buf = bytes::BytesMut::default();
                             tx.encode_enveloped(&mut buf);
                             let data = &buf.freeze().into();
                             let l1_fee = (!tx.is_deposit())
@@ -146,11 +172,7 @@ where
                         receipt,
                         &receipts,
                         #[cfg(feature = "optimism")]
-                        &l1_block_info,
-                        #[cfg(feature = "optimism")]
-                        l1_fee,
-                        #[cfg(feature = "optimism")]
-                        l1_data_gas,
+                        OptimismBlockMeta::new(l1_block_info.as_ref(), l1_fee, l1_data_gas),
                     )
                 })
                 .collect::<EthResult<Vec<_>>>();
