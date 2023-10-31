@@ -1,10 +1,12 @@
 //! Helpers for testing trace calls.
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::Error as RpcError;
-
 use reth_primitives::{BlockId, Bytes, TxHash};
 use reth_rpc_api::clients::TraceApiClient;
-use reth_rpc_types::trace::parity::{LocalizedTransactionTrace, TraceResults, TraceType};
+use reth_rpc_types::{
+    trace::parity::{LocalizedTransactionTrace, TraceResults, TraceType},
+    CallRequest,
+};
 use std::{
     collections::HashSet,
     pin::Pin,
@@ -18,6 +20,13 @@ pub type TraceBlockResult = Result<(Vec<LocalizedTransactionTrace>, BlockId), (R
 /// Type alias representing the result of replaying a transaction.
 
 pub type ReplayTransactionResult = Result<(TraceResults, TxHash), (RpcError, TxHash)>;
+
+/// A type representing the result of calling `trace_call_many` method.
+
+pub type CallManyTraceResult = Result<
+    (Vec<TraceResults>, Vec<(CallRequest, HashSet<TraceType>)>),
+    (RpcError, Vec<(CallRequest, HashSet<TraceType>)>),
+>;
 
 /// An extension trait for the Trace API.
 #[async_trait::async_trait]
@@ -59,7 +68,40 @@ pub trait TraceApiExt {
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> RawTransactionTraceStream<'_>;
+    /// Creates a stream of results for multiple dependent transaction calls on top of the same
+    /// block.
+
+    fn trace_call_many_stream<I>(
+        &self,
+        calls: I,
+        block_id: Option<BlockId>,
+    ) -> CallManyTraceStream<'_>
+    where
+        I: IntoIterator<Item = (CallRequest, HashSet<TraceType>)>;
 }
+/// A stream that provides asynchronous iteration over results from the `trace_call_many` function.
+///
+/// The stream yields items of type `CallManyTraceResult`.
+#[must_use = "streams do nothing unless polled"]
+pub struct CallManyTraceStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = CallManyTraceResult> + 'a>>,
+}
+
+impl<'a> Stream for CallManyTraceStream<'a> {
+    type Item = CallManyTraceResult;
+    /// Polls for the next item from the stream.
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl<'a> std::fmt::Debug for CallManyTraceStream<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CallManyTraceStream").finish()
+    }
+}
+
 /// A stream that traces the provided raw transaction data.
 
 #[must_use = "streams do nothing unless polled"]
@@ -170,6 +212,24 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
             }
         });
         RawTransactionTraceStream { stream: Box::pin(stream) }
+    }
+
+    fn trace_call_many_stream<I>(
+        &self,
+        calls: I,
+        block_id: Option<BlockId>,
+    ) -> CallManyTraceStream<'_>
+    where
+        I: IntoIterator<Item = (CallRequest, HashSet<TraceType>)>,
+    {
+        let call_set = calls.into_iter().collect::<Vec<_>>();
+        let stream = futures::stream::once(async move {
+            match self.trace_call_many(call_set.clone(), block_id).await {
+                Ok(results) => Ok((results, call_set)),
+                Err(err) => Err((err, call_set)),
+            }
+        });
+        CallManyTraceStream { stream: Box::pin(stream) }
     }
 }
 
