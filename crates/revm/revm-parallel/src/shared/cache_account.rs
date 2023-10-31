@@ -263,6 +263,11 @@ impl SharedCacheAccount {
         }
     }
 
+    /// Return the status of account as it was loaded or after last transition applied
+    pub fn previous_status(&self) -> AccountStatus {
+        self.previous_status
+    }
+
     /// Returns current balance as it should be reported to EVM.
     pub fn account_balance(&self) -> U256 {
         let original = self.previous_info.as_ref().map(|info| info.balance).unwrap_or_default();

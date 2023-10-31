@@ -149,25 +149,8 @@ impl Command {
 
             if self.validate {
                 tracing::debug!(target: "reth::cli", block_number = block.number, ?queue, "Validating parallel execution");
-
                 state.merge_transitions(BundleRetention::Reverts);
-
-                // Patch expected state by removing unchanged storage entries.
-                let mut removed = 0;
-                for (_, account) in &mut state.bundle_state.state {
-                    account.storage.retain(|_, value| {
-                        if value.is_changed() {
-                            true
-                        } else {
-                            removed += 1;
-                            false
-                        }
-                    });
-                }
-                state.bundle_state.state_size -= removed;
-
                 self.validate(sp_database, &block, td, senders, queue.clone(), state).await?;
-
                 tracing::debug!(target: "reth::cli", block_number = block.number, ?queue, "Successfully validated parallel execution");
             }
 
@@ -190,7 +173,7 @@ impl Command {
         td: U256,
         senders: Vec<Address>,
         queue: BlockQueue,
-        expected: State<Box<dyn reth_revm::Database<Error = RethError> + Send + '_>>,
+        mut expected: State<Box<dyn reth_revm::Database<Error = RethError> + Send + '_>>,
     ) -> eyre::Result<()> {
         let mut parallel_executor = ParallelExecutor::new(
             self.chain.clone(),
@@ -204,44 +187,45 @@ impl Command {
         let mut parallel_state = parallel_executor.state.write().unwrap();
         parallel_state.merge_transitions(BundleRetention::Reverts);
 
-        let mut parallel_cache_accounts = parallel_state
-            .cache
-            .accounts
-            .clone()
-            .into_iter()
-            .sorted_by_key(|(address, _)| *address)
-            .peekable();
-        let mut expected_cache_accounts =
-            expected.cache.accounts.into_iter().sorted_by_key(|(address, _)| *address).peekable();
-        while parallel_cache_accounts.peek().is_some() || expected_cache_accounts.peek().is_some() {
-            let parallel = parallel_cache_accounts
-                .next()
-                .map(|(address, account)| (address, CacheAccount::from(account)));
-            let mut expected = expected_cache_accounts.next();
-
-            // Due to how transitions are applied, the parallel executor will not produce a
+        // Patch expected state
+        let mut removed = 0;
+        for (address, account) in &mut expected.bundle_state.state {
+            // PATCH: Due to how transitions are applied, the parallel executor will not produce a
             // destroyed account if it was created in the same block. If it wasn't
             // created in the same block, this will be caught when asserting transitions.
-            if parallel
-                .as_ref()
-                .map_or(false, |(_, acc)| acc.status == AccountStatus::LoadedNotExisting) &&
-                expected
-                    .as_ref()
-                    .map_or(false, |(_, acc)| acc.status == AccountStatus::Destroyed)
-            {
-                expected = expected.map(|(address, account)| {
-                    (
-                        address,
-                        CacheAccount {
-                            account: account.account,
-                            status: AccountStatus::LoadedNotExisting,
-                        },
-                    )
-                });
+            if account.status == AccountStatus::Destroyed {
+                let corresponding_parallel = parallel_state.cache.accounts.get(address);
+                if corresponding_parallel.map_or(false, |account| {
+                    account.previous_status() == AccountStatus::LoadedNotExisting
+                }) {
+                    account.status = AccountStatus::LoadedNotExisting
+                }
             }
 
-            pretty_assertions::assert_eq!(parallel, expected, "Cache account mismatch");
+            // PATCH: remove unchanged storage entries.
+            account.storage.retain(|_, value| {
+                if value.is_changed() {
+                    true
+                } else {
+                    removed += 1;
+                    false
+                }
+            });
         }
+        expected.bundle_state.state_size -= removed;
+
+        pretty_assertions::assert_eq!(
+            BTreeMap::from_iter(
+                parallel_state
+                    .cache
+                    .accounts
+                    .clone()
+                    .into_iter()
+                    .map(|(address, account)| (address, CacheAccount::from(account)))
+            ),
+            BTreeMap::from_iter(expected.cache.accounts),
+            "Cache accounts mismatch",
+        );
 
         pretty_assertions::assert_eq!(
             BTreeMap::from_iter(
