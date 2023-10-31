@@ -506,8 +506,8 @@ impl ChainSpec {
         for (_, cond) in self.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block) |
-            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block)
+            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
                     if block != current_applied {
@@ -517,7 +517,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block }
+                    return ForkId { hash: forkhash, next: block };
                 }
             }
         }
@@ -538,7 +538,7 @@ impl ChainSpec {
                 // can safely return here because we have already handled all block forks and
                 // have handled all active timestamp forks, and set the next value to the
                 // timestamp that is known but not active yet
-                return ForkId { hash: forkhash, next: timestamp }
+                return ForkId { hash: forkhash, next: timestamp };
             }
         }
 
@@ -553,7 +553,7 @@ impl ChainSpec {
                 // to satisfy every timestamp ForkCondition, we find the last ForkCondition::Block
                 // if one exists, and include its block_num in the returned Head
                 if let Some(last_block_num) = self.last_block_fork_before_merge_or_timestamp() {
-                    return Head { timestamp, number: last_block_num, ..Default::default() }
+                    return Head { timestamp, number: last_block_num, ..Default::default() };
                 }
                 Head { timestamp, ..Default::default() }
             }
@@ -581,17 +581,17 @@ impl ChainSpec {
                     ForkCondition::TTD { fork_block, .. } => {
                         // handle Sepolia merge netsplit case
                         if fork_block.is_some() {
-                            return *fork_block
+                            return *fork_block;
                         }
                         // ensure curr_cond is indeed ForkCondition::Block and return block_num
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num)
+                            return Some(block_num);
                         }
                     }
                     ForkCondition::Timestamp(_) => {
                         // ensure curr_cond is indeed ForkCondition::Block and return block_num
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num)
+                            return Some(block_num);
                         }
                     }
                     ForkCondition::Block(_) | ForkCondition::Never => continue,
@@ -992,9 +992,9 @@ impl ForkCondition {
     /// - The condition is satisfied by the timestamp;
     /// - or the condition is satisfied by the total difficulty
     pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number) ||
-            self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty, head.difficulty)
+        self.active_at_block(head.number)
+            || self.active_at_timestamp(head.timestamp)
+            || self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.
@@ -2298,7 +2298,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn test_serialization_custom_chain() {
+    fn test_all_genesis_formats_deserialization() {
         // custom genesis with chain config
         let config = ChainConfig {
             chain_id: 2600,
@@ -2334,6 +2334,12 @@ Post-merge hard forks (timestamp based):
         let account = GenesisAccount::default().with_balance(U256::from(33));
         let genesis = genesis.extend_accounts(HashMap::from([(address, account)]));
 
+        // ensure genesis is deserialized correctly
+        let serialized_genesis = serde_json::to_string(&genesis).unwrap();
+        let deserialized_genesis: AllGenesisFormats =
+            serde_json::from_str(&serialized_genesis).unwrap();
+        assert!(matches!(deserialized_genesis, AllGenesisFormats::Geth(_)));
+
         // build chain
         let chain_spec = ChainSpecBuilder::default()
             .chain(2600.into())
@@ -2341,8 +2347,10 @@ Post-merge hard forks (timestamp based):
             .cancun_activated()
             .build();
 
-        let serialized = serde_json::to_string(&chain_spec).unwrap();
-        let deserialized: AllGenesisFormats = serde_json::from_str(&serialized).unwrap();
-        assert!(matches!(deserialized, AllGenesisFormats::Reth(_)))
+        // ensure chain spec is deserialized correctly
+        let serialized_chain_spec = serde_json::to_string(&chain_spec).unwrap();
+        let deserialized_chain_spec: AllGenesisFormats =
+            serde_json::from_str(&serialized_chain_spec).unwrap();
+        assert!(matches!(deserialized_chain_spec, AllGenesisFormats::Reth(_)))
     }
 }
