@@ -111,8 +111,8 @@ reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
 reth-tokio-util = { path = "crates/tokio-util" }
 # revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "0d78d1eb304a2ce41ddac8f03206f5a316af247b" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "0d78d1eb304a2ce41ddac8f03206f5a316af247b" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
 
 ## eth
 alloy-primitives = "0.4"
@@ -179,7 +179,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 ] }
 enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
-c-kzg = "0.1.1"
+c-kzg = "0.4.0"
 
 ## config
 confy = "0.5"
