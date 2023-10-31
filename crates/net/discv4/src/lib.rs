@@ -1158,7 +1158,7 @@ impl Discv4Service {
                 {
                     let request = entry.get();
                     if request.echo_hash != pong.echo {
-                        debug!(target: "discv4",  from=?remote_addr, expected=?request.echo_hash, echo_hash=?pong.echo,"Got unexpected Pong");
+                        trace!(target: "discv4",  from=?remote_addr, expected=?request.echo_hash, echo_hash=?pong.echo,"Got unexpected Pong");
                         return
                     }
                 }
@@ -1281,7 +1281,7 @@ impl Discv4Service {
                     if total <= MAX_NODES_PER_BUCKET {
                         request.response_count = total;
                     } else {
-                        debug!(target: "discv4", total, from=?remote_addr,  "Received neighbors packet entries exceeds max nodes per bucket");
+                        trace!(target: "discv4", total, from=?remote_addr,  "Received neighbors packet entries exceeds max nodes per bucket");
                         return
                     }
                 };
@@ -1297,7 +1297,7 @@ impl Discv4Service {
             }
             Entry::Vacant(_) => {
                 // received neighbours response without requesting it
-                debug!(target: "discv4", from=?remote_addr, "Received unsolicited Neighbours");
+                trace!(target: "discv4", from=?remote_addr, "Received unsolicited Neighbours");
                 return
             }
         };
