@@ -182,9 +182,9 @@ where
             status,
             fork_filter,
             dns_discovery_config,
+            tx_gossip_disabled,
             #[cfg(feature = "optimism")]
-                optimism_network_config:
-                crate::config::OptimismNetworkConfig { sequencer_endpoint, tx_gossip_disabled },
+                optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -242,10 +242,9 @@ where
             network_mode,
             bandwidth_meter,
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
+            tx_gossip_disabled,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
-            #[cfg(feature = "optimism")]
-            tx_gossip_disabled,
         );
 
         Ok(Self {
