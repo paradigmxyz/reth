@@ -18,6 +18,7 @@ pub struct SnapshotProvider {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
+    /// Tracks the latest and highest snapshot of every segment.
     highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
 }
 
@@ -55,6 +56,13 @@ impl SnapshotProvider {
         }
 
         self.get_segment_provider(segment, block, path)
+    }
+
+    /// Gets the highest snapshot if it exists for a snapshot segment.
+    pub fn get_highest_snapshot(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
+        self.highest_tracker
+            .as_ref()
+            .and_then(|tracker| tracker.borrow().and_then(|highest| highest.highest(segment)))
     }
 }
 

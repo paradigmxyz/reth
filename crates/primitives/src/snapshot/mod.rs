@@ -25,3 +25,14 @@ pub struct HighestSnapshots {
     /// If [`None`], no snapshot is available.
     pub transactions: Option<BlockNumber>,
 }
+
+impl HighestSnapshots {
+    /// Returns the highest snapshot if it exists for a segment
+    pub fn highest(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
+        match segment {
+            SnapshotSegment::Headers => self.headers,
+            SnapshotSegment::Transactions => self.transactions,
+            SnapshotSegment::Receipts => self.receipts,
+        }
+    }
+}
