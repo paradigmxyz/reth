@@ -8,7 +8,9 @@ use clap::Parser;
 use itertools::Itertools;
 use reth_db::init_db;
 use reth_interfaces::RethError;
-use reth_primitives::{fs, stage::StageId, Address, Block, BlockNumber, ChainSpec, U256};
+use reth_primitives::{
+    fs, stage::StageId, Address, Block, BlockNumber, ChainSpec, KECCAK_EMPTY, U256,
+};
 use reth_provider::{
     BlockReader, HeaderProvider, HistoricalStateProvider, ProviderError, ProviderFactory,
     StageCheckpointReader, TransactionVariant,
@@ -217,9 +219,9 @@ impl Command {
                 .map(|(address, account)| (address, CacheAccount::from(account)));
             let mut expected = expected_cache_accounts.next();
 
-            // Due to how transitions are applied, the parallel state will not produce a destroyed
-            // account if it was created in the same block. If it wasn't created in the
-            // same block, this will be caught when asserting transitions.
+            // Due to how transitions are applied, the parallel executor will not produce a
+            // destroyed account if it was created in the same block. If it wasn't
+            // created in the same block, this will be caught when asserting transitions.
             if parallel
                 .as_ref()
                 .map_or(false, |(_, acc)| acc.status == AccountStatus::LoadedNotExisting) &&
@@ -242,8 +244,21 @@ impl Command {
         }
 
         pretty_assertions::assert_eq!(
-            BTreeMap::from_iter(parallel_state.cache.contracts.clone().into_iter()),
-            BTreeMap::from_iter(expected.cache.contracts),
+            BTreeMap::from_iter(
+                parallel_state
+                    .cache
+                    .contracts
+                    .clone()
+                    .into_iter()
+                    .filter(|(code_hash, _)| *code_hash != KECCAK_EMPTY)
+            ),
+            BTreeMap::from_iter(
+                expected
+                    .cache
+                    .contracts
+                    .into_iter()
+                    .filter(|(code_hash, _)| *code_hash != KECCAK_EMPTY)
+            ),
             "Cache contracts mismatch"
         );
 
