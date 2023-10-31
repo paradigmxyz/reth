@@ -44,7 +44,6 @@ impl BeaconNodeEventTopic {
             BeaconNodeEventTopic::LightClientOptimisticUpdate => "light_client_optimistic_update",
             BeaconNodeEventTopic::BlobSidecar => "blob_sidecar",
         }
-        .to_string()
     }
 }
 
