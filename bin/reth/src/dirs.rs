@@ -264,6 +264,11 @@ impl<D> ChainPath<D> {
         self.0.join("db").into()
     }
 
+    /// Returns the path to the snapshots directory for this chain.
+    pub fn snapshots_path(&self) -> PathBuf {
+        self.0.join("snapshots").into()
+    }
+
     /// Returns the path to the reth p2p secret key for this chain.
     pub fn p2p_secret_path(&self) -> PathBuf {
         self.0.join("discovery-secret").into()
