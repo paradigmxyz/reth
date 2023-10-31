@@ -3,7 +3,7 @@
 use crate::SnapshotterError;
 use reth_db::database::Database;
 use reth_interfaces::{RethError, RethResult};
-use reth_primitives::{BlockNumber, ChainSpec, TxNumber};
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, ChainSpec, TxNumber};
 use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory};
 use std::{collections::HashMap, ops::RangeInclusive, sync::Arc};
 use tokio::sync::watch;
@@ -27,20 +27,6 @@ pub struct Snapshotter<DB> {
 
 /// Tracker for the latest [`HighestSnapshots`] value.
 pub type HighestSnapshotsTracker = watch::Receiver<Option<HighestSnapshots>>;
-
-/// Highest snapshotted block numbers, per data part.
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub struct HighestSnapshots {
-    /// Highest snapshotted block of headers, inclusive.
-    /// If [`None`], no snapshot is available.
-    pub headers: Option<BlockNumber>,
-    /// Highest snapshotted block of receipts, inclusive.
-    /// If [`None`], no snapshot is available.
-    pub receipts: Option<BlockNumber>,
-    /// Highest snapshotted block of transactions, inclusive.
-    /// If [`None`], no snapshot is available.
-    pub transactions: Option<BlockNumber>,
-}
 
 /// Snapshot targets, per data part, measured in [`BlockNumber`] and [`TxNumber`], if applicable.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -240,13 +226,13 @@ impl<DB: Database> Snapshotter<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{snapshotter::SnapshotTargets, HighestSnapshots, Snapshotter};
+    use crate::{snapshotter::SnapshotTargets, Snapshotter};
     use assert_matches::assert_matches;
     use reth_interfaces::{
         test_utils::{generators, generators::random_block_range},
         RethError,
     };
-    use reth_primitives::{B256, MAINNET};
+    use reth_primitives::{snapshot::HighestSnapshots, B256, MAINNET};
     use reth_stages::test_utils::TestTransaction;
     use tokio::sync::watch;
 
