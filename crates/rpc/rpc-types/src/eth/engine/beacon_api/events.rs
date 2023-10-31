@@ -12,9 +12,9 @@ use super::{
     light_client_optimistic::LightClientOptimisticData,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BeaconNodeEventTopic {
-    PayloadAtrributes,
+    PayloadAttributes,
     Head,
     Block,
     Attestation,
@@ -26,6 +26,26 @@ pub enum BeaconNodeEventTopic {
     LightClientFinalityUpdate,
     LightClientOptimisticUpdate,
     BlobSidecar,
+}
+
+impl BeaconNodeEventTopic {
+    pub fn query_value(&self) -> String {
+        match self {
+            BeaconNodeEventTopic::PayloadAttributes => "payload_attributes",
+            BeaconNodeEventTopic::Head => "head",
+            BeaconNodeEventTopic::Block => "block",
+            BeaconNodeEventTopic::Attestation => "attestation",
+            BeaconNodeEventTopic::VoluntaryExit => "voluntary_exit",
+            BeaconNodeEventTopic::BlsToExecutionChange => "bls_to_execution_change",
+            BeaconNodeEventTopic::FinalizedCheckpoint => "finalized_checkpoint",
+            BeaconNodeEventTopic::ChainReorg => "chain_reorg",
+            BeaconNodeEventTopic::ContributionAndProof => "contribution_and_proof",
+            BeaconNodeEventTopic::LightClientFinalityUpdate => "light_client_finality_update",
+            BeaconNodeEventTopic::LightClientOptimisticUpdate => "light_client_optimistic_update",
+            BeaconNodeEventTopic::BlobSidecar => "blob_sidecar",
+        }
+        .to_string()
+    }
 }
 
 /// Event for the `payload_attributes` topic of the beacon API node event stream.
@@ -48,31 +68,36 @@ pub struct PayloadAttributesEvent {
 /// current_duty_dependent_root is \`get_block_root_at_slot(state,
 /// compute_start_slot_at_epoch(epoch)
 /// - 1)\`. Both dependent roots use the genesis block root in the case of underflow.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeadEvent {
-    pub slot: String,
-    pub block: String,
-    pub state: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub slot: u64,
+    pub block: B256,
+    pub state: B256,
     pub epoch_transition: bool,
-    pub previous_duty_dependent_root: String,
-    pub current_duty_dependent_root: String,
+    pub previous_duty_dependent_root: B256,
+    pub current_duty_dependent_root: B256,
     pub execution_optimistic: bool,
 }
 
 /// Event for the `Block` topic of the beacon API node event stream.
 ///
 /// The node has received a valid block (from P2P or API)
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockEvent {
-    pub slot: String,
-    pub block: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub slot: u64,
+    pub block: B256,
     pub execution_optimistic: bool,
 }
 
 /// Event for the `Attestation` topic of the beacon API node event stream.
 ///
 /// The node has received a valid attestation (from P2P or API)
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestationEvent {
     pub aggregation_bits: String,
     pub signature: String,
@@ -82,30 +107,35 @@ pub struct AttestationEvent {
 /// Event for the `VoluntaryExit` topic of the beacon API node event stream.
 ///
 /// The node has received a valid voluntary exit (from P2P or API)
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VoluntaryExitEvent {
     pub message: VoluntaryExitMessage,
     pub signature: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VoluntaryExitMessage {
-    pub epoch: String,
-    pub validator_index: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub epoch: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub validator_index: u64,
 }
 
 /// Event for the `BlsToExecutionChange` topic of the beacon API node event stream.
 ///
 /// The node has received a BLS to execution change (from P2P or API)
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlsToExecutionChangeEvent {
     pub message: BlsToExecutionChangeMessage,
     pub signature: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlsToExecutionChangeMessage {
-    pub validator_index: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub validator_index: u64,
     pub from_bls_pubkey: String,
     pub to_execution_address: String,
 }
@@ -113,50 +143,60 @@ pub struct BlsToExecutionChangeMessage {
 /// Event for the `Deposit` topic of the beacon API node event stream.
 ///
 /// Finalized checkpoint has been updated
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FinalizedCheckpointEvent {
-    pub block: String,
-    pub state: String,
-    pub epoch: String,
+    pub block: B256,
+    pub state: B256,
+    #[serde_as(as = "DisplayFromStr")]
+    pub epoch: u64,
     pub execution_optimistic: bool,
 }
 
 /// Event for the `ChainReorg` topic of the beacon API node event stream.
 ///
 /// The node has reorganized its chain
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChainReorgEvent {
-    pub slot: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub slot: u64,
     pub depth: String,
-    pub old_head_block: String,
-    pub new_head_block: String,
-    pub old_head_state: String,
-    pub new_head_state: String,
-    pub epoch: String,
+    pub old_head_block: B256,
+    pub new_head_block: B256,
+    pub old_head_state: B256,
+    pub new_head_state: B256,
+    #[serde_as(as = "DisplayFromStr")]
+    pub epoch: u64,
     pub execution_optimistic: bool,
 }
 
 /// Event for the `ContributionAndProof` topic of the beacon API node event stream.
 ///
 /// The node has received a valid sync committee SignedContributionAndProof (from P2P or API)
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributionAndProofEvent {
     pub message: ContributionAndProofMessage,
     pub signature: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributionAndProofMessage {
-    pub aggregator_index: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub aggregator_index: u64,
     pub contribution: Contribution,
     pub selection_proof: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contribution {
-    pub slot: String,
-    pub beacon_block_root: String,
-    pub subcommittee_index: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub slot: u64,
+    pub beacon_block_root: B256,
+    #[serde_as(as = "DisplayFromStr")]
+    pub subcommittee_index: u64,
     pub aggregation_bits: String,
     pub signature: String,
 }
@@ -164,7 +204,7 @@ pub struct Contribution {
 /// Event for the `LightClientFinalityUpdate` topic of the beacon API node event stream.
 ///
 /// The node's latest known `LightClientFinalityUpdate` has been updated
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LightClientFinalityUpdateEvent {
     pub version: String,
     pub data: LightClientFinalityData,
@@ -173,7 +213,7 @@ pub struct LightClientFinalityUpdateEvent {
 /// Event for the `LightClientOptimisticUpdate` topic of the beacon API node event stream.
 ///
 /// The node's latest known `LightClientOptimisticUpdate` has been updated
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LightClientOptimisticUpdateEvent {
     pub version: String,
     pub data: LightClientOptimisticData,
@@ -183,13 +223,16 @@ pub struct LightClientOptimisticUpdateEvent {
 ///
 /// The node has received a BlobSidecar (from P2P or API) that passes all gossip validations on the
 /// blob_sidecar_{subnet_id} topic
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlobSidecarEvent {
-    pub block_root: String,
-    pub index: String,
-    pub slot: String,
+    pub block_root: B256,
+    #[serde_as(as = "DisplayFromStr")]
+    pub index: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub slot: u64,
     pub kzg_commitment: String,
-    pub versioned_hash: String,
+    pub versioned_hash: B256,
 }
 
 impl PayloadAttributesEvent {

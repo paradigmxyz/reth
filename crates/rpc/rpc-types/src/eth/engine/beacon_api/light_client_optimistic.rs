@@ -1,26 +1,34 @@
+use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+use serde_with::{serde_as, DisplayFromStr};
+
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LightClientOptimisticData {
     pub attested_header: AttestedHeader,
     pub sync_aggregate: SyncAggregate,
-    pub signature_slot: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub signature_slot: u64,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestedHeader {
     pub beacon: Beacon,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Beacon {
-    pub slot: String,
-    pub proposer_index: String,
-    pub parent_root: String,
-    pub state_root: String,
-    pub body_root: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub slot: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub proposer_index: u64,
+    pub parent_root: B256,
+    pub state_root: B256,
+    pub body_root: B256,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncAggregate {
     pub sync_committee_bits: String,
     pub sync_committee_signature: String,
