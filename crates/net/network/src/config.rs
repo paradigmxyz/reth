@@ -78,7 +78,7 @@ pub struct NetworkConfig<C> {
 
 /// Optimmism Network Config
 #[cfg(feature = "optimism")]
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct OptimismNetworkConfig {
     /// The sequencer HTTP endpoint, if provided via CLI flag
     pub sequencer_endpoint: Option<String>,
@@ -171,7 +171,7 @@ pub struct NetworkConfigBuilder {
 /// Optimism Network Config Builder
 #[cfg(feature = "optimism")]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct OptimismNetworkConfigBuilder {
     /// The sequencer HTTP endpoint, if provided via CLI flag
     sequencer_endpoint: Option<String>,
@@ -198,7 +198,7 @@ impl NetworkConfigBuilder {
             head: None,
             tx_gossip_disabled: false,
             #[cfg(feature = "optimism")]
-            optimism_network_config: OptimismNetworkConfigBuilder { sequencer_endpoint: None },
+            optimism_network_config: OptimismNetworkConfigBuilder::default(),
         }
     }
 

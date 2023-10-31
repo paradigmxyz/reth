@@ -939,7 +939,7 @@ where
         )
     }
 
-    /// Helper function for `eth_send_raw_transaction` for Optimism.
+    /// Helper function for `eth_sendRawTransaction` for Optimism.
     ///
     /// Forwards the raw transaction bytes to the configured sequencer endpoint.
     /// This is a no-op if the sequencer endpoint is not configured.
