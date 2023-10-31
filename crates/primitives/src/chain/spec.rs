@@ -1189,10 +1189,13 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{b256, hex, NamedChain, B256, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA, U256, ChainConfig, GenesisAccount};
+    use crate::{
+        b256, hex, ChainConfig, GenesisAccount, NamedChain, B256, DEV, GOERLI, HOLESKY, MAINNET,
+        SEPOLIA, U256,
+    };
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
-    use std::{str::FromStr, collections::HashMap};
+    use std::{collections::HashMap, str::FromStr};
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
@@ -2329,9 +2332,7 @@ Post-merge hard forks (timestamp based):
         // seed accounts after genesis struct created
         let address = hex!("6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b").into();
         let account = GenesisAccount::default().with_balance(U256::from(33));
-        let genesis = genesis.extend_accounts(HashMap::from(
-            [(address, account)]
-        ));
+        let genesis = genesis.extend_accounts(HashMap::from([(address, account)]));
 
         // build chain
         let chain_spec = ChainSpecBuilder::default()
@@ -2344,5 +2345,4 @@ Post-merge hard forks (timestamp based):
         let deserialized: AllGenesisFormats = serde_json::from_str(&serialized).unwrap();
         assert!(matches!(deserialized, AllGenesisFormats::Reth(_)))
     }
-
 }

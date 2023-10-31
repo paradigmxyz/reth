@@ -35,9 +35,9 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
 }
 
 /// Clap value parser for [ChainSpec]s.
-/// 
+///
 /// The value parser matches either a known chain, the path
-/// to a json file, or a json formatted string in-memory. The json can be either 
+/// to a json file, or a json formatted string in-memory. The json can be either
 /// a serialized [ChainSpec] or a [Genesis] struct.
 pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
@@ -123,10 +123,12 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use proptest::prelude::Rng;
-    use reth_primitives::{ChainSpecBuilder, Genesis, U256, Address, GenesisAccount, hex, ChainConfig};
+    use reth_primitives::{
+        hex, Address, ChainConfig, ChainSpecBuilder, Genesis, GenesisAccount, U256,
+    };
     use secp256k1::rand::thread_rng;
+    use std::collections::HashMap;
 
     #[test]
     fn parse_known_chain_spec() {
@@ -207,9 +209,7 @@ mod tests {
         // seed accounts after genesis struct created
         let address = hex!("6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b").into();
         let account = GenesisAccount::default().with_balance(U256::from(33));
-        let genesis = genesis.extend_accounts(HashMap::from(
-            [(address, account)]
-        ));
+        let genesis = genesis.extend_accounts(HashMap::from([(address, account)]));
 
         let custom_genesis_from_struct = serde_json::to_string(&genesis).unwrap();
         let chain_from_struct = genesis_value_parser(&custom_genesis_from_struct).unwrap();
