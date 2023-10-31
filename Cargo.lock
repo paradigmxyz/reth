@@ -685,6 +685,8 @@ dependencies = [
  "futures-util",
  "mev-share-sse",
  "reth",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
