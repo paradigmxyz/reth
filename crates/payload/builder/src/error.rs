@@ -6,9 +6,6 @@ use reth_transaction_pool::BlobStoreError;
 use revm_primitives::EVMError;
 use tokio::sync::oneshot;
 
-#[cfg(feature = "optimism")]
-use revm_primitives::Address;
-
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadBuilderError {
@@ -52,7 +49,7 @@ pub enum OptimismPayloadBuilderError {
     /// Thrown when a database account could not be loaded.
     #[error("failed to load account {0:?}")]
     #[cfg(feature = "optimism")]
-    AccountLoadFailed(Address),
+    AccountLoadFailed(revm_primitives::Address),
 }
 
 impl From<oneshot::error::RecvError> for PayloadBuilderError {
