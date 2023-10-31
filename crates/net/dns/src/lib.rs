@@ -156,7 +156,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             self.bootstrap();
 
             while let Some(event) = self.next().await {
-                trace!(target : "disc::dns", ?event,  "processed");
+                trace!(target: "disc::dns", ?event,  "processed");
             }
         })
     }

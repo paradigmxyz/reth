@@ -18,7 +18,7 @@ use std::{
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Framed};
-use tracing::{debug, instrument, trace};
+use tracing::{instrument, trace};
 
 /// `ECIES` stream over TCP exchanging raw bytes
 #[derive(Debug)]
@@ -74,11 +74,11 @@ where
     pub async fn incoming(transport: Io, secret_key: SecretKey) -> Result<Self, ECIESError> {
         let ecies = ECIESCodec::new_server(secret_key)?;
 
-        debug!("incoming ecies stream ...");
+        trace!("incoming ecies stream");
         let mut transport = ecies.framed(transport);
         let msg = transport.try_next().await?;
 
-        debug!("receiving ecies auth");
+        trace!("receiving ecies auth");
         let remote_id = match &msg {
             Some(IngressECIESValue::AuthReceive(remote_id)) => *remote_id,
             _ => {
@@ -90,7 +90,7 @@ where
             }
         };
 
-        debug!("sending ecies ack ...");
+        trace!("sending ecies ack");
         transport.send(EgressECIESValue::Ack).await?;
 
         Ok(Self { stream: transport, remote_id })

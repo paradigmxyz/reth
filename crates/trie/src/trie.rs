@@ -143,7 +143,7 @@ impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError> {
-        tracing::debug!(target: "loader", "incremental state root");
+        tracing::debug!(target: "trie::loader", "incremental state root");
         Self::incremental_root_calculator(tx, range)?.root()
     }
 
@@ -159,7 +159,7 @@ impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
-        tracing::debug!(target: "loader", "incremental state root");
+        tracing::debug!(target: "trie::loader", "incremental state root");
         Self::incremental_root_calculator(tx, range)?.root_with_updates()
     }
 
@@ -173,7 +173,7 @@ impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError> {
-        tracing::debug!(target: "loader", "incremental state root with progress");
+        tracing::debug!(target: "trie::loader", "incremental state root with progress");
         Self::incremental_root_calculator(tx, range)?.root_with_progress()
     }
 }
@@ -222,7 +222,7 @@ where
     }
 
     fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
-        tracing::debug!(target: "loader", "calculating state root");
+        tracing::debug!(target: "trie::loader", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
 
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
