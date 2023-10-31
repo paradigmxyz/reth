@@ -439,11 +439,17 @@ where
                         )
                         .exists()
                     {
+                        // If database already exists, fallback to the page size it was created
+                        // with
                         -1
                     } else {
+                        // Otherwise, proceed with the page size from the provided geometry
                         match geometry.page_size {
+                            // Use default
                             None => -1,
+                            // Use minimal page size
                             Some(PageSize::MinimalAcceptable) => 0,
+                            // Use requested page size
                             Some(PageSize::Set(size)) => size as isize,
                         }
                     };
