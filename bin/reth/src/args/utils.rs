@@ -1,7 +1,7 @@
 //! Clap parser utilities
 
 use reth_primitives::{
-    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, GOERLI, HOLESKY, MAINNET,
+    fs::{self, FsPathError}, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, GOERLI, HOLESKY, MAINNET,
     SEPOLIA,
 };
 use std::{
@@ -34,8 +34,11 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
     })
 }
 
-/// Clap value parser for [ChainSpec]s that takes either a built-in genesis format, the path
-/// to a custom one, or one that's built in-memory.
+/// Clap value parser for [ChainSpec]s.
+/// 
+/// The value parser matches either a known chain, the path
+/// to a json file, or a json formatted string in-memory. The json can be either 
+/// a serialized [ChainSpec] or a [Genesis] struct.
 pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
         "mainnet" => MAINNET.clone(),
@@ -44,11 +47,20 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
         _ => {
+            // both serialized Genesis and ChainSpec structs supported
             let genesis: AllGenesisFormats =
+                // try to read from a path first
                 match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
-                    Ok(raw) => serde_json::from_str(&raw)?, // from path
-                    Err(_) => serde_json::from_str(&s)?,    // from memory
+                    // try use json from path
+                    Ok(raw) => serde_json::from_str(&raw)?,
+                    // see if s contains common json character
+                    // note: valid json may start with "\n"
+                    Err(io_err) => match s.contains("{") {
+                        true => serde_json::from_str(s)?,
+                        false => return Err(io_err.into()), // assume invalid path
+                    }
                 };
+
             Arc::new(genesis.into())
         }
     })
@@ -113,7 +125,7 @@ mod tests {
 
     use super::*;
     use proptest::prelude::Rng;
-    use reth_primitives::{Genesis, U256, Address, GenesisAccount, hex, ChainConfig};
+    use reth_primitives::{ChainSpecBuilder, Genesis, U256, Address, GenesisAccount, hex, ChainConfig};
     use secp256k1::rand::thread_rng;
 
     #[test]
@@ -160,6 +172,9 @@ mod tests {
     }
 }
 "#;
+
+        println!("raw: {:?}", custom_genesis_from_json);
+        println!("this should be true then: {:?}", custom_genesis_from_json.starts_with("\n"));
         let chain_from_json = genesis_value_parser(&custom_genesis_from_json).unwrap();
 
         // using structs
@@ -198,9 +213,32 @@ mod tests {
             [(address, account)]
         ));
 
+        println!("\n\ngenesis: {genesis:?}\n\n");
+
         let custom_genesis_from_struct = serde_json::to_string(&genesis).unwrap();
         let chain_from_struct = genesis_value_parser(&custom_genesis_from_struct).unwrap();
         assert_eq!(chain_from_json.genesis(), chain_from_struct.genesis());
+
+        // chain spec
+        let chain_spec = ChainSpecBuilder::default()
+            .chain(2600.into())
+            .genesis(genesis)
+            .cancun_activated()
+            .build();
+
+        println!("\n\nchain_spec: {chain_spec:?}\n\n");
+
+        let chain_spec_json = serde_json::to_string(&chain_spec).unwrap();
+        println!("\n\nchain_spec_json: {chain_spec_json:?}\n\n");
+        let custom_genesis_from_spec = genesis_value_parser(&chain_spec_json).unwrap();
+
+        println!("custom_genesis_from_spec: {:?}", custom_genesis_from_spec.chain());
+        println!("chain_from_struct: {:?}", chain_from_struct.chain());
+        println!("\n\nchain_from_struct: {chain_from_struct:?}\n\n");
+        println!("\n\ncustom_genesis_from_spec {custom_genesis_from_spec:?}\n\n");
+
+        // TODO: currently failing
+        assert_eq!(custom_genesis_from_spec.chain(), chain_from_struct.chain());
     }
 
     #[test]
