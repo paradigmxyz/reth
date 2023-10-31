@@ -212,7 +212,7 @@ mod tests {
     #[cfg(feature = "optimism")]
     #[test]
     fn check_optimism_receipt_root() {
-        use reth_primitives::{Bloom, Bytes};
+        use crate::{Bloom, Bytes};
 
         let receipts = vec![
             // 0xb0d6ee650637911394396d81172bd1c637d568ed1fbddab0daddfca399c58b53
