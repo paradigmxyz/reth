@@ -667,33 +667,37 @@ where
                     CanonicalOutcome::AlreadyCanonical { ref header } => {
                         // On Optimism, the proposers are allowed to reorg their own chain at will.
                         cfg_if::cfg_if! {
-                            if #[cfg(feautre = "optimism")] {
-                                let optimism = self.chain_spec().optimism;
+                            if #[cfg(feature = "optimism")] {
+                                if self.chain_spec().optimism {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        fcu_head_num=?header.number,
+                                        current_head_num=?self.blockchain.canonical_tip().number,
+                                        "[Optimism] Allowing beacon reorg to old head"
+                                    );
+                                    let _ = self.update_head(header.clone());
+                                    self.listeners.notify(
+                                        BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                                            header.clone(),
+                                            elapsed,
+                                        ),
+                                    );
+                                } else {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        fcu_head_num=?header.number,
+                                        current_head_num=?self.blockchain.canonical_tip().number,
+                                        "Ignoring beacon update to old head"
+                                    );
+                                }
                             } else {
-                                let optimism = false;
+                                debug!(
+                                    target: "consensus::engine",
+                                    fcu_head_num=?header.number,
+                                    current_head_num=?self.blockchain.canonical_tip().number,
+                                    "Ignoring beacon update to old head"
+                                );
                             }
-                        };
-                        if optimism {
-                            debug!(
-                                target: "consensus::engine",
-                                fcu_head_num=?header.number,
-                                current_head_num=?self.blockchain.canonical_tip().number,
-                                "[Optimism] Allowing beacon reorg to old head"
-                            );
-                            let _ = self.update_head(header.clone());
-                            self.listeners.notify(
-                                BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                                    header.clone(),
-                                    elapsed,
-                                ),
-                            );
-                        } else {
-                            debug!(
-                                target: "consensus::engine",
-                                fcu_head_num=?header.number,
-                                current_head_num=?self.blockchain.canonical_tip().number,
-                                "Ignoring beacon update to old head"
-                            );
                         }
                     }
                     CanonicalOutcome::Committed { ref head } => {
