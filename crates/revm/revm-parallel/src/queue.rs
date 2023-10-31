@@ -52,6 +52,9 @@ impl BlockQueue {
         let target = &sets[idx];
         for (queue_depth, tx_list) in self.iter().enumerate().rev() {
             for tx_index in tx_list.iter() {
+                // The dependency check has to be bidirectional since the target
+                // transaction might modify the state in a way that affects the reads
+                // of the transaction we are currently checking.
                 let tx = &sets[*tx_index as usize];
                 if target.depends_on(tx) || tx.depends_on(target) {
                     return Some(queue_depth)

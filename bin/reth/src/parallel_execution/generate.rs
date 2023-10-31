@@ -5,6 +5,7 @@ use crate::{
     runner::CliContext,
 };
 use clap::Parser;
+use itertools::Itertools;
 use reth_db::init_db;
 use reth_interfaces::RethError;
 use reth_primitives::{fs, stage::StageId, Address, Block, BlockNumber, ChainSpec, U256};
@@ -14,7 +15,10 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    db::{states::bundle_state::BundleRetention, AccountRevert, State},
+    db::{
+        states::{bundle_state::BundleRetention, CacheAccount},
+        AccountRevert, AccountStatus, State,
+    },
     parallel::{
         executor::{DatabaseRefBox, ParallelExecutor},
         queue::{BlockQueue, BlockQueueStore},
@@ -198,18 +202,44 @@ impl Command {
         let mut parallel_state = parallel_executor.state.write().unwrap();
         parallel_state.merge_transitions(BundleRetention::Reverts);
 
-        pretty_assertions::assert_eq!(
-            BTreeMap::from_iter(
-                parallel_state
-                    .cache
-                    .accounts
-                    .clone()
-                    .into_iter()
-                    .map(|(address, account)| (address, account.into()))
-            ),
-            BTreeMap::from_iter(expected.cache.accounts.into_iter()),
-            "Cache accounts mismatch"
-        );
+        let mut parallel_cache_accounts = parallel_state
+            .cache
+            .accounts
+            .clone()
+            .into_iter()
+            .sorted_by_key(|(address, _)| *address)
+            .peekable();
+        let mut expected_cache_accounts =
+            expected.cache.accounts.into_iter().sorted_by_key(|(address, _)| *address).peekable();
+        while parallel_cache_accounts.peek().is_some() || expected_cache_accounts.peek().is_some() {
+            let parallel = parallel_cache_accounts
+                .next()
+                .map(|(address, account)| (address, CacheAccount::from(account)));
+            let mut expected = expected_cache_accounts.next();
+
+            // Due to how transitions are applied, the parallel state will not produce a destroyed
+            // account if it was created in the same block. If it wasn't created in the
+            // same block, this will be caught when asserting transitions.
+            if parallel
+                .as_ref()
+                .map_or(false, |(_, acc)| acc.status == AccountStatus::LoadedNotExisting) &&
+                expected
+                    .as_ref()
+                    .map_or(false, |(_, acc)| acc.status == AccountStatus::Destroyed)
+            {
+                expected = expected.map(|(address, account)| {
+                    (
+                        address,
+                        CacheAccount {
+                            account: account.account,
+                            status: AccountStatus::LoadedNotExisting,
+                        },
+                    )
+                });
+            }
+
+            pretty_assertions::assert_eq!(parallel, expected, "Cache account mismatch");
+        }
 
         pretty_assertions::assert_eq!(
             BTreeMap::from_iter(parallel_state.cache.contracts.clone().into_iter()),
