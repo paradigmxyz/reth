@@ -1225,9 +1225,9 @@ impl RpcServerConfig {
     ///
     /// If no server is configured, no server will be be launched on [RpcServerConfig::start].
     pub fn has_server(&self) -> bool {
-        self.http_server_config.is_some()
-            || self.ws_server_config.is_some()
-            || self.ipc_server_config.is_some()
+        self.http_server_config.is_some() ||
+            self.ws_server_config.is_some() ||
+            self.ipc_server_config.is_some()
     }
 
     /// Returns the [SocketAddr] of the http server
@@ -1264,9 +1264,9 @@ impl RpcServerConfig {
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
         let metrics = RpcServerMetrics::default();
         // If both are configured on the same port, we combine them into one server.
-        if self.http_addr == self.ws_addr
-            && self.http_server_config.is_some()
-            && self.ws_server_config.is_some()
+        if self.http_addr == self.ws_addr &&
+            self.http_server_config.is_some() &&
+            self.ws_server_config.is_some()
         {
             let cors = match (self.ws_cors_domains.as_ref(), self.http_cors_domains.as_ref()) {
                 (Some(ws_cors), Some(http_cors)) => {
@@ -1275,7 +1275,7 @@ impl RpcServerConfig {
                             http_cors_domains: Some(http_cors.clone()),
                             ws_cors_domains: Some(ws_cors.clone()),
                         }
-                        .into());
+                        .into())
                     }
                     Some(ws_cors)
                 }
@@ -1304,7 +1304,7 @@ impl RpcServerConfig {
                 http_local_addr: Some(addr),
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
-            });
+            })
         }
 
         let mut http_local_addr = None;
@@ -1501,7 +1501,7 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true);
+            return http.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
@@ -1516,7 +1516,7 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true);
+            return ws.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
@@ -1531,7 +1531,7 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true);
+            return ipc.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
@@ -1666,8 +1666,7 @@ impl WsHttpServerKind {
             let local_addr = server.local_addr()?;
             let server = WsHttpServerKind::WithCors(server);
             Ok((server, local_addr))
-        }
-        else if let Some(secret) = auth_secret {
+        } else if let Some(secret) = auth_secret {
             let middleware = tower::ServiceBuilder::new()
                 .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
             let server = builder
@@ -1692,25 +1691,6 @@ impl WsHttpServerKind {
             Ok((server, local_addr))
         }
     }
-
-    // pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
-    //     let Self { socket_addr, secret, server_config } = self;
-
-    //     // Create auth middleware.
-    // let middleware = tower::ServiceBuilder::new()
-    //     .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
-
-    //     // By default, both http and ws are enabled.
-    // let server =
-    //     server_config.set_middleware(middleware).build(socket_addr).await.map_err(|err| {
-    //         RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr))
-    //     })?;
-
-    //     let local_addr = server.local_addr()?;
-
-    //     let handle = server.start(module.inner);
-    //     Ok(AuthServerHandle { handle, local_addr, secret })
-    // }
 }
 
 /// Container type for each transport ie. http, ws, and ipc server
