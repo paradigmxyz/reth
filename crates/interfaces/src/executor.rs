@@ -145,14 +145,6 @@ pub enum OptimismBlockExecutionError {
         /// The inner error message
         message: String,
     },
-    /// Error for when there is insufficient funds for the L1 cost of an L2 transaction
-    #[error("Insufficient funds to cover transaction L1 cost: want {want}, have {have}")]
-    InsufficientFundsForL1Cost {
-        /// How much ETH the L1 fee requires
-        want: u64,
-        /// How much ETH the account has
-        have: u64,
-    },
 }
 
 impl BlockExecutionError {
