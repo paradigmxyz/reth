@@ -322,6 +322,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn can_create_trace_call_many_stream() {
         let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
 
