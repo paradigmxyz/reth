@@ -90,9 +90,7 @@ default = []
 arbitrary = ["revm-primitives/arbitrary", "reth-rpc-types/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 clap = ["dep:clap"]
-# value-256 controls whether transaction Value fields are DB-encoded as 256 bits instead of the
-# default of 128 bits.
-optimism = ["reth-codecs/value-256"]
+optimism = ["reth-codecs/optimism"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
