@@ -4,14 +4,17 @@
 
 use crate::engine::PayloadAttributes;
 use alloy_primitives::B256;
+use attestation::AttestationData;
+use light_client_finality::LightClientFinalityData;
+use light_client_optimistic::LightClientOptimisticData;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
-use super::{
-    attestation::AttestationData, light_client_finality::LightClientFinalityData,
-    light_client_optimistic::LightClientOptimisticData,
-};
+pub mod attestation;
+pub mod light_client_finality;
+pub mod light_client_optimistic;
 
+/// Topic variant for the eventstream API
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BeaconNodeEventTopic {
     PayloadAttributes,
@@ -29,6 +32,7 @@ pub enum BeaconNodeEventTopic {
 }
 
 impl BeaconNodeEventTopic {
+    /// Returns the identifier value for the eventstream query
     pub fn query_value(&self) -> &'static str {
         match self {
             BeaconNodeEventTopic::PayloadAttributes => "payload_attributes",
