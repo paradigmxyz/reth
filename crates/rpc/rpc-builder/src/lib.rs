@@ -1103,6 +1103,7 @@ impl fmt::Debug for RpcServerConfig {
             .field("ws_addr", &self.ws_addr)
             .field("ipc_server_config", &self.ipc_server_config)
             .field("ipc_endpoint", &self.ipc_endpoint.as_ref().map(|endpoint| endpoint.path()))
+            .field("jwt_secret", &self.jwt_secret)
             .finish()
     }
 }
@@ -1214,6 +1215,12 @@ impl RpcServerConfig {
         self
     }
 
+    /// Configures the JWT secret for authentication
+    pub fn with_jwt_secret(mut self, secret: JwtSecret) -> Self {
+        self.jwt_secret = Some(secret);
+        self
+    }
+
     /// Returns true if any server is configured.
     ///
     /// If no server is configured, no server will be be launched on [RpcServerConfig::start].
@@ -1278,6 +1285,8 @@ impl RpcServerConfig {
             }
             .cloned();
 
+            let secret = self.jwt_secret.take();
+
             // we merge this into one server using the http setup
             self.ws_server_config.take();
 
@@ -1286,6 +1295,7 @@ impl RpcServerConfig {
                 builder,
                 http_socket_addr,
                 cors,
+                secret,
                 ServerKind::WsHttp(http_socket_addr),
                 metrics.clone(),
             )
@@ -1308,6 +1318,7 @@ impl RpcServerConfig {
                 builder,
                 ws_socket_addr,
                 self.ws_cors_domains.take(),
+                self.jwt_secret.take(),
                 ServerKind::WS(ws_socket_addr),
                 metrics.clone(),
             )
@@ -1322,6 +1333,7 @@ impl RpcServerConfig {
                 builder,
                 http_socket_addr,
                 self.http_cors_domains.take(),
+                self.jwt_secret.take(),
                 ServerKind::Http(http_socket_addr),
                 metrics.clone(),
             )
@@ -1655,11 +1667,15 @@ impl WsHttpServerKind {
             let server = WsHttpServerKind::WithCors(server);
             Ok((server, local_addr))
         }
-        if let Some(secret) = auth_secret {
+        else if let Some(secret) = auth_secret {
             let middleware = tower::ServiceBuilder::new()
                 .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
-            let server =
-                builder.set_middleware(middleware).build(socket_addr).await.map_err(|err| {
+            let server = builder
+                .set_middleware(middleware)
+                .set_logger(metrics)
+                .build(socket_addr)
+                .await
+                .map_err(|err| {
                     RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr))
                 })?;
             let local_addr = server.local_addr()?;
