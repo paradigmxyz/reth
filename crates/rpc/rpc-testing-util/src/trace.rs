@@ -270,6 +270,7 @@ mod tests {
     use super::*;
     use jsonrpsee::http_client::HttpClientBuilder;
     use reth_primitives::BlockNumberOrTag;
+    use std::collections::HashSet;
 
     fn assert_is_stream<St: Stream>(_: &St) {}
 
@@ -318,5 +319,31 @@ mod tests {
 
         println!("Total successes: {}", successes);
         println!("Total failures: {}", failures);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn can_create_trace_call_many_stream() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+
+        let call_request_1 = CallRequest::default();
+        let call_request_2 = CallRequest::default();
+        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
+        let calls = vec![(call_request_1, trace_types.clone()), (call_request_2, trace_types)];
+
+        let mut stream = client.trace_call_many_stream(calls, None);
+
+        assert_is_stream(&stream);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(trace_result) => {
+                    println!("Success: {:?}", trace_result);
+                }
+                Err(error) => {
+                    println!("Error: {:?}", error);
+                }
+            }
+        }
     }
 }
