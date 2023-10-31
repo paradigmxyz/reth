@@ -78,8 +78,8 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
         // the deposit nonce from the receipts before calculating the receipt root.
         let receipts = receipts
             .iter()
-            .map(|r| {
-                let mut r = r.clone();
+            .cloned()
+            .map(|mut r| {
                 r.receipt.deposit_nonce = None;
                 r
             })
@@ -92,7 +92,7 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
-/// Calculates the receipt root for a header for the reference type of [ReceiptWithBloom].
+/// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
 pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
