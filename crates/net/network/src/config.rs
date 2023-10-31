@@ -78,7 +78,7 @@ pub struct NetworkConfig<C> {
 
 /// Optimmism Network Config
 #[cfg(feature = "optimism")]
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct OptimismNetworkConfig {
     /// The sequencer HTTP endpoint, if provided via CLI flag
     pub sequencer_endpoint: Option<String>,
