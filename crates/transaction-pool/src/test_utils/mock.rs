@@ -723,9 +723,6 @@ impl FromRecoveredTransaction for MockTransaction {
                 input,
                 accesslist: access_list,
             },
-            Transaction::Eip2930 { .. } => {
-                unimplemented!()
-            }
             #[cfg(feature = "optimism")]
             Transaction::Deposit { .. } => {
                 unimplemented!()
