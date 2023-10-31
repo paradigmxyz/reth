@@ -295,7 +295,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
 
         // setup the blockchain provider
-        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
+        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
+        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain))
+            .with_snapshots(highest_snapshots_rx.clone());
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
@@ -449,8 +451,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             None
         };
-
-        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
 
         let mut hooks = EngineHooks::new();
 
