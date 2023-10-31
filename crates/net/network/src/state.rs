@@ -420,7 +420,7 @@ where
                             // check if the error is due to a closed channel to the session
                             if res.err().map(|err| err.is_channel_closed()).unwrap_or_default() {
                                 debug!(
-                                    target : "net",
+                                    target: "net",
                                     ?id,
                                     "Request canceled, response channel from session closed."
                                 );

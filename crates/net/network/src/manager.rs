@@ -360,7 +360,7 @@ where
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
-        trace!(target : "net", ?peer_id,  "received unexpected message");
+        trace!(target: "net", ?peer_id,  "received unexpected message");
         self.swarm
             .state_mut()
             .peers_mut()
@@ -506,7 +506,7 @@ where
                 unreachable!("Not emitted by session")
             }
             PeerMessage::Other(other) => {
-                debug!(target : "net", message_id=%other.id, "Ignoring unsupported message");
+                debug!(target: "net", message_id=%other.id, "Ignoring unsupported message");
             }
         }
     }
@@ -646,20 +646,20 @@ where
                             this.metrics.invalid_messages_received.increment(1);
                         }
                         SwarmEvent::TcpListenerClosed { remote_addr } => {
-                            trace!(target : "net", ?remote_addr, "TCP listener closed.");
+                            trace!(target: "net", ?remote_addr, "TCP listener closed.");
                         }
                         SwarmEvent::TcpListenerError(err) => {
-                            trace!(target : "net", ?err, "TCP connection error.");
+                            trace!(target: "net", ?err, "TCP connection error.");
                         }
                         SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
-                            trace!(target : "net", ?session_id, ?remote_addr, "Incoming connection");
+                            trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
                             this.metrics.total_incoming_connections.increment(1);
                             this.metrics
                                 .incoming_connections
                                 .set(this.swarm.state().peers().num_inbound_connections() as f64);
                         }
                         SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
-                            trace!(target : "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
+                            trace!(target: "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
                             this.metrics.total_outgoing_connections.increment(1);
                             this.metrics
                                 .outgoing_connections
@@ -724,7 +724,7 @@ where
                                 this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
                             this.metrics.connected_peers.set(total_active as f64);
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?peer_id,
                                 ?total_active,
@@ -769,7 +769,7 @@ where
                         }
                         SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?error,
                                 "Incoming pending session failed"
@@ -805,7 +805,7 @@ where
                             error,
                         } => {
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?peer_id,
                                 ?error,
@@ -839,7 +839,7 @@ where
                         }
                         SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?peer_id,
                                 ?error,
