@@ -158,7 +158,7 @@ where
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: StateProviderFactory + BlockReader + BlockReaderIdExt + HeaderProvider + Clone + 'static,
+    C: StateProviderFactory + BlockReaderIdExt + HeaderProvider + Clone + 'static,
     Pool: TransactionPool,
 {
     /// Installs an eth pool on each peer

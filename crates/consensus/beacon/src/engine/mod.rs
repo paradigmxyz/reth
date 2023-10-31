@@ -665,6 +665,7 @@ where
             Ok(outcome) => {
                 match outcome {
                     CanonicalOutcome::AlreadyCanonical { ref header } => {
+                        // On Optimism, the proposers are allowed to reorg their own chain at will.
                         cfg_if::cfg_if! {
                             if #[cfg(feautre = "optimism")] {
                                 let optimism = self.chain_spec().optimism;
