@@ -184,15 +184,18 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
 }
 
 /// Fill transaction environment from [TransactionSignedEcRecovered].
+#[cfg(not(feature = "optimism"))]
+pub fn fill_tx_env_with_recovered(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
+    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
+}
+
+/// Fill transaction environment from [TransactionSignedEcRecovered] and the given envelope.
+#[cfg(feature = "optimism")]
 pub fn fill_tx_env_with_recovered(
     tx_env: &mut TxEnv,
     transaction: &TransactionSignedEcRecovered,
-    #[cfg(feature = "optimism")] envelope: Bytes,
+    envelope: Bytes,
 ) {
-    #[cfg(not(feature = "optimism"))]
-    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
-
-    #[cfg(feature = "optimism")]
     fill_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
 }
 
@@ -313,7 +316,7 @@ pub fn fill_tx_env<T>(
                 TransactionKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
                 TransactionKind::Create => tx_env.transact_to = TransactTo::create(),
             }
-            tx_env.value = tx.value.0;
+            tx_env.value = tx.value.into();
             tx_env.data = tx.input.clone();
             tx_env.chain_id = None;
             tx_env.nonce = None;

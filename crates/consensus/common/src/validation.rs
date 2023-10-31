@@ -251,6 +251,41 @@ pub fn validate_block_standalone(
     Ok(())
 }
 
+// Check gas limit, max diff between child/parent gas_limit should be  max_diff=parent_gas/1024
+// On Optimism, the gas limit can adjust instantly, so we skip this check if the optimism
+// feature flag is enabled.
+#[inline(always)]
+#[cfg(not(feature = "optimism"))]
+fn check_gas_limit(
+    parent: &SealedHeader,
+    child: &SealedHeader,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError> {
+    let mut parent_gas_limit = parent.gas_limit;
+
+    // By consensus, gas_limit is multiplied by elasticity (*2) on
+    // on exact block that hardfork happens.
+    if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
+        parent_gas_limit = parent.gas_limit * chain_spec.base_fee_params.elasticity_multiplier;
+    }
+
+    if child.gas_limit > parent_gas_limit {
+        if child.gas_limit - parent_gas_limit >= parent_gas_limit / 1024 {
+            return Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit,
+                child_gas_limit: child.gas_limit,
+            })
+        }
+    } else if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
+        return Err(ConsensusError::GasLimitInvalidDecrease {
+            parent_gas_limit,
+            child_gas_limit: child.gas_limit,
+        })
+    }
+
+    Ok(())
+}
+
 /// Validate block in regards to parent
 pub fn validate_header_regarding_parent(
     parent: &SealedHeader,
@@ -283,42 +318,13 @@ pub fn validate_header_regarding_parent(
     // TODO Check difficulty increment between parent and child
     // Ace age did increment it by some formula that we need to follow.
 
-    // Check gas limit, max diff between child/parent gas_limit should be  max_diff=parent_gas/1024
-    // On Optimism, the gas limit can adjust instantly, so we skip this check if the optimism
-    // flag is enabled in the chainspec.
-    #[inline(always)]
-    fn check_gas_limit(
-        parent: &SealedHeader,
-        child: &SealedHeader,
-        chain_spec: &ChainSpec,
-    ) -> Result<(), ConsensusError> {
-        let mut parent_gas_limit = parent.gas_limit;
-
-        // By consensus, gas_limit is multiplied by elasticity (*2) on
-        // on exact block that hardfork happens.
-        if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
-            parent_gas_limit = parent.gas_limit * chain_spec.base_fee_params.elasticity_multiplier;
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "optimism")] {
+            // On Optimism, the gas limit can adjust instantly, so we skip this check if the optimism
+            // flag is enabled in the chainspec.
+        } else {
+            check_gas_limit(parent, child, chain_spec)?;
         }
-
-        if child.gas_limit > parent_gas_limit {
-            if child.gas_limit - parent_gas_limit >= parent_gas_limit / 1024 {
-                return Err(ConsensusError::GasLimitInvalidIncrease {
-                    parent_gas_limit,
-                    child_gas_limit: child.gas_limit,
-                })
-            }
-        } else if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
-            return Err(ConsensusError::GasLimitInvalidDecrease {
-                parent_gas_limit,
-                child_gas_limit: child.gas_limit,
-            })
-        }
-
-        Ok(())
-    }
-
-    if !chain_spec.is_optimism() {
-        check_gas_limit(parent, child, chain_spec)?;
     }
 
     // EIP-1559 check base fee
