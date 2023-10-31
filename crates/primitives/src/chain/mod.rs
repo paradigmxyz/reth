@@ -149,14 +149,24 @@ impl Chain {
 
     /// Returns true if the chain contains Optimism configuration.
     pub fn is_optimism(self) -> bool {
-        matches!(
-            self,
-            Chain::Named(NamedChain::Optimism) |
-                Chain::Named(NamedChain::OptimismGoerli) |
-                Chain::Named(NamedChain::OptimismKovan) |
-                Chain::Named(NamedChain::Base) |
-                Chain::Named(NamedChain::BaseGoerli)
-        )
+        self.named().map_or(false, |c| {
+            matches!(
+                c,
+                NamedChain::Optimism |
+                    NamedChain::OptimismGoerli |
+                    NamedChain::OptimismKovan |
+                    NamedChain::Base |
+                    NamedChain::BaseGoerli
+            )
+        })
+    }
+
+    /// Attempts to convert the chain into a named chain.
+    pub fn named(&self) -> Option<NamedChain> {
+        match self {
+            Chain::Named(chain) => Some(*chain),
+            Chain::Id(id) => NamedChain::try_from(*id).ok(),
+        }
     }
 
     /// The id of the chain
