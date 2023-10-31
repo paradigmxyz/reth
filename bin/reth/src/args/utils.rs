@@ -38,7 +38,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
 ///
 /// The value parser matches either a known chain, the path
 /// to a json file, or a json formatted string in-memory. The json can be either
-/// a serialized [ChainSpec] or a [Genesis] struct.
+/// a serialized [ChainSpec] or Genesis struct.
 pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
         "mainnet" => MAINNET.clone(),
