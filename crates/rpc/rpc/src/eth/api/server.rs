@@ -385,7 +385,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig},
         BlockingTaskPool, EthApi,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
@@ -422,9 +422,10 @@ mod tests {
             testing_pool(),
             NoopNetwork::default(),
             cache.clone(),
-            GasPriceOracle::new(provider, Default::default(), cache),
+            GasPriceOracle::new(provider.clone(), Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
+            FeeHistoryCache::new(FeeHistoryCacheConfig::default(), provider.clone()),
         )
     }
 

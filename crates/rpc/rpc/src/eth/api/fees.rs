@@ -95,16 +95,8 @@ where
 
         let start_block = end_block_plus - block_count;
 
-        let headers: Vec<SealedHeader>;
-        if start_block < (end_block - max_fee_history) {
-            headers = self.provider().sealed_headers_range(start_block..=end_block)?;
-        } else {
-            let read_guard = self.fee_history_cache().entries.read().await;
-            headers = read_guard
-                .range(start_block..=end_block)
-                .map(|(_, header)| header.clone())
-                .collect();
-        }
+        let headers = self.fee_history_cache().get_history(start_block, end_block).await?;
+      
         if headers.len() != block_count as usize {
             return Err(EthApiError::InvalidBlockRange)
         }

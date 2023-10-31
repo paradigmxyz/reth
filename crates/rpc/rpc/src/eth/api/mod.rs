@@ -9,6 +9,7 @@ use crate::eth::{
     signer::EthSigner,
 };
 use async_trait::async_trait;
+use metrics::atomics::AtomicU64;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
@@ -17,7 +18,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, EvmEnvProvider, StateProviderBox,
-    StateProviderFactory,
+    StateProviderFactory, BlockNumReader,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -28,16 +29,15 @@ use std::{
     collections::BTreeMap,
     fmt::Debug,
     future::Future,
-    sync::Arc,
+    sync::Arc, 
+    sync::atomic::Ordering::SeqCst,
     time::{Duration, Instant},
 };
 
-use futures::{future::Either, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
     oneshot, Mutex,
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 mod block;
 mod call;
@@ -103,7 +103,7 @@ where
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache,
+        fee_history_cache: FeeHistoryCache<Provider>,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -129,7 +129,7 @@ where
         gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache,
+        fee_history_cache: FeeHistoryCache<Provider>,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -210,7 +210,7 @@ where
     }
 
     /// Returns fee history cache
-    pub fn fee_history_cache(&self) -> &FeeHistoryCache {
+    pub fn fee_history_cache(&self) -> &FeeHistoryCache<Provider> {
         &self.inner.fee_history_cache
     }
 }
@@ -462,7 +462,7 @@ struct EthApiInner<Provider, Pool, Network> {
     /// A pool dedicated to blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
-    fee_history_cache: FeeHistoryCache,
+    fee_history_cache: FeeHistoryCache<Provider>,
 }
 
 /// The type that contains fees data for associated block in cache
@@ -496,7 +496,7 @@ pub struct FeeHistoryCacheConfig {
     /// Max number of blocks in cache.
     ///
     /// Default is 1024.
-    pub max_blocks: u32,
+    pub max_blocks: u64,
 }
 
 impl Default for FeeHistoryCacheConfig {
@@ -506,16 +506,48 @@ impl Default for FeeHistoryCacheConfig {
 }
 
 /// Wrapper struct for BTreeMap
-pub(crate) struct FeeHistoryCache {
+#[derive(Debug, Clone)]
+pub struct FeeHistoryCache<Provider> {
+    lower_bound: Arc<AtomicU64>,
+    upper_bound: Arc<AtomicU64>,
     config: FeeHistoryCacheConfig,
-    entries: tokio::sync::RwLock<BTreeMap<u64, SealedHeader>>,
+    provider: Provider,
+    entries: Arc<tokio::sync::RwLock<BTreeMap<u64, SealedHeader>>>,
 }
 
-impl FeeHistoryCache {
-    pub fn new(config: FeeHistoryCacheConfig) -> Self {
-        let mut entries = tokio::sync::RwLock::new(BTreeMap::new());
-        let cache = FeeHistoryCache { config, entries };
+impl<Provider> FeeHistoryCache<Provider>
+where
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + BlockNumReader + 'static,
+{
+    pub fn new(
+        config: FeeHistoryCacheConfig,
+        provider: Provider,
+        ) -> Self {
+        let mut init_tree_map = BTreeMap::new();
 
+        let last_block_number = provider.last_block_number().unwrap_or(0);    
+        let start_block = last_block_number - config.max_blocks;
+        let headers = provider.sealed_headers_range(start_block..=last_block_number).unwrap_or_default();
+        
+        for header in headers {
+            init_tree_map.insert(header.number, header);    
+        }
+        let upper_bound = *init_tree_map.last_key_value().expect("Chain has at least 1 block").0;
+        let lower_bound = *init_tree_map.first_key_value().expect("Chain has at least one block").0; 
+        
+        let entries = Arc::new(tokio::sync::RwLock::new(init_tree_map));
+        
+        let upper_bound = Arc::new(AtomicU64::new(upper_bound));
+        let lower_bound = Arc::new(AtomicU64::new(lower_bound));
+
+        let cache = FeeHistoryCache { 
+            config, 
+            entries, 
+            provider, 
+            upper_bound,
+            lower_bound,
+        };
         cache
     }
 
@@ -526,15 +558,32 @@ impl FeeHistoryCache {
             entries.pop_first();
         }
     }
+
+    pub async fn get_history(&self, start_block: u64, end_block: u64) -> RethResult<Vec<SealedHeader>> {
+        let headers: Vec<SealedHeader>;
+         
+        let lower_bound = self.lower_bound.load(SeqCst);
+        let upper_bound = self.upper_bound.load(SeqCst); 
+        if start_block >= lower_bound && end_block <= upper_bound {
+            let entries = self.entries.read().await;
+            headers = entries.range(start_block..=end_block+1).map(|(_, header)| header.clone()).collect();
+        } else {
+            headers = self.provider.sealed_headers_range(start_block..=end_block)?;
+        }
+        
+        Ok(headers)
+    }
 }
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
-pub(crate) async fn fee_history_cache_new_blocks_task<St>(
-    fee_history_cache: FeeHistoryCache,
+pub async fn fee_history_cache_new_blocks_task<St, Provider>(
+    fee_history_cache: FeeHistoryCache<Provider>,
     mut events: St,
 ) where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+    Provider: 
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + BlockNumReader + 'static,
 {
     while let Some(event) = events.next().await {
         if let Some(committed) = event.committed() {

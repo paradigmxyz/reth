@@ -7,9 +7,9 @@ use crate::{
             inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
             EvmOverrides,
         },
-        utils::recover_raw_transaction,
+        utils::recover_raw_transaction, 
     },
-    EthApi, EthApiSpec,
+    EthApi, EthApiSpec, 
 };
 use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
@@ -1090,7 +1090,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 mod tests {
     use super::*;
     use crate::{
-        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig},
         BlockingTaskPool, EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
@@ -1106,6 +1106,7 @@ mod tests {
         let pool = testing_pool();
 
         let cache = EthStateCache::spawn(noop_provider, Default::default());
+        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default(), noop_provider);
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),
@@ -1114,6 +1115,7 @@ mod tests {
             GasPriceOracle::new(noop_provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
+            fee_history_cache,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
