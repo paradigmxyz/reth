@@ -4,11 +4,13 @@ use dashmap::DashMap;
 use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::BLOCKS_PER_SNAPSHOT, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo,
-    Header, SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    snapshot::{HighestSnapshots, BLOCKS_PER_SNAPSHOT},
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, SealedHeader,
+    SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    B256, U256,
 };
 use std::{ops::RangeBounds, path::PathBuf};
+use tokio::sync::watch;
 
 /// SnapshotProvider
 #[derive(Debug, Default)]
@@ -16,9 +18,19 @@ pub struct SnapshotProvider {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
+    highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
 }
 
 impl SnapshotProvider {
+    /// Adds a highest snapshot tracker to the provider
+    pub fn with_highest_tracker(
+        mut self,
+        highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
+    ) -> Self {
+        self.highest_tracker = highest_tracker;
+        self
+    }
+
     /// Gets the provider of the requested segment and range.
     pub fn get_segment_provider(
         &self,
