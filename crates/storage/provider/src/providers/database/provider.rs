@@ -98,6 +98,7 @@ pub struct DatabaseProvider<TX> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot provider
+    #[allow(unused)]
     snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
