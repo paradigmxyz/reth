@@ -66,7 +66,7 @@ pub use constants::{
 };
 pub use eip4844::{calculate_excess_blob_gas, kzg_to_versioned_hash};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
-pub use genesis::{Genesis, GenesisAccount, ChainConfig};
+pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
 pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;

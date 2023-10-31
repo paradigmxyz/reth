@@ -175,7 +175,7 @@ mod tests {
 }
 "#;
 
-        let chain_from_json = genesis_value_parser(&custom_genesis_from_json).unwrap();
+        let chain_from_json = genesis_value_parser(custom_genesis_from_json).unwrap();
 
         // using structs
         let config = ChainConfig {
