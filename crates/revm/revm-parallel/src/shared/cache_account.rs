@@ -391,10 +391,14 @@ impl SharedCacheAccount {
         let had_no_nonce_and_code =
             self.previous_info.as_ref().map(AccountInfo::has_no_code_and_nonce).unwrap_or_default();
 
-        if self.selfdestruct_index.is_some() {
-            if !changed && matches!(self.previous_status, AccountStatus::LoadedNotExisting) {
+        if self.previous_status == AccountStatus::LoadedNotExisting {
+            if changed {
+                AccountStatus::InMemoryChange
+            } else {
                 AccountStatus::LoadedNotExisting
-            } else if current_info.is_some() {
+            }
+        } else if self.selfdestruct_index.is_some() {
+            if current_info.is_some() {
                 AccountStatus::DestroyedChanged
             } else if self.selfdestruct_count > 1 {
                 AccountStatus::DestroyedAgain

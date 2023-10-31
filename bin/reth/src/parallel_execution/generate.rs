@@ -87,6 +87,10 @@ pub struct Command {
     #[arg(long)]
     validate: bool,
 
+    /// Flag indicating whether we should skip account status checks
+    #[arg(long, requires = "validate")]
+    skip_account_status_validation: bool,
+
     /// Path for writing the output file.
     #[arg(long)]
     out: PathBuf,
@@ -235,24 +239,32 @@ impl Command {
             // Account status
             let parallel_account_status = parallel_account.as_ref().map(|acc| acc.status);
             let expected_account_status = expected_account.as_ref().map(|acc| acc.status);
-            if parallel_account_status != expected_account_status {
-                // Account status mismatch is a soft error.
-                // Most importantly the transitions should match.
-                account_status_mismatches += 1;
-                tracing::warn!(
-                    target: "reth::cli",
-                    block_number = block.number,
-                    address = ?expected_address,
-                    ?parallel_account_status,
-                    ?expected_account_status,
-                    "Cache account status mismatch"
+            if self.skip_account_status_validation {
+                if parallel_account_status != expected_account_status {
+                    // Account status mismatch is a soft error.
+                    // Most importantly the transitions should match.
+                    account_status_mismatches += 1;
+                    tracing::warn!(
+                            target: "reth::cli",
+                            block_number = block.number,
+                            address = ?expected_address,
+                        ?parallel_account_status,
+                        ?expected_account_status,
+                        "Cache account status mismatch"
+                    );
+                }
+                pretty_assertions::assert_eq!(
+                    parallel_account.map(|acc| acc.account),
+                    expected_account.map(|acc| acc.account),
+                    "Cache account mismatch"
+                );
+            } else {
+                pretty_assertions::assert_eq!(
+                    parallel_account,
+                    expected_account,
+                    "Cache account mismatch"
                 );
             }
-            pretty_assertions::assert_eq!(
-                parallel_account.map(|acc| acc.account),
-                expected_account.map(|acc| acc.account),
-                "Cache account mismatch"
-            );
         }
 
         pretty_assertions::assert_eq!(
