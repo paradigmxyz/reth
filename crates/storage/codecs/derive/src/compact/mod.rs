@@ -164,9 +164,9 @@ pub fn get_bit_size(ftype: &str) -> u8 {
         "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
         "U256" => 6,
-        #[cfg(not(feature = "value-256"))]
+        #[cfg(not(feature = "optimism"))]
         "TxValue" => 5, // u128 for ethereum chains assuming high order bits are not used
-        #[cfg(feature = "value-256")]
+        #[cfg(feature = "optimism")]
         // for fuzz/prop testing and chains that may require full 256 bits
         "TxValue" => 6,
         _ => 0,
