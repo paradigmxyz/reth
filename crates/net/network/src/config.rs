@@ -69,20 +69,19 @@ pub struct NetworkConfig<C> {
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
     pub hello_message: HelloMessage,
+    /// Whether to disable transaction gossip
+    pub tx_gossip_disabled: bool,
     /// Optimism Network Config
     #[cfg(feature = "optimism")]
     pub optimism_network_config: OptimismNetworkConfig,
 }
 
 /// Optimmism Network Config
+#[cfg(feature = "optimism")]
 #[derive(Debug)]
 pub struct OptimismNetworkConfig {
     /// The sequencer HTTP endpoint, if provided via CLI flag
-    #[cfg(feature = "optimism")]
     pub sequencer_endpoint: Option<String>,
-    /// Whether to disable transaction gossip
-    #[cfg(feature = "optimism")]
-    pub tx_gossip_disabled: bool,
 }
 
 // === impl NetworkConfig ===
@@ -162,12 +161,20 @@ pub struct NetworkConfigBuilder {
     hello_message: Option<HelloMessage>,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
-    /// The sequencer HTTP endpoint, if provided via CLI flag
-    #[cfg(feature = "optimism")]
-    sequencer_endpoint: Option<String>,
     /// Whether tx gossip is disabled
-    #[cfg(feature = "optimism")]
     tx_gossip_disabled: bool,
+    /// Optimism Network Config Builder
+    #[cfg(feature = "optimism")]
+    optimism_network_config: OptimismNetworkConfigBuilder,
+}
+
+/// Optimism Network Config Builder
+#[cfg(feature = "optimism")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug)]
+pub struct OptimismNetworkConfigBuilder {
+    /// The sequencer HTTP endpoint, if provided via CLI flag
+    sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -189,10 +196,9 @@ impl NetworkConfigBuilder {
             executor: None,
             hello_message: None,
             head: None,
-            #[cfg(feature = "optimism")]
-            sequencer_endpoint: None,
-            #[cfg(feature = "optimism")]
             tx_gossip_disabled: false,
+            #[cfg(feature = "optimism")]
+            optimism_network_config: OptimismNetworkConfigBuilder { sequencer_endpoint: None },
         }
     }
 
@@ -373,17 +379,16 @@ impl NetworkConfigBuilder {
         }
     }
 
-    /// Sets the sequencer HTTP endpoint.
-    #[cfg(feature = "optimism")]
-    pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
-        self.sequencer_endpoint = endpoint;
+    /// Sets whether tx gossip is disabled.
+    pub fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
+        self.tx_gossip_disabled = disable_tx_gossip;
         self
     }
 
-    /// Sets whether tx gossip is disabled.
+    /// Sets the sequencer HTTP endpoint.
     #[cfg(feature = "optimism")]
-    pub fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
-        self.tx_gossip_disabled = disable_tx_gossip;
+    pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
+        self.optimism_network_config.sequencer_endpoint = endpoint;
         self
     }
 
@@ -409,10 +414,9 @@ impl NetworkConfigBuilder {
             executor,
             hello_message,
             head,
-            #[cfg(feature = "optimism")]
-            sequencer_endpoint,
-            #[cfg(feature = "optimism")]
             tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+                optimism_network_config: OptimismNetworkConfigBuilder { sequencer_endpoint },
         } = self;
 
         let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
@@ -463,11 +467,9 @@ impl NetworkConfigBuilder {
             status,
             hello_message,
             fork_filter,
+            tx_gossip_disabled,
             #[cfg(feature = "optimism")]
-            optimism_network_config: OptimismNetworkConfig {
-                sequencer_endpoint,
-                tx_gossip_disabled,
-            },
+            optimism_network_config: OptimismNetworkConfig { sequencer_endpoint },
         }
     }
 }
