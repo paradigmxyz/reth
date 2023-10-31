@@ -1,0 +1,256 @@
+use super::{SharedCacheAccount, SharedCacheState};
+use dashmap::{mapref::one::RefMut, DashMap};
+use derive_more::Deref;
+use reth_primitives::U256;
+use revm::{
+    db::{
+        states::{bundle_state::BundleRetention, plain_account::PlainStorage},
+        BundleState,
+    },
+    primitives::{
+        AccountInfo, Address, Bytecode, HashMap, State as EVMState, B256, BLOCK_HASH_HISTORY,
+    },
+    DatabaseRef,
+};
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        RwLock,
+    },
+    vec::Vec,
+};
+
+/// State of the blockchain. Port of [revm::db::State] that can be safely shared across threads.
+#[derive(Debug)]
+pub struct SharedState<DB: DatabaseRef> {
+    /// The underlying database provider.
+    pub database: DB,
+    /// Cached state contains both changed from evm execution and cached/loaded account/storages
+    /// from database. This allows us to have only one layer of cache where we can fetch data.
+    /// Additionally we can introduce some preloading of data from database.
+    pub cache: SharedCacheState,
+    /// After block is finishes we merge those changes inside bundle.
+    /// Bundle is used to update database and create changesets.
+    /// Bundle state can be set on initialization if we want to use preloaded bundle.
+    pub bundle_state: BundleState,
+    /// If EVM asks for block hash we will first check if they are found here.
+    /// and then ask the database.
+    ///
+    /// This map can be used to give different values for block hashes if in case
+    /// The fork block is different or some blocks are not saved inside database.
+    pub block_hashes: DashMap<u64, B256>,
+    /// The earliest block hash stored in the state.
+    pub earliest_block_hash: AtomicU64,
+}
+
+impl<DB: DatabaseRef> SharedState<DB> {
+    /// Create new shared state.
+    pub fn new(database: DB) -> Self {
+        Self {
+            database,
+            cache: SharedCacheState::new(false),
+            bundle_state: BundleState::default(),
+            block_hashes: DashMap::default(),
+            earliest_block_hash: AtomicU64::new(0),
+        }
+    }
+
+    /// Returns the size hint for the inner bundle state.
+    /// See [BundleState::size_hint] for more info.
+    pub fn bundle_size_hint(&self) -> usize {
+        self.bundle_state.size_hint()
+    }
+
+    /// Iterate over received balances and increment all account balances.
+    /// If account is not found inside cache state it will be loaded from database.
+    ///
+    /// Update will create transitions for all accounts that are updated.
+    pub fn increment_balances(
+        &mut self,
+        balances: impl IntoIterator<Item = (Address, u128)>,
+    ) -> Result<(), DB::Error> {
+        for (address, balance) in balances.into_iter().filter(|(_, incr)| *incr != 0) {
+            self.load_cache_account(address)?.increment_balance(balance);
+        }
+        Ok(())
+    }
+
+    /// Drain balances from given account and return those values.
+    ///
+    /// It is used for DAO hardfork state change to move values from given accounts.
+    pub fn drain_balances(
+        &mut self,
+        addresses: impl IntoIterator<Item = Address>,
+    ) -> Result<Vec<u128>, DB::Error> {
+        let mut balances = Vec::new();
+        for address in addresses {
+            let balance = self.load_cache_account(address)?.drain_balance();
+            balances.push(balance);
+        }
+
+        Ok(balances)
+    }
+
+    /// State clear EIP-161 is enabled in Spurious Dragon hardfork.
+    pub fn set_state_clear_flag(&mut self, has_state_clear: bool) {
+        self.cache.set_state_clear_flag(has_state_clear);
+    }
+
+    /// Insert non existing account into cache.
+    pub fn insert_not_existing(&self, address: Address) {
+        self.cache.insert_not_existing(address)
+    }
+
+    /// Insert account into cache.
+    pub fn insert_account(&self, address: Address, info: AccountInfo) {
+        self.cache.insert_account(address, info)
+    }
+
+    /// Insert account with storage into cache.
+    pub fn insert_account_with_storage(
+        &self,
+        address: Address,
+        info: AccountInfo,
+        storage: PlainStorage,
+    ) {
+        self.cache.insert_account_with_storage(address, info, storage)
+    }
+
+    /// Take all transitions and merge them inside bundle state.
+    /// This action will create final post state and all reverts so that
+    /// we at any time revert state of bundle to the state before transition
+    /// is applied.
+    pub fn merge_transitions(&mut self, retention: BundleRetention) {
+        let transitions = self.cache.take_transitions();
+        self.bundle_state.apply_transitions_and_create_reverts(transitions, retention);
+    }
+
+    /// Load account from cache or, if missing, from underlying database.
+    pub fn load_cache_account(
+        &self,
+        address: Address,
+    ) -> Result<RefMut<'_, Address, SharedCacheAccount>, DB::Error> {
+        let account = match self.cache.accounts.get_mut(&address) {
+            Some(account) => account,
+            None => {
+                // if not found in bundle, load it from database
+                let info = self.database.basic_ref(address)?;
+                let account = match info {
+                    None => SharedCacheAccount::new_loaded_not_existing(),
+                    Some(acc) if acc.is_empty() => {
+                        SharedCacheAccount::new_loaded_empty_eip161(HashMap::new())
+                    }
+                    Some(acc) => SharedCacheAccount::new_loaded(acc, HashMap::new()),
+                };
+
+                self.cache.accounts.entry(address).insert(account)
+            }
+        };
+        Ok(account)
+    }
+
+    /// Commit concurrent evm state results to database.
+    pub fn commit(&mut self, evm_states: Vec<(usize, EVMState)>) {
+        self.cache.apply_evm_states(evm_states);
+    }
+
+    /// Takes changeset and reverts from state and replaces it with empty one.
+    /// This will trop pending Transition and any transitions would be lost.
+    pub fn take_bundle(&mut self) -> BundleState {
+        core::mem::take(&mut self.bundle_state)
+    }
+}
+
+impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
+    type Error = DB::Error;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.load_cache_account(address).map(|a| a.account_info())
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        let code = match self.cache.contracts.get(&code_hash) {
+            Some(code) => code.clone(),
+            None => {
+                // if not found in bundle ask database
+                let code = self.database.code_by_hash_ref(code_hash)?;
+                self.cache.contracts.insert(code_hash, code.clone());
+                code
+            }
+        };
+        Ok(code)
+    }
+
+    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        // Account is guaranteed to be loaded.
+        // Note that storage from bundle is already loaded with account.
+        let value = match self.cache.accounts.get_mut(&address) {
+            Some(mut account) => account
+                .get_or_insert_storage_slot(index, || self.database.storage_ref(address, index))?,
+            None => unreachable!(
+                "For accessing any storage account is guaranteed to be loaded beforehand"
+            ),
+        };
+        Ok(value)
+    }
+
+    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+        // block number is never bigger then u64::MAX.
+        let number_u64: u64 = number.to();
+        let block_hash = match self.block_hashes.get(&number_u64) {
+            Some(hash) => *hash,
+            None => {
+                let block_hash = self.database.block_hash_ref(number)?;
+                self.block_hashes.insert(number_u64, block_hash);
+
+                let mut earliest_block_hash = self.earliest_block_hash.load(Ordering::Relaxed);
+                if self.earliest_block_hash.load(Ordering::Relaxed) == 0 {
+                    earliest_block_hash = number_u64;
+                } else {
+                    // prune all hashes that are older then BLOCK_HASH_HISTORY
+                    let minimum_required_block_hash =
+                        number_u64.saturating_sub(BLOCK_HASH_HISTORY as u64);
+                    while earliest_block_hash < minimum_required_block_hash {
+                        self.block_hashes.remove(&earliest_block_hash);
+                        earliest_block_hash += 1;
+                    }
+                }
+                self.earliest_block_hash.store(earliest_block_hash, Ordering::Relaxed);
+
+                block_hash
+            }
+        };
+        Ok(block_hash)
+    }
+}
+
+/// Shared state behind RW lock.
+#[derive(Deref, Debug)]
+pub struct LockedSharedState<DB: DatabaseRef>(RwLock<SharedState<DB>>);
+
+impl<DB: DatabaseRef> LockedSharedState<DB> {
+    /// Create new locked shared state.
+    pub fn new(state: SharedState<DB>) -> Self {
+        Self(RwLock::new(state))
+    }
+}
+
+impl<DB: DatabaseRef> DatabaseRef for LockedSharedState<DB> {
+    type Error = DB::Error;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.read().unwrap().basic_ref(address)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.read().unwrap().code_by_hash_ref(code_hash)
+    }
+
+    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        self.read().unwrap().storage_ref(address, index)
+    }
+
+    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+        self.read().unwrap().block_hash_ref(number)
+    }
+}

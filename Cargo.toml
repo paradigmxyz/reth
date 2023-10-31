@@ -24,6 +24,7 @@ members = [
     "crates/prune",
     "crates/revm",
     "crates/revm/revm-inspectors",
+    "crates/revm/revm-parallel",
     "crates/rpc/ipc",
     "crates/rpc/rpc",
     "crates/rpc/rpc-api",
@@ -111,8 +112,8 @@ reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
 reth-tokio-util = { path = "crates/tokio-util" }
 # revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "0d78d1eb304a2ce41ddac8f03206f5a316af247b" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "0d78d1eb304a2ce41ddac8f03206f5a316af247b" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "8779d23c0357ba4cb85ab4ef7b26fed98de49706" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "8779d23c0357ba4cb85ab4ef7b26fed98de49706" }
 
 ## eth
 alloy-primitives = "0.4"

@@ -23,7 +23,7 @@ reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-revm = { path = "../../crates/revm" }
+reth-revm = { path = "../../crates/revm", features = ["parallel"]}
 reth-revm-inspectors = { path = "../../crates/revm/revm-inspectors" }
 reth-stages = { path = "../../crates/stages" }
 reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }

@@ -5,7 +5,7 @@ use crate::{
     cli::ext::RethCliExt,
     db, debug_cmd,
     dirs::{LogsDir, PlatformPath},
-    node, p2p, recover,
+    node, p2p, parallel_execution, recover,
     runner::CliRunner,
     stage, test_vectors,
     version::{LONG_VERSION, SHORT_VERSION},
@@ -95,6 +95,9 @@ impl<Ext: RethCliExt> Cli<Ext> {
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::ParallelExecution(command) => {
+                runner.run_command_until_exit(|ctx| command.execute(ctx))
+            }
         }
     }
 
@@ -163,6 +166,9 @@ pub enum Commands<Ext: RethCliExt = ()> {
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command),
+    /// Utilities for parallel execution.
+    #[command(name = "parallel-execution")]
+    ParallelExecution(parallel_execution::Command),
 }
 
 impl<Ext: RethCliExt> Commands<Ext> {

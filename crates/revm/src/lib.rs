@@ -32,3 +32,9 @@ pub use revm::{self, *};
 
 /// Ethereum DAO hardfork state change data.
 pub mod eth_dao_fork;
+
+/// Re-export parallel library if the feature is enabled.
+#[cfg(feature = "parallel")]
+pub mod parallel {
+    pub use reth_revm_parallel::*;
+}

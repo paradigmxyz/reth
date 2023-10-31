@@ -60,7 +60,7 @@ impl From<Option<StateOverride>> for EvmOverrides {
 /// Helper type to work with different transaction types when configuring the EVM env.
 ///
 /// This makes it easier to handle errors.
-pub(crate) trait FillableTransaction {
+pub trait FillableTransaction {
     /// Returns the hash of the transaction.
     fn hash(&self) -> TxHash;
 
@@ -150,7 +150,7 @@ where
 /// _runtime_ db ([CacheDB]).
 ///
 /// Note: This assumes the target transaction is in the given iterator.
-pub(crate) fn replay_transactions_until<DB, I, Tx>(
+pub fn replay_transactions_until<DB, I, Tx>(
     db: &mut CacheDB<DB>,
     cfg: CfgEnv,
     block_env: BlockEnv,

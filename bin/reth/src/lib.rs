@@ -35,6 +35,7 @@ pub mod dirs;
 pub mod init;
 pub mod node;
 pub mod p2p;
+pub mod parallel_execution;
 pub mod prometheus_exporter;
 pub mod recover;
 pub mod runner;
