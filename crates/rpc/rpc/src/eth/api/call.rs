@@ -231,7 +231,7 @@ where
 
         // if the provided gas limit is less than computed cap, use that
         let gas_limit = std::cmp::min(U256::from(env.tx.gas_limit), highest_gas_limit);
-        env.block.gas_limit = gas_limit;
+        env.tx.gas_limit = gas_limit.saturating_to();
 
         trace!(target: "rpc::eth::estimate", ?env, "Starting gas estimation");
 
