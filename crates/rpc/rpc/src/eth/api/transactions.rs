@@ -44,9 +44,13 @@ use revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, 
 #[cfg(feature = "optimism")]
 use crate::eth::api::block::OptimismBlockMeta;
 #[cfg(feature = "optimism")]
+use reth_revm::optimism::RethL1BlockInfo;
+#[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
 use std::ops::Div;
+#[cfg(feature = "optimism")]
+use std::sync::Arc;
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBox<'r>>>;
@@ -874,7 +878,7 @@ where
         };
 
         #[cfg(feature = "optimism")]
-        let (l1_block_info, l1_fee, l1_data_gas) = {
+        let optimism_block_meta = {
             let block = self
                 .provider()
                 .block_by_number(meta.block_number)?
@@ -882,11 +886,12 @@ where
 
             let block_timestamp = block.timestamp;
 
-            let l1_block_info: Option<L1BlockInfo> = reth_revm::optimism::parse_l1_info_tx(
+            let l1_block_info: Option<Arc<L1BlockInfo>> = reth_revm::optimism::parse_l1_info_tx(
                 &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
             )
             .map_err(|_| EthApiError::InternalEthError)
-            .ok();
+            .ok()
+            .map(Arc::new);
             let mut buf = bytes::BytesMut::default();
             tx.encode_enveloped(&mut buf);
             let data = &buf.freeze().into();
@@ -913,9 +918,9 @@ where
                     .transpose()
                     .map_err(|_| EthApiError::InternalEthError)?;
 
-                (Some(l1_block_info), l1_fee, l1_data_gas)
+                OptimismBlockMeta::new(Some(l1_block_info), l1_fee, l1_data_gas)
             } else {
-                (None, None, None)
+                OptimismBlockMeta::default()
             }
         };
 
@@ -925,7 +930,7 @@ where
             receipt,
             &all_receipts,
             #[cfg(feature = "optimism")]
-            OptimismBlockMeta::new(l1_block_info, l1_fee, l1_data_gas),
+            optimism_block_meta,
         )
     }
 

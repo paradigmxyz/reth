@@ -22,26 +22,28 @@ use reth_primitives::U256;
 use reth_revm::optimism::RethL1BlockInfo;
 #[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
+#[cfg(feature = "optimism")]
+use std::sync::Arc;
 
 /// Optimism Block Meta
 ///
 /// Includes the l1 fee and data gas for the block along with the l1 block info.
 #[cfg(feature = "optimism")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimismBlockMeta<'a> {
+#[derive(Debug, Default, Clone)]
+pub(crate) struct OptimismBlockMeta {
     /// The L1 block info.
-    pub l1_block_info: Option<&'a L1BlockInfo>,
+    pub(crate) l1_block_info: Option<Arc<L1BlockInfo>>,
     /// The L1 fee for the block.
-    pub l1_fee: Option<U256>,
+    pub(crate) l1_fee: Option<U256>,
     /// The L1 data gas for the block.
-    pub l1_data_gas: Option<U256>,
+    pub(crate) l1_data_gas: Option<U256>,
 }
 
 #[cfg(feature = "optimism")]
-impl OptimismBlockMeta<'_> {
+impl OptimismBlockMeta {
     /// Creates a new OptimismBlockMeta.
-    pub fn new(
-        l1_block_info: Option<&'_ L1BlockInfo>,
+    pub(crate) fn new(
+        l1_block_info: Option<Arc<L1BlockInfo>>,
         l1_fee: Option<U256>,
         l1_data_gas: Option<U256>,
     ) -> Self {
@@ -110,11 +112,11 @@ where
             let excess_blob_gas = block.excess_blob_gas;
 
             #[cfg(feature = "optimism")]
-            let (block_timestamp, l1_block_info): (_, Option<L1BlockInfo>) = {
+            let (block_timestamp, l1_block_info): (_, Option<Arc<L1BlockInfo>>) = {
                 let body = reth_revm::optimism::parse_l1_info_tx(
                     &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
                 );
-                (block.timestamp, body.ok())
+                (block.timestamp, body.ok().map(Arc::new))
             };
 
             let receipts = block
@@ -133,7 +135,7 @@ where
                     };
 
                     #[cfg(feature = "optimism")]
-                    let (l1_fee, l1_data_gas) = {
+                    let optimism_block_meta = {
                         if let Some(l1_block_info) = &l1_block_info {
                             let mut buf = bytes::BytesMut::default();
                             tx.encode_enveloped(&mut buf);
@@ -160,9 +162,13 @@ where
                                 .transpose()
                                 .map_err(|_| EthApiError::InternalEthError)?;
 
-                            (l1_fee, l1_data_gas)
+                            OptimismBlockMeta::new(
+                                Some(Arc::clone(l1_block_info)),
+                                l1_fee,
+                                l1_data_gas,
+                            )
                         } else {
-                            (None, None)
+                            OptimismBlockMeta::default()
                         }
                     };
 
@@ -172,7 +178,7 @@ where
                         receipt,
                         &receipts,
                         #[cfg(feature = "optimism")]
-                        OptimismBlockMeta::new(l1_block_info.as_ref(), l1_fee, l1_data_gas),
+                        optimism_block_meta,
                     )
                 })
                 .collect::<EthResult<Vec<_>>>();
