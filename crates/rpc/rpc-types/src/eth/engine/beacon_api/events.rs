@@ -29,7 +29,7 @@ pub enum BeaconNodeEventTopic {
 }
 
 impl BeaconNodeEventTopic {
-    pub fn query_value(&self) -> String {
+    pub fn query_value(&self) -> &'static str {
         match self {
             BeaconNodeEventTopic::PayloadAttributes => "payload_attributes",
             BeaconNodeEventTopic::Head => "head",
