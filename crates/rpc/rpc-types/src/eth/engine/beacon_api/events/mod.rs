@@ -3,7 +3,7 @@
 //! See also [ethereum-beacon-API eventstream](https://ethereum.github.io/beacon-APIs/#/Events/eventstream)
 
 use crate::engine::PayloadAttributes;
-use alloy_primitives::B256;
+use alloy_primitives::{Address, Bytes, B256};
 use attestation::AttestationData;
 use light_client_finality::LightClientFinalityData;
 use light_client_optimistic::LightClientOptimisticData;
@@ -102,8 +102,8 @@ pub struct BlockEvent {
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestationEvent {
-    pub aggregation_bits: String,
-    pub signature: String,
+    pub aggregation_bits: Bytes,
+    pub signature: Bytes,
     pub data: AttestationData,
 }
 
@@ -113,7 +113,7 @@ pub struct AttestationEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VoluntaryExitEvent {
     pub message: VoluntaryExitMessage,
-    pub signature: String,
+    pub signature: Bytes,
 }
 
 #[serde_as]
@@ -131,7 +131,7 @@ pub struct VoluntaryExitMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlsToExecutionChangeEvent {
     pub message: BlsToExecutionChangeMessage,
-    pub signature: String,
+    pub signature: Bytes,
 }
 
 #[serde_as]
@@ -140,7 +140,7 @@ pub struct BlsToExecutionChangeMessage {
     #[serde_as(as = "DisplayFromStr")]
     pub validator_index: u64,
     pub from_bls_pubkey: String,
-    pub to_execution_address: String,
+    pub to_execution_address: Address,
 }
 
 /// Event for the `Deposit` topic of the beacon API node event stream.
@@ -164,7 +164,8 @@ pub struct FinalizedCheckpointEvent {
 pub struct ChainReorgEvent {
     #[serde_as(as = "DisplayFromStr")]
     pub slot: u64,
-    pub depth: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub depth: u64,
     pub old_head_block: B256,
     pub new_head_block: B256,
     pub old_head_state: B256,
@@ -180,7 +181,7 @@ pub struct ChainReorgEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributionAndProofEvent {
     pub message: ContributionAndProofMessage,
-    pub signature: String,
+    pub signature: Bytes,
 }
 
 #[serde_as]
@@ -189,7 +190,7 @@ pub struct ContributionAndProofMessage {
     #[serde_as(as = "DisplayFromStr")]
     pub aggregator_index: u64,
     pub contribution: Contribution,
-    pub selection_proof: String,
+    pub selection_proof: Bytes,
 }
 
 #[serde_as]
@@ -200,8 +201,8 @@ pub struct Contribution {
     pub beacon_block_root: B256,
     #[serde_as(as = "DisplayFromStr")]
     pub subcommittee_index: u64,
-    pub aggregation_bits: String,
-    pub signature: String,
+    pub aggregation_bits: Bytes,
+    pub signature: Bytes,
 }
 
 /// Event for the `LightClientFinalityUpdate` topic of the beacon API node event stream.
@@ -234,7 +235,7 @@ pub struct BlobSidecarEvent {
     pub index: u64,
     #[serde_as(as = "DisplayFromStr")]
     pub slot: u64,
-    pub kzg_commitment: String,
+    pub kzg_commitment: Bytes,
     pub versioned_hash: B256,
 }
 
@@ -328,7 +329,7 @@ mod tests {
 
     #[test]
     fn serde_bls_to_execution_change_event() {
-        let s = r#"{"message":{"validator_index":"1", "from_bls_pubkey":"0x933ad9491b62059dd065b560d256d8957a8c402cc6e8d8ee7290ae11e8f7329267a8811c397529dac52ae1342ba58c95", "to_execution_address":"0x9be8d619c56699667c1fedcd15f6b14d8B067f72"}, "signature":"0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505"}"#;
+        let s = r#"{"message":{"validator_index":"1", "from_bls_pubkey":"0x933ad9491b62059dd065b560d256d8957a8c402cc6e8d8ee7290ae11e8f7329267a8811c397529dac52ae1342ba58c95", "to_execution_address":"0x9be8d619c56699667c1fedcd15f6b14d8b067f72"}, "signature":"0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505"}"#;
 
         let event: BlsToExecutionChangeEvent =
             serde_json::from_str::<BlsToExecutionChangeEvent>(s).unwrap();

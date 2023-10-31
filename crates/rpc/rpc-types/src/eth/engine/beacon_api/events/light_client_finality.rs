@@ -1,4 +1,4 @@
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -49,6 +49,6 @@ pub struct Beacon2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncAggregate {
-    pub sync_committee_bits: String,
-    pub sync_committee_signature: String,
+    pub sync_committee_bits: Bytes,
+    pub sync_committee_signature: Bytes,
 }

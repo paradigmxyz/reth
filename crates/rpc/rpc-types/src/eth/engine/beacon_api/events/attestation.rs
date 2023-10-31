@@ -9,7 +9,7 @@ pub struct AttestationData {
     pub slot: u64,
     #[serde_as(as = "DisplayFromStr")]
     pub index: u64,
-    pub beacon_block_root: String,
+    pub beacon_block_root: B256,
     pub source: Source,
     pub target: Target,
 }
