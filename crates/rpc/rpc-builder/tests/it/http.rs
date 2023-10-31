@@ -18,7 +18,10 @@ use reth_rpc_api::{
     Web3ApiClient,
 };
 use reth_rpc_builder::RethRpcModule;
-use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Filter, Index, TransactionRequest};
+use reth_rpc_types::{
+    trace::filter::TraceFilter, CallRequest, Filter, Index, PendingTransactionFilterKind,
+    TransactionRequest,
+};
 use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
@@ -36,7 +39,13 @@ where
     C: ClientT + SubscriptionClientT + Sync,
 {
     EthFilterApiClient::new_filter(client, Filter::default()).await.unwrap();
-    EthFilterApiClient::new_pending_transaction_filter(client).await.unwrap();
+    EthFilterApiClient::new_pending_transaction_filter(client, None).await.unwrap();
+    EthFilterApiClient::new_pending_transaction_filter(
+        client,
+        Some(PendingTransactionFilterKind::Full),
+    )
+    .await
+    .unwrap();
     let id = EthFilterApiClient::new_block_filter(client).await.unwrap();
     EthFilterApiClient::filter_changes(client, id.clone()).await.unwrap();
     EthFilterApiClient::logs(client, Filter::default()).await.unwrap();

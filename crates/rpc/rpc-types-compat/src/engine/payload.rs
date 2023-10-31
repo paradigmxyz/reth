@@ -1,8 +1,8 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 use reth_primitives::{
-    constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
-    proofs::{self, EMPTY_LIST_HASH},
+    constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
+    proofs::{self},
     Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, B256, U256, U64,
 };
 use reth_rpc_types::engine::{
@@ -51,7 +51,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         parent_beacon_block_root: None,
         extra_data: payload.extra_data,
         // Defaults
-        ommers_hash: EMPTY_LIST_HASH,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         difficulty: Default::default(),
         nonce: Default::default(),
     };
@@ -358,6 +358,47 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
                 .collect::<Vec<_>>()
         });
     ExecutionPayloadBodyV1 { transactions: transactions.collect(), withdrawals: withdraw }
+}
+
+/// Transforms a [reth_primitives::BlobTransactionSidecar] into a
+/// [reth_rpc_types::BlobTransactionSidecar]
+pub fn from_primitive_sidecar(
+    sidecar: reth_primitives::BlobTransactionSidecar,
+) -> reth_rpc_types::BlobTransactionSidecar {
+    reth_rpc_types::BlobTransactionSidecar {
+        blobs: sidecar.blobs,
+        commitments: sidecar.commitments,
+        proofs: sidecar.proofs,
+    }
+}
+
+/// Transforms a [SealedBlock] into a [ExecutionPayloadV1]
+pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
+    let transactions = value
+        .body
+        .iter()
+        .map(|tx| {
+            let mut encoded = Vec::new();
+            tx.encode_enveloped(&mut encoded);
+            encoded.into()
+        })
+        .collect();
+    ExecutionPayloadV1 {
+        parent_hash: value.parent_hash,
+        fee_recipient: value.beneficiary,
+        state_root: value.state_root,
+        receipts_root: value.receipts_root,
+        logs_bloom: value.logs_bloom,
+        prev_randao: value.mix_hash,
+        block_number: U64::from(value.number),
+        gas_limit: U64::from(value.gas_limit),
+        gas_used: U64::from(value.gas_used),
+        timestamp: U64::from(value.timestamp),
+        extra_data: value.extra_data.clone(),
+        base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
+        block_hash: value.hash(),
+        transactions,
+    }
 }
 
 #[cfg(test)]

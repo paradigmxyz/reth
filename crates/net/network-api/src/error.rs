@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, oneshot};
 #[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum NetworkError {
-    #[error("Sender has been dropped")]
+    #[error("sender has been dropped")]
     ChannelClosed,
 }
 

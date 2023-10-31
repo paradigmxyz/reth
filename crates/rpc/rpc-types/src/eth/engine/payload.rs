@@ -1,10 +1,7 @@
-use crate::eth::withdrawal::BeaconAPIWithdrawal;
+use crate::eth::{transaction::BlobTransactionSidecar, withdrawal::BeaconAPIWithdrawal};
 pub use crate::Withdrawal;
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
-use reth_primitives::{
-    kzg::{Blob, Bytes48},
-    BlobTransactionSidecar, SealedBlock,
-};
+use c_kzg::{Blob, Bytes48};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -138,36 +135,6 @@ pub struct ExecutionPayloadV1 {
     pub base_fee_per_gas: U256,
     pub block_hash: B256,
     pub transactions: Vec<Bytes>,
-}
-
-impl From<SealedBlock> for ExecutionPayloadV1 {
-    fn from(value: SealedBlock) -> Self {
-        let transactions = value
-            .body
-            .iter()
-            .map(|tx| {
-                let mut encoded = Vec::new();
-                tx.encode_enveloped(&mut encoded);
-                encoded.into()
-            })
-            .collect();
-        ExecutionPayloadV1 {
-            parent_hash: value.parent_hash,
-            fee_recipient: value.beneficiary,
-            state_root: value.state_root,
-            receipts_root: value.receipts_root,
-            logs_bloom: value.logs_bloom,
-            prev_randao: value.mix_hash,
-            block_number: U64::from(value.number),
-            gas_limit: U64::from(value.gas_limit),
-            gas_used: U64::from(value.gas_used),
-            timestamp: U64::from(value.timestamp),
-            extra_data: value.extra_data.clone(),
-            base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-            block_hash: value.hash(),
-            transactions,
-        }
-    }
 }
 
 /// This structure maps on the ExecutionPayloadV2 structure of the beacon chain spec.
@@ -341,22 +308,22 @@ impl From<ExecutionPayloadV3> for ExecutionPayload {
 #[derive(thiserror::Error, Debug)]
 pub enum PayloadError {
     /// Invalid payload extra data.
-    #[error("Invalid payload extra data: {0}")]
+    #[error("invalid payload extra data: {0}")]
     ExtraData(Bytes),
     /// Invalid payload base fee.
-    #[error("Invalid payload base fee: {0}")]
+    #[error("invalid payload base fee: {0}")]
     BaseFee(U256),
     /// Invalid payload blob gas used.
-    #[error("Invalid payload blob gas used: {0}")]
+    #[error("invalid payload blob gas used: {0}")]
     BlobGasUsed(U256),
     /// Invalid payload excess blob gas.
-    #[error("Invalid payload excess blob gas: {0}")]
+    #[error("invalid payload excess blob gas: {0}")]
     ExcessBlobGas(U256),
     /// Pre-cancun Payload has blob transactions.
-    #[error("Invalid payload, pre-Cancun payload has blob transactions")]
+    #[error("pre-Cancun payload has blob transactions")]
     PreCancunBlockWithBlobTransactions,
     /// Invalid payload block hash.
-    #[error("blockhash mismatch, want {consensus}, got {execution}")]
+    #[error("block hash mismatch: want {consensus}, got {execution}")]
     BlockHash {
         /// The block hash computed from the payload.
         execution: B256,
@@ -364,7 +331,7 @@ pub enum PayloadError {
         consensus: B256,
     },
     /// Expected blob versioned hashes do not match the given transactions.
-    #[error("Expected blob versioned hashes do not match the given transactions")]
+    #[error("expected blob versioned hashes do not match the given transactions")]
     InvalidVersionedHashes,
     /// Encountered decoding error.
     #[error(transparent)]

@@ -139,7 +139,7 @@ impl Discv4 {
         let socket = UdpSocket::bind(local_address).await?;
         let local_addr = socket.local_addr()?;
         local_node_record.udp_port = local_addr.port();
-        trace!( target : "discv4",  ?local_addr,"opened UDP socket");
+        trace!(target: "discv4",  ?local_addr,"opened UDP socket");
 
         let (to_service, rx) = mpsc::channel(100);
         

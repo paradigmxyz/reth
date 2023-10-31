@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// Contains the connectivity related state of the network.
 ///
@@ -226,7 +226,7 @@ where
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
-                        debug!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
+                        trace!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
                         self.state_mut()
                             .peers_mut()
                             .on_incoming_pending_session_rejected_internally();

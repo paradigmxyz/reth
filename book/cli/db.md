@@ -72,26 +72,31 @@ Database:
           - extra:   Enables logging for extra debug-level messages
 
 Logging:
-      --log.directory <PATH>
+      --log.file.directory <PATH>
           The path to put log files in
           
           [default: /reth/logs]
 
-      --log.max-size <SIZE>
-          The maximum size (in MB) of log files
+      --log.file.max-size <SIZE>
+          The maximum size (in MB) of one log file
           
           [default: 200]
 
-      --log.max-files <COUNT>
+      --log.file.max-files <COUNT>
           The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
           
           [default: 5]
 
-      --log.journald
-          Log events to journald
-
-      --log.filter <FILTER>
+      --log.file.filter <FILTER>
           The filter to use for logs written to the log file
+          
+          [default: debug]
+
+      --log.journald
+          Write logs to journald
+
+      --log.journald.filter <FILTER>
+          The filter to use for logs written to journald
           
           [default: error]
 

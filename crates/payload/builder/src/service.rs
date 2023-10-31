@@ -18,7 +18,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// A communication channel to the [PayloadBuilderService] that can retrieve payloads.
 #[derive(Debug, Clone)]
@@ -274,11 +274,13 @@ where
                         let mut res = Ok(id);
 
                         if this.contains_payload(id) {
-                            warn!(%id, parent = ?attr.parent, "Payload job already in progress, ignoring.");
+                            debug!(%id, parent = %attr.parent, "Payload job already in progress, ignoring.");
                         } else {
                             // no job for this payload yet, create one
+                            let parent = attr.parent;
                             match this.generator.new_payload_job(attr) {
                                 Ok(job) => {
+                                    info!(%id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id));
