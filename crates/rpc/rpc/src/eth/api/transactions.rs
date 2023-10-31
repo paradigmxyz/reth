@@ -1099,8 +1099,6 @@ impl From<TransactionSource> for Transaction {
     }
 }
 
-/// Optimism
-
 /// Helper function to construct a transaction receipt
 pub(crate) fn build_transaction_receipt_with_block_receipts(
     tx: TransactionSigned,
