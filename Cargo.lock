@@ -5825,6 +5825,7 @@ name = "reth-consensus-common"
 version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
+ "cfg-if",
  "mockall",
  "reth-interfaces",
  "reth-primitives",

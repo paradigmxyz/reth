@@ -556,7 +556,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // client from performing the derivation pipeline from genesis, and instead
         // starts syncing from the current tip in the DB.
         #[cfg(feature = "optimism")]
-        if self.chain.optimism && !self.rollup.enable_genesis_walkback {
+        if self.chain.is_optimism() && !self.rollup.enable_genesis_walkback {
             let client = _rpc_server_handles.auth.http_client();
             reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
                 &client,

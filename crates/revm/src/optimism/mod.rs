@@ -49,7 +49,7 @@ pub fn parse_l1_info_tx(data: impl AsRef<[u8]>) -> Result<L1BlockInfo, BlockExec
             reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
                 message: "unexpected l1 block info tx calldata length found".to_string(),
             },
-        ));
+        ))
     }
 
     let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
@@ -118,7 +118,7 @@ impl RethL1BlockInfo for L1BlockInfo {
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
         if is_deposit {
-            return Ok(U256::ZERO);
+            return Ok(U256::ZERO)
         }
 
         if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {

@@ -9,7 +9,7 @@ pub fn revm_spec_by_timestamp_after_merge(
     timestamp: u64,
 ) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
-    if chain_spec.optimism {
+    if chain_spec.is_optimism() {
         if chain_spec.fork(Hardfork::Regolith).active_at_timestamp(timestamp) {
             return revm_primitives::REGOLITH
         } else {
@@ -29,7 +29,7 @@ pub fn revm_spec_by_timestamp_after_merge(
 /// return revm_spec from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
-    if chain_spec.optimism {
+    if chain_spec.is_optimism() {
         if chain_spec.fork(Hardfork::Regolith).active_at_head(&block) {
             return revm_primitives::REGOLITH
         } else if chain_spec.fork(Hardfork::Bedrock).active_at_head(&block) {
@@ -134,7 +134,7 @@ mod tests {
         {
             #[inline(always)]
             fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-                let cs = ChainSpecBuilder::mainnet().optimism_activated();
+                let cs = ChainSpecBuilder::mainnet().chain(crate::Chain::Id(10));
                 f(cs).build()
             }
 

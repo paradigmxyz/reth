@@ -47,7 +47,7 @@ pub fn fill_cfg_env(
 
     #[cfg(feature = "optimism")]
     {
-        cfg_env.optimism = chain_spec.optimism;
+        cfg_env.optimism = chain_spec.is_optimism();
     }
 }
 

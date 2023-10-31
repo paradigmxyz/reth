@@ -668,7 +668,7 @@ where
                         // On Optimism, the proposers are allowed to reorg their own chain at will.
                         cfg_if::cfg_if! {
                             if #[cfg(feature = "optimism")] {
-                                if self.chain_spec().optimism {
+                                if self.chain_spec().is_optimism() {
                                     debug!(
                                         target: "consensus::engine",
                                         fcu_head_num=?header.number,
@@ -1647,7 +1647,7 @@ where
                 if reached_max_block {
                     // Terminate the sync early if it's reached the maximum user
                     // configured block.
-                    return Some(Ok(()));
+                    return Some(Ok(()))
                 }
 
                 if let ControlFlow::Unwind { bad_block, .. } = ctrl {
@@ -1843,7 +1843,7 @@ where
                     },
                 )? {
                     this.on_hook_result(result)?;
-                    continue;
+                    continue
                 }
 
                 // Process one incoming message from the CL. We don't drain the messages right away,
@@ -1878,12 +1878,12 @@ where
                             this.listeners.push_listener(tx);
                         }
                     }
-                    continue;
+                    continue
                 }
 
                 // Both running hook with db write access and engine messages are pending,
                 // proceed to other polls
-                break;
+                break
             }
 
             // process sync events if any
@@ -1894,7 +1894,7 @@ where
                     }
                     // this could have taken a while, so we start the next cycle to handle any new
                     // engine messages
-                    continue 'main;
+                    continue 'main
                 }
                 Poll::Pending => {
                     // no more sync events to process
@@ -1919,7 +1919,7 @@ where
 
                     // ensure we're polling until pending while also checking for new engine
                     // messages before polling the next hook
-                    continue 'main;
+                    continue 'main
                 }
             }
 
@@ -2037,7 +2037,7 @@ mod tests {
                         result,
                         Err(BeaconConsensusEngineError::Pipeline(n)) if matches!(*n.as_ref(), PipelineError::Stage(StageError::ChannelClosed))
                     );
-                    break;
+                    break
                 }
                 Err(TryRecvError::Empty) => {
                     let _ = env

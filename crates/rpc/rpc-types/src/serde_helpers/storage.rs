@@ -61,7 +61,7 @@ where
     D: Deserializer<'de>,
 {
     if bytes.0.len() > 32 {
-        return Err(serde::de::Error::custom("input too long to be a B256"));
+        return Err(serde::de::Error::custom("input too long to be a B256"))
     }
 
     // left pad with zeros to 32 bytes

@@ -66,8 +66,6 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParams::ethereum(),
         prune_delete_limit: 3500,
         snapshot_block_interval: 500_000,
-        #[cfg(feature = "optimism")]
-        optimism: false,
     }
     .into()
 });
@@ -111,8 +109,6 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParams::ethereum(),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
-        #[cfg(feature = "optimism")]
-        optimism: false,
     }
     .into()
 });
@@ -161,8 +157,6 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParams::ethereum(),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
-        #[cfg(feature = "optimism")]
-        optimism: false,
     }
     .into()
 });
@@ -205,8 +199,6 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParams::ethereum(),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
-        #[cfg(feature = "optimism")]
-        optimism: false,
     }
     .into()
 });
@@ -245,8 +237,6 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
         deposit_contract: None, // TODO: do we even have?
-        #[cfg(feature = "optimism")]
-        optimism: false,
         ..Default::default()
     }
     .into()
@@ -319,7 +309,6 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParams::optimism(),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
-        optimism: true,
         ..Default::default()
     }
     .into()
@@ -361,7 +350,6 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParams::optimism_goerli(),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
-        optimism: true,
         ..Default::default()
     }
     .into()
@@ -403,7 +391,6 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParams::optimism(),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
-        optimism: true,
         ..Default::default()
     }
     .into()
@@ -459,10 +446,6 @@ pub struct ChainSpec {
 
     /// The block interval for creating snapshots. Each snapshot will have that much blocks in it.
     pub snapshot_block_interval: u64,
-
-    /// Optimism configuration
-    #[cfg(feature = "optimism")]
-    pub optimism: bool,
 }
 
 impl Default for ChainSpec {
@@ -478,8 +461,6 @@ impl Default for ChainSpec {
             base_fee_params: BaseFeeParams::ethereum(),
             prune_delete_limit: MAINNET.prune_delete_limit,
             snapshot_block_interval: Default::default(),
-            #[cfg(feature = "optimism")]
-            optimism: Default::default(),
         }
     }
 }
@@ -488,6 +469,11 @@ impl ChainSpec {
     /// Get information about the chain itself
     pub fn chain(&self) -> Chain {
         self.chain
+    }
+
+    /// Returns `true` if this chain contains Optimism configuration.
+    pub fn is_optimism(&self) -> bool {
+        self.chain.is_optimism()
     }
 
     /// Get the genesis block specification.
@@ -819,8 +805,6 @@ impl From<Genesis> for ChainSpec {
             hardforks,
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
-            #[cfg(feature = "optimism")]
-            optimism: false,
             ..Default::default()
         }
     }
@@ -904,8 +888,6 @@ pub struct ChainSpecBuilder {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
     hardforks: BTreeMap<Hardfork, ForkCondition>,
-    #[cfg(feature = "optimism")]
-    optimism: bool,
 }
 
 impl ChainSpecBuilder {
@@ -915,8 +897,6 @@ impl ChainSpecBuilder {
             chain: Some(MAINNET.chain),
             genesis: Some(MAINNET.genesis.clone()),
             hardforks: MAINNET.hardforks.clone(),
-            #[cfg(feature = "optimism")]
-            optimism: false,
         }
     }
 
@@ -946,15 +926,6 @@ impl ChainSpecBuilder {
             Hardfork::Paris,
             ForkCondition::TTD { total_difficulty: ttd, fork_block: None },
         )
-    }
-
-    /// Enable Optimism L2 modifications
-    ///
-    /// Warning: By itself, this does not enable the earliest Optimism hardfork, Bedrock.
-    #[cfg(feature = "optimism")]
-    pub fn optimism_activated(mut self) -> Self {
-        self.optimism = true;
-        self
     }
 
     /// Enable Frontier at genesis.
@@ -1076,8 +1047,6 @@ impl ChainSpecBuilder {
             hardforks: self.hardforks,
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
-            #[cfg(feature = "optimism")]
-            optimism: self.optimism,
             ..Default::default()
         }
     }
@@ -1089,8 +1058,6 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
             chain: Some(value.chain),
             genesis: Some(value.genesis.clone()),
             hardforks: value.hardforks.clone(),
-            #[cfg(feature = "optimism")]
-            optimism: value.optimism,
         }
     }
 }
