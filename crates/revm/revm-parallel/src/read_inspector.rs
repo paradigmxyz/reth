@@ -1,7 +1,7 @@
 //! [Inspector] for collecting data reads during EVM execution.
 
 use crate::rw_set::RevmAccessSet;
-use reth_primitives::{Address, B256};
+use reth_primitives::{Address, B256, U256};
 use revm::{
     interpreter::{opcode, Interpreter},
     Database, EVMData, Inspector,
@@ -51,8 +51,17 @@ where
                     self.0.account_code(Address::from_word(B256::from(slot.to_be_bytes())));
                 }
             }
-            opcode::DELEGATECALL | opcode::CALL | opcode::STATICCALL | opcode::CALLCODE => {
-                // TODO: caller balance read
+            opcode::CALL | opcode::CALLCODE => {
+                if let Ok(slot) = interpreter.stack().peek(1) {
+                    self.0.account_code(Address::from_word(B256::from(slot.to_be_bytes())));
+                }
+                if let Ok(value) = interpreter.stack.peek(2) {
+                    if value != U256::ZERO {
+                        self.0.account_balance(interpreter.contract.address);
+                    }
+                }
+            }
+            opcode::DELEGATECALL | opcode::STATICCALL => {
                 if let Ok(slot) = interpreter.stack().peek(1) {
                     self.0.account_code(Address::from_word(B256::from(slot.to_be_bytes())));
                 }
