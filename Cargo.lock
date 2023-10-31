@@ -6270,7 +6270,10 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
 <<<<<<< HEAD
+<<<<<<< HEAD
  "reth-tokio-util",
+=======
+>>>>>>> 7fd0df2980135cc27f287e9d1179ad190c7ad06a
 =======
 >>>>>>> 7fd0df2980135cc27f287e9d1179ad190c7ad06a
  "revm",
@@ -6286,8 +6289,11 @@ dependencies = [
  "test-fuzz",
  "thiserror",
 <<<<<<< HEAD
+<<<<<<< HEAD
  "tokio",
  "tokio-stream",
+=======
+>>>>>>> 7fd0df2980135cc27f287e9d1179ad190c7ad06a
 =======
 >>>>>>> 7fd0df2980135cc27f287e9d1179ad190c7ad06a
  "toml 0.8.6",

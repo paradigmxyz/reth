@@ -13,11 +13,6 @@ description = "Commonly used types in reth."
 reth-codecs = { path = "../storage/codecs" }
 reth-rpc-types.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
-reth-tokio-util.workspace = true
-
-# async
-tokio = { workspace = true, features = ["sync"] }
-tokio-stream.workspace = true
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
@@ -84,7 +79,6 @@ plain_hasher = "0.2"
 hash-db = "~0.15"
 # value-256 is needed for the main_codec proptests to pass
 reth-primitives = { path = ".", features = ["value-256"] }
-tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 
 
 # necessary so we don't hit a "undeclared 'std'":
