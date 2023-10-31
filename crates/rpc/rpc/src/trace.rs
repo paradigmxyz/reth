@@ -556,7 +556,9 @@ struct TraceApiInner<Provider, Eth> {
 #[inline]
 fn tracing_config(trace_types: &HashSet<TraceType>) -> TracingInspectorConfig {
     let needs_vm_trace = trace_types.contains(&TraceType::VmTrace);
-    TracingInspectorConfig::default_parity().set_steps(needs_vm_trace)
+    TracingInspectorConfig::default_parity()
+        .set_steps(needs_vm_trace)
+        .set_memory_snapshots(needs_vm_trace)
 }
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
