@@ -27,7 +27,11 @@ use std::sync::Arc;
 
 /// Optimism Block Meta
 ///
-/// Includes the l1 fee and data gas for the block along with the l1 block info.
+/// Includes the l1 fee and data gas for the block along with the l1
+/// block info. In order to pass the `OptimismBlockMeta` into the
+/// async colored `build_transaction_receipt_with_block_receipts`
+/// function, an atomic reference counter for the l1 block info is
+/// used so the l1 block info can be shared between receipts.
 #[cfg(feature = "optimism")]
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OptimismBlockMeta {
