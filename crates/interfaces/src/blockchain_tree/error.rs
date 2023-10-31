@@ -244,8 +244,7 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::AppendChainDoesntConnect { .. } |
                     BlockExecutionError::UnavailableForTest => false,
                     #[cfg(feature = "optimism")]
-                    BlockExecutionError::L1BlockInfoError { .. } |
-                    BlockExecutionError::InsufficientFundsForL1Cost { .. } => false,
+                    BlockExecutionError::OptimismBlockExecution(_) => false,
                 }
             }
             InsertBlockErrorKind::Tree(err) => {

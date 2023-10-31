@@ -16,13 +16,15 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, BlockExecutionError
         .body
         .iter()
         .find(|tx| matches!(tx.kind(), TransactionKind::Call(to) if to == &revm::optimism::L1_BLOCK_CONTRACT))
-        .ok_or(reth_executor::BlockExecutionError::L1BlockInfoError {
-            message: "could not find l1 block info tx in the L2 block".to_string(),
-        })
+        .ok_or(reth_executor::BlockExecutionError::OptimismBlockExecution(
+            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+                message: "could not find l1 block info tx in the L2 block".to_string(),
+        }))
         .and_then(|tx| {
-            tx.input().get(4..).ok_or(reth_executor::BlockExecutionError::L1BlockInfoError {
+            tx.input().get(4..).ok_or(reth_executor::BlockExecutionError::OptimismBlockExecution(
+                reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
                 message: "could not get l1 block info tx calldata bytes".to_string(),
-            })
+            }))
         })?;
 
     parse_l1_info_tx(l1_info_tx_data)
@@ -43,25 +45,33 @@ pub fn parse_l1_info_tx(data: impl AsRef<[u8]>) -> Result<L1BlockInfo, BlockExec
     // + 32 bytes for the fee overhead
     // + 32 bytes for the fee scalar
     if data.len() != 256 {
-        return Err(reth_executor::BlockExecutionError::L1BlockInfoError {
-            message: "unexpected l1 block info tx calldata length found".to_string(),
-        })
+        return Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
+            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+                message: "unexpected l1 block info tx calldata length found".to_string(),
+            },
+        ));
     }
 
     let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
-        reth_executor::BlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 base fee".to_string(),
-        },
+        reth_executor::BlockExecutionError::OptimismBlockExecution(
+            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+                message: "could not convert l1 base fee".to_string(),
+            },
+        ),
     )?;
     let l1_fee_overhead = U256::try_from_be_slice(&data[192..224]).ok_or(
-        reth_executor::BlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 fee overhead".to_string(),
-        },
+        reth_executor::BlockExecutionError::OptimismBlockExecution(
+            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+                message: "could not convert l1 fee overhead".to_string(),
+            },
+        ),
     )?;
     let l1_fee_scalar = U256::try_from_be_slice(&data[224..256]).ok_or(
-        reth_executor::BlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 fee scalar".to_string(),
-        },
+        reth_executor::BlockExecutionError::OptimismBlockExecution(
+            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+                message: "could not convert l1 fee scalar".to_string(),
+            },
+        ),
     )?;
 
     Ok(L1BlockInfo { l1_base_fee, l1_fee_overhead, l1_fee_scalar })
@@ -108,7 +118,7 @@ impl RethL1BlockInfo for L1BlockInfo {
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
         if is_deposit {
-            return Ok(U256::ZERO)
+            return Ok(U256::ZERO);
         }
 
         if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
@@ -116,9 +126,11 @@ impl RethL1BlockInfo for L1BlockInfo {
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
             Ok(self.calculate_tx_l1_cost::<BedrockSpec>(input))
         } else {
-            Err(reth_executor::BlockExecutionError::L1BlockInfoError {
-                message: "Optimism hardforks are not active".to_string(),
-            })
+            Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
+                reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+                    message: "Optimism hardforks are not active".to_string(),
+                },
+            ))
         }
     }
 
@@ -133,9 +145,11 @@ impl RethL1BlockInfo for L1BlockInfo {
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
             Ok(self.data_gas::<BedrockSpec>(input))
         } else {
-            Err(reth_executor::BlockExecutionError::L1BlockInfoError {
-                message: "Optimism hardforks are not active".to_string(),
-            })
+            Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
+                reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+                    message: "Optimism hardforks are not active".to_string(),
+                },
+            ))
         }
     }
 }
