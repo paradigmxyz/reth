@@ -34,13 +34,14 @@ pub const BLOB_TX_MIN_BLOB_GASPRICE: u128 = 1u128;
 /// Commitment version of a KZG commitment
 pub const VERSIONED_HASH_VERSION_KZG: u8 = 0x01;
 
-/// KZG Trusted setup raw
-const TRUSTED_SETUP_RAW: &[u8] = include_bytes!("../../res/eip4844/trusted_setup.txt");
-
 /// KZG trusted setup
 pub static MAINNET_KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
     Arc::new(
-        load_trusted_setup_from_bytes(TRUSTED_SETUP_RAW).expect("Failed to load trusted setup"),
+        c_kzg::KzgSettings::load_trusted_setup(
+            &revm_primitives::kzg::G1_POINTS.0,
+            &revm_primitives::kzg::G2_POINTS.0,
+        )
+        .expect("failed to load trusted setup"),
     )
 });
 
@@ -59,11 +60,11 @@ pub fn load_trusted_setup_from_bytes(bytes: &[u8]) -> Result<KzgSettings, LoadKz
 pub enum LoadKzgSettingsError {
     /// Failed to create temp file to store bytes for loading [KzgSettings] via
     /// [KzgSettings::load_trusted_setup_file].
-    #[error("Failed to setup temp file: {0:?}")]
+    #[error("failed to setup temp file: {0}")]
     TempFileErr(#[from] std::io::Error),
     /// Kzg error
-    #[error("Kzg error: {0:?}")]
-    KzgError(c_kzg::Error),
+    #[error("KZG error: {0:?}")]
+    KzgError(#[from] c_kzg::Error),
 }
 
 #[cfg(test)]

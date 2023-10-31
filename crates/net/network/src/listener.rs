@@ -43,7 +43,7 @@ impl ConnectionListener {
         match ready!(this.incoming.poll_next(cx)) {
             Some(Ok((stream, remote_addr))) => {
                 if let Err(err) = stream.set_nodelay(true) {
-                    tracing::warn!(target : "net", "set nodelay failed: {:?}", err);
+                    tracing::warn!(target: "net", "set nodelay failed: {:?}", err);
                 }
                 Poll::Ready(ListenerEvent::Incoming { stream, remote_addr })
             }

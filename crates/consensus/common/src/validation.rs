@@ -198,7 +198,6 @@ pub fn validate_block_standalone(
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
     // Check ommers hash
-    // TODO(onbjerg): This should probably be accessible directly on [Block]
     let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
     if block.header.ommers_hash != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff {

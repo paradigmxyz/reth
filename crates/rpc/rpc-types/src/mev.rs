@@ -1,8 +1,8 @@
 //! MEV bundle type bindings
 
 #![allow(missing_docs)]
+use crate::{BlockId, BlockNumberOrTag, Log};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256, U64};
-use reth_primitives::{BlockId, BlockNumberOrTag, Log};
 use serde::{
     ser::{SerializeSeq, Serializer},
     Deserialize, Deserializer, Serialize,
