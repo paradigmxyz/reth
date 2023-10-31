@@ -87,11 +87,6 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-#[cfg(feature = "optimism")]
-use reth_rpc_api::EngineApiClient;
-#[cfg(feature = "optimism")]
-use reth_rpc_types::engine::ForkchoiceState;
-
 pub mod cl_events;
 pub mod events;
 
@@ -563,9 +558,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         #[cfg(feature = "optimism")]
         if self.chain.optimism && !self.rollup.enable_genesis_walkback {
             let client = _rpc_server_handles.auth.http_client();
-            EngineApiClient::fork_choice_updated_v2(
+            reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
                 &client,
-                ForkchoiceState {
+                reth_rpc_types::engine::ForkchoiceState {
                     head_block_hash: head.hash,
                     safe_block_hash: head.hash,
                     finalized_block_hash: head.hash,
@@ -794,7 +789,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow());
+            return Ok(header.seal_slow())
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -802,7 +797,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header);
+                    return Ok(tip_header)
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
