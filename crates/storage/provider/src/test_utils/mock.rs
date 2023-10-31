@@ -485,7 +485,8 @@ impl AccountReader for MockEthProvider {
 
 impl StateRootProvider for MockEthProvider {
     fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<B256> {
-        todo!()
+        // TODO: implement properly
+        Ok(B256::ZERO)
     }
 }
 
