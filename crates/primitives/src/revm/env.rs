@@ -123,7 +123,7 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 
     #[cfg(feature = "optimism")]
     {
-        let mut envelope_buf = Vec::new();
+        let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
         transaction.encode_enveloped(&mut envelope_buf);
         fill_tx_env(&mut tx_env, transaction.as_ref(), transaction.signer(), envelope_buf.into());
     }
