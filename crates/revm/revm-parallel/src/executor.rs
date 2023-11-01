@@ -127,6 +127,52 @@ impl<'a> ParallelExecutor<'a> {
         Ok(results)
     }
 
+    /// Execute transactions.
+    pub async fn execute_transactions(
+        &mut self,
+        env: Env,
+        block: &Block,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok((Vec::new(), 0))
+        }
+
+        let mut results = Vec::with_capacity(block.body.len());
+        let block_queue = self.store.get_queue(block.number).cloned().unwrap_or_else(|| {
+            BlockQueue::from((0..block.body.len() as u32).map(|idx| Vec::from([idx])))
+        });
+        for batch in block_queue.iter() {
+            results.extend(
+                self.execute_batch(
+                    &env,
+                    batch,
+                    &block.body,
+                    senders.as_ref().unwrap(), /* TODO: */
+                )
+                .await?,
+            );
+        }
+        results.sort_unstable_by_key(|(idx, _)| *idx);
+
+        let mut cumulative_gas_used = 0;
+        let mut receipts = Vec::with_capacity(block.body.len());
+        for (transaction, (_, result)) in block.body.iter().zip(results) {
+            cumulative_gas_used += result.gas_used();
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                // convert to reth log
+                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+            });
+        }
+        Ok((receipts, cumulative_gas_used))
+    }
+
     /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
     /// hardfork state change.
     pub fn apply_post_execution_state_change(
@@ -199,42 +245,8 @@ impl<'a> ParallelExecutor<'a> {
             self.state_mut().commit(Vec::from([(0, state)]));
         }
 
-        // perf: do not execute empty blocks
-        if block.body.is_empty() {
-            return Ok(Vec::new())
-        }
-
-        let mut results = Vec::with_capacity(block.body.len());
-        let block_queue = self.store.get_queue(block.number).cloned().unwrap_or_else(|| {
-            BlockQueue::from((0..block.body.len() as u32).map(|idx| Vec::from([idx])))
-        });
-        for batch in block_queue.iter() {
-            results.extend(
-                self.execute_batch(
-                    &env,
-                    batch,
-                    &block.body,
-                    senders.as_ref().unwrap(), /* TODO: */
-                )
-                .await?,
-            );
-        }
-        results.sort_unstable_by_key(|(idx, _)| *idx);
-
-        let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
-        for (transaction, (_, result)) in block.body.iter().zip(results) {
-            cumulative_gas_used += result.gas_used();
-            receipts.push(Receipt {
-                tx_type: transaction.tx_type(),
-                // Success flag was added in `EIP-658: Embedding transaction status code in
-                // receipts`.
-                success: result.is_success(),
-                cumulative_gas_used,
-                // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-            });
-        }
+        let (receipts, cumulative_gas_used) =
+            self.execute_transactions(env, &block, senders).await?;
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
