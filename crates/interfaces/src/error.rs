@@ -23,11 +23,14 @@ pub enum RethError {
     #[error(transparent)]
     Canonical(#[from] crate::blockchain_tree::error::CanonicalError),
 
-    #[error(transparent)]
-    BlockchainTree(#[from] crate::blockchain_tree::error::BlockchainTreeError),
-
     #[error("{0}")]
     Custom(String),
+}
+
+impl From<crate::blockchain_tree::error::BlockchainTreeError> for RethError {
+    fn from(error: crate::blockchain_tree::error::BlockchainTreeError) -> Self {
+        RethError::Canonical(error.into())
+    }
 }
 
 impl From<reth_nippy_jar::NippyJarError> for RethError {
