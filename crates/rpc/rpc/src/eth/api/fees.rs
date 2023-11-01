@@ -96,7 +96,7 @@ where
         let start_block = end_block_plus - block_count;
 
         let headers = self.fee_history_cache().get_history(start_block, end_block).await?;
-      
+
         if headers.len() != block_count as usize {
             return Err(EthApiError::InvalidBlockRange)
         }

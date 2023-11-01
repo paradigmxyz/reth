@@ -13,12 +13,11 @@ use metrics::atomics::AtomicU64;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, ChainInfo, Header, SealedBlock, SealedHeader, B256, U256,
-    U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, SealedHeader, B256, U256, U64,
 };
 use reth_provider::{
-    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, EvmEnvProvider, StateProviderBox,
-    StateProviderFactory, BlockNumReader,
+    BlockNumReader, BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, EvmEnvProvider,
+    StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -29,15 +28,12 @@ use std::{
     collections::BTreeMap,
     fmt::Debug,
     future::Future,
-    sync::Arc, 
-    sync::atomic::Ordering::SeqCst,
+    sync::{atomic::Ordering::SeqCst, Arc},
     time::{Duration, Instant},
 };
 
 use futures::{Stream, StreamExt};
-use tokio::sync::{
-    oneshot, Mutex,
-};
+use tokio::sync::{oneshot, Mutex};
 
 mod block;
 mod call;
@@ -50,8 +46,6 @@ mod transactions;
 
 use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
-
-use super::revm_utils::FillableTransaction;
 
 /// `Eth` API trait.
 ///
@@ -154,9 +148,7 @@ where
             fee_history_cache,
         };
 
-        let eth_api = Self { inner: Arc::new(inner) };
-
-        eth_api
+        Self { inner: Arc::new(inner) }
     }
 
     /// Executes the future on a new blocking task.
@@ -465,30 +457,6 @@ struct EthApiInner<Provider, Pool, Network> {
     fee_history_cache: FeeHistoryCache<Provider>,
 }
 
-/// The type that contains fees data for associated block in cache
-#[derive(Clone, Debug)]
-pub struct BlockFees {
-    /// Block data on bas_fee_per_gas
-    pub base_fee_per_gas: u64,
-    /// Precalculated ratio
-    pub gas_used_ratio: f64,
-    /// Block data on gas_used
-    pub gas_used: u64,
-    /// Block data on gas_limit
-    pub gas_limit: u64,
-}
-
-impl BlockFees {
-    fn from_header(header: Header) -> BlockFees {
-        BlockFees {
-            base_fee_per_gas: header.base_fee_per_gas.unwrap_or_default(),
-            gas_used_ratio: header.gas_used as f64 / header.gas_limit as f64,
-            gas_used: header.gas_used,
-            gas_limit: header.gas_limit,
-        }
-    }
-}
-
 /// Settings for the [EthStateCache](crate::eth::cache::EthStateCache).
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -517,60 +485,84 @@ pub struct FeeHistoryCache<Provider> {
 
 impl<Provider> FeeHistoryCache<Provider>
 where
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + BlockNumReader + 'static,
+    Provider: BlockReaderIdExt
+        + ChainSpecProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + BlockNumReader
+        + 'static,
 {
-    pub fn new(
-        config: FeeHistoryCacheConfig,
-        provider: Provider,
-        ) -> Self {
+    /// Creates new FeeHistoryCache instance, initialize it with the mose recent data, set bounds
+    pub fn new(config: FeeHistoryCacheConfig, provider: Provider) -> Self {
         let mut init_tree_map = BTreeMap::new();
 
-        let last_block_number = provider.last_block_number().unwrap_or(0);    
-        let start_block = last_block_number - config.max_blocks;
-        let headers = provider.sealed_headers_range(start_block..=last_block_number).unwrap_or_default();
-        
+        let last_block_number = provider.last_block_number().unwrap_or(0);
+
+        let start_block = if last_block_number > config.max_blocks {
+            last_block_number - config.max_blocks
+        } else {
+            0
+        };
+
+        let headers =
+            provider.sealed_headers_range(start_block..=last_block_number).unwrap_or_default();
+
+        let (mut lower_bound, mut upper_bound) = (0, 0);
         for header in headers {
-            init_tree_map.insert(header.number, header);    
+            init_tree_map.insert(header.number, header.clone());
+            upper_bound = header.number;
+            if lower_bound == 0 {
+                lower_bound = header.number;
+            }
         }
-        let upper_bound = *init_tree_map.last_key_value().expect("Chain has at least 1 block").0;
-        let lower_bound = *init_tree_map.first_key_value().expect("Chain has at least one block").0; 
-        
+
         let entries = Arc::new(tokio::sync::RwLock::new(init_tree_map));
-        
+
         let upper_bound = Arc::new(AtomicU64::new(upper_bound));
         let lower_bound = Arc::new(AtomicU64::new(lower_bound));
 
-        let cache = FeeHistoryCache { 
-            config, 
-            entries, 
-            provider, 
-            upper_bound,
-            lower_bound,
-        };
-        cache
+        FeeHistoryCache { config, entries, provider, upper_bound, lower_bound }
     }
 
+    /// Processing of the arriving blocks
     pub async fn on_new_block(&self, block: &SealedBlock) {
         let mut entries = self.entries.write().await;
         entries.insert(block.number, block.header.clone());
         while entries.len() > self.config.max_blocks as usize {
             entries.pop_first();
         }
+        if entries.len() == 0 {
+            self.upper_bound.store(0, SeqCst);
+            self.lower_bound.store(0, SeqCst);
+            return
+        }
+        let upper_bound = *entries.last_entry().expect("Contains be at least one entry").key();
+        let lower_bound = *entries.first_entry().expect("Contains at least one entry").key();
+        self.upper_bound.store(upper_bound, SeqCst);
+        self.lower_bound.store(lower_bound, SeqCst);
     }
 
-    pub async fn get_history(&self, start_block: u64, end_block: u64) -> RethResult<Vec<SealedHeader>> {
+    /// Collect fee history for given range. It will try to use a cache to take the most recent
+    /// headers or if the range is out of caching config it will fallback to the database provider
+    pub async fn get_history(
+        &self,
+        start_block: u64,
+        end_block: u64,
+    ) -> RethResult<Vec<SealedHeader>> {
         let headers: Vec<SealedHeader>;
-         
+
         let lower_bound = self.lower_bound.load(SeqCst);
-        let upper_bound = self.upper_bound.load(SeqCst); 
+        let upper_bound = self.upper_bound.load(SeqCst);
         if start_block >= lower_bound && end_block <= upper_bound {
             let entries = self.entries.read().await;
-            headers = entries.range(start_block..=end_block+1).map(|(_, header)| header.clone()).collect();
+            headers = entries
+                .range(start_block..=end_block + 1)
+                .map(|(_, header)| header.clone())
+                .collect();
         } else {
             headers = self.provider.sealed_headers_range(start_block..=end_block)?;
         }
-        
+
         Ok(headers)
     }
 }
@@ -582,8 +574,12 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
     mut events: St,
 ) where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
-    Provider: 
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + BlockNumReader + 'static,
+    Provider: BlockReaderIdExt
+        + ChainSpecProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + BlockNumReader
+        + 'static,
 {
     while let Some(event) = events.next().await {
         if let Some(committed) = event.committed() {

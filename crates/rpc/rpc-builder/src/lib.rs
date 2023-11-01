@@ -1022,21 +1022,26 @@ where
             let new_canonical_blocks = self.events.canonical_state_stream();
             let c = cache.clone();
 
-            let fee_history_cache = FeeHistoryCache::new(self.config.eth.fee_history_cache.clone());
-            let fhc = fee_history_cache.clone();
-
+            let fee_history_cache = FeeHistoryCache::new(
+                self.config.eth.fee_history_cache.clone(),
+                self.provider.clone(),
+            );
             self.executor.spawn_critical(
                 "cache canonical blocks task",
                 Box::pin(async move {
                     cache_new_blocks_task(c, new_canonical_blocks).await;
                 }),
             );
+
+            let new_canonical_blocks = self.events.canonical_state_stream();
+            let fhc = fee_history_cache.clone();
             self.executor.spawn_critical(
                 "cache canonical blocks for fee history task",
                 Box::pin(async move {
                     fee_history_cache_new_blocks_task(fhc, new_canonical_blocks).await;
                 }),
             );
+
             let executor = Box::new(self.executor.clone());
             let blocking_task_pool =
                 BlockingTaskPool::build().expect("failed to build tracing pool");
@@ -1049,6 +1054,7 @@ where
                 self.config.eth.rpc_gas_cap,
                 executor.clone(),
                 blocking_task_pool.clone(),
+                fee_history_cache,
             );
             let filter = EthFilter::new(
                 self.provider.clone(),

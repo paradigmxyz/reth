@@ -16,7 +16,9 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+    eth::{
+        cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
+    },
     AuthLayer, BlockingTaskPool, Claims, EngineEthApi, EthApi, EthFilter,
     EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret,
 };
@@ -58,6 +60,8 @@ where
     let eth_cache =
         EthStateCache::spawn_with(provider.clone(), Default::default(), executor.clone());
     let gas_oracle = GasPriceOracle::new(provider.clone(), Default::default(), eth_cache.clone());
+    let fee_history_cache =
+        FeeHistoryCache::new(FeeHistoryCacheConfig::default(), provider.clone());
     let eth_api = EthApi::with_spawner(
         provider.clone(),
         pool.clone(),
@@ -67,6 +71,7 @@ where
         EthConfig::default().rpc_gas_cap,
         Box::new(executor.clone()),
         BlockingTaskPool::build().expect("failed to build tracing pool"),
+        fee_history_cache,
     );
     let eth_filter = EthFilter::new(
         provider,
