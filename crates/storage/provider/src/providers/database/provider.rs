@@ -48,7 +48,9 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
+    time::Instant,
 };
+use tracing::debug;
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<<DB as DatabaseGAT<'this>>::TX>;
@@ -1824,7 +1826,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
-    fn calculate_history_indices(&self, range: RangeInclusive<BlockNumber>) -> RethResult<()> {
+    fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> RethResult<()> {
         // account history stage
         {
             let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
@@ -2168,22 +2170,37 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         let last_block_hash = last.hash();
         let expected_state_root = last.state_root;
 
+        let mut timings = Vec::with_capacity(5);
+
         // Insert the blocks
         for block in blocks {
             let (block, senders) = block.into_components();
+            let block_number = block.number;
+            let start = Instant::now();
             self.insert_block(block, Some(senders), prune_modes)?;
+            timings.push((format!("block {}", block_number), start.elapsed()));
         }
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
+        let start = Instant::now();
         state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)?;
+        timings.push(("state".to_string(), start.elapsed()));
 
+        let start = Instant::now();
         self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
+        timings.push(("hashes".to_string(), start.elapsed()));
 
-        self.calculate_history_indices(first_number..=last_block_number)?;
+        let start = Instant::now();
+        self.update_history_indices(first_number..=last_block_number)?;
+        timings.push(("history indices".to_string(), start.elapsed()));
 
         // Update pipeline progress
+        let start = Instant::now();
         self.update_pipeline_stages(new_tip_number, false)?;
+        timings.push(("pipeline stages".to_string(), start.elapsed()));
+
+        debug!(target: "providers::db", ?timings, "Appended blocks");
 
         Ok(())
     }
