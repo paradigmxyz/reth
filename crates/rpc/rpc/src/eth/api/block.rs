@@ -19,24 +19,22 @@ use reth_transaction_pool::TransactionPool;
 #[cfg(feature = "optimism")]
 use reth_primitives::U256;
 #[cfg(feature = "optimism")]
-use reth_revm::optimism::RethL1BlockInfo;
-#[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
-use std::sync::Arc;
+use std::rc::Rc;
 
-/// Optimism Block Meta
+/// Optimism Transaction Metadata
 ///
-/// Includes the l1 fee and data gas for the block along with the l1
-/// block info. In order to pass the `OptimismBlockMeta` into the
+/// Includes the L1 fee and data gas for the tx along with the L1
+/// block info. In order to pass the [OptimismTxMeta] into the
 /// async colored `build_transaction_receipt_with_block_receipts`
-/// function, an atomic reference counter for the l1 block info is
-/// used so the l1 block info can be shared between receipts.
+/// function, a reference counter for the L1 block info is
+/// used so the L1 block info can be shared between receipts.
 #[cfg(feature = "optimism")]
 #[derive(Debug, Default, Clone)]
-pub(crate) struct OptimismBlockMeta {
+pub(crate) struct OptimismTxMeta {
     /// The L1 block info.
-    pub(crate) l1_block_info: Option<Arc<L1BlockInfo>>,
+    pub(crate) l1_block_info: Option<Rc<L1BlockInfo>>,
     /// The L1 fee for the block.
     pub(crate) l1_fee: Option<U256>,
     /// The L1 data gas for the block.
@@ -44,10 +42,10 @@ pub(crate) struct OptimismBlockMeta {
 }
 
 #[cfg(feature = "optimism")]
-impl OptimismBlockMeta {
-    /// Creates a new OptimismBlockMeta.
+impl OptimismTxMeta {
+    /// Creates a new [OptimismTxMeta].
     pub(crate) fn new(
-        l1_block_info: Option<Arc<L1BlockInfo>>,
+        l1_block_info: Option<Rc<L1BlockInfo>>,
         l1_fee: Option<U256>,
         l1_data_gas: Option<U256>,
     ) -> Self {
@@ -116,11 +114,11 @@ where
             let excess_blob_gas = block.excess_blob_gas;
 
             #[cfg(feature = "optimism")]
-            let (block_timestamp, l1_block_info): (_, Option<Arc<L1BlockInfo>>) = {
+            let (block_timestamp, l1_block_info) = {
                 let body = reth_revm::optimism::parse_l1_info_tx(
                     &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
                 );
-                (block.timestamp, body.ok().map(Arc::new))
+                (block.timestamp, body.ok().map(Rc::new))
             };
 
             let receipts = block
@@ -139,42 +137,8 @@ where
                     };
 
                     #[cfg(feature = "optimism")]
-                    let optimism_block_meta = {
-                        if let Some(l1_block_info) = &l1_block_info {
-                            let mut buf = bytes::BytesMut::default();
-                            tx.encode_enveloped(&mut buf);
-                            let data = &buf.freeze().into();
-                            let l1_fee = (!tx.is_deposit())
-                                .then(|| {
-                                    l1_block_info.l1_tx_data_fee(
-                                        self.inner.provider.chain_spec(),
-                                        block_timestamp,
-                                        data,
-                                        tx.is_deposit(),
-                                    )
-                                })
-                                .transpose()
-                                .map_err(|_| EthApiError::InternalEthError)?;
-                            let l1_data_gas = (!tx.is_deposit())
-                                .then(|| {
-                                    l1_block_info.l1_data_gas(
-                                        self.inner.provider.chain_spec(),
-                                        block_timestamp,
-                                        data,
-                                    )
-                                })
-                                .transpose()
-                                .map_err(|_| EthApiError::InternalEthError)?;
-
-                            OptimismBlockMeta::new(
-                                Some(Arc::clone(l1_block_info)),
-                                l1_fee,
-                                l1_data_gas,
-                            )
-                        } else {
-                            OptimismBlockMeta::default()
-                        }
-                    };
+                    let op_tx_meta =
+                        self.build_op_tx_meta(&tx, l1_block_info.clone(), block_timestamp)?;
 
                     build_transaction_receipt_with_block_receipts(
                         tx,
@@ -182,7 +146,7 @@ where
                         receipt,
                         &receipts,
                         #[cfg(feature = "optimism")]
-                        optimism_block_meta,
+                        op_tx_meta,
                     )
                 })
                 .collect::<EthResult<Vec<_>>>();

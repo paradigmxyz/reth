@@ -42,7 +42,7 @@ use revm::{
 use revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State};
 
 #[cfg(feature = "optimism")]
-use crate::eth::api::block::OptimismBlockMeta;
+use crate::eth::api::block::OptimismTxMeta;
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
 #[cfg(feature = "optimism")]
@@ -50,7 +50,7 @@ use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
 use std::ops::Div;
 #[cfg(feature = "optimism")]
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBox<'r>>>;
@@ -902,37 +902,37 @@ where
             .block_by_number(meta.block_number)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
 
-        let optimism_block_meta = self.parse_op_block_meta(&tx, &block)?;
+        let l1_block_info = {
+            let body = reth_revm::optimism::parse_l1_info_tx(
+                &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
+            );
+            body.ok().map(Rc::new)
+        };
+        let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
 
         build_transaction_receipt_with_block_receipts(
             tx,
             meta,
             receipt,
             &all_receipts,
-            optimism_block_meta,
+            optimism_tx_meta,
         )
     }
 
     #[cfg(feature = "optimism")]
-    pub(crate) fn parse_op_block_meta(
+    pub(crate) fn build_op_tx_meta(
         &self,
         tx: &TransactionSigned,
-        block: &reth_primitives::Block,
-    ) -> EthResult<OptimismBlockMeta> {
-        let block_timestamp = block.timestamp;
-        let l1_block_info: Option<Arc<L1BlockInfo>> = reth_revm::optimism::parse_l1_info_tx(
-            &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
-        )
-        .map_err(|_| EthApiError::InternalEthError)
-        .ok()
-        .map(Arc::new);
-        let envelope_buf: Bytes = {
-            let mut envelope_buf = bytes::BytesMut::default();
-            tx.encode_enveloped(&mut envelope_buf);
-            envelope_buf.freeze().into()
-        };
-
+        l1_block_info: Option<Rc<L1BlockInfo>>,
+        block_timestamp: u64,
+    ) -> EthResult<OptimismTxMeta> {
         if let Some(l1_block_info) = l1_block_info {
+            let envelope_buf: Bytes = {
+                let mut envelope_buf = bytes::BytesMut::default();
+                tx.encode_enveloped(&mut envelope_buf);
+                envelope_buf.freeze().into()
+            };
+
             let l1_fee = (!tx.is_deposit())
                 .then(|| {
                     l1_block_info.l1_tx_data_fee(
@@ -955,9 +955,9 @@ where
                 .transpose()
                 .map_err(|_| EthApiError::InternalEthError)?;
 
-            Ok(OptimismBlockMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
+            Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
         } else {
-            Ok(OptimismBlockMeta::default())
+            Ok(OptimismTxMeta::default())
         }
     }
 
@@ -1137,7 +1137,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     meta: TransactionMeta,
     receipt: Receipt,
     all_receipts: &[Receipt],
-    #[cfg(feature = "optimism")] optimism_block_meta: OptimismBlockMeta,
+    #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
 ) -> EthResult<TransactionReceipt> {
     let transaction =
         tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
@@ -1181,11 +1181,11 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     };
 
     #[cfg(feature = "optimism")]
-    if let Some(l1_block_info) = optimism_block_meta.l1_block_info {
+    if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
         if !tx.is_deposit() {
-            res_receipt.l1_fee = optimism_block_meta.l1_fee;
+            res_receipt.l1_fee = optimism_tx_meta.l1_fee;
             res_receipt.l1_gas_used =
-                optimism_block_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
+                optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
             res_receipt.l1_fee_scalar =
                 Some(l1_block_info.l1_fee_scalar.div(U256::from(1_000_000)));
             res_receipt.l1_gas_price = Some(l1_block_info.l1_base_fee);
