@@ -1070,7 +1070,7 @@ where
 /// Http and WS share the same settings: [`ServerBuilder`].
 ///
 /// Once the [RpcModule] is built via [RpcModuleBuilder] the servers can be started, See also
-/// [ServerBuilder::build] and [Server::start](jsonrpc::server::Server::start).
+/// [ServerBuilder::build] and [Server::start](jsonrpsee::server::Server::start).
 #[derive(Default)]
 pub struct RpcServerConfig {
     /// Configs for JSON-RPC Http.
