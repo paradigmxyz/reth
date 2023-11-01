@@ -2,7 +2,10 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::{get_secret_key, utils::chain_spec_value_parser, DatabaseArgs, NetworkArgs, StageEnum},
+    args::{
+        get_secret_key, utils::chain_spec_value_parser, DatabaseArgs, ExecutionArgs, NetworkArgs,
+        StageEnum,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
     version::SHORT_VERSION,
@@ -95,6 +98,9 @@ pub struct Command {
 
     #[clap(flatten)]
     db: DatabaseArgs,
+
+    #[clap(flatten)]
+    execution: ExecutionArgs,
 
     /// Commits the changes in the database. WARNING: potentially destructive.
     ///
@@ -195,7 +201,7 @@ impl Command {
                 }
                 StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),
                 StageEnum::Execution => {
-                    let factory = reth_revm::EVMProcessorFactory::new(self.chain.clone());
+                    let factory = self.execution.pipeline_executor_factory(self.chain.clone())?;
                     (
                         Box::new(ExecutionStage::new(
                             factory,
