@@ -139,8 +139,10 @@ impl<T: ParkedOrd> ParkedPool<T> {
         let mut drop = queued - limit.max_txs;
 
         while drop > 0 && !addresses.is_empty() {
+            // SAFETY: This will not panic due to `!addresses.is_empty()`
             let addr = addresses.pop().unwrap();
-            let list = self.get_txs_by_sender(&addr);
+            // problem: we have to iterate through the entire pool for this
+            let mut list = self.get_txs_by_sender(&addr);
 
             // Drop all transactions if they are less than the overflow
             if list.len() <= drop {
@@ -152,8 +154,10 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 drop -= list.len();
                 continue
             }
+
             // Otherwise drop only last few transactions
-            for tx in list.iter().rev().take(drop) {
+            // SAFETY: This will not panic because `list.len() > drop`
+            for tx in list.split_off(drop) {
                 if let Some(tx) = self.remove_transaction(tx.id()) {
                     removed.push(tx);
                 }
