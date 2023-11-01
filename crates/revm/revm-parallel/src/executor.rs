@@ -127,12 +127,13 @@ impl<'a> ParallelExecutor<'a> {
         Ok(results)
     }
 
-    /// Execute transactions.
-    pub async fn execute_transactions(
+    /// Execute transactions in parallel.
+    pub async fn execute_transactions_in_parallel(
         &mut self,
         env: Env,
         block: &Block,
         senders: Option<Vec<Address>>,
+        block_queue: BlockQueue,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
         // perf: do not execute empty blocks
         if block.body.is_empty() {
@@ -140,9 +141,6 @@ impl<'a> ParallelExecutor<'a> {
         }
 
         let mut results = Vec::with_capacity(block.body.len());
-        let block_queue = self.store.get_queue(block.number).cloned().unwrap_or_else(|| {
-            BlockQueue::from((0..block.body.len() as u32).map(|idx| Vec::from([idx])))
-        });
         for batch in block_queue.iter() {
             results.extend(
                 self.execute_batch(
@@ -170,6 +168,63 @@ impl<'a> ParallelExecutor<'a> {
                 logs: result.into_logs().into_iter().map(into_reth_log).collect(),
             });
         }
+        Ok((receipts, cumulative_gas_used))
+    }
+
+    pub fn execute_transactions(
+        &mut self,
+        env: Env,
+        block: &Block,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok((Vec::new(), 0))
+        }
+
+        let senders = senders.unwrap(); // TODO:
+
+        let mut cumulative_gas_used = 0;
+        let mut receipts = Vec::with_capacity(block.body.len());
+        for (idx, (transaction, sender)) in block.body.iter().zip(senders).enumerate() {
+            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
+            // must be no greater than the block’s gasLimit.
+            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
+            if transaction.gas_limit() > block_available_gas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: transaction.gas_limit(),
+                    block_available_gas,
+                }
+                .into())
+            }
+            // Execute transaction.
+            let mut evm = EVM::with_env(env.clone());
+            fill_tx_env(&mut evm.env.tx, transaction, sender);
+            evm.database(self.state.clone());
+            let ResultAndState { result, state } = evm.transact_ref().map_err(|e| {
+                BlockExecutionError::Validation(BlockValidationError::EVM {
+                    hash: transaction.hash,
+                    error: e.into(),
+                })
+            })?;
+
+            self.state_mut().commit(Vec::from([(idx, state)]));
+
+            // append gas used
+            cumulative_gas_used += result.gas_used();
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                // convert to reth log
+                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+            });
+        }
+
         Ok((receipts, cumulative_gas_used))
     }
 
@@ -246,8 +301,12 @@ impl<'a> ParallelExecutor<'a> {
             self.state_mut().commit(Vec::from([(0, state)]));
         }
 
-        let (receipts, cumulative_gas_used) =
-            self.execute_transactions(env, &block, senders).await?;
+        let (receipts, cumulative_gas_used) = match self.store.get_queue(block.number).cloned() {
+            Some(queue) => {
+                self.execute_transactions_in_parallel(env, &block, senders, queue).await?
+            }
+            None => self.execute_transactions(env, block, senders)?,
+        };
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
