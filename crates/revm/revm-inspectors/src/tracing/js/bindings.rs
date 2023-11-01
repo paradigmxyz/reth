@@ -24,7 +24,7 @@ use revm::{
     },
     primitives::State,
 };
-use std::{borrow::Borrow, sync::mpsc::channel};
+use std::{borrow::Borrow, cell::RefCell, rc::Rc, sync::mpsc::channel};
 use tokio::sync::mpsc;
 
 /// A macro that creates a native function that returns via [JsValue::from]
@@ -52,6 +52,65 @@ macro_rules! js_value_capture_getter {
         .length(0)
         .build()
     };
+}
+
+/// A reference to a value that can be garbagae collected, but will not give access to the value if
+/// it has been dropped.
+///
+/// This is used to allow the JS tracer functions to access values at a certain point during
+/// inspection by ref without having to clone them and capture them in the js object.
+///
+/// JS tracer functions get access to evm internals via objects or function arguments, for example
+/// `function step(log,evm)` where log has an object `stack` that has a function `peek(number)` that
+/// returns a value from the stack.
+///
+/// These functions could get garbage collected, however the data accessed by the function is
+/// supposed to be ephemeral and only valid for the duration of the function call.
+///
+/// This type supports garbage collection of references and prevents access to the value if it has
+/// been dropped.
+pub(crate) struct GuardedNullableGcRef<Val: 'static> {
+    val: &'static Val,
+    dropped: Rc<RefCell<bool>>,
+}
+
+impl<Val: 'static> GuardedNullableGcRef<Val> {
+    /// Creates a garbage collectible reference to the given reference.
+    ///
+    /// SAFETY; the caller must ensure that the guard is dropped before the value is dropped.
+    pub(crate) fn new(val: &Val) -> (Self, RefGuard) {
+        let dropped = Rc::new(RefCell::new(false));
+        // SAFETY: caller must ensure that the guard is dropped before the value is dropped
+        let this = Self { val: unsafe { std::mem::transmute(val) }, dropped: Rc::clone(&dropped) };
+        (this, RefGuard { dropped })
+    }
+
+    /// Gets the value if it has not been dropped.
+    pub(crate) fn get(&self) -> Option<&'static Val> {
+        if *RefCell::borrow(&*self.dropped) {
+            // value has been dropped
+            None
+        } else {
+            Some(self.val)
+        }
+    }
+}
+
+impl<Val: 'static> Finalize for GuardedNullableGcRef<Val> {}
+
+unsafe impl<Val: 'static> Trace for GuardedNullableGcRef<Val> {
+    empty_trace!();
+}
+
+#[derive(Debug)]
+pub(crate) struct RefGuard {
+    dropped: Rc<RefCell<bool>>,
+}
+
+impl Drop for RefGuard {
+    fn drop(&mut self) {
+        *self.dropped.borrow_mut() = true;
+    }
 }
 
 /// The Log object that is passed to the javascript inspector.
