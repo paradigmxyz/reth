@@ -108,14 +108,13 @@ pub enum EthApiError {
 }
 
 /// Eth Optimism Api Error
+#[cfg(feature = "optimism")]
 #[derive(Debug, thiserror::Error)]
 pub enum OptimismEthApiError {
     /// Wrapper around a [hyper::Error].
-    #[cfg(feature = "optimism")]
     #[error(transparent)]
     HyperError(#[from] hyper::Error),
     /// Wrapper around an [http::Error].
-    #[cfg(feature = "optimism")]
     #[error(transparent)]
     HttpError(#[from] http::Error),
 }
@@ -348,11 +347,9 @@ pub enum RpcInvalidTransactionError {
 pub enum OptimismInvalidTransactionError {
     /// A deposit transaction was submitted as a system transaction post-regolith.
     #[error("no system transactions allowed after regolith")]
-    #[cfg(feature = "optimism")]
     DepositSystemTxPostRegolith,
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
-    #[cfg(feature = "optimism")]
     HaltedDepositPostRegolith,
 }
 
