@@ -132,7 +132,6 @@ optimism = [
   "reth-network/optimism",
   "reth-network-api/optimism"
 ]
-ethereum = []
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
