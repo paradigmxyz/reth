@@ -1597,6 +1597,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         end_block_hash: B256,
         expected_state_root: B256,
     ) -> RethResult<()> {
+        let mut timings = Vec::new();
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
         let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
@@ -1604,6 +1605,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
 
         // storage hashing stage
         {
+            let start = Instant::now();
             let lists = self.changed_storages_with_range(range.clone())?;
             let storages = self.plainstate_storages(lists)?;
             let storage_entries = self.insert_storage_for_hashing(storages)?;
@@ -1616,10 +1618,12 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                         .insert(Nibbles::unpack(slot));
                 }
             }
+            timings.push(("storage hashing", start.elapsed()));
         }
 
         // account hashing stage
         {
+            let start = Instant::now();
             let lists = self.changed_accounts_with_range(range.clone())?;
             let accounts = self.basic_accounts(lists)?;
             let hashed_addresses = self.insert_account_for_hashing(accounts)?;
@@ -1629,10 +1633,12 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     destroyed_accounts.insert(hashed_address);
                 }
             }
+            timings.push(("account hashing", start.elapsed()));
         }
 
         // merkle tree
         {
+            let start = Instant::now();
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
             // are pre-loaded.
             let (state_root, trie_updates) = StateRoot::new(&self.tx)
@@ -1653,7 +1659,11 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                 .into())
             }
             trie_updates.flush(&self.tx)?;
+            timings.push(("merkle tree", start.elapsed()));
         }
+
+        debug!(target: "providers::db", ?timings, ?range, "Inserted hashes");
+
         Ok(())
     }
 
