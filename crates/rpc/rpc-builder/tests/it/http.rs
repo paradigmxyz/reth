@@ -22,9 +22,7 @@ use reth_rpc_types::{
     TransactionRequest,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
