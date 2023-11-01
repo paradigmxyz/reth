@@ -430,16 +430,23 @@ impl SharedCacheAccount {
 
         let info = self.account_info();
         let next_status =
-            self.next_status(&info, !transition_storage.is_empty(), !state_clear_enabled);
+            self.next_status(&info, !transition_storage.is_empty(), state_clear_enabled);
 
-        let transition = (next_status != self.previous_status).then(|| TransitionAccount {
-            info: info.clone(),
-            status: next_status,
-            previous_info: self.previous_info.clone(),
-            previous_status: self.previous_status,
-            storage: transition_storage,
-            storage_was_destroyed: self.selfdestruct_index.is_some(),
-        });
+        let transition = if next_status != self.previous_status ||
+            info != self.previous_info ||
+            !transition_storage.is_empty()
+        {
+            Some(TransitionAccount {
+                info: info.clone(),
+                status: next_status,
+                previous_info: self.previous_info.clone(),
+                previous_status: self.previous_status,
+                storage: transition_storage,
+                storage_was_destroyed: self.selfdestruct_index.is_some(),
+            })
+        } else {
+            None
+        };
 
         self.info_diff = AccountInfoDiff::default().with_code(
             info.as_ref().map(|info| AccountCode::new(info.code_hash, info.code.clone())),

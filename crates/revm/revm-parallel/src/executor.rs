@@ -204,6 +204,7 @@ impl<'a> ParallelExecutor<'a> {
             // return balance to DAO beneficiary.
             *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
         }
+
         // increment balances
         self.state_mut()
             .increment_balances(balance_increments.into_iter().map(|(k, v)| (k, v)))
