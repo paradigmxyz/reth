@@ -165,8 +165,8 @@ impl EngineHooksController {
     }
 
     /// Returns a running hook with DB write access, if there's any.
-    pub(crate) fn running_hook_with_db_write(&self) -> Option<&Box<dyn EngineHook>> {
-        self.running_hook_with_db_write.as_ref()
+    pub(crate) fn running_hook_with_db_write(&self) -> Option<&dyn EngineHook> {
+        self.running_hook_with_db_write.as_ref().map(|hook| hook.as_ref())
     }
 }
 
