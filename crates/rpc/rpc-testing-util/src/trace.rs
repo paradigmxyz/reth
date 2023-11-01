@@ -271,7 +271,7 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
                 Err(err) => Err((err, hash, vec![index])),
             }
         }))
-        .buffered(10); // Assuming a buffer of 10 for concurrent processing.
+        .buffered(10); 
 
         TraceGetStream { stream: Box::pin(stream) }
     }
