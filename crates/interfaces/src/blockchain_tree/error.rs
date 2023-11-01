@@ -330,7 +330,6 @@ impl From<crate::RethError> for InsertBlockErrorKind {
             RethError::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             RethError::Custom(err) => InsertBlockErrorKind::Internal(err.into()),
             RethError::Canonical(err) => InsertBlockErrorKind::Canonical(err),
-            RethError::BlockchainTree(err) => InsertBlockErrorKind::BlockchainTree(err),
         }
     }
 }

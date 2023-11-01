@@ -955,7 +955,9 @@ where
                 })
                 .with_latest_valid_hash(B256::ZERO)
             }
-            RethError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. }) => {
+            RethError::Canonical(CanonicalError::BlockchainTree(
+                BlockchainTreeError::BlockHashNotFoundInChain { .. },
+            )) => {
                 // This just means we couldn't find the block when attempting to make it canonical,
                 // so we should not warn the user, since this will result in us attempting to sync
                 // to a new target and is considered normal operation during sync
