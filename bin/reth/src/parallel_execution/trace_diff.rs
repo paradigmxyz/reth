@@ -31,7 +31,7 @@ use reth_revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use reth_rpc::eth::revm_utils::replay_transactions_until;
 use reth_rpc_types::trace::geth::{DefaultFrame, GethDefaultTracingOptions};
 use reth_stages::PipelineError;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 /// `reth parallel-execution generate` command
 #[derive(Debug, Parser)]
@@ -149,7 +149,7 @@ impl Command {
 
         let mut parallel_executor = ParallelExecutor::new(
             self.chain.clone(),
-            BlockQueueStore::new(HashMap::from_iter([(block.number, queue.clone())])), /* store is unused */
+            Arc::new(BlockQueueStore::default()), /* store is unused */
             sp_database,
             None,
         )?;
@@ -158,10 +158,10 @@ impl Command {
         while !queue.first().expect("not empty").contains(&(target_tx_idx as u32)) {
             let batch = queue.remove(0);
             tracing::trace!(target: "reth::cli", block_number, ?batch, "Executing transaction batch");
-            parallel_executor.execute_batch(&target_env, &batch, &block.body, &senders).await?
+            parallel_executor.execute_batch(&target_env, &batch, &block.body, &senders).await?;
         }
 
-        let parallel_trace = self.inspect_target(parallel_executor.state, target_env)?;
+        let parallel_trace = self.inspect_target(parallel_executor.state(), target_env)?;
 
         let mut position = 0;
         let mut expected_struct_log_iter = expected_trace.struct_logs.into_iter().peekable();

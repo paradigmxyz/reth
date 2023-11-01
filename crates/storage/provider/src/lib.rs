@@ -16,16 +16,17 @@
 /// Various provider traits.
 mod traits;
 pub use traits::{
-    AccountExtReader, AccountReader, BlockExecutionWriter, BlockExecutor, BlockExecutorStats,
-    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-    BlockWriter, BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
+    AccountExtReader, AccountReader, AsyncBlockExecutor, AsyncExecutorFactory,
+    BlockExecutionWriter, BlockExecutor, BlockExecutorStats, BlockHashReader, BlockIdReader,
+    BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
+    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, ExecutorFactory,
-    HashingWriter, HeaderProvider, HistoryWriter, PrunableBlockExecutor, PruneCheckpointReader,
-    PruneCheckpointWriter, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StageCheckpointWriter, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider, StorageReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, WithdrawalsProvider,
+    HashingWriter, HeaderProvider, HistoryWriter, PrunableAsyncBlockExecutor,
+    PrunableBlockExecutor, PruneCheckpointReader, PruneCheckpointWriter, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StageCheckpointWriter, StateProvider,
+    StateProviderBox, StateProviderFactory, StateRootProvider, StorageReader, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.

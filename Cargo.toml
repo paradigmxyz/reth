@@ -23,6 +23,8 @@ members = [
     "crates/primitives",
     "crates/prune",
     "crates/revm",
+    "crates/revm/revm-database",
+    "crates/revm/revm-executor",
     "crates/revm/revm-inspectors",
     "crates/revm/revm-parallel",
     "crates/rpc/ipc",

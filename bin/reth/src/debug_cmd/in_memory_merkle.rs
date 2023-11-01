@@ -161,7 +161,7 @@ impl Command {
             )
             .await?;
 
-        let executor_factory = reth_revm::Factory::new(self.chain.clone());
+        let executor_factory = reth_revm::EVMProcessorFactory::new(self.chain.clone());
         let mut executor =
             executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
 

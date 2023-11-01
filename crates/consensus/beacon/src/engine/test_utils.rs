@@ -25,11 +25,12 @@ use reth_interfaces::{
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneModes, B256, U256};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
-    BundleStateWithReceipts, ExecutorFactory, ProviderFactory, PrunableBlockExecutor,
+    providers::BlockchainProvider, test_utils::TestExecutorFactory, AsyncExecutorFactory,
+    BlockExecutor, BundleStateWithReceipts, ExecutorFactory, ProviderFactory,
+    PrunableAsyncBlockExecutor, PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
-use reth_revm::Factory;
+use reth_revm::EVMProcessorFactory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
@@ -47,7 +48,7 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
         Arc<DatabaseEnv>,
         ShareableBlockchainTree<
             Arc<DatabaseEnv>,
-            EitherExecutorFactory<TestExecutorFactory, Factory>,
+            EitherExecutorFactory<TestExecutorFactory, EVMProcessorFactory>,
         >,
     >,
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
@@ -161,7 +162,7 @@ impl Default for TestExecutorConfig {
 
 /// A type that represents one of two possible executor factories.
 #[derive(Debug, Clone)]
-pub enum EitherExecutorFactory<A: ExecutorFactory, B: ExecutorFactory> {
+pub enum EitherExecutorFactory<A, B> {
     /// The first factory variant
     Left(A),
     /// The second factory variant
@@ -268,6 +269,29 @@ where
         &'a self,
         sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a> {
+        match self {
+            EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
+            EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
+        }
+    }
+}
+
+impl<A, B> AsyncExecutorFactory for EitherExecutorFactory<A, B>
+where
+    A: AsyncExecutorFactory,
+    B: AsyncExecutorFactory,
+{
+    fn chain_spec(&self) -> &ChainSpec {
+        match self {
+            EitherExecutorFactory::Left(a) => a.chain_spec(),
+            EitherExecutorFactory::Right(b) => b.chain_spec(),
+        }
+    }
+
+    fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
+        &'a self,
+        sp: SP,
+    ) -> Box<dyn PrunableAsyncBlockExecutor + 'a> {
         match self {
             EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
             EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
@@ -465,9 +489,9 @@ where
                 executor_factory.extend(results);
                 EitherExecutorFactory::Left(executor_factory)
             }
-            TestExecutorConfig::Real => {
-                EitherExecutorFactory::Right(Factory::new(self.base_config.chain_spec.clone()))
-            }
+            TestExecutorConfig::Real => EitherExecutorFactory::Right(EVMProcessorFactory::new(
+                self.base_config.chain_spec.clone(),
+            )),
         };
 
         // Setup pipeline

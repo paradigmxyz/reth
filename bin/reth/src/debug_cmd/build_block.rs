@@ -30,7 +30,7 @@ use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::Factory;
+use reth_revm::EVMProcessorFactory;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -153,7 +153,7 @@ impl Command {
         let tree_externals = TreeExternals::new(
             Arc::clone(&db),
             Arc::clone(&consensus),
-            Factory::new(self.chain.clone()),
+            EVMProcessorFactory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
         let _tree_config = BlockchainTreeConfig::default();
@@ -273,7 +273,7 @@ impl Command {
                 let block_with_senders =
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
-                let executor_factory = Factory::new(self.chain.clone());
+                let executor_factory = EVMProcessorFactory::new(self.chain.clone());
                 let mut executor = executor_factory.with_state(blockchain_db.latest()?);
                 executor.execute_and_verify_receipt(
                     &block_with_senders.block.clone().unseal(),

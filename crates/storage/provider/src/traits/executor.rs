@@ -13,8 +13,20 @@ pub trait ExecutorFactory: Send + Sync + 'static {
     /// Executor with [`StateProvider`]
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
-        _sp: SP,
+        sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a>;
+
+    /// Return internal chainspec
+    fn chain_spec(&self) -> &ChainSpec;
+}
+
+/// Executor factory that would create the async block executor with a state provider.
+pub trait AsyncExecutorFactory: Send + Sync + 'static {
+    /// Executor with [`StateProvider`]
+    fn with_state<'a, SP: StateProvider + 'a>(
+        &'a self,
+        sp: SP,
+    ) -> Box<dyn PrunableAsyncBlockExecutor + 'a>;
 
     /// Return internal chainspec
     fn chain_spec(&self) -> &ChainSpec;
@@ -62,6 +74,95 @@ pub trait PrunableBlockExecutor: BlockExecutor {
 
     /// Set prune modes.
     fn set_prune_modes(&mut self, prune_modes: PruneModes);
+}
+
+/// A block executor with async execution implementations.
+#[async_trait::async_trait]
+pub trait AsyncBlockExecutor: Send {
+    /// Execute a block.
+    ///
+    /// The number of `senders` should be equal to the number of transactions in the block.
+    ///
+    /// If no senders are specified, the `execute` function MUST recover the senders for the
+    /// provided block's transactions internally. We use this to allow for calculating senders in
+    /// parallel in e.g. staged sync, so that execution can happen without paying for sender
+    /// recovery costs.
+    async fn execute(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(), BlockExecutionError>;
+
+    /// Executes the block and checks receipts.
+    async fn execute_and_verify_receipt(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(), BlockExecutionError>;
+
+    /// Return bundle state. This is output of executed blocks.
+    fn take_output_state(&mut self) -> BundleStateWithReceipts;
+
+    /// Internal statistics of execution.
+    fn stats(&self) -> BlockExecutorStats;
+
+    /// Returns the size hint of current in-memory changes.
+    fn size_hint(&self) -> Option<usize>;
+}
+
+#[async_trait::async_trait]
+impl<T: BlockExecutor + Send> AsyncBlockExecutor for T {
+    async fn execute(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(), BlockExecutionError> {
+        <T as BlockExecutor>::execute(self, block, total_difficulty, senders)
+    }
+
+    async fn execute_and_verify_receipt(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(), BlockExecutionError> {
+        <T as BlockExecutor>::execute_and_verify_receipt(self, block, total_difficulty, senders)
+    }
+
+    fn take_output_state(&mut self) -> BundleStateWithReceipts {
+        <T as BlockExecutor>::take_output_state(self)
+    }
+
+    fn stats(&self) -> BlockExecutorStats {
+        <T as BlockExecutor>::stats(self)
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        <T as BlockExecutor>::size_hint(self)
+    }
+}
+
+/// An [AsyncBlockExecutor] capable of in-memory pruning of the data that will be written to the
+/// database.
+pub trait PrunableAsyncBlockExecutor: AsyncBlockExecutor {
+    /// Set tip - highest known block number.
+    fn set_tip(&mut self, tip: BlockNumber);
+
+    /// Set prune modes.
+    fn set_prune_modes(&mut self, prune_modes: PruneModes);
+}
+
+impl<T: PrunableBlockExecutor + Send> PrunableAsyncBlockExecutor for T {
+    fn set_tip(&mut self, tip: BlockNumber) {
+        <T as PrunableBlockExecutor>::set_tip(self, tip)
+    }
+
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        <T as PrunableBlockExecutor>::set_prune_modes(self, prune_modes)
+    }
 }
 
 /// Block execution statistics. Contains duration of each step of block execution.

@@ -5,8 +5,8 @@ use crate::{
     args::{
         get_secret_key,
         utils::{genesis_value_parser, parse_socket_address},
-        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-        RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DebugArgs, DevArgs, ExecutionArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     cli::{
         components::RethNodeComponentsImpl,
@@ -61,8 +61,7 @@ use reth_provider::{
     HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::{segments::SegmentSet, Pruner};
-use reth_revm::Factory;
-use reth_revm_inspectors::stack::Hook;
+use reth_revm::EVMProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_snapshot::HighestSnapshotsTracker;
 use reth_stages::{
@@ -186,6 +185,10 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[clap(flatten)]
     pub pruning: PruningArgs,
 
+    /// EVM execution related arguments
+    #[clap(flatten)]
+    pub execution: ExecutionArgs,
+
     /// Additional cli arguments
     #[clap(flatten)]
     pub ext: Ext::Node,
@@ -209,6 +212,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            execution,
             ..
         } = self;
         NodeCommand {
@@ -226,6 +230,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            execution,
             ext,
         }
     }
@@ -281,7 +286,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let tree_externals = TreeExternals::new(
             Arc::clone(&db),
             Arc::clone(&consensus),
-            Factory::new(self.chain.clone()),
+            EVMProcessorFactory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
         let tree = BlockchainTree::new(
@@ -808,23 +813,23 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        use reth_revm_inspectors::stack::InspectorStackConfig;
-        let factory = reth_revm::Factory::new(self.chain.clone());
 
-        let stack_config = InspectorStackConfig {
-            use_printer_tracer: self.debug.print_inspector,
-            hook: if let Some(hook_block) = self.debug.hook_block {
-                Hook::Block(hook_block)
-            } else if let Some(tx) = self.debug.hook_transaction {
-                Hook::Transaction(tx)
-            } else if self.debug.hook_all {
-                Hook::All
-            } else {
-                Hook::None
-            },
-        };
+        let factory = self.execution.pipeline_executor_factory(self.chain.clone())?;
 
-        let factory = factory.with_stack_config(stack_config);
+        // TODO: reenable
+        // let stack_config = InspectorStackConfig {
+        //     use_printer_tracer: self.debug.print_inspector,
+        //     hook: if let Some(hook_block) = self.debug.hook_block {
+        //         Hook::Block(hook_block)
+        //     } else if let Some(tx) = self.debug.hook_transaction {
+        //         Hook::Transaction(tx)
+        //     } else if self.debug.hook_all {
+        //         Hook::All
+        //     } else {
+        //         Hook::None
+        //     },
+        // };
+        // let factory = factory.with_stack_config(stack_config);
 
         let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 

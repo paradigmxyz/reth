@@ -10,6 +10,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod executor;
+pub mod factory;
 pub mod queue;
 pub mod read_inspector;
 pub mod rw_set;

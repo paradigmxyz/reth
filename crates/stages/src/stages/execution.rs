@@ -18,7 +18,7 @@ use reth_primitives::{
     BlockNumber, Header, PruneModes, U256,
 };
 use reth_provider::{
-    BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
+    AsyncExecutorFactory, BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, TransactionVariant,
 };
 use std::{
@@ -57,10 +57,12 @@ use tracing::*;
 /// to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<EF: ExecutorFactory> {
+pub struct ExecutionStage<EF: AsyncExecutorFactory> {
     metrics_tx: Option<MetricEventsSender>,
     /// The stage's internal executor
     executor_factory: EF,
+    /// The stage's parallel executor.
+    // parallel_executor:
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -72,7 +74,7 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     prune_modes: PruneModes,
 }
 
-impl<EF: ExecutorFactory> ExecutionStage<EF> {
+impl<EF: AsyncExecutorFactory> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
     pub fn new(
         executor_factory: EF,
@@ -105,115 +107,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
         self.metrics_tx = Some(metrics_tx);
         self
-    }
-
-    /// Execute the stage.
-    pub fn execute_inner<DB: Database>(
-        &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-
-        let start_block = input.next_block();
-        let max_block = input.target();
-        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
-
-        // Build executor
-        let mut executor =
-            self.executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
-        executor.set_prune_modes(prune_modes);
-        executor.set_tip(max_block);
-
-        // Progress tracking
-        let mut stage_progress = start_block;
-        let mut stage_checkpoint =
-            execution_checkpoint(provider, start_block, max_block, input.checkpoint())?;
-
-        let mut fetch_block_duration = Duration::default();
-        let mut execution_duration = Duration::default();
-        debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
-        // Execute block range
-
-        let mut cumulative_gas = 0;
-
-        for block_number in start_block..=max_block {
-            let time = Instant::now();
-            let td = provider
-                .header_td_by_number(block_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-
-            // we need the block's transactions but we don't need the transaction hashes
-            let block = provider
-                .block_with_senders(block_number, TransactionVariant::NoHash)?
-                .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
-
-            fetch_block_duration += time.elapsed();
-
-            cumulative_gas += block.gas_used;
-
-            // Configure the executor to use the current state.
-            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
-
-            let time = Instant::now();
-            // Execute the block
-            let (block, senders) = block.into_components();
-            executor.execute_and_verify_receipt(&block, td, Some(senders)).map_err(|error| {
-                StageError::Block {
-                    block: block.header.clone().seal_slow(),
-                    error: BlockErrorKind::Execution(error),
-                }
-            })?;
-
-            execution_duration += time.elapsed();
-
-            // Gas metrics
-            if let Some(metrics_tx) = &mut self.metrics_tx {
-                let _ =
-                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
-            }
-
-            stage_progress = block_number;
-
-            stage_checkpoint.progress.processed += block.gas_used;
-
-            // Check if we should commit now
-            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
-            if self.thresholds.is_end_of_batch(
-                block_number - start_block,
-                bundle_size_hint,
-                cumulative_gas,
-            ) {
-                break
-            }
-        }
-        let time = Instant::now();
-        let state = executor.take_output_state();
-        let write_preparation_duration = time.elapsed();
-
-        let time = Instant::now();
-        // write output
-        state.write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)?;
-        let db_write_duration = time.elapsed();
-        debug!(
-            target: "sync::stages::execution",
-            block_fetch = ?fetch_block_duration,
-            execution = ?execution_duration,
-            write_preperation = ?write_preparation_duration,
-            write = ?db_write_duration,
-            "Execution time"
-        );
-
-        executor.stats().log_info();
-
-        let done = stage_progress == max_block;
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(stage_progress)
-                .with_execution_stage_checkpoint(stage_checkpoint),
-            done,
-        })
     }
 
     /// Adjusts the prune modes related to changesets.
@@ -332,7 +225,7 @@ fn calculate_gas_used_from_headers<DB: Database>(
 }
 
 #[async_trait::async_trait]
-impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
+impl<EF: AsyncExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Execution
@@ -344,7 +237,107 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        self.execute_inner(provider, input)
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
+        let start_block = input.next_block();
+        let max_block = input.target();
+        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
+
+        // Build executor
+        let mut executor =
+            self.executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
+        executor.set_prune_modes(prune_modes);
+        executor.set_tip(max_block);
+
+        // Progress tracking
+        let mut stage_progress = start_block;
+        let mut stage_checkpoint =
+            execution_checkpoint(provider, start_block, max_block, input.checkpoint())?;
+
+        let mut fetch_block_duration = Duration::default();
+        let mut execution_duration = Duration::default();
+        debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
+        // Execute block range
+
+        let mut cumulative_gas = 0;
+
+        for block_number in start_block..=max_block {
+            let time = Instant::now();
+            let td = provider
+                .header_td_by_number(block_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+            // we need the block's transactions but we don't need the transaction hashes
+            let block = provider
+                .block_with_senders(block_number, TransactionVariant::NoHash)?
+                .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
+
+            fetch_block_duration += time.elapsed();
+
+            cumulative_gas += block.gas_used;
+
+            // Configure the executor to use the current state.
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
+
+            let time = Instant::now();
+            // Execute the block
+            let (block, senders) = block.into_components();
+            executor.execute_and_verify_receipt(&block, td, Some(senders)).await.map_err(
+                |error| StageError::Block {
+                    block: block.header.clone().seal_slow(),
+                    error: BlockErrorKind::Execution(error),
+                },
+            )?;
+
+            execution_duration += time.elapsed();
+
+            // Gas metrics
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let _ =
+                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
+            }
+
+            stage_progress = block_number;
+
+            stage_checkpoint.progress.processed += block.gas_used;
+
+            // Check if we should commit now
+            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
+            if self.thresholds.is_end_of_batch(
+                block_number - start_block,
+                bundle_size_hint,
+                cumulative_gas,
+            ) {
+                break
+            }
+        }
+        let time = Instant::now();
+        let state = executor.take_output_state();
+        let write_preparation_duration = time.elapsed();
+
+        let time = Instant::now();
+        // write output
+        state.write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)?;
+        let db_write_duration = time.elapsed();
+        debug!(
+            target: "sync::stages::execution",
+            block_fetch = ?fetch_block_duration,
+            execution = ?execution_duration,
+            write_preperation = ?write_preparation_duration,
+            write = ?db_write_duration,
+            "Execution time"
+        );
+
+        executor.stats().log_info();
+
+        let done = stage_progress == max_block;
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(stage_progress)
+                .with_execution_stage_checkpoint(stage_checkpoint),
+            done,
+        })
     }
 
     /// Unwind the stage.
@@ -501,12 +494,13 @@ mod tests {
         ChainSpecBuilder, PruneModes, SealedBlock, StorageEntry, B256, MAINNET, U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
-    use reth_revm::Factory;
+    use reth_revm::EVMProcessorFactory;
     use std::sync::Arc;
 
-    fn stage() -> ExecutionStage<Factory> {
-        let factory =
-            Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
+    fn stage() -> ExecutionStage<EVMProcessorFactory> {
+        let factory = EVMProcessorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        ));
         ExecutionStage::new(
             factory,
             ExecutionStageThresholds {

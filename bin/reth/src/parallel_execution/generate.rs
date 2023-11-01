@@ -12,8 +12,8 @@ use reth_primitives::{
     fs, stage::StageId, Address, Block, BlockNumber, ChainSpec, KECCAK_EMPTY, U256,
 };
 use reth_provider::{
-    BlockReader, HeaderProvider, HistoricalStateProvider, ProviderError, ProviderFactory,
-    StageCheckpointReader, TransactionVariant,
+    AsyncBlockExecutor, BlockReader, HeaderProvider, HistoricalStateProvider, ProviderError,
+    ProviderFactory, StageCheckpointReader, TransactionVariant,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -28,11 +28,7 @@ use reth_revm::{
     },
 };
 use reth_stages::PipelineError;
-use std::{
-    collections::{BTreeMap, HashMap},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth parallel-execution generate` command
@@ -190,20 +186,18 @@ impl Command {
 
         let mut parallel_executor = ParallelExecutor::new(
             self.chain.clone(),
-            BlockQueueStore::new(HashMap::from_iter([(block.number, queue.clone())])),
+            Arc::new(BlockQueueStore::from_iter([(block.number, queue.clone())])),
             database,
             None,
         )?;
         parallel_executor.execute(&block, td, Some(senders)).await?;
         tracing::debug!(target: "reth::cli", block_number = block.number, ?queue, "Successfully executed in parallel");
 
-        let mut parallel_state = parallel_executor.state.write().unwrap();
-        parallel_state.merge_transitions(BundleRetention::Reverts);
+        let parallel_state = parallel_executor.state_mut();
 
-        // Patch expected state
+        // PATCH: remove unchanged storage entries.
         let mut removed = 0;
         for (_, account) in &mut expected.bundle_state.state {
-            // PATCH: remove unchanged storage entries.
             account.storage.retain(|_, value| {
                 if value.is_changed() {
                     true

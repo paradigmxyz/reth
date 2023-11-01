@@ -94,9 +94,9 @@ impl Case for BlockchainTestCase {
 
             // Call execution stage
             {
-                let mut stage = ExecutionStage::new_with_factory(reth_revm::Factory::new(
-                    Arc::new(case.network.clone().into()),
-                ));
+                let mut stage = ExecutionStage::new_with_factory(
+                    reth_revm::EVMProcessorFactory::new(Arc::new(case.network.clone().into())),
+                );
 
                 let target = last_block.as_ref().map(|b| b.number);
                 tokio::runtime::Builder::new_current_thread()

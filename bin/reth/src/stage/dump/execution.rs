@@ -7,7 +7,7 @@ use reth_db::{
 };
 use reth_primitives::{stage::StageCheckpoint, ChainSpec};
 use reth_provider::ProviderFactory;
-use reth_revm::Factory;
+use reth_revm::EVMProcessorFactory;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
@@ -98,7 +98,8 @@ async fn unwind_and_copy<DB: Database>(
     let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
     let provider = factory.provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(db_tool.chain.clone()));
+    let mut exec_stage =
+        ExecutionStage::new_with_factory(EVMProcessorFactory::new(db_tool.chain.clone()));
 
     exec_stage
         .unwind(
@@ -132,7 +133,7 @@ async fn dry_run<DB: Database>(
 
     let factory = ProviderFactory::new(&output_db, chain.clone());
     let provider = factory.provider_rw()?;
-    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(chain.clone()));
+    let mut exec_stage = ExecutionStage::new_with_factory(EVMProcessorFactory::new(chain.clone()));
 
     exec_stage
         .execute(

@@ -1,31 +1,24 @@
 [package]
-name = "reth-revm-parallel"
+name = "reth-revm-executor"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "revm parallel execution"
+description = "reth executor implementation"
 
 [dependencies]
-# reth 
+# reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
+reth-consensus-common = { path = "../../consensus/common" }
 reth-revm-database = { path = "../revm-database" }
-reth-revm-executor = { path = "../revm-executor" }
+reth-revm-inspectors = { path = "../revm-inspectors" }
 
 # revm
 revm.workspace = true
 
-# misc
-derive_more = "0.99"
-serde = { workspace = true, features = ["derive"] }
-tokio = { workspace = true, features = ["sync"] }
-rayon.workspace = true
-num_cpus = "1"
-dashmap = "5"
-futures.workspace = true
+# common
 tracing.workspace = true
-async-trait.workspace = true

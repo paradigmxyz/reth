@@ -1,9 +1,9 @@
-//! DAO FOrk related constants from [EIP-779](https://eips.ethereum.org/EIPS/eip-779).
+//! DAO Fork related constants from [EIP-779](https://eips.ethereum.org/EIPS/eip-779).
 //! It happened on Ethereum block 1_920_000
 
 use reth_primitives::{address, Address};
 
-/// Dao hardfork beneficiary that received ether from accounts from DAO and DAO creator children.
+/// DAO hardfork beneficiary that received ether from accounts from DAO and DAO creator children.
 pub static DAO_HARDFORK_BENEFICIARY: Address = address!("bf4ed7b27f1d666546e30d74d50d173d20bca754");
 
 /// DAO hardfork account that ether was taken and added to beneficiary

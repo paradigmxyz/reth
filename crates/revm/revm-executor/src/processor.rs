@@ -1,8 +1,7 @@
 use crate::{
-    database::StateProviderDatabase,
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    ExecutionData,
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
@@ -13,19 +12,16 @@ use reth_primitives::{
         compat::into_reth_log,
         env::{fill_cfg_and_block_env, fill_tx_env},
     },
-    Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
-    MINIMUM_PRUNING_DISTANCE, U256,
+    Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneModes, Receipt,
+    ReceiptWithBloom, Receipts, TransactionSigned, B256, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableBlockExecutor,
     StateProvider,
 };
-use revm::{
-    db::{states::bundle_state::BundleRetention, StateDBBox},
-    primitives::ResultAndState,
-    DatabaseCommit, State, EVM,
-};
+use reth_revm_database::StateProviderDatabase;
+use reth_revm_inspectors::stack::{InspectorStack, InspectorStackConfig};
+use revm::{db::StateDBBox, primitives::ResultAndState, DatabaseCommit, State, EVM};
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
@@ -48,29 +44,12 @@ use tracing::{debug, trace};
 // #[derive(Debug)]
 #[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a> {
-    /// The configured chain-spec
-    chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
     evm: EVM<StateDBBox<'a, RethError>>,
     /// Hook and inspector stack that we want to invoke on that hook.
     stack: InspectorStack,
-    /// The collection of receipts.
-    /// Outer vector stores receipts for each block sequentially.
-    /// The inner vector stores receipts ordered by transaction number.
-    ///
-    /// If receipt is None it means it is pruned.
-    receipts: Receipts,
-    /// First block will be initialized to `None`
-    /// and be set to the block number of first block executed.
-    first_block: Option<BlockNumber>,
-    /// The maximum known block.
-    tip: Option<BlockNumber>,
-    /// Pruning configuration.
-    prune_modes: PruneModes,
-    /// Memoized address pruning filter.
-    /// Empty implies that there is going to be addresses to include in the filter in a future
-    /// block. None means there isn't any kind of configuration.
-    pruning_address_filter: Option<(u64, Vec<Address>)>,
+    /// Aggregated execution data.
+    data: ExecutionData,
     /// Execution stats
     stats: BlockExecutorStats,
 }
@@ -78,21 +57,16 @@ pub struct EVMProcessor<'a> {
 impl<'a> EVMProcessor<'a> {
     /// Return chain spec.
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
-        &self.chain_spec
+        &self.data.chain_spec
     }
 
     /// Create a new pocessor with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         let evm = EVM::new();
         EVMProcessor {
-            chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            receipts: Receipts::new(),
-            first_block: None,
-            tip: None,
-            prune_modes: PruneModes::none(),
-            pruning_address_filter: None,
+            data: ExecutionData::new(chain_spec),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -118,14 +92,9 @@ impl<'a> EVMProcessor<'a> {
         let mut evm = EVM::new();
         evm.database(revm_state);
         EVMProcessor {
-            chain_spec,
             evm,
             stack: InspectorStack::new(InspectorStackConfig::default()),
-            receipts: Receipts::new(),
-            first_block: None,
-            tip: None,
-            prune_modes: PruneModes::none(),
-            pruning_address_filter: None,
+            data: ExecutionData::new(chain_spec),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -137,7 +106,7 @@ impl<'a> EVMProcessor<'a> {
 
     /// Configure the executor with the given block.
     pub fn set_first_block(&mut self, num: BlockNumber) {
-        self.first_block = Some(num);
+        self.data.first_block = Some(num);
     }
 
     /// Returns a reference to the database
@@ -171,15 +140,13 @@ impl<'a> EVMProcessor<'a> {
     /// Initializes the config and block env.
     fn init_env(&mut self, header: &Header, total_difficulty: U256) {
         // Set state clear flag.
-        let state_clear_flag =
-            self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(header.number);
-
-        self.db_mut().set_state_clear_flag(state_clear_flag);
+        let state_clear_enabled = self.data.state_clear_enabled(header.number);
+        self.db_mut().set_state_clear_flag(state_clear_enabled);
 
         fill_cfg_and_block_env(
             &mut self.evm.env.cfg,
             &mut self.evm.env.block,
-            &self.chain_spec,
+            &self.data.chain_spec,
             header,
             total_difficulty,
         );
@@ -194,7 +161,7 @@ impl<'a> EVMProcessor<'a> {
         block: &Block,
     ) -> Result<(), BlockExecutionError> {
         apply_beacon_root_contract_call(
-            &self.chain_spec,
+            &self.data.chain_spec,
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
@@ -211,7 +178,7 @@ impl<'a> EVMProcessor<'a> {
         total_difficulty: U256,
     ) -> Result<(), BlockExecutionError> {
         let mut balance_increments = post_block_balance_increments(
-            &self.chain_spec,
+            &self.data.chain_spec,
             block.number,
             block.difficulty,
             block.beneficiary,
@@ -222,7 +189,7 @@ impl<'a> EVMProcessor<'a> {
         );
 
         // Irregular state change at Ethereum DAO hardfork
-        if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
+        if self.data.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
                 .db_mut()
@@ -369,90 +336,24 @@ impl<'a> EVMProcessor<'a> {
         self.stats.apply_post_execution_state_changes_duration += time.elapsed();
 
         let time = Instant::now();
-        let retention = if self.tip.map_or(true, |tip| {
-            !self
-                .prune_modes
-                .account_history
-                .map_or(false, |mode| mode.should_prune(block.number, tip)) &&
-                !self
-                    .prune_modes
-                    .storage_history
-                    .map_or(false, |mode| mode.should_prune(block.number, tip))
-        }) {
-            BundleRetention::Reverts
-        } else {
-            BundleRetention::PlainState
-        };
+        let retention = self.data.retention_for_block(block.number);
         self.db_mut().merge_transitions(retention);
         self.stats.merge_transitions_duration += time.elapsed();
 
-        if self.first_block.is_none() {
-            self.first_block = Some(block.number);
+        if self.data.first_block.is_none() {
+            self.data.first_block = Some(block.number);
         }
 
         Ok(receipts)
     }
 
-    /// Save receipts to the executor.
+    /// Saves receipts to the executor.
     pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
         let mut receipts = receipts.into_iter().map(Option::Some).collect();
         // Prune receipts if necessary.
-        self.prune_receipts(&mut receipts)?;
+        self.data.prune_receipts(&mut receipts)?;
         // Save receipts.
-        self.receipts.push(receipts);
-        Ok(())
-    }
-
-    /// Prune receipts according to the pruning configuration.
-    fn prune_receipts(
-        &mut self,
-        receipts: &mut Vec<Option<Receipt>>,
-    ) -> Result<(), PruneSegmentError> {
-        let (first_block, tip) = match self.first_block.zip(self.tip) {
-            Some((block, tip)) => (block, tip),
-            _ => return Ok(()),
-        };
-
-        let block_number = first_block + self.receipts.len() as u64;
-
-        // Block receipts should not be retained
-        if self.prune_modes.receipts == Some(PruneMode::Full) ||
-                // [`PruneSegment::Receipts`] takes priority over [`PruneSegment::ContractLogs`]
-            self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
-        {
-            receipts.clear();
-            return Ok(())
-        }
-
-        // All receipts from the last 128 blocks are required for blockchain tree, even with
-        // [`PruneSegment::ContractLogs`].
-        let prunable_receipts =
-            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
-        if !prunable_receipts {
-            return Ok(())
-        }
-
-        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
-
-        if !contract_log_pruner.is_empty() {
-            let (prev_block, filter) = self.pruning_address_filter.get_or_insert((0, Vec::new()));
-            for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
-                filter.extend(addresses.iter().copied());
-            }
-        }
-
-        for receipt in receipts.iter_mut() {
-            let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
-
-            // If there is an address_filter, and it does not contain any of the
-            // contract addresses, then remove this receipts
-            if let Some((_, filter)) = &self.pruning_address_filter {
-                if !inner_receipt.logs.iter().any(|log| filter.contains(&log.address)) {
-                    receipt.take();
-                }
-            }
-        }
-
+        self.data.receipts.push(receipts);
         Ok(())
     }
 }
@@ -481,7 +382,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         // operation as hashing that is needed for state root got calculated in every
         // transaction This was replaced with is_success flag.
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-        if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
+        if self.data.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
             let time = Instant::now();
             if let Err(error) =
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
@@ -496,11 +397,11 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
-        let receipts = std::mem::take(&mut self.receipts);
+        let receipts = std::mem::take(&mut self.data.receipts);
         BundleStateWithReceipts::new(
             self.evm.db().unwrap().take_bundle(),
             receipts,
-            self.first_block.unwrap_or_default(),
+            self.data.first_block.unwrap_or_default(),
         )
     }
 
@@ -515,11 +416,11 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
 impl<'a> PrunableBlockExecutor for EVMProcessor<'a> {
     fn set_tip(&mut self, tip: BlockNumber) {
-        self.tip = Some(tip);
+        self.data.tip = Some(tip);
     }
 
     fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-        self.prune_modes = prune_modes;
+        self.data.prune_modes = prune_modes;
     }
 }
 

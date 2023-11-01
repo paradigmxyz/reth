@@ -10,18 +10,13 @@ description = "reth specific revm utilities"
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
-reth-interfaces.workspace = true
-reth-provider.workspace = true
-reth-consensus-common = { path = "../consensus/common" }
+reth-revm-database = { path = "./revm-database" }
 reth-revm-inspectors = { path = "./revm-inspectors" }
+reth-revm-executor = { path = "./revm-executor" }
 reth-revm-parallel = { path = "./revm-parallel", optional = true }
 
 # revm
 revm.workspace = true
-
-# common
-tracing.workspace = true
 
 [features]
 parallel = ["reth-revm-parallel"]

@@ -90,6 +90,11 @@ impl BlockQueueStore {
         Self(queues)
     }
 
+    /// Create new queue store from iterator.
+    pub fn from_iter(iter: impl IntoIterator<Item = (BlockNumber, BlockQueue)>) -> Self {
+        Self(HashMap::from_iter(iter))
+    }
+
     /// Returns block queue for a given number.
     pub fn get_queue(&self, block: BlockNumber) -> Option<&BlockQueue> {
         self.0.get(&block)

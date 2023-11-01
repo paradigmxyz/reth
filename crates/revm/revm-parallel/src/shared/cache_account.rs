@@ -331,7 +331,7 @@ impl SharedCacheAccount {
         new_balance
     }
 
-    /// Apply single account revision. Revision are expected to come out of order.
+    /// Apply single account revision. Revisions are expected to come out of order.
     pub fn apply_account_revision(
         &mut self,
         previous_info: &Option<AccountInfo>,

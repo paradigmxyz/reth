@@ -9,29 +9,19 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Contains glue code for integrating reth database into revm's [Database].
-pub mod database;
-
-/// revm implementation of reth block and transaction executors.
-mod factory;
-
-/// new revm account state executor
-pub mod processor;
-
-/// State changes that are not related to transactions.
-pub mod state_change;
-
-/// revm executor factory.
-pub use factory::Factory;
-
-/// reexport for convenience
-pub use reth_revm_inspectors::*;
-
 /// Re-export everything
 pub use revm::{self, *};
 
-/// Ethereum DAO hardfork state change data.
-pub mod eth_dao_fork;
+/// Re-export for convenience.
+pub use reth_revm_inspectors::*;
+
+/// Re-export for convenience.
+pub use reth_revm_executor::*;
+
+/// Re-export revm database integration.
+pub mod database {
+    pub use reth_revm_database::*;
+}
 
 /// Re-export parallel library if the feature is enabled.
 #[cfg(feature = "parallel")]

@@ -6287,6 +6287,7 @@ version = "0.1.0-alpha.10"
 dependencies = [
  "alloy-rlp",
  "assert_matches",
+ "async-trait",
  "auto_impl",
  "dashmap",
  "itertools 0.11.0",
@@ -6332,12 +6333,33 @@ dependencies = [
 name = "reth-revm"
 version = "0.1.0-alpha.10"
 dependencies = [
+ "reth-revm-database",
+ "reth-revm-executor",
+ "reth-revm-inspectors",
+ "reth-revm-parallel",
+ "revm",
+]
+
+[[package]]
+name = "reth-revm-database"
+version = "0.1.0-alpha.10"
+dependencies = [
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "revm",
+]
+
+[[package]]
+name = "reth-revm-executor"
+version = "0.1.0-alpha.10"
+dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-revm-database",
  "reth-revm-inspectors",
- "reth-revm-parallel",
  "revm",
  "tracing",
 ]
@@ -6362,6 +6384,7 @@ dependencies = [
 name = "reth-revm-parallel"
 version = "0.1.0-alpha.10"
 dependencies = [
+ "async-trait",
  "dashmap",
  "derive_more",
  "futures",
@@ -6370,9 +6393,12 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-revm-database",
+ "reth-revm-executor",
  "revm",
  "serde",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -1,0 +1,18 @@
+[package]
+name = "reth-revm-database"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "revm database integration"
+
+[dependencies]
+# reth 
+reth-primitives.workspace = true
+reth-interfaces.workspace = true
+reth-provider.workspace = true
+
+# revm
+revm.workspace = true
