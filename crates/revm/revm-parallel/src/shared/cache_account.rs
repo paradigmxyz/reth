@@ -325,6 +325,7 @@ impl SharedCacheAccount {
     }
 
     fn account_balance_change<F: FnOnce(U256) -> U256>(&mut self, compute_balance: F) -> U256 {
+        self.touched |= true;
         let current_balance = self.account_balance();
         let new_balance = compute_balance(current_balance);
         self.info_diff.update_balance_delta(current_balance, new_balance);
