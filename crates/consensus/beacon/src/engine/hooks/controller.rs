@@ -164,9 +164,9 @@ impl EngineHooksController {
         Poll::Pending
     }
 
-    /// Returns `true` if there's a hook with DB write access running.
-    pub(crate) fn is_hook_with_db_write_running(&self) -> bool {
-        self.running_hook_with_db_write.is_some()
+    /// Returns a running hook with DB write access, if there's any.
+    pub(crate) fn running_hook_with_db_write(&self) -> Option<&Box<dyn EngineHook>> {
+        self.running_hook_with_db_write.as_ref()
     }
 }
 
