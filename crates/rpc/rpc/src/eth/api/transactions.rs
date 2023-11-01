@@ -867,6 +867,7 @@ where
     /// Helper function for `eth_getTransactionReceipt`
     ///
     /// Returns the receipt
+    #[cfg(not(feature = "optimism"))]
     pub(crate) async fn build_transaction_receipt(
         &self,
         tx: TransactionSigned,
@@ -878,62 +879,86 @@ where
             Some(recpts) => recpts,
             None => return Err(EthApiError::UnknownBlockNumber),
         };
+        build_transaction_receipt_with_block_receipts(tx, meta, receipt, &all_receipts)
+    }
 
-        #[cfg(feature = "optimism")]
-        let optimism_block_meta = {
-            let block = self
-                .provider()
-                .block_by_number(meta.block_number)?
-                .ok_or(EthApiError::UnknownBlockNumber)?;
-
-            let block_timestamp = block.timestamp;
-
-            let l1_block_info: Option<Arc<L1BlockInfo>> = reth_revm::optimism::parse_l1_info_tx(
-                &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
-            )
-            .map_err(|_| EthApiError::InternalEthError)
-            .ok()
-            .map(Arc::new);
-            let mut buf = bytes::BytesMut::default();
-            tx.encode_enveloped(&mut buf);
-            let data = &buf.freeze().into();
-            if let Some(l1_block_info) = l1_block_info {
-                let l1_fee = (!tx.is_deposit())
-                    .then(|| {
-                        l1_block_info.l1_tx_data_fee(
-                            self.inner.provider.chain_spec(),
-                            block_timestamp,
-                            data,
-                            tx.is_deposit(),
-                        )
-                    })
-                    .transpose()
-                    .map_err(|_| EthApiError::InternalEthError)?;
-                let l1_data_gas = (!tx.is_deposit())
-                    .then(|| {
-                        l1_block_info.l1_data_gas(
-                            self.inner.provider.chain_spec(),
-                            block_timestamp,
-                            data,
-                        )
-                    })
-                    .transpose()
-                    .map_err(|_| EthApiError::InternalEthError)?;
-
-                OptimismBlockMeta::new(Some(l1_block_info), l1_fee, l1_data_gas)
-            } else {
-                OptimismBlockMeta::default()
-            }
+    /// Helper function for `eth_getTransactionReceipt` (optimism)
+    ///
+    /// Returns the receipt
+    #[cfg(feature = "optimism")]
+    pub(crate) async fn build_transaction_receipt(
+        &self,
+        tx: TransactionSigned,
+        meta: TransactionMeta,
+        receipt: Receipt,
+    ) -> EthResult<TransactionReceipt> {
+        // get all receipts for the block
+        let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
+            Some(recpts) => recpts,
+            None => return Err(EthApiError::UnknownBlockNumber),
         };
+        let block = self
+            .provider()
+            .block_by_number(meta.block_number)?
+            .ok_or(EthApiError::UnknownBlockNumber)?;
+
+        let optimism_block_meta = self.parse_op_block_meta(&tx, &block)?;
 
         build_transaction_receipt_with_block_receipts(
             tx,
             meta,
             receipt,
             &all_receipts,
-            #[cfg(feature = "optimism")]
             optimism_block_meta,
         )
+    }
+
+    #[cfg(feature = "optimism")]
+    pub(crate) fn parse_op_block_meta(
+        &self,
+        tx: &TransactionSigned,
+        block: &reth_primitives::Block,
+    ) -> EthResult<OptimismBlockMeta> {
+        let block_timestamp = block.timestamp;
+        let l1_block_info: Option<Arc<L1BlockInfo>> = reth_revm::optimism::parse_l1_info_tx(
+            &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
+        )
+        .map_err(|_| EthApiError::InternalEthError)
+        .ok()
+        .map(Arc::new);
+        let envelope_buf: Bytes = {
+            let mut envelope_buf = bytes::BytesMut::default();
+            tx.encode_enveloped(&mut envelope_buf);
+            envelope_buf.freeze().into()
+        };
+
+        if let Some(l1_block_info) = l1_block_info {
+            let l1_fee = (!tx.is_deposit())
+                .then(|| {
+                    l1_block_info.l1_tx_data_fee(
+                        self.inner.provider.chain_spec(),
+                        block_timestamp,
+                        &envelope_buf,
+                        tx.is_deposit(),
+                    )
+                })
+                .transpose()
+                .map_err(|_| EthApiError::InternalEthError)?;
+            let l1_data_gas = (!tx.is_deposit())
+                .then(|| {
+                    l1_block_info.l1_data_gas(
+                        self.inner.provider.chain_spec(),
+                        block_timestamp,
+                        &envelope_buf,
+                    )
+                })
+                .transpose()
+                .map_err(|_| EthApiError::InternalEthError)?;
+
+            Ok(OptimismBlockMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
+        } else {
+            Ok(OptimismBlockMeta::default())
+        }
     }
 
     /// Helper function for `eth_sendRawTransaction` for Optimism.
