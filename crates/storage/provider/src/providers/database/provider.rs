@@ -48,7 +48,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tracing::debug;
 
@@ -2130,7 +2130,9 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
             block.body.into_iter().zip(senders).collect()
         };
 
-        let start = Instant::now();
+        let mut tx_senders_elapsed = Duration::default();
+        let mut transactions_elapsed = Duration::default();
+        let mut tx_hash_numbers_elapsed = Duration::default();
         for (transaction, sender) in tx_iter {
             let hash = transaction.hash();
 
@@ -2139,21 +2141,29 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
                 .filter(|prune_mode| prune_mode.is_full())
                 .is_none()
             {
+                let start = Instant::now();
                 self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+                tx_senders_elapsed += start.elapsed();
             }
 
+            let start = Instant::now();
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
+            transactions_elapsed += start.elapsed();
 
             if prune_modes
                 .and_then(|modes| modes.transaction_lookup)
                 .filter(|prune_mode| prune_mode.is_full())
                 .is_none()
             {
+                let start = Instant::now();
                 self.tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+                tx_hash_numbers_elapsed += start.elapsed();
             }
             next_tx_num += 1;
         }
-        timings.push(("insert transactions", start.elapsed()));
+        timings.push(("insert tx senders", tx_senders_elapsed));
+        timings.push(("insert transactions", transactions_elapsed));
+        timings.push(("insert tx hash numbers", tx_hash_numbers_elapsed));
 
         let start = Instant::now();
         if let Some(withdrawals) = block.withdrawals {
