@@ -31,9 +31,7 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, BlockExecutionError
 }
 
 /// Parses the calldata of the [L1BlockInfo] transaction.
-pub fn parse_l1_info_tx(data: impl AsRef<[u8]>) -> Result<L1BlockInfo, BlockExecutionError> {
-    let data = data.as_ref();
-
+pub fn parse_l1_info_tx(data: &[u8]) -> Result<L1BlockInfo, BlockExecutionError> {
     // The setL1BlockValues tx calldata must be exactly 260 bytes long, considering that
     // we already removed the first 4 bytes (the function selector). Detailed breakdown:
     //   32 bytes for the block number

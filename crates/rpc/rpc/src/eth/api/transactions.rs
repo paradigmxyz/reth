@@ -902,12 +902,7 @@ where
             .block_by_number(meta.block_number)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
 
-        let l1_block_info = {
-            let body = reth_revm::optimism::parse_l1_info_tx(
-                &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
-            );
-            body.ok().map(Rc::new)
-        };
+        let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok().map(Rc::new);
         let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
 
         build_transaction_receipt_with_block_receipts(

@@ -243,6 +243,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     pub async fn execute(mut self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
+        // Runtime safety check for the `optimism` feature flag being enabled on a non-OP Stack
+        // chain.
+        #[cfg(feature = "optimism")]
+        if !self.chain.is_optimism() {
+            eyre::bail!(
+                "The `optimism` feature flag is enabled, but the chain is a non OP Stack chain."
+            )
+        }
+
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit();
