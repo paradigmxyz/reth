@@ -18,9 +18,12 @@ pub struct TaskExecutorMetrics {
 }
 
 impl TaskExecutorMetrics {
+    /// Increments the counter for spawned critical tasks.
+
     pub(crate) fn inc_critical_tasks(&self) {
         self.critical_tasks.increment(1);
     }
+    /// Increments the counter for spawned regular tasks.
 
     pub(crate) fn inc_regular_tasks(&self) {
         self.regular_tasks.increment(1);
@@ -37,13 +40,15 @@ impl fmt::Debug for IncCounterOnDrop {
 }
 
 impl IncCounterOnDrop {
-    /// Create a new `IncCounterOnDrop`.
+    /// Creates a new instance of `IncCounterOnDrop` with the given counter.
     pub fn new(counter: Counter) -> Self {
         IncCounterOnDrop(counter)
     }
 }
 
 impl Drop for IncCounterOnDrop {
+    /// Increment the counter when the instance is dropped.
+
     fn drop(&mut self) {
         self.0.increment(1);
     }
