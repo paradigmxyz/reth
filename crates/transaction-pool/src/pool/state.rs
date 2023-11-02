@@ -66,7 +66,7 @@ impl TxState {
 }
 
 /// Identifier for the transaction Sub-pool
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u8)]
 pub enum SubPool {
     /// The queued sub-pool contains transactions that are not ready to be included in the next
@@ -188,6 +188,11 @@ mod tests {
         assert!(state.is_pending());
 
         state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+        assert!(state.is_blob());
+        assert!(!state.is_pending());
+
+        state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+        state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
         assert!(state.is_blob());
         assert!(!state.is_pending());
     }

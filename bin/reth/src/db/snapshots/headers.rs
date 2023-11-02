@@ -3,15 +3,16 @@ use super::{
     Command,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{database::Database, open_db_read_only, table::Decompress};
+use reth_db::{database::Database, open_db_read_only, snapshot::HeaderMask};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
-    ChainSpec, Header, SnapshotSegment,
+    BlockHash, ChainSpec, Header, SnapshotSegment,
 };
-use reth_provider::{DatabaseProviderRO, HeaderProvider, ProviderError, ProviderFactory};
-use reth_snapshot::segments::{get_snapshot_segment_file_name, Headers, Segment};
+use reth_provider::{
+    providers::SnapshotProvider, DatabaseProviderRO, HeaderProvider, ProviderError, ProviderFactory,
+};
+use reth_snapshot::segments::{Headers, Segment};
 use std::{path::Path, sync::Arc};
 
 impl Command {
@@ -54,20 +55,12 @@ impl Command {
 
         let mut row_indexes = range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
-        let mut dictionaries = None;
-        let mut jar = NippyJar::load(&get_snapshot_segment_file_name(
-            SnapshotSegment::Headers,
-            filters,
-            compression,
-            &range,
-        ))?;
-
-        let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
-        let mut cursor = if !decompressors.is_empty() {
-            provider.cursor_with_decompressors(decompressors)
-        } else {
-            provider.cursor()
-        };
+        let path =
+            SnapshotSegment::Headers.filename_with_configuration(filters, compression, &range);
+        let provider = SnapshotProvider::default();
+        let jar_provider =
+            provider.get_segment_provider(SnapshotSegment::Headers, self.from, Some(path))?;
+        let mut cursor = jar_provider.cursor()?;
 
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {
             bench(
@@ -78,14 +71,9 @@ impl Command {
                 compression,
                 || {
                     for num in row_indexes.iter() {
-                        Header::decompress(
-                            cursor
-                                .row_by_number_with_cols::<0b01, 2>((num - self.from) as usize)?
-                                .ok_or(ProviderError::HeaderNotFound((*num).into()))?[0],
-                        )?;
-                        // TODO: replace with below when eventually SnapshotProvider re-uses cursor
-                        // provider.header_by_number(num as
-                        // u64)?.ok_or(ProviderError::HeaderNotFound((*num as u64).into()))?;
+                        cursor
+                            .get_one::<HeaderMask<Header>>((*num).into())?
+                            .ok_or(ProviderError::HeaderNotFound((*num).into()))?;
                     }
                     Ok(())
                 },
@@ -113,11 +101,9 @@ impl Command {
                 filters,
                 compression,
                 || {
-                    Ok(Header::decompress(
-                        cursor
-                            .row_by_number_with_cols::<0b01, 2>((num - self.from) as usize)?
-                            .ok_or(ProviderError::HeaderNotFound((num as u64).into()))?[0],
-                    )?)
+                    Ok(cursor
+                        .get_one::<HeaderMask<Header>>(num.into())?
+                        .ok_or(ProviderError::HeaderNotFound(num.into()))?)
                 },
                 |provider| {
                     Ok(provider
@@ -143,14 +129,13 @@ impl Command {
                 filters,
                 compression,
                 || {
-                    let header = Header::decompress(
-                        cursor
-                            .row_by_key_with_cols::<0b01, 2>(header_hash.as_slice())?
-                            .ok_or(ProviderError::HeaderNotFound(header_hash.into()))?[0],
-                    )?;
+                    let (header, hash) = cursor
+                        .get_two::<HeaderMask<Header, BlockHash>>((&header_hash).into())?
+                        .ok_or(ProviderError::HeaderNotFound(header_hash.into()))?;
 
                     // Might be a false positive, so in the real world we have to validate it
-                    assert_eq!(header.hash_slow(), header_hash);
+                    assert_eq!(hash, header_hash);
+
                     Ok(header)
                 },
                 |provider| {

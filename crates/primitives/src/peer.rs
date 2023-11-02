@@ -1,10 +1,5 @@
-use crate::B512;
-
-// TODO: should we use `PublicKey` for this? Even when dealing with public keys we should try to
-// prevent misuse
-/// This represents an uncompressed secp256k1 public key.
-/// This encodes the concatenation of the x and y components of the affine point in bytes.
-pub type PeerId = B512;
+// Re-export PeerId for ease of use.
+pub use reth_rpc_types::PeerId;
 
 /// Generic wrapper with peer id
 #[derive(Debug)]

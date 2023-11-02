@@ -280,6 +280,7 @@ impl StackObj {
         .length(0)
         .build();
 
+        // peek returns the nth-from-the-top element of the stack.
         let peek = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure_with_captures(
@@ -293,6 +294,9 @@ impl StackObj {
                             ),
                         )))
                     }
+                    // idx is from the top of the stack, so we need to reverse it
+                    // SAFETY: bounds checked above
+                    let idx = len - idx - 1;
                     stack_arr.get(idx as u64, ctx)
                 },
                 stack_arr,

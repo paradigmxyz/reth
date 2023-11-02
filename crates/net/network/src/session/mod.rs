@@ -202,7 +202,7 @@ impl SessionManager {
         let session_id = self.next_id();
 
         trace!(
-            target : "net::session",
+            target: "net::session",
             ?remote_addr,
             ?session_id,
             "new pending incoming session"
@@ -347,7 +347,7 @@ impl SessionManager {
                 return match event {
                     ActiveSessionMessage::Disconnected { peer_id, remote_addr } => {
                         trace!(
-                            target : "net::session",
+                            target: "net::session",
                             ?peer_id,
                             "gracefully disconnected active session."
                         );
@@ -359,7 +359,7 @@ impl SessionManager {
                         remote_addr,
                         error,
                     } => {
-                        trace!(target : "net::session",  ?peer_id, ?error,"closed session.");
+                        trace!(target: "net::session",  ?peer_id, ?error,"closed session.");
                         self.remove_active_session(&peer_id);
                         Poll::Ready(SessionEvent::SessionClosedOnConnectionError {
                             remote_addr,
@@ -407,7 +407,7 @@ impl SessionManager {
                 // If there's already a session to the peer then we disconnect right away
                 if self.active_sessions.contains_key(&peer_id) {
                     trace!(
-                        target : "net::session",
+                        target: "net::session",
                         ?session_id,
                         ?remote_addr,
                         ?peer_id,
@@ -501,7 +501,7 @@ impl SessionManager {
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
                 trace!(
-                    target : "net::session",
+                    target: "net::session",
                     ?session_id,
                     ?remote_addr,
                     ?error,
@@ -531,7 +531,7 @@ impl SessionManager {
                 error,
             } => {
                 trace!(
-                    target : "net::session",
+                    target: "net::session",
                     ?error,
                     ?session_id,
                     ?remote_addr,
@@ -544,7 +544,7 @@ impl SessionManager {
             PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
                 self.remove_pending_session(&session_id);
                 trace!(
-                    target : "net::session",
+                    target: "net::session",
                     ?error,
                     ?session_id,
                     ?remote_addr,
@@ -761,7 +761,7 @@ async fn start_pending_outbound_session(
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
             if let Err(err) = stream.set_nodelay(true) {
-                tracing::warn!(target : "net::session", "set nodelay failed: {:?}", err);
+                tracing::warn!(target: "net::session", "set nodelay failed: {:?}", err);
             }
             MeteredStream::new_with_meter(stream, bandwidth_meter)
         }
