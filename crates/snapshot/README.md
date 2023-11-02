@@ -17,9 +17,11 @@ graph TD;
     SP --> |triggers| SH["create_snapshot(block_range, SnapshotSegment::Headers)"]
     SP --> |triggers| ST["create_snapshot(block_range, SnapshotSegment::Transactions)"]
     SP --> |triggers| SR["create_snapshot(block_range, SnapshotSegment::Receipts)"]
+    SP --> |triggers| ETC["create_snapshot(block_range, ...)"]
     SH --> CS["create_snapshot::&lt; T &gt;(DatabaseCursor)"]
     ST --> CS
     SR --> CS
+    ETC --> CS
     CS --> |create| IF(NippyJar::InclusionFilters)
     CS -- iterates --> DC(DatabaseCursor) -->HN{HasNext} 
     HN --> |true| NJC(NippyJar::Compression)
