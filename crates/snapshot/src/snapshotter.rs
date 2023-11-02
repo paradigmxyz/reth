@@ -74,12 +74,9 @@ impl SnapshotTargets {
 
 impl<DB: Database> Snapshotter<DB> {
     /// Creates a new [Snapshotter].
-    pub fn new(
-        db: DB,
-        chain_spec: Arc<ChainSpec>,
-        block_interval: u64,
-        highest_snapshots_tracker: watch::Sender<Option<HighestSnapshots>>,
-    ) -> Self {
+    pub fn new(db: DB, chain_spec: Arc<ChainSpec>, block_interval: u64) -> Self {
+        let (highest_snapshots_tracker, _) = watch::channel(None);
+
         let snapshotter = Self {
             provider_factory: ProviderFactory::new(db, chain_spec),
             // TODO(alexey): fill from on-disk snapshot data
@@ -110,6 +107,11 @@ impl<DB: Database> Snapshotter<DB> {
         let _ = self.highest_snapshots_tracker.send(Some(self.highest_snapshots)).map_err(|_| {
             warn!(target: "snapshot", "Highest snapshots channel closed");
         });
+    }
+
+    /// Returns a new [`HighestSnapshotsTracker`].
+    pub fn highest_snapshot_receiver(&self) -> HighestSnapshotsTracker {
+        self.highest_snapshots_tracker.subscribe()
     }
 
     /// Run the snapshotter
@@ -234,17 +236,17 @@ mod tests {
     };
     use reth_primitives::{snapshot::HighestSnapshots, B256, MAINNET};
     use reth_stages::test_utils::TestTransaction;
-    use tokio::sync::watch;
 
     #[test]
     fn new() {
         let tx = TestTransaction::default();
 
-        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
-        assert_eq!(*highest_snapshots_rx.borrow(), None);
+        let snapshotter = Snapshotter::new(tx.inner_raw(), MAINNET.clone(), 2);
 
-        Snapshotter::new(tx.inner_raw(), MAINNET.clone(), 2, highest_snapshots_tx);
-        assert_eq!(*highest_snapshots_rx.borrow(), Some(HighestSnapshots::default()));
+        assert_eq!(
+            *snapshotter.highest_snapshot_receiver().borrow(),
+            Some(HighestSnapshots::default())
+        );
     }
 
     #[test]
@@ -255,8 +257,7 @@ mod tests {
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
-        let mut snapshotter =
-            Snapshotter::new(tx.inner_raw(), MAINNET.clone(), 2, watch::channel(None).0);
+        let mut snapshotter = Snapshotter::new(tx.inner_raw(), MAINNET.clone(), 2);
 
         // Snapshot targets has data per part up to the passed finalized block number,
         // respecting the block interval

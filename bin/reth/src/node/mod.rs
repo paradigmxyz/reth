@@ -294,10 +294,16 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // fetch the head block from the database
         let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
 
+        // configure snapshotter
+        let snapshotter = reth_snapshot::Snapshotter::new(
+            db.clone(),
+            self.chain.clone(),
+            self.chain.snapshot_block_interval,
+        );
+
         // setup the blockchain provider
-        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
         let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain))
-            .with_snapshots(highest_snapshots_rx.clone());
+            .with_snapshots(snapshotter.highest_snapshot_receiver());
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
@@ -455,7 +461,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = self.build_pruner(&prune_config, db.clone(), highest_snapshots_rx);
+            let mut pruner = self.build_pruner(
+                &prune_config,
+                db.clone(),
+                snapshotter.highest_snapshot_receiver(),
+            );
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
@@ -465,13 +475,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             Either::Right(stream::empty())
         };
-
-        let _snapshotter = reth_snapshot::Snapshotter::new(
-            db,
-            self.chain.clone(),
-            self.chain.snapshot_block_interval,
-            highest_snapshots_tx,
-        );
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
