@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// Trace filter.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceFilter {
