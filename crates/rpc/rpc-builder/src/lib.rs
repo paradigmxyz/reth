@@ -102,7 +102,6 @@
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics};
 use constants::*;
 use error::{RpcError, ServerKind};
-use hyper::server;
 use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
@@ -119,8 +118,8 @@ use reth_rpc::{
         gas_oracle::GasPriceOracle,
     },
     AdminApi, AuthLayer, BlockingTaskGuard, BlockingTaskPool, DebugApi, EngineEthApi, EthApi,
-    EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, NetApi, OtterscanApi,
-    RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
+    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -1703,7 +1702,9 @@ impl WsHttpServerKind {
         }
     }
 
-    /// Builds
+    /// Builds the server according to the given config parameters.
+    ///
+    /// Returns the address of the started server.
     async fn build(
         builder: ServerBuilder,
         socket_addr: SocketAddr,
@@ -1714,7 +1715,9 @@ impl WsHttpServerKind {
     ) -> Result<(Self, SocketAddr), RpcError> {
         if let Some(cors) = cors_domains.as_deref().map(cors::create_cors_layer) {
             let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
+
             if let Some(secret) = auth_secret {
+                // stack cors and auth layers
                 let middleware = tower::ServiceBuilder::new()
                     .layer(cors)
                     .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
@@ -1741,6 +1744,7 @@ impl WsHttpServerKind {
                 Ok((server, local_addr))
             }
         } else if let Some(secret) = auth_secret {
+            // jwt auth layered service
             let middleware = tower::ServiceBuilder::new()
                 .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
             let server = builder
@@ -1755,6 +1759,7 @@ impl WsHttpServerKind {
             let server = WsHttpServerKind::WithAuth(server);
             Ok((server, local_addr))
         } else {
+            // plain server without any middleware
             let server = builder
                 .set_logger(metrics)
                 .build(socket_addr)
