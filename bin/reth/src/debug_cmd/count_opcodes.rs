@@ -8,7 +8,6 @@ use reth_primitives::ChainSpecBuilder;
 use reth_provider::ProviderFactory;
 use reth_revm::interpreter::{opcode, OpCode};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
-use tracing::info;
 
 /// `reth count-opcodes` command
 #[derive(Debug, Parser)]
@@ -103,115 +102,89 @@ impl OpCodeCounter {
     }
 
     fn print_counts(&self, size: usize) {
-        let mut table = Table::new();
-
-        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-        table.set_header(["Opcode", "Occurrencies"]);
-
-        let opcodes_vec = self
+        // Print single opcodes
+        let opcodes_vec: Vec<_> = self
             .opcodes
             .iter()
             .map(|(k, v)| (opcode_or_invalid(*k), *v))
             .sorted_by(|a, b| b.1.cmp(&a.1))
-            .take(size)
-            .collect::<Vec<(OpCode, usize)>>();
+            .collect();
+        print_opcode_table("Opcode", &opcodes_vec, size);
 
-        for el in &opcodes_vec {
-            let mut row = Row::new();
-            row.add_cell(Cell::new(el.0));
-            row.add_cell(Cell::new(el.1));
-            table.add_row(row);
-        }
-
-        println!("\n{}", table);
-
-        table = Table::new();
-
-        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-        table.set_header(["Opcodes tuples", "Occurrencies"]);
-
-        let tuple_vec = self
+        // Print opcode tuples
+        let tuple_vec: Vec<_> = self
             .tuple_opcodes
             .iter()
-            .map(|(k, v)| (opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), *v))
-            .sorted_by(|a, b| b.2.cmp(&a.2))
-            .take(size)
-            .collect::<Vec<(OpCode, OpCode, usize)>>();
+            .map(|(k, v)| (format!("{} {}", opcode_or_invalid(k[0]), opcode_or_invalid(k[1])), *v))
+            .sorted_by(|a, b| b.1.cmp(&a.1))
+            .collect();
+        print_opcode_table("Opcode tuples", &tuple_vec, size);
 
-        for el in &tuple_vec {
-            let mut row = Row::new();
-            let tuple = format!("{} {}", el.0, el.1);
-            row.add_cell(Cell::new(tuple));
-            row.add_cell(Cell::new(el.2));
-            table.add_row(row);
-        }
-
-        println!("\n{}", table);
-
-        table = Table::new();
-
-        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-        table.set_header(["Opcodes triplets", "Occurrencies"]);
-
-        let triplets_vec = self
+        // Print opcode triplets
+        let triplets_vec: Vec<_> = self
             .triplets_opcodes
             .iter()
             .map(|(k, v)| {
-                (opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), opcode_or_invalid(k[2]), *v)
+                (
+                    format!(
+                        "{} {} {}",
+                        opcode_or_invalid(k[0]),
+                        opcode_or_invalid(k[1]),
+                        opcode_or_invalid(k[2])
+                    ),
+                    *v,
+                )
             })
-            .sorted_by(|a, b| b.3.cmp(&a.3))
-            .take(size)
-            .collect::<Vec<(OpCode, OpCode, OpCode, usize)>>();
+            .sorted_by(|a, b| b.1.cmp(&a.1))
+            .collect();
+        print_opcode_table("Opcodes triplets", &triplets_vec, size);
 
-        for el in &triplets_vec {
-            let mut row = Row::new();
-            let triplet = format!("{} {} {}", el.0, el.1, el.2);
-            row.add_cell(Cell::new(triplet));
-            row.add_cell(Cell::new(el.3));
-            table.add_row(row);
-        }
-
-        println!("\n{}", table);
-
-        table = Table::new();
-
-        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-        table.set_header(["Opcodes quadruplets", "Occurrencies"]);
-
-        let quadruplets_vec = self
+        // Print opcode quadruplets
+        let quadruplets_vec: Vec<_> = self
             .quadruplets_opcodes
             .iter()
             .map(|(k, v)| {
                 (
-                    opcode_or_invalid(k[0]),
-                    opcode_or_invalid(k[1]),
-                    opcode_or_invalid(k[2]),
-                    opcode_or_invalid(k[3]),
+                    format!(
+                        "{} {} {} {}",
+                        opcode_or_invalid(k[0]),
+                        opcode_or_invalid(k[1]),
+                        opcode_or_invalid(k[2]),
+                        opcode_or_invalid(k[3])
+                    ),
                     *v,
                 )
             })
-            .sorted_by(|a, b| b.4.cmp(&a.4))
-            .take(size)
-            .collect::<Vec<(OpCode, OpCode, OpCode, OpCode, usize)>>();
-
-        for el in &quadruplets_vec {
-            let mut row = Row::new();
-            let quadruplet = format!("{} {} {} {}", el.0, el.1, el.2, el.3);
-            row.add_cell(Cell::new(quadruplet));
-            row.add_cell(Cell::new(el.4));
-            table.add_row(row);
-        }
-
-        println!("\n{}", table);
+            .sorted_by(|a, b| b.1.cmp(&a.1))
+            .collect();
+        print_opcode_table("Opcodes quadruplets", &quadruplets_vec, size);
     }
 }
 
+/// Utility function for creating an opcode. When it finds an unknown opcode it creates the
+/// `INVALID` opcode.
 fn opcode_or_invalid(opcode: u8) -> OpCode {
     if let Some(op) = OpCode::new(opcode) {
         op
     } else {
         OpCode::new(0xFE).unwrap() // INVALID
     }
+}
+
+/// Generic function to print opcode sequences.
+fn print_opcode_table<T: ToString>(header: &str, sequences: &[(T, usize)], size: usize) {
+    let mut table = Table::new();
+    table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+    table.set_header([header, "Occurrences"]);
+
+    sequences.iter().take(size).for_each(|(seq, count)| {
+        let mut row = Row::new();
+        row.add_cell(Cell::new(seq.to_string()));
+        row.add_cell(Cell::new(count));
+        table.add_row(row);
+    });
+
+    println!("\n{}", table);
 }
 
 #[cfg(test)]
