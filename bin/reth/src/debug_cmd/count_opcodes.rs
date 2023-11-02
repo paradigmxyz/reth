@@ -9,6 +9,20 @@ use reth_provider::ProviderFactory;
 use reth_revm::interpreter::{opcode, OpCode};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
+/// Macro for printing opcode data.
+macro_rules! print_opcode_data {
+    ($self:ident, $size:ident, $($map:expr, $title:expr, $formatter:expr),*) => {
+        $(
+            let opcodes_vec: Vec<_> = $map.iter()
+                .map(|(k, v)| ($formatter(k), *v))
+                .sorted_by(|a, b| b.1.cmp(&a.1))
+                .take($size)
+                .collect();
+            print_opcode_table($title, &opcodes_vec);
+        )*
+    };
+}
+
 /// `reth count-opcodes` command
 #[derive(Debug, Parser)]
 pub struct Command {
@@ -102,62 +116,13 @@ impl OpCodeCounter {
     }
 
     fn print_counts(&self, size: usize) {
-        // Print single opcodes
-        let opcodes_vec: Vec<_> = self
-            .opcodes
-            .iter()
-            .map(|(k, v)| (opcode_or_invalid(*k), *v))
-            .sorted_by(|a, b| b.1.cmp(&a.1))
-            .collect();
-        print_opcode_table("Opcode", &opcodes_vec, size);
-
-        // Print opcode tuples
-        let tuple_vec: Vec<_> = self
-            .tuple_opcodes
-            .iter()
-            .map(|(k, v)| (format!("{} {}", opcode_or_invalid(k[0]), opcode_or_invalid(k[1])), *v))
-            .sorted_by(|a, b| b.1.cmp(&a.1))
-            .collect();
-        print_opcode_table("Opcode tuples", &tuple_vec, size);
-
-        // Print opcode triplets
-        let triplets_vec: Vec<_> = self
-            .triplets_opcodes
-            .iter()
-            .map(|(k, v)| {
-                (
-                    format!(
-                        "{} {} {}",
-                        opcode_or_invalid(k[0]),
-                        opcode_or_invalid(k[1]),
-                        opcode_or_invalid(k[2])
-                    ),
-                    *v,
-                )
-            })
-            .sorted_by(|a, b| b.1.cmp(&a.1))
-            .collect();
-        print_opcode_table("Opcodes triplets", &triplets_vec, size);
-
-        // Print opcode quadruplets
-        let quadruplets_vec: Vec<_> = self
-            .quadruplets_opcodes
-            .iter()
-            .map(|(k, v)| {
-                (
-                    format!(
-                        "{} {} {} {}",
-                        opcode_or_invalid(k[0]),
-                        opcode_or_invalid(k[1]),
-                        opcode_or_invalid(k[2]),
-                        opcode_or_invalid(k[3])
-                    ),
-                    *v,
-                )
-            })
-            .sorted_by(|a, b| b.1.cmp(&a.1))
-            .collect();
-        print_opcode_table("Opcodes quadruplets", &quadruplets_vec, size);
+        print_opcode_data!(
+            self, size,
+            &self.opcodes, "Opcode", &|k: &u8| opcode_or_invalid(*k).to_string(),
+            &self.tuple_opcodes, "Opcode Tuples", &|k: &[u8; 2]| format!("{} {}", opcode_or_invalid(k[0]), opcode_or_invalid(k[1])),
+            &self.triplets_opcodes, "Opcodes Triplets", &|k: &[u8; 3]| format!("{} {} {}", opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), opcode_or_invalid(k[2])),
+            &self.quadruplets_opcodes, "Opcodes Quadruplets", &|k: &[u8; 4]| format!("{} {} {} {}", opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), opcode_or_invalid(k[2]), opcode_or_invalid(k[3]))
+        );
     }
 }
 
@@ -172,12 +137,12 @@ fn opcode_or_invalid(opcode: u8) -> OpCode {
 }
 
 /// Generic function to print opcode sequences.
-fn print_opcode_table<T: ToString>(header: &str, sequences: &[(T, usize)], size: usize) {
+fn print_opcode_table<T: ToString>(header: &str, sequences: &[(T, usize)]) {
     let mut table = Table::new();
     table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
     table.set_header([header, "Occurrences"]);
 
-    sequences.iter().take(size).for_each(|(seq, count)| {
+    sequences.iter().for_each(|(seq, count)| {
         let mut row = Row::new();
         row.add_cell(Cell::new(seq.to_string()));
         row.add_cell(Cell::new(count));
