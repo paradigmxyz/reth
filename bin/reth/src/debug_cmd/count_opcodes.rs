@@ -9,17 +9,18 @@ use reth_provider::ProviderFactory;
 use reth_revm::interpreter::{opcode, OpCode};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-/// Macro for printing opcode data.
-macro_rules! print_opcode_data {
-    ($self:ident, $size:ident, $($map:expr, $title:expr, $formatter:expr),*) => {
-        $(
-            let opcodes_vec: Vec<_> = $map.iter()
-                .map(|(k, v)| ($formatter(k), *v))
-                .sorted_by(|a, b| b.1.cmp(&a.1))
-                .take($size)
-                .collect();
-            print_opcode_table($title, &opcodes_vec);
-        )*
+macro_rules! opcodes_tuples_vec {
+    ($map:expr, $take: ident) => {
+        $map.iter()
+            .map(|(k, v)| {
+                let mut string = String::new();
+                (0..k.len())
+                    .for_each(|i| string.push_str(&format!("{} ", &opcode_or_invalid(k[i]))));
+                (string, *v)
+            })
+            .sorted_by(|a, b| b.1.cmp(&a.1))
+            .take($take)
+            .collect::<Vec<_>>()
     };
 }
 
@@ -80,8 +81,8 @@ fn filter_bytecode_bytes(bytes: &Bytes) -> Bytes {
 }
 
 struct OpCodeCounter {
-    opcodes: HashMap<u8, usize>,
-    tuple_opcodes: HashMap<[u8; 2], usize>,
+    opcodes: HashMap<[u8; 1], usize>,
+    couples_opcodes: HashMap<[u8; 2], usize>,
     triplets_opcodes: HashMap<[u8; 3], usize>,
     quadruplets_opcodes: HashMap<[u8; 4], usize>,
 }
@@ -90,7 +91,7 @@ impl OpCodeCounter {
     fn new() -> Self {
         Self {
             opcodes: HashMap::new(),
-            tuple_opcodes: HashMap::new(),
+            couples_opcodes: HashMap::new(),
             triplets_opcodes: HashMap::new(),
             quadruplets_opcodes: HashMap::new(),
         }
@@ -98,13 +99,13 @@ impl OpCodeCounter {
 
     fn count_sequences(&mut self, bytes: &Bytes) {
         for (i, opcode) in bytes.iter().enumerate() {
-            let tuple = bytes.get(i..=i + 1);
+            let couple = bytes.get(i..=i + 1);
             let triple = bytes.get(i..=i + 2);
             let quadruple = bytes.get(i..=i + 3);
 
-            *self.opcodes.entry(*opcode).or_default() += 1;
-            if let Some(t) = tuple {
-                *self.tuple_opcodes.entry([t[0], t[1]]).or_default() += 1;
+            *self.opcodes.entry([*opcode]).or_default() += 1;
+            if let Some(t) = couple {
+                *self.couples_opcodes.entry([t[0], t[1]]).or_default() += 1;
             }
             if let Some(t) = triple {
                 *self.triplets_opcodes.entry([t[0], t[1], t[2]]).or_default() += 1;
@@ -115,14 +116,16 @@ impl OpCodeCounter {
         }
     }
 
-    fn print_counts(&self, size: usize) {
-        print_opcode_data!(
-            self, size,
-            &self.opcodes, "Opcode", &|k: &u8| opcode_or_invalid(*k).to_string(),
-            &self.tuple_opcodes, "Opcode Tuples", &|k: &[u8; 2]| format!("{} {}", opcode_or_invalid(k[0]), opcode_or_invalid(k[1])),
-            &self.triplets_opcodes, "Opcodes Triplets", &|k: &[u8; 3]| format!("{} {} {}", opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), opcode_or_invalid(k[2])),
-            &self.quadruplets_opcodes, "Opcodes Quadruplets", &|k: &[u8; 4]| format!("{} {} {} {}", opcode_or_invalid(k[0]), opcode_or_invalid(k[1]), opcode_or_invalid(k[2]), opcode_or_invalid(k[3]))
-        );
+    fn print_counts(&self, take: usize) {
+        let opcodes_vec = opcodes_tuples_vec!(&self.opcodes, take);
+        let couples_vec = opcodes_tuples_vec!(&self.couples_opcodes, take);
+        let triplets_vec = opcodes_tuples_vec!(&self.triplets_opcodes, take);
+        let quadruplets_vec = opcodes_tuples_vec!(&self.quadruplets_opcodes, take);
+
+        print_opcode_table("Opcodes", &opcodes_vec);
+        print_opcode_table("Opcodes couples", &couples_vec);
+        print_opcode_table("Opcodes triplets", &triplets_vec);
+        print_opcode_table("Opcodes quadruplets", &quadruplets_vec);
     }
 }
 
@@ -174,7 +177,7 @@ mod test {
     #[test]
     fn opcode_counter() {
         let test_bytecode = all_opcodes_test_string();
-        let bytecode = Bytecode::new_raw(hex::decode(&test_bytecode).unwrap().into());
+        let bytecode = Bytecode::new_raw(hex::decode(test_bytecode).unwrap().into());
         let filtered_bytes = filter_bytecode_bytes(bytecode.bytes());
 
         let mut opcode_counter = OpCodeCounter::new();
@@ -184,7 +187,7 @@ mod test {
         for (i, opcode) in OPCODE_JUMPMAP.iter().enumerate() {
             if opcode.is_some() {
                 let i = i as u8;
-                assert_eq!(opcode_counter.opcodes.get(&i), Some(1_usize).as_ref());
+                assert_eq!(opcode_counter.opcodes.get(&[i]), Some(1_usize).as_ref());
             }
         }
 
@@ -200,8 +203,8 @@ mod test {
         let mut opcode_counter = OpCodeCounter::new();
         opcode_counter.count_sequences(&filtered_bytes);
 
-        assert_eq!(opcode_counter.opcodes.get(&0).unwrap().clone(), 1);
-        assert_eq!(opcode_counter.tuple_opcodes.get(&[1, 2]).unwrap().clone(), 2);
+        assert_eq!(opcode_counter.opcodes.get(&[0]).unwrap().clone(), 1);
+        assert_eq!(opcode_counter.couples_opcodes.get(&[1, 2]).unwrap().clone(), 2);
         assert_eq!(opcode_counter.triplets_opcodes.get(&[3, 4, 5]).unwrap().clone(), 2);
         assert_eq!(opcode_counter.quadruplets_opcodes.get(&[6, 7, 8, 9]).unwrap().clone(), 2);
     }
