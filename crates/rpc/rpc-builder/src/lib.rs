@@ -1043,10 +1043,8 @@ where
                 self.provider.clone(),
                 self.pool.clone(),
                 cache.clone(),
-                self.config.eth.max_blocks_per_filter,
-                self.config.eth.max_logs_per_response,
+                self.config.eth.filter_config(),
                 executor.clone(),
-                self.config.eth.stale_filter_ttl,
             );
 
             let pubsub = EthPubSub::with_spawner(
