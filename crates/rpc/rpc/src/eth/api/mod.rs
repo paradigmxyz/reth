@@ -11,10 +11,10 @@ use crate::eth::{
     signer::EthSigner,
 };
 use async_trait::async_trait;
-use reth_interfaces::Result;
+use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, H256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -39,7 +39,7 @@ mod sign;
 mod state;
 mod transactions;
 
-use crate::TracingCallPool;
+use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -48,13 +48,13 @@ pub use transactions::{EthTransactions, TransactionSource};
 #[async_trait]
 pub trait EthApiSpec: EthTransactions + Send + Sync {
     /// Returns the current ethereum protocol version.
-    async fn protocol_version(&self) -> Result<U64>;
+    async fn protocol_version(&self) -> RethResult<U64>;
 
     /// Returns the chain id
     fn chain_id(&self) -> U64;
 
     /// Returns provider chain info
-    fn chain_info(&self) -> Result<ChainInfo>;
+    fn chain_info(&self) -> RethResult<ChainInfo>;
 
     /// Returns a list of addresses owned by provider.
     fn accounts(&self) -> Vec<Address>;
@@ -63,7 +63,7 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
     fn is_syncing(&self) -> bool;
 
     /// Returns the [SyncStatus] of the network
-    fn sync_status(&self) -> Result<SyncStatus>;
+    fn sync_status(&self) -> RethResult<SyncStatus>;
 }
 
 /// `Eth` API implementation.
@@ -91,7 +91,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
-        tracing_call_pool: TracingCallPool,
+        blocking_task_pool: BlockingTaskPool,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -101,7 +101,7 @@ where
             gas_oracle,
             gas_cap.into().into(),
             Box::<TokioTaskExecutor>::default(),
-            tracing_call_pool,
+            blocking_task_pool,
         )
     }
 
@@ -115,7 +115,7 @@ where
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
-        tracing_call_pool: TracingCallPool,
+        blocking_task_pool: BlockingTaskPool,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -136,7 +136,7 @@ where
             starting_block: U256::from(latest_block),
             task_spawner,
             pending_block: Default::default(),
-            tracing_call_pool,
+            blocking_task_pool,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -200,6 +200,8 @@ where
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Returns the state at the given [BlockId] enum.
+    ///
+    /// Note: if not [BlockNumberOrTag::Pending] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
     pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
         Ok(self.provider().state_by_block_id(at)?)
     }
@@ -219,12 +221,12 @@ where
     }
 
     /// Returns the state at the given block number
-    pub fn state_at_hash(&self, block_hash: H256) -> Result<StateProviderBox<'_>> {
+    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox<'_>> {
         self.provider().history_by_block_hash(block_hash)
     }
 
     /// Returns the _latest_ state
-    pub fn latest_state(&self) -> Result<StateProviderBox<'_>> {
+    pub fn latest_state(&self) -> RethResult<StateProviderBox<'_>> {
         self.provider().latest()
     }
 }
@@ -261,8 +263,9 @@ where
 
         let mut cfg = CfgEnv::default();
         let mut block_env = BlockEnv::default();
-        self.provider().fill_block_env_with_header(&mut block_env, origin.header())?;
-        self.provider().fill_cfg_env_with_header(&mut cfg, origin.header())?;
+        // Note: for the PENDING block we assume it is past the known merge block and thus this will
+        // not fail when looking up the total difficulty value for the blockenv.
+        self.provider().fill_env_with_header(&mut cfg, &mut block_env, origin.header())?;
 
         Ok(PendingBlockEnv { cfg, block_env, origin })
     }
@@ -339,7 +342,7 @@ where
     /// Returns the current ethereum protocol version.
     ///
     /// Note: This returns an `U64`, since this should return as hex string.
-    async fn protocol_version(&self) -> Result<U64> {
+    async fn protocol_version(&self) -> RethResult<U64> {
         let status = self.network().network_status().await?;
         Ok(U64::from(status.protocol_version))
     }
@@ -350,7 +353,7 @@ where
     }
 
     /// Returns the current info for the chain
-    fn chain_info(&self) -> Result<ChainInfo> {
+    fn chain_info(&self) -> RethResult<ChainInfo> {
         self.provider().chain_info()
     }
 
@@ -363,7 +366,7 @@ where
     }
 
     /// Returns the [SyncStatus] of the network
-    fn sync_status(&self) -> Result<SyncStatus> {
+    fn sync_status(&self) -> RethResult<SyncStatus> {
         let status = if self.is_syncing() {
             let current_block = U256::from(
                 self.provider().chain_info().map(|info| info.best_number).unwrap_or_default(),
@@ -433,6 +436,6 @@ struct EthApiInner<Provider, Pool, Network> {
     task_spawner: Box<dyn TaskSpawner>,
     /// Cached pending block if any
     pending_block: Mutex<Option<PendingBlock>>,
-    /// A pool dedicated to tracing calls
-    tracing_call_pool: TracingCallPool,
+    /// A pool dedicated to blocking tasks.
+    blocking_task_pool: BlockingTaskPool,
 }

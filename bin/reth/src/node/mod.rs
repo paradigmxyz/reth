@@ -8,7 +8,11 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    cli::ext::{RethCliExt, RethNodeCommandConfig},
+    cli::{
+        components::RethNodeComponentsImpl,
+        config::RethRpcConfig,
+        ext::{RethCliExt, RethNodeCommandConfig},
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::cl_events::ConsensusLayerHealthEvents,
@@ -17,18 +21,21 @@ use crate::{
     utils::get_single_header,
     version::SHORT_VERSION,
 };
-use clap::Parser;
+use clap::{value_parser, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, pin_mut, stream, stream_select, StreamExt};
+use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
-use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN};
+use reth_beacon_consensus::{
+    hooks::{EngineHooks, PruneHook},
+    BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
+};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -40,20 +47,25 @@ use reth_interfaces::{
         either::EitherDownloader,
         headers::{client::HeadersClient, downloader::HeaderDownloader},
     },
+    RethResult,
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
-use reth_network_api::NetworkInfo;
+use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
-    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head,
-    SealedHeader, H256,
+    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
+    kzg::KzgSettings,
+    stage::StageId,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
     HeaderProvider, ProviderFactory, StageCheckpointReader,
 };
+use reth_prune::{segments::SegmentSet, Pruner};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
+use reth_snapshot::HighestSnapshotsTracker;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -61,7 +73,6 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
-    MetricEventsSender, MetricsListener,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{
@@ -69,7 +80,7 @@ use reth_transaction_pool::{
 };
 use secp256k1::SecretKey;
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
 };
@@ -104,6 +115,7 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     /// - dev
     #[arg(
         long,
@@ -121,6 +133,26 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// The metrics will be served at the given interface and port.
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub metrics: Option<SocketAddr>,
+
+    /// Add a new instance of a node.
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
+    /// port numbers that conflict with each other.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - AUTH_PORT: default + `instance` * 100 - 100
+    /// - HTTP_RPC_PORT: default - `instance` + 1
+    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
+    pub instance: u16,
+
+    /// Overrides the KZG trusted setup by reading from the supplied file.
+    #[arg(long, value_name = "PATH")]
+    pub trusted_setup_file: Option<PathBuf>,
 
     /// All networking related arguments
     #[clap(flatten)]
@@ -167,6 +199,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            trusted_setup_file,
+            instance,
             network,
             rpc,
             txpool,
@@ -182,6 +216,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config,
             chain,
             metrics,
+            instance,
+            trusted_setup_file,
             network,
             rpc,
             txpool,
@@ -211,12 +247,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // always store reth.toml in the data dir, not the chain specific data dir
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
+        let prometheus_handle = self.install_prometheus_recorder()?;
+
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path, self.db.log_level)?);
+        let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics());
         info!(target: "reth::cli", "Database opened");
 
-        self.start_metrics_endpoint(Arc::clone(&db)).await?;
+        self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -224,57 +262,50 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
-        let consensus: Arc<dyn Consensus> = if self.dev.dev {
-            debug!(target: "reth::cli", "Using auto seal");
-            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
-        } else {
-            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
-        };
+        let consensus = self.consensus();
 
         self.init_trusted_nodes(&mut config);
 
-        debug!(target: "reth::cli", "Spawning metrics listener task");
-        let (metrics_tx, metrics_rx) = unbounded_channel();
-        let metrics_listener = MetricsListener::new(metrics_rx);
-        ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
+        debug!(target: "reth::cli", "Spawning stages metrics listener task");
+        let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
+        let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
+        ctx.task_executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
+
+        let prune_config =
+            self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            db.clone(),
+            Arc::clone(&db),
             Arc::clone(&consensus),
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
-        let tree_config = BlockchainTreeConfig::default();
-        // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
-        // depth at least N blocks must be sent at once.
-        let (canon_state_notification_sender, _receiver) =
-            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
-        let blockchain_tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(
-                tree_externals,
-                canon_state_notification_sender.clone(),
-                tree_config,
-            )?
-            .with_sync_metrics_tx(metrics_tx.clone()),
-        );
+        let tree = BlockchainTree::new(
+            tree_externals,
+            BlockchainTreeConfig::default(),
+            prune_config.clone().map(|config| config.segments),
+        )?
+        .with_sync_metrics_tx(sync_metrics_tx.clone());
+        let canon_state_notification_sender = tree.canon_state_notification_sender();
+        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        debug!(target: "reth::cli", "configured blockchain tree");
+
+        // fetch the head block from the database
+        let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
 
         // setup the blockchain provider
         let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
-
         let blob_store = InMemoryBlobStore::default();
-        let transaction_pool = reth_transaction_pool::Pool::eth_pool(
-            TransactionValidationTaskExecutor::eth_with_additional_tasks(
-                blockchain_db.clone(),
-                Arc::clone(&self.chain),
-                blob_store.clone(),
-                ctx.task_executor.clone(),
-                1,
-            ),
-            blob_store,
-            self.txpool.pool_config(),
-        );
+        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
+            .with_head_timestamp(head.timestamp)
+            .kzg_settings(self.kzg_settings()?)
+            .with_additional_tasks(1)
+            .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
+
+        let transaction_pool =
+            reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
 
         // spawn txpool maintenance task
@@ -301,7 +332,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         let default_peers_path = data_dir.known_peers_path();
-        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
@@ -318,21 +348,23 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 default_peers_path,
             )
             .await?;
-        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
         let network_client = network.fetch_client().await?;
 
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        let components = RethNodeComponentsImpl {
+            provider: blockchain_db.clone(),
+            pool: transaction_pool.clone(),
+            network: network.clone(),
+            task_executor: ctx.task_executor.clone(),
+            events: blockchain_db.clone(),
+        };
+        self.ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
-        let payload_builder = self.ext.spawn_payload_builder_service(
-            &self.builder,
-            blockchain_db.clone(),
-            transaction_pool.clone(),
-            ctx.task_executor.clone(),
-            Arc::clone(&self.chain),
-        )?;
+        let payload_builder = self.ext.spawn_payload_builder_service(&self.builder, &components)?;
 
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
@@ -340,9 +372,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             None
         };
-
-        let prune_config =
-            self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
 
         // Configure the pipeline
         let (mut pipeline, client) = if self.dev.dev {
@@ -377,7 +406,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
-                    metrics_tx,
+                    sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
                 )
@@ -397,7 +426,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     Arc::clone(&consensus),
                     db.clone(),
                     &ctx.task_executor,
-                    metrics_tx,
+                    sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
                 )
@@ -421,16 +450,28 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
-        let pruner = prune_config.map(|prune_config| {
-            info!(target: "reth::cli", "Pruner initialized");
-            reth_prune::Pruner::new(
-                db.clone(),
-                self.chain.clone(),
-                prune_config.block_interval,
-                prune_config.parts,
-                self.chain.prune_batch_sizes,
-            )
-        });
+        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
+
+        let mut hooks = EngineHooks::new();
+
+        let pruner_events = if let Some(prune_config) = prune_config {
+            let mut pruner = self.build_pruner(&prune_config, db.clone(), highest_snapshots_rx);
+
+            let events = pruner.events();
+            hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
+
+            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
+            Either::Left(events)
+        } else {
+            Either::Right(stream::empty())
+        };
+
+        let _snapshotter = reth_snapshot::Snapshotter::new(
+            db,
+            self.chain.clone(),
+            self.chain.snapshot_block_interval,
+            highest_snapshots_tx,
+        );
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
@@ -446,7 +487,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
             consensus_engine_rx,
-            pruner,
+            hooks,
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -461,7 +502,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 )
             } else {
                 Either::Right(stream::empty())
-            }
+            },
+            pruner_events.map(Into::into)
         );
         ctx.task_executor.spawn_critical(
             "events task",
@@ -481,20 +523,12 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let default_jwt_path = data_dir.jwt_path();
         let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
 
+        // adjust rpc port numbers based on instance number
+        self.adjust_instance_ports();
+
         // Start RPC servers
-        let (_rpc_server, _auth_server) = self
-            .rpc
-            .start_servers(
-                blockchain_db.clone(),
-                transaction_pool.clone(),
-                network.clone(),
-                ctx.task_executor.clone(),
-                blockchain_tree,
-                engine_api,
-                jwt_secret,
-                &mut self.ext,
-            )
-            .await?;
+        let _rpc_server_handles =
+            self.rpc.start_servers(&components, engine_api, jwt_secret, &mut self.ext).await?;
 
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
@@ -503,6 +537,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             let res = beacon_consensus_engine.await;
             let _ = tx.send(res);
         });
+
+        self.ext.on_node_started(&components)?;
 
         rx.await??;
 
@@ -517,6 +553,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
+    /// Returns the [Consensus] instance to use.
+    ///
+    /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
+    /// will be an [AutoSealConsensus] instance.
+    pub fn consensus(&self) -> Arc<dyn Consensus> {
+        if self.dev.dev {
+            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
+        } else {
+            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
+        }
+    }
+
     /// Constructs a [Pipeline] that's wired to the network
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
@@ -526,7 +574,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         consensus: Arc<dyn Consensus>,
         db: DB,
         task_executor: &TaskExecutor,
-        metrics_tx: MetricEventsSender,
+        metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
     ) -> eyre::Result<Pipeline<DB>>
@@ -566,6 +614,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
     }
 
+    /// Loads the trusted setup params from a given file path or falls back to
+    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
+        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
+            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
+                .map_err(LoadKzgSettingsError::KzgError)?;
+            Ok(Arc::new(trusted_setup))
+        } else {
+            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+        }
+    }
+
     fn init_trusted_nodes(&self, config: &mut Config) {
         config.peers.connect_trusted_nodes_only = self.network.trusted_only;
 
@@ -577,11 +637,24 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
-    async fn start_metrics_endpoint(&self, db: Arc<DatabaseEnv>) -> eyre::Result<()> {
+    fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
+        prometheus_exporter::install_recorder()
+    }
+
+    async fn start_metrics_endpoint(
+        &self,
+        prometheus_handle: PrometheusHandle,
+        db: Arc<DatabaseEnv>,
+    ) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::initialize(listen_addr, db, metrics_process::Collector::default())
-                .await?;
+            prometheus_exporter::serve(
+                listen_addr,
+                prometheus_handle,
+                db,
+                metrics_process::Collector::default(),
+            )
+            .await?;
         }
 
         Ok(())
@@ -618,7 +691,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(handle)
     }
 
-    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> Result<Head, reth_interfaces::Error> {
+    /// Fetches the head block from the database.
+    ///
+    /// If the database is empty, returns the genesis block.
+    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> RethResult<Head> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
@@ -651,10 +727,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn lookup_or_fetch_tip<DB, Client>(
         &self,
-        db: &DB,
+        db: DB,
         client: Client,
-        tip: H256,
-    ) -> Result<u64, reth_interfaces::Error>
+        tip: B256,
+    ) -> RethResult<u64>
     where
         DB: Database,
         Client: HeadersClient,
@@ -667,10 +743,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn fetch_tip<DB, Client>(
         &self,
-        db: &DB,
+        db: DB,
         client: Client,
         tip: BlockHashOrNumber,
-    ) -> Result<SealedHeader, reth_interfaces::Error>
+    ) -> RethResult<SealedHeader>
     where
         DB: Database,
         Client: HeadersClient,
@@ -714,12 +790,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .with_task_executor(Box::new(executor))
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.addr,
+                // set discovery port based on instance number
+                self.network.port + self.instance - 1,
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.addr,
+                // set discovery port based on instance number
+                self.network.port + self.instance - 1,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
     }
@@ -734,7 +812,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
-        metrics_tx: MetricEventsSender,
+        metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -751,7 +829,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             builder = builder.with_max_block(max_block)
         }
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         use reth_revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::Factory::new(self.chain.clone());
 
@@ -769,6 +847,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         };
 
         let factory = factory.with_stack_config(stack_config);
+
+        let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
@@ -796,13 +876,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                         ExecutionStageThresholds {
                             max_blocks: stage_config.execution.max_blocks,
                             max_changes: stage_config.execution.max_changes,
+                            max_cumulative_gas: stage_config.execution.max_cumulative_gas,
                         },
                         stage_config
                             .merkle
                             .clean_threshold
                             .max(stage_config.account_hashing.clean_threshold)
                             .max(stage_config.storage_hashing.clean_threshold),
-                        prune_config.map(|prune| prune.parts).unwrap_or_default(),
+                        prune_modes.clone(),
                     )
                     .with_metrics_tx(metrics_tx),
                 )
@@ -815,17 +896,78 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     stage_config.storage_hashing.commit_threshold,
                 ))
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
-                .set(TransactionLookupStage::new(stage_config.transaction_lookup.commit_threshold))
+                .set(TransactionLookupStage::new(
+                    stage_config.transaction_lookup.commit_threshold,
+                    prune_modes.transaction_lookup,
+                ))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
+                    prune_modes.account_history,
                 ))
                 .set(IndexStorageHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
+                    prune_modes.storage_history,
                 )),
             )
             .build(db, self.chain.clone());
 
         Ok(pipeline)
+    }
+
+    /// Builds a [Pruner] with the given config.
+    fn build_pruner<DB: Database>(
+        &self,
+        config: &PruneConfig,
+        db: DB,
+        highest_snapshots_rx: HighestSnapshotsTracker,
+    ) -> Pruner<DB> {
+        let segments = SegmentSet::default()
+            // Receipts
+            .segment_opt(config.segments.receipts.map(reth_prune::segments::Receipts::new))
+            // Receipts by logs
+            .segment_opt((!config.segments.receipts_log_filter.is_empty()).then(|| {
+                reth_prune::segments::ReceiptsByLogs::new(
+                    config.segments.receipts_log_filter.clone(),
+                )
+            }))
+            // Transaction lookup
+            .segment_opt(
+                config
+                    .segments
+                    .transaction_lookup
+                    .map(reth_prune::segments::TransactionLookup::new),
+            )
+            // Sender recovery
+            .segment_opt(
+                config.segments.sender_recovery.map(reth_prune::segments::SenderRecovery::new),
+            )
+            // Account history
+            .segment_opt(
+                config.segments.account_history.map(reth_prune::segments::AccountHistory::new),
+            )
+            // Storage history
+            .segment_opt(
+                config.segments.storage_history.map(reth_prune::segments::StorageHistory::new),
+            );
+
+        Pruner::new(
+            db,
+            self.chain.clone(),
+            segments.into_vec(),
+            config.block_interval,
+            self.chain.prune_delete_limit,
+            highest_snapshots_rx,
+        )
+    }
+
+    /// Change rpc port numbers based on the instance number.
+    fn adjust_instance_ports(&mut self) {
+        // auth port is scaled by a factor of instance * 100
+        self.rpc.auth_port += self.instance * 100 - 100;
+        // http port is scaled by a factor of -instance
+        self.rpc.http_port -= self.instance - 1;
+        // ws port is scaled by a factor of instance * 2
+        self.rpc.ws_port += self.instance * 2 - 2;
     }
 }
 
@@ -848,7 +990,7 @@ async fn run_network_until_shutdown<C>(
     if let Some(file_path) = persistent_peers_file {
         let known_peers = network.all_peers().collect::<Vec<_>>();
         if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
-            trace!(target : "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
+            trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
             let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
             match parent_dir.and_then(|_| std::fs::write(&file_path, known_peers)) {
                 Ok(_) => {
@@ -865,8 +1007,12 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_primitives::DEV;
-    use std::{net::IpAddr, path::Path};
+    use std::{
+        net::{IpAddr, Ipv4Addr},
+        path::Path,
+    };
 
     #[test]
     fn parse_help_node_command() {
@@ -883,9 +1029,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_discovery_addr() {
+        let cmd =
+            NodeCommand::<()>::try_parse_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
+        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
+    }
+
+    #[test]
+    fn parse_addr() {
+        let cmd = NodeCommand::<()>::try_parse_from([
+            "reth",
+            "--discovery.addr",
+            "127.0.0.1",
+            "--addr",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(cmd.network.addr, Ipv4Addr::LOCALHOST);
+    }
+
+    #[test]
     fn parse_discovery_port() {
         let cmd = NodeCommand::<()>::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
-        assert_eq!(cmd.network.discovery.port, Some(300));
+        assert_eq!(cmd.network.discovery.port, 300);
     }
 
     #[test]
@@ -893,8 +1060,8 @@ mod tests {
         let cmd =
             NodeCommand::<()>::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"])
                 .unwrap();
-        assert_eq!(cmd.network.discovery.port, Some(300));
-        assert_eq!(cmd.network.port, Some(99));
+        assert_eq!(cmd.network.discovery.port, 300);
+        assert_eq!(cmd.network.port, 99);
     }
 
     #[test]
@@ -957,5 +1124,38 @@ mod tests {
         assert!(cmd.network.discovery.disable_discovery);
 
         assert!(cmd.dev.dev);
+    }
+
+    #[test]
+    fn parse_instance() {
+        let mut cmd = NodeCommand::<()>::parse_from(["reth"]);
+        cmd.adjust_instance_ports();
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8551);
+        assert_eq!(cmd.rpc.http_port, 8545);
+        assert_eq!(cmd.rpc.ws_port, 8546);
+        // check network listening port number
+        assert_eq!(cmd.network.port, 30303);
+
+        let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "2"]);
+        cmd.adjust_instance_ports();
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8651);
+        assert_eq!(cmd.rpc.http_port, 8544);
+        assert_eq!(cmd.rpc.ws_port, 8548);
+        // check network listening port number
+        assert_eq!(cmd.network.port, 30304);
+
+        let mut cmd = NodeCommand::<()>::parse_from(["reth", "--instance", "3"]);
+        cmd.adjust_instance_ports();
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
+        // check rpc port numbers
+        assert_eq!(cmd.rpc.auth_port, 8751);
+        assert_eq!(cmd.rpc.http_port, 8543);
+        assert_eq!(cmd.rpc.ws_port, 8550);
+        // check network listening port number
+        assert_eq!(cmd.network.port, 30305);
     }
 }

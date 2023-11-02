@@ -50,6 +50,7 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     #[arg(
     long,
     value_name = "CHAIN_OR_PATH",
@@ -130,8 +131,9 @@ impl Command {
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
-            prometheus_exporter::initialize(
+            prometheus_exporter::serve(
                 listen_addr,
+                prometheus_exporter::install_recorder()?,
                 Arc::clone(&db),
                 metrics_process::Collector::default(),
             )
@@ -201,14 +203,17 @@ impl Command {
                             ExecutionStageThresholds {
                                 max_blocks: Some(batch_size),
                                 max_changes: None,
+                                max_cumulative_gas: None,
                             },
                             config.stages.merkle.clean_threshold,
-                            config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                            config.prune.map(|prune| prune.segments).unwrap_or_default(),
                         )),
                         None,
                     )
                 }
-                StageEnum::TxLookup => (Box::new(TransactionLookupStage::new(batch_size)), None),
+                StageEnum::TxLookup => {
+                    (Box::new(TransactionLookupStage::new(batch_size, None)), None)
+                }
                 StageEnum::AccountHashing => {
                     (Box::new(AccountHashingStage::new(1, batch_size)), None)
                 }

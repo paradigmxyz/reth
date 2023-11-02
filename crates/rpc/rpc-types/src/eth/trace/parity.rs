@@ -3,7 +3,7 @@
 //!
 //! See <https://openethereum.github.io/JSONRPC-trace-module>
 
-use reth_primitives::{Address, Bytes, H256, U256, U64};
+use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -39,13 +39,28 @@ pub struct TraceResults {
     pub vm_trace: Option<VmTrace>,
 }
 
+// === impl TraceResults ===
+
+impl TraceResults {
+    /// Sets the gas used of the root trace.
+    ///
+    /// The root trace's gasUsed should mirror the actual gas used by the transaction.
+    ///
+    /// This allows setting it manually by consuming the execution result's gas for example.
+    pub fn set_root_trace_gas_used(&mut self, gas_used: u64) {
+        if let Some(r) = self.trace.first_mut().and_then(|t| t.result.as_mut()) {
+            r.set_gas_used(gas_used)
+        }
+    }
+}
+
 /// A `FullTrace` with an additional transaction hash
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceResultsWithTransactionHash {
     #[serde(flatten)]
     pub full_trace: TraceResults,
-    pub transaction_hash: H256,
+    pub transaction_hash: B256,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -67,13 +82,42 @@ pub enum Delta<T> {
     Changed(ChangedType<T>),
 }
 
+// === impl Delta ===
+
+impl<T> Delta<T> {
+    /// Creates a new [Delta::Changed] variant
+    pub fn changed(from: T, to: T) -> Self {
+        Self::Changed(ChangedType { from, to })
+    }
+
+    /// Returns true if the value is unchanged
+    pub fn is_unchanged(&self) -> bool {
+        matches!(self, Delta::Unchanged)
+    }
+
+    /// Returns true if the value is added
+    pub fn is_added(&self) -> bool {
+        matches!(self, Delta::Added(_))
+    }
+
+    /// Returns true if the value is removed
+    pub fn is_removed(&self) -> bool {
+        matches!(self, Delta::Removed(_))
+    }
+
+    /// Returns true if the value is changed
+    pub fn is_changed(&self) -> bool {
+        matches!(self, Delta::Changed(_))
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountDiff {
     pub balance: Delta<U256>,
     pub code: Delta<Bytes>,
     pub nonce: Delta<U64>,
-    pub storage: BTreeMap<H256, Delta<H256>>,
+    pub storage: BTreeMap<B256, Delta<B256>>,
 }
 
 /// New-type for list of account diffs
@@ -240,13 +284,37 @@ pub struct CreateOutput {
     pub address: Address,
 }
 
+/// Represents the output of a trace.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TraceOutput {
+    /// Output of a regular call transaction.
     Call(CallOutput),
+    /// Output of a CREATE transaction.
     Create(CreateOutput),
 }
 
+// === impl TraceOutput ===
+
+impl TraceOutput {
+    /// Returns the gas used by this trace.
+    pub fn gas_used(&self) -> U64 {
+        match self {
+            TraceOutput::Call(call) => call.gas_used,
+            TraceOutput::Create(create) => create.gas_used,
+        }
+    }
+
+    /// Sets the gas used by this trace.
+    pub fn set_gas_used(&mut self, gas_used: u64) {
+        match self {
+            TraceOutput::Call(call) => call.gas_used = U64::from(gas_used),
+            TraceOutput::Create(create) => create.gas_used = U64::from(gas_used),
+        }
+    }
+}
+
+/// A parity style trace of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionTrace {
@@ -267,14 +335,18 @@ pub struct LocalizedTransactionTrace {
     /// Hash of the block, if not pending
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
-    pub block_hash: Option<H256>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_hash: Option<B256>,
     /// Block number the transaction is included in, None if pending.
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_number: Option<u64>,
     /// Hash of the transaction
-    pub transaction_hash: Option<H256>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_hash: Option<B256>,
     /// Transaction index within the block, None if pending.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_position: Option<u64>,
 }
 

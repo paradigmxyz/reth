@@ -1,7 +1,12 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{database::Database, models::BlockNumberAddress};
-use reth_primitives::stage::{StageCheckpoint, StageId};
-use reth_provider::{DatabaseProviderRW, HistoryWriter, StorageReader};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    PruneCheckpoint, PruneMode, PruneSegment,
+};
+use reth_provider::{
+    DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StorageReader,
+};
 use std::fmt::Debug;
 
 /// Stage is indexing history the account changesets generated in
@@ -12,18 +17,20 @@ pub struct IndexStorageHistoryStage {
     /// Number of blocks after which the control
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
+    /// Pruning configuration.
+    pub prune_mode: Option<PruneMode>,
 }
 
 impl IndexStorageHistoryStage {
     /// Create new instance of [IndexStorageHistoryStage].
-    pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold }
+    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
+        Self { commit_threshold, prune_mode }
     }
 }
 
 impl Default for IndexStorageHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self { commit_threshold: 100_000, prune_mode: None }
     }
 }
 
@@ -38,8 +45,32 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     async fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
-        input: ExecInput,
+        mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        if let Some((target_prunable_block, prune_mode)) = self
+            .prune_mode
+            .map(|mode| mode.prune_target_block(input.target(), PruneSegment::StorageHistory))
+            .transpose()?
+            .flatten()
+        {
+            if target_prunable_block > input.checkpoint().block_number {
+                input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+
+                // Save prune checkpoint only if we don't have one already.
+                // Otherwise, pruner may skip the unpruned range of blocks.
+                if provider.get_prune_checkpoint(PruneSegment::StorageHistory)?.is_none() {
+                    provider.save_prune_checkpoint(
+                        PruneSegment::StorageHistory,
+                        PruneCheckpoint {
+                            block_number: Some(target_prunable_block),
+                            tx_number: None,
+                            prune_mode,
+                        },
+                    )?;
+                }
+            }
+        }
+
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -69,9 +100,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
 #[cfg(test)]
 mod tests {
-    use reth_provider::ProviderFactory;
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
@@ -94,14 +122,16 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{
-        hex_literal::hex, Address, BlockNumber, StorageEntry, H160, H256, MAINNET, U256,
+        address, b256, Address, BlockNumber, PruneMode, StorageEntry, B256, MAINNET, U256,
     };
+    use reth_provider::ProviderFactory;
+    use std::collections::BTreeMap;
 
-    const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
-    const STORAGE_KEY: H256 =
-        H256(hex!("0000000000000000000000000000000000000000000000000000000000000001"));
+    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
+    const STORAGE_KEY: B256 =
+        b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
-    fn storage(key: H256) -> StorageEntry {
+    fn storage(key: B256) -> StorageEntry {
         // Value is not used in indexing stage.
         StorageEntry { key, value: U256::ZERO }
     }
@@ -381,16 +411,69 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn insert_index_with_prune_mode() {
+        // init
+        let tx = TestTransaction::default();
+
+        // setup
+        tx.commit(|tx| {
+            // we just need first and last
+            tx.put::<tables::BlockBodyIndices>(
+                0,
+                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+            )
+            .unwrap();
+
+            tx.put::<tables::BlockBodyIndices>(
+                100,
+                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
+            )
+            .unwrap();
+
+            // setup changeset that are going to be applied to history index
+            tx.put::<tables::StorageChangeSet>(trns(20), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSet>(trns(36), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSet>(trns(100), storage(STORAGE_KEY)).unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        // run
+        let input = ExecInput { target: Some(20000), ..Default::default() };
+        let mut stage = IndexStorageHistoryStage {
+            prune_mode: Some(PruneMode::Before(36)),
+            ..Default::default()
+        };
+        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let provider = factory.provider_rw().unwrap();
+        let out = stage.execute(&provider, input).await.unwrap();
+        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
+        provider.commit().unwrap();
+
+        // verify
+        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100]),]));
+
+        // unwind
+        unwind(&tx, 20000, 0).await;
+
+        // verify initial state
+        let table = tx.table::<tables::StorageHistory>().unwrap();
+        assert!(table.is_empty());
+    }
+
     stage_test_suite_ext!(IndexStorageHistoryTestRunner, index_storage_history);
 
     struct IndexStorageHistoryTestRunner {
         pub(crate) tx: TestTransaction,
         commit_threshold: u64,
+        prune_mode: Option<PruneMode>,
     }
 
     impl Default for IndexStorageHistoryTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), commit_threshold: 1000 }
+            Self { tx: TestTransaction::default(), commit_threshold: 1000, prune_mode: None }
         }
     }
 
@@ -402,7 +485,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { commit_threshold: self.commit_threshold }
+            Self::S { commit_threshold: self.commit_threshold, prune_mode: self.prune_mode }
         }
     }
 
@@ -420,7 +503,7 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let blocks = random_block_range(&mut rng, start..=end, H256::zero(), 0..3);
+            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3);
 
             let (transitions, _) = random_changeset_range(
                 &mut rng,
@@ -461,7 +544,7 @@ mod tests {
                     .walk_range(BlockNumberAddress::range(start_block..=end_block))?
                     .try_fold(
                         BTreeMap::new(),
-                        |mut storages: BTreeMap<(Address, H256), Vec<u64>>,
+                        |mut storages: BTreeMap<(Address, B256), Vec<u64>>,
                          entry|
                          -> Result<_, TestRunnerError> {
                             let (index, storage) = entry?;

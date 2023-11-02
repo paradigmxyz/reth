@@ -15,7 +15,7 @@ use crate::{
 
 /// Mock database used for testing with inner BTreeMap structure
 /// TODO
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct DatabaseMock {
     /// Main data. TODO (Make it table aware)
     pub data: BTreeMap<Vec<u8>, Vec<u8>>,
@@ -54,35 +54,33 @@ impl<'a> DbTxMutGAT<'a> for TxMock {
     type DupCursorMut<T: DupSort> = CursorMock;
 }
 
-impl<'a> DbTx<'a> for TxMock {
+impl DbTx for TxMock {
     fn get<T: Table>(&self, _key: T::Key) -> Result<Option<T::Value>, DatabaseError> {
         todo!()
     }
 
     fn commit(self) -> Result<bool, DatabaseError> {
-        todo!()
+        Ok(true)
     }
 
-    fn drop(self) {
-        todo!()
-    }
+    fn abort(self) {}
 
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
-        todo!()
+        Ok(CursorMock { _cursor: 0 })
     }
 
     fn cursor_dup_read<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
-        todo!()
+        Ok(CursorMock { _cursor: 0 })
     }
 
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
-        todo!()
+        Ok(self._table.len())
     }
 }
 
-impl<'a> DbTxMut<'a> for TxMock {
+impl DbTxMut for TxMock {
     fn put<T: Table>(&self, _key: T::Key, _value: T::Value) -> Result<(), DatabaseError> {
         todo!()
     }
@@ -112,14 +110,15 @@ impl<'a> DbTxMut<'a> for TxMock {
     }
 }
 
-impl<'a> TableImporter<'a> for TxMock {}
+impl TableImporter for TxMock {}
 
 /// Cursor that iterates over table
+#[derive(Debug)]
 pub struct CursorMock {
     _cursor: u32,
 }
 
-impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
+impl<T: Table> DbCursorRO<T> for CursorMock {
     fn first(&mut self) -> PairResult<T> {
         todo!()
     }
@@ -148,30 +147,27 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
         todo!()
     }
 
-    fn walk<'cursor>(
-        &'cursor mut self,
-        _start_key: Option<T::Key>,
-    ) -> Result<Walker<'cursor, 'tx, T, Self>, DatabaseError>
+    fn walk(&mut self, _start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
         todo!()
     }
 
-    fn walk_range<'cursor>(
-        &'cursor mut self,
+    fn walk_range(
+        &mut self,
         _range: impl RangeBounds<T::Key>,
-    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<RangeWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
         todo!()
     }
 
-    fn walk_back<'cursor>(
-        &'cursor mut self,
+    fn walk_back(
+        &mut self,
         _start_key: Option<T::Key>,
-    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -179,7 +175,7 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
     }
 }
 
-impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
+impl<T: DupSort> DbDupCursorRO<T> for CursorMock {
     fn next_dup(&mut self) -> PairResult<T> {
         todo!()
     }
@@ -200,11 +196,11 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
         todo!()
     }
 
-    fn walk_dup<'cursor>(
-        &'cursor mut self,
+    fn walk_dup(
+        &mut self,
         _key: Option<<T>::Key>,
         _subkey: Option<<T as DupSort>::SubKey>,
-    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<DupWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -212,7 +208,7 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
     }
 }
 
-impl<'tx, T: Table> DbCursorRW<'tx, T> for CursorMock {
+impl<T: Table> DbCursorRW<T> for CursorMock {
     fn upsert(
         &mut self,
         _key: <T as Table>::Key,
@@ -242,7 +238,7 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for CursorMock {
     }
 }
 
-impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for CursorMock {
+impl<T: DupSort> DbDupCursorRW<T> for CursorMock {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
         todo!()
     }

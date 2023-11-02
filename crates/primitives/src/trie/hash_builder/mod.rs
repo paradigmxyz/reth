@@ -2,14 +2,20 @@ use super::{
     nodes::{rlp_hash, BranchNode, ExtensionNode, LeafNode},
     BranchNodeCompact, Nibbles, TrieMask,
 };
-use crate::{keccak256, proofs::EMPTY_ROOT, H256};
-use std::{collections::HashMap, fmt::Debug};
+use crate::{constants::EMPTY_ROOT_HASH, keccak256, Bytes, B256};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+};
 
 mod state;
 pub use state::HashBuilderState;
 
 mod value;
 pub use value::HashBuilderValue;
+
+mod proof_retainer;
+pub use proof_retainer::ProofRetainer;
 
 /// A component used to construct the root hash of the trie. The primary purpose of a Hash Builder
 /// is to build the Merkle proof that is essential for verifying the integrity and authenticity of
@@ -47,6 +53,7 @@ pub struct HashBuilder {
     stored_in_database: bool,
 
     updated_branch_nodes: Option<HashMap<Nibbles, BranchNodeCompact>>,
+    proof_retainer: Option<ProofRetainer>,
 
     rlp_buf: Vec<u8>,
 }
@@ -62,6 +69,7 @@ impl From<HashBuilderState> for HashBuilder {
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,
             updated_branch_nodes: None,
+            proof_retainer: None,
             rlp_buf: Vec::with_capacity(32),
         }
     }
@@ -90,6 +98,12 @@ impl HashBuilder {
         self
     }
 
+    /// Enable proof retainer for the specified target nibbles.
+    pub fn with_proof_retainer(mut self, targets: Vec<Nibbles>) -> Self {
+        self.proof_retainer = Some(ProofRetainer::new(targets));
+        self
+    }
+
     /// Enables the Hash Builder to store updated branch nodes.
     ///
     /// Call [HashBuilder::split] to get the updates to branch nodes.
@@ -105,6 +119,11 @@ impl HashBuilder {
         (self, updates.unwrap_or_default())
     }
 
+    /// Take and return the proofs retained.
+    pub fn take_proofs(&mut self) -> BTreeMap<Nibbles, Bytes> {
+        self.proof_retainer.take().map(ProofRetainer::into_proofs).unwrap_or_default()
+    }
+
     /// The number of total updates accrued.
     /// Returns `0` if [Self::with_updates] was not called.
     pub fn updates_len(&self) -> usize {
@@ -115,7 +134,7 @@ impl HashBuilder {
     pub fn print_stack(&self) {
         println!("============ STACK ===============");
         for item in &self.stack {
-            println!("{}", hex::encode(item));
+            println!("{}", crate::hex::encode(item));
         }
         println!("============ END STACK ===============");
     }
@@ -130,7 +149,7 @@ impl HashBuilder {
     }
 
     /// Adds a new branch element & its hash to the trie hash builder.
-    pub fn add_branch(&mut self, key: Nibbles, value: H256, stored_in_database: bool) {
+    pub fn add_branch(&mut self, key: Nibbles, value: B256, stored_in_database: bool) {
         assert!(key > self.key || (self.key.is_empty() && key.is_empty()));
         if !self.key.is_empty() {
             self.update(&key);
@@ -141,15 +160,8 @@ impl HashBuilder {
         self.stored_in_database = stored_in_database;
     }
 
-    fn set_key_value<T: Into<HashBuilderValue>>(&mut self, key: Nibbles, value: T) {
-        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "old key/value");
-        self.key = key;
-        self.value = value.into();
-        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "new key/value");
-    }
-
     /// Returns the current root hash of the trie builder.
-    pub fn root(&mut self) -> H256 {
+    pub fn root(&mut self) -> B256 {
         // Clears the internal state
         if !self.key.is_empty() {
             self.update(&Nibbles::default());
@@ -159,15 +171,22 @@ impl HashBuilder {
         self.current_root()
     }
 
-    fn current_root(&self) -> H256 {
+    fn set_key_value<T: Into<HashBuilderValue>>(&mut self, key: Nibbles, value: T) {
+        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "old key/value");
+        self.key = key;
+        self.value = value.into();
+        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "new key/value");
+    }
+
+    fn current_root(&self) -> B256 {
         if let Some(node_ref) = self.stack.last() {
-            if node_ref.len() == H256::len_bytes() + 1 {
-                H256::from_slice(&node_ref[1..])
+            if node_ref.len() == B256::len_bytes() + 1 {
+                B256::from_slice(&node_ref[1..])
             } else {
                 keccak256(node_ref)
             }
         } else {
-            EMPTY_ROOT
+            EMPTY_ROOT_HASH
         }
     }
 
@@ -189,7 +208,7 @@ impl HashBuilder {
                 tracing::Level::TRACE,
                 "loop",
                 i,
-                current = hex::encode(&current.hex_data),
+                current = crate::hex::encode(&current.hex_data),
                 ?build_extensions
             );
             let _enter = span.enter();
@@ -247,11 +266,12 @@ impl HashBuilder {
                         tracing::debug!(target: "trie::hash_builder", ?leaf_node, "pushing leaf node");
                         tracing::trace!(target: "trie::hash_builder", rlp = {
                             self.rlp_buf.clear();
-                            hex::encode(&leaf_node.rlp(&mut self.rlp_buf))
+                            crate::hex::encode(&leaf_node.rlp(&mut self.rlp_buf))
                         }, "leaf node rlp");
 
                         self.rlp_buf.clear();
                         self.stack.push(leaf_node.rlp(&mut self.rlp_buf));
+                        self.retain_proof_from_buf(&current);
                     }
                     HashBuilderValue::Hash(hash) => {
                         tracing::debug!(target: "trie::hash_builder", ?hash, "pushing branch node hash");
@@ -277,10 +297,11 @@ impl HashBuilder {
                 tracing::debug!(target: "trie::hash_builder", ?extension_node, "pushing extension node");
                 tracing::trace!(target: "trie::hash_builder", rlp = {
                     self.rlp_buf.clear();
-                    hex::encode(&extension_node.rlp(&mut self.rlp_buf))
+                    crate::hex::encode(&extension_node.rlp(&mut self.rlp_buf))
                 }, "extension node rlp");
                 self.rlp_buf.clear();
                 self.stack.push(extension_node.rlp(&mut self.rlp_buf));
+                self.retain_proof_from_buf(&current.slice(0, len_from));
                 self.resize_masks(len_from);
             }
 
@@ -292,7 +313,7 @@ impl HashBuilder {
             // Insert branch nodes in the stack
             if !succeeding.is_empty() || preceding_exists {
                 // Pushes the corresponding branch node to the stack
-                let children = self.push_branch_node(len);
+                let children = self.push_branch_node(&current, len);
                 // Need to store the branch node in an efficient format
                 // outside of the hash builder
                 self.store_branch_node(&current, len, children);
@@ -323,7 +344,7 @@ impl HashBuilder {
     /// Given the size of the longest common prefix, it proceeds to create a branch node
     /// from the state mask and existing stack state, and store its RLP to the top of the stack,
     /// after popping all the relevant elements from the stack.
-    fn push_branch_node(&mut self, len: usize) -> Vec<H256> {
+    fn push_branch_node(&mut self, current: &Nibbles, len: usize) -> Vec<B256> {
         let state_mask = self.groups[len];
         let hash_mask = self.hash_masks[len];
         let branch_node = BranchNode::new(&self.stack);
@@ -331,6 +352,7 @@ impl HashBuilder {
 
         self.rlp_buf.clear();
         let rlp = branch_node.rlp(state_mask, &mut self.rlp_buf);
+        self.retain_proof_from_buf(&current.slice(0, len));
 
         // Clears the stack from the branch node elements
         let first_child_idx = self.stack.len() - state_mask.count_ones() as usize;
@@ -343,7 +365,7 @@ impl HashBuilder {
         self.stack.resize(first_child_idx, vec![]);
 
         tracing::debug!(target: "trie::hash_builder", "pushing branch node with {:?} mask from stack", state_mask);
-        tracing::trace!(target: "trie::hash_builder", rlp = hex::encode(&rlp), "branch node rlp");
+        tracing::trace!(target: "trie::hash_builder", rlp = crate::hex::encode(&rlp), "branch node rlp");
         self.stack.push(rlp);
         children
     }
@@ -352,7 +374,7 @@ impl HashBuilder {
     /// to update the masks for the next level and store the branch node and the
     /// masks in the database. We will use that when consuming the intermediate nodes
     /// from the database to efficiently build the trie.
-    fn store_branch_node(&mut self, current: &Nibbles, len: usize, children: Vec<H256>) {
+    fn store_branch_node(&mut self, current: &Nibbles, len: usize, children: Vec<B256>) {
         if len > 0 {
             let parent_index = len - 1;
             self.hash_masks[parent_index] |= TrieMask::from_nibble(current[parent_index]);
@@ -387,6 +409,12 @@ impl HashBuilder {
         }
     }
 
+    fn retain_proof_from_buf(&mut self, prefix: &Nibbles) {
+        if let Some(proof_retainer) = self.proof_retainer.as_mut() {
+            proof_retainer.retain(prefix, &self.rlp_buf)
+        }
+    }
+
     fn update_masks(&mut self, current: &Nibbles, len_from: usize) {
         if len_from > 0 {
             let flag = TrieMask::from_nibble(current[len_from - 1]);
@@ -415,11 +443,11 @@ impl HashBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{hex_literal::hex, proofs::KeccakHasher, H256, U256};
+    use crate::{hex_literal::hex, proofs::triehash::KeccakHasher, B256, U256};
     use proptest::prelude::*;
     use std::collections::{BTreeMap, HashMap};
 
-    fn trie_root<I, K, V>(iter: I) -> H256
+    fn trie_root<I, K, V>(iter: I) -> B256
     where
         I: IntoIterator<Item = (K, V)>,
         K: AsRef<[u8]> + Ord,
@@ -439,7 +467,7 @@ mod tests {
         K: AsRef<[u8]> + Ord,
     {
         let hashed = iter
-            .map(|(k, v)| (keccak256(k.as_ref()), reth_rlp::encode_fixed_size(v).to_vec()))
+            .map(|(k, v)| (keccak256(k.as_ref()), alloy_rlp::encode_fixed_size(v).to_vec()))
             // Collect into a btree map to sort the data
             .collect::<BTreeMap<_, _>>();
 
@@ -472,12 +500,12 @@ mod tests {
 
     #[test]
     fn empty() {
-        assert_eq!(HashBuilder::default().root(), EMPTY_ROOT);
+        assert_eq!(HashBuilder::default().root(), EMPTY_ROOT_HASH);
     }
 
     #[test]
     fn arbitrary_hashed_root() {
-        proptest!(|(state: BTreeMap<H256, U256>)| {
+        proptest!(|(state: BTreeMap<B256, U256>)| {
             assert_hashed_trie_root(state.iter());
         });
     }
@@ -557,15 +585,15 @@ mod tests {
     #[test]
     fn test_root_rlp_hashed_data() {
         let data = HashMap::from([
-            (H256::from_low_u64_le(1), U256::from(2)),
-            (H256::from_low_u64_be(3), U256::from(4)),
+            (B256::with_last_byte(1), U256::from(2)),
+            (B256::with_last_byte(3), U256::from(4)),
         ]);
         assert_hashed_trie_root(data.iter());
     }
 
     #[test]
     fn test_root_known_hash() {
-        let root_hash = H256::random();
+        let root_hash = B256::random();
         let mut hb = HashBuilder::default();
         hb.add_branch(Nibbles::default(), root_hash, false);
         assert_eq!(hb.root(), root_hash);
@@ -590,7 +618,7 @@ mod tests {
         // Skip the 0th element given in this example they have a common prefix and will
         // collapse to a Branch node.
         use crate::bytes::BytesMut;
-        use reth_rlp::Encodable;
+        use alloy_rlp::Encodable;
         let leaf1 = LeafNode::new(&Nibbles::unpack(&raw_input[0].0[1..]), input[0].1);
         let leaf2 = LeafNode::new(&Nibbles::unpack(&raw_input[1].0[1..]), input[1].1);
         let mut branch: [&dyn Encodable; 17] = [b""; 17];
@@ -599,7 +627,7 @@ mod tests {
         branch[4] = &leaf1;
         branch[7] = &leaf2;
         let mut branch_node_rlp = BytesMut::new();
-        reth_rlp::encode_list::<dyn Encodable, _>(&branch, &mut branch_node_rlp);
+        alloy_rlp::encode_list::<_, dyn Encodable>(&branch, &mut branch_node_rlp);
         let branch_node_hash = keccak256(branch_node_rlp);
 
         let mut hb2 = HashBuilder::default();

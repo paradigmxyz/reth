@@ -1,8 +1,7 @@
-use std::mem;
-
-use crate::{constants::GWEI_TO_WEI, serde_helper::u64_hex, Address, U256};
+use crate::{constants::GWEI_TO_WEI, serde_helper::u64_hex, Address};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{RlpDecodable, RlpEncodable};
+use std::mem;
 
 /// Withdrawal represents a validator withdrawal from the consensus layer.
 #[main_codec]
@@ -23,8 +22,8 @@ pub struct Withdrawal {
 
 impl Withdrawal {
     /// Return the withdrawal amount in wei.
-    pub fn amount_wei(&self) -> U256 {
-        U256::from(self.amount) * U256::from(GWEI_TO_WEI)
+    pub fn amount_wei(&self) -> u128 {
+        self.amount as u128 * GWEI_TO_WEI as u128
     }
 
     /// Calculate a heuristic for the in-memory size of the [Withdrawal].

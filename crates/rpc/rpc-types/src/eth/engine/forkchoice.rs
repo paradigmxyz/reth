@@ -1,6 +1,6 @@
 use super::{PayloadStatus, PayloadStatusEnum};
 use crate::engine::PayloadId;
-use reth_primitives::H256;
+use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 
 /// invalid forkchoice state error code.
@@ -23,11 +23,11 @@ pub type ForkChoiceUpdateResult = Result<ForkchoiceUpdated, ForkchoiceUpdateErro
 #[serde(rename_all = "camelCase")]
 pub struct ForkchoiceState {
     /// Hash of the head block.
-    pub head_block_hash: H256,
+    pub head_block_hash: B256,
     /// Hash of the safe block.
-    pub safe_block_hash: H256,
+    pub safe_block_hash: B256,
     /// Hash of finalized block.
-    pub finalized_block_hash: H256,
+    pub finalized_block_hash: B256,
 }
 
 /// A standalone forkchoice update errors for RPC.
@@ -40,10 +40,10 @@ pub enum ForkchoiceUpdateError {
     /// [PayloadAttributes](crate::engine::PayloadAttributes).
     ///
     /// This is returned as an error because the payload attributes are invalid and the payload is not valid, See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
-    #[error("Invalid payload attributes")]
+    #[error("invalid payload attributes")]
     UpdatedInvalidPayloadAttributes,
     /// The given [ForkchoiceState] is invalid or inconsistent.
-    #[error("Invalid forkchoice state")]
+    #[error("invalid forkchoice state")]
     InvalidState,
     /// Thrown when a forkchoice final block does not exist in the database.
     #[error("final block not available in database")]
@@ -97,7 +97,7 @@ impl ForkchoiceUpdated {
         Self { payload_status: PayloadStatus::from_status(status), payload_id: None }
     }
 
-    pub fn with_latest_valid_hash(mut self, hash: H256) -> Self {
+    pub fn with_latest_valid_hash(mut self, hash: B256) -> Self {
         self.payload_status.latest_valid_hash = Some(hash);
         self
     }

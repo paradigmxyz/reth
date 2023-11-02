@@ -17,7 +17,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
     },
-    BlockHashOrNumber, BlockNumber, SealedHeader, H256,
+    BlockHashOrNumber, BlockNumber, SealedHeader, B256,
 };
 use reth_provider::DatabaseProviderRW;
 use tokio::sync::watch;
@@ -31,7 +31,7 @@ pub enum HeaderSyncMode {
     Continuous,
     /// A sync mode in which the stage polls the receiver for the next tip
     /// to download from.
-    Tip(watch::Receiver<H256>),
+    Tip(watch::Receiver<B256>),
 }
 
 /// The headers stage.
@@ -206,7 +206,12 @@ where
 
         // Nothing to sync
         if gap.is_closed() {
-            info!(target: "sync::stages::headers", checkpoint = %current_checkpoint, target = ?tip, "Target block already reached");
+            info!(
+                target: "sync::stages::headers",
+                checkpoint = %current_checkpoint.block_number,
+                target = ?tip,
+                "Target block already reached"
+            );
             return Ok(ExecOutput::done(current_checkpoint))
         }
 
@@ -385,8 +390,9 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
+    use rand::Rng;
     use reth_interfaces::test_utils::{generators, generators::random_header};
-    use reth_primitives::{stage::StageUnitCheckpoint, H256, MAINNET};
+    use reth_primitives::{stage::StageUnitCheckpoint, B256, MAINNET};
     use reth_provider::ProviderFactory;
     use test_runner::HeadersTestRunner;
 
@@ -406,7 +412,7 @@ mod tests {
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
             pub(crate) client: TestHeadersClient,
-            channel: (watch::Sender<H256>, watch::Receiver<H256>),
+            channel: (watch::Sender<B256>, watch::Receiver<B256>),
             downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
             tx: TestTransaction,
         }
@@ -416,7 +422,7 @@ mod tests {
                 let client = TestHeadersClient::default();
                 Self {
                     client: client.clone(),
-                    channel: watch::channel(H256::zero()),
+                    channel: watch::channel(B256::ZERO),
                     downloader_factory: Box::new(move || {
                         TestHeaderDownloader::new(
                             client.clone(),
@@ -524,7 +530,7 @@ mod tests {
                 let client = TestHeadersClient::default();
                 Self {
                     client: client.clone(),
-                    channel: watch::channel(H256::zero()),
+                    channel: watch::channel(B256::ZERO),
                     downloader_factory: Box::new(move || {
                         ReverseHeadersDownloaderBuilder::default()
                             .stream_batch_size(500)
@@ -547,7 +553,7 @@ mod tests {
                 Ok(())
             }
 
-            pub(crate) fn send_tip(&self, tip: H256) {
+            pub(crate) fn send_tip(&self, tip: B256) {
                 self.channel.0.send(tip).expect("failed to send tip");
             }
         }
@@ -604,7 +610,7 @@ mod tests {
 
         let mut rng = generators::rng();
 
-        let consensus_tip = H256::random();
+        let consensus_tip = rng.gen();
         runner.send_tip(consensus_tip);
 
         // Genesis

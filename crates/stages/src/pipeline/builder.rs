@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageSet};
 use reth_db::database::Database;
-use reth_primitives::{stage::StageId, BlockNumber, ChainSpec, H256};
+use reth_primitives::{stage::StageId, BlockNumber, ChainSpec, B256};
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
@@ -16,7 +16,7 @@ where
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
     /// A receiver for the current chain tip to sync to.
-    tip_tx: Option<watch::Sender<H256>>,
+    tip_tx: Option<watch::Sender<B256>>,
     metrics_tx: Option<MetricEventsSender>,
 }
 
@@ -56,7 +56,7 @@ where
     }
 
     /// Set the tip sender.
-    pub fn with_tip_sender(mut self, tip_tx: watch::Sender<H256>) -> Self {
+    pub fn with_tip_sender(mut self, tip_tx: watch::Sender<B256>) -> Self {
         self.tip_tx = Some(tip_tx);
         self
     }
@@ -69,7 +69,7 @@ where
 
     /// Builds the final [`Pipeline`] using the given database.
     ///
-    /// Note: it's expected that this is either an [Arc](std::sync::Arc) or an Arc wrapper type.
+    /// Note: it's expected that this is either an [Arc] or an Arc wrapper type.
     pub fn build(self, db: DB, chain_spec: Arc<ChainSpec>) -> Pipeline<DB> {
         let Self { stages, max_block, tip_tx, metrics_tx } = self;
         Pipeline {

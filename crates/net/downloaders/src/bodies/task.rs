@@ -181,7 +181,7 @@ mod tests {
         let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),

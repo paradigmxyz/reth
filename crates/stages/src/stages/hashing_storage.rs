@@ -240,7 +240,7 @@ mod tests {
         generators::{random_block_range, random_contract_account_range},
     };
     use reth_primitives::{
-        stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, H256, U256,
+        stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, B256, U256,
     };
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
@@ -492,7 +492,7 @@ mod tests {
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut rng, &mut (0..n_accounts));
 
-            let blocks = random_block_range(&mut rng, stage_progress..=end, H256::zero(), 0..3);
+            let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..3);
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
@@ -620,9 +620,9 @@ mod tests {
                 .map_err(|e| e.into())
         }
 
-        fn insert_storage_entry<'a, TX: DbTxMut<'a>>(
+        fn insert_storage_entry<TX: DbTxMut>(
             &self,
-            tx: &'a TX,
+            tx: &TX,
             tid_address: BlockNumberAddress,
             entry: StorageEntry,
             hash: bool,

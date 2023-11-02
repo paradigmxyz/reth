@@ -17,7 +17,7 @@ use std::{cmp::Ordering, collections::BTreeSet, ops::Deref, sync::Arc};
 pub(crate) struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.
     ///
-    /// This way we can determine when transactions where submitted to the pool.
+    /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: FnvHashMap<TransactionId, ParkedPoolTransaction<T>>,
@@ -101,11 +101,23 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.by_id.len()
     }
 
-    /// Whether the pool is empty
+    /// Returns whether the pool is empty
     #[cfg(test)]
     #[allow(unused)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
+    }
+
+    /// Returns `true` if the transaction with the given id is already included in this pool.
+    #[cfg(test)]
+    pub(crate) fn contains(&self, id: &TransactionId) -> bool {
+        self.by_id.contains_key(id)
+    }
+
+    /// Asserts that the bijection between `by_id` and `best` is valid.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn assert_invariants(&self) {
+        assert_eq!(self.by_id.len(), self.best.len(), "by_id.len() != best.len()");
     }
 }
 

@@ -6,7 +6,10 @@
 use crate::{
     blobstore::BlobStoreError,
     error::PoolError,
-    traits::{GetPooledTransactionLimit, PendingTransactionListenerKind},
+    traits::{
+        BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar,
+        TransactionListenerKind,
+    },
     validate::ValidTransaction,
     AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
     NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
@@ -38,6 +41,7 @@ impl TransactionPool for NoopTransactionPool {
             last_seen_block_hash: Default::default(),
             last_seen_block_number: 0,
             pending_basefee: 0,
+            pending_blob_fee: None,
         }
     }
 
@@ -47,7 +51,7 @@ impl TransactionPool for NoopTransactionPool {
         transaction: Self::Transaction,
     ) -> PoolResult<TransactionEvents> {
         let hash = *transaction.hash();
-        Err(PoolError::Other(hash, Box::new(NoopInsertError::new(transaction))))
+        Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
     }
 
     async fn add_transaction(
@@ -56,7 +60,7 @@ impl TransactionPool for NoopTransactionPool {
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let hash = *transaction.hash();
-        Err(PoolError::Other(hash, Box::new(NoopInsertError::new(transaction))))
+        Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
     }
 
     async fn add_transactions(
@@ -68,7 +72,7 @@ impl TransactionPool for NoopTransactionPool {
             .into_iter()
             .map(|transaction| {
                 let hash = *transaction.hash();
-                Err(PoolError::Other(hash, Box::new(NoopInsertError::new(transaction))))
+                Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
             })
             .collect())
     }
@@ -83,12 +87,23 @@ impl TransactionPool for NoopTransactionPool {
 
     fn pending_transactions_listener_for(
         &self,
-        _kind: PendingTransactionListenerKind,
+        _kind: TransactionListenerKind,
     ) -> Receiver<TxHash> {
         mpsc::channel(1).1
     }
 
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
+        mpsc::channel(1).1
+    }
+
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        mpsc::channel(1).1
+    }
+
+    fn new_transactions_listener_for(
+        &self,
+        _kind: TransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>> {
         mpsc::channel(1).1
     }
 
@@ -128,6 +143,13 @@ impl TransactionPool for NoopTransactionPool {
     fn best_transactions_with_base_fee(
         &self,
         _: u64,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+        Box::new(std::iter::empty())
+    }
+
+    fn best_transactions_with_attributes(
+        &self,
+        _: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(std::iter::empty())
     }
@@ -184,6 +206,16 @@ impl TransactionPool for NoopTransactionPool {
     ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
         Ok(vec![])
     }
+
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+        if tx_hashes.is_empty() {
+            return Ok(vec![])
+        }
+        Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
@@ -232,7 +264,7 @@ impl<T> Default for MockTransactionValidator<T> {
 
 /// An error that contains the transaction that failed to be inserted into the noop pool.
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("Can't insert transaction into the noop pool that does nothing.")]
+#[error("can't insert transaction into the noop pool that does nothing")]
 pub struct NoopInsertError {
     tx: EthPooledTransaction,
 }

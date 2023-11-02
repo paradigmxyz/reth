@@ -81,7 +81,7 @@ impl TransportReceiverT for Receiver {
     }
 }
 
-/// Builder for IPC transport [`Sender`] and ['Receiver`] pair.
+/// Builder for IPC transport [`Sender`] and [`Receiver`] pair.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct IpcTransportClientBuilder;
@@ -120,13 +120,13 @@ impl IpcTransportClientBuilder {
 #[allow(missing_docs)]
 pub enum IpcError {
     /// Operation not supported
-    #[error("Operation not supported")]
+    #[error("operation not supported")]
     NotSupported,
     /// Stream was closed
-    #[error("Stream closed")]
+    #[error("stream closed")]
     Closed,
     /// Thrown when failed to establish a socket connection.
-    #[error("Failed to connect to socket {path}: {err}")]
+    #[error("failed to connect to socket {path}: {err}")]
     FailedToConnect {
         /// The path of the socket.
         path: PathBuf,

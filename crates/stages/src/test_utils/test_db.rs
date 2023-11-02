@@ -5,14 +5,14 @@ use reth_db::{
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::{Table, TableRow},
     tables,
-    test_utils::{create_test_rw_db, create_test_rw_db_with_path},
+    test_utils::{create_test_rw_db, create_test_rw_db_with_path, TempDatabase},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     DatabaseEnv, DatabaseError as DbError,
 };
-use reth_interfaces::test_utils::generators::ChangeSet;
+use reth_interfaces::{test_utils::generators::ChangeSet, RethResult};
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
-    TxHash, TxNumber, H256, MAINNET, U256,
+    TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, HistoryWriter, ProviderFactory};
 use std::{
@@ -33,9 +33,9 @@ use std::{
 #[derive(Debug)]
 pub struct TestTransaction {
     /// DB
-    pub tx: Arc<DatabaseEnv>,
+    pub tx: Arc<TempDatabase<DatabaseEnv>>,
     pub path: Option<PathBuf>,
-    pub factory: ProviderFactory<Arc<DatabaseEnv>>,
+    pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
 }
 
 impl Default for TestTransaction {
@@ -57,17 +57,17 @@ impl TestTransaction {
     }
 
     /// Return a database wrapped in [DatabaseProviderRW].
-    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<DatabaseEnv>> {
+    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<TempDatabase<DatabaseEnv>>> {
         self.factory.provider_rw().expect("failed to create db container")
     }
 
     /// Return a database wrapped in [DatabaseProviderRO].
-    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<DatabaseEnv>> {
+    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<TempDatabase<DatabaseEnv>>> {
         self.factory.provider().expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
-    pub fn inner_raw(&self) -> Arc<DatabaseEnv> {
+    pub fn inner_raw(&self) -> Arc<TempDatabase<DatabaseEnv>> {
         self.tx.clone()
     }
 
@@ -198,10 +198,7 @@ impl TestTransaction {
     }
 
     /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
-    fn insert_header<'a, TX: DbTxMut<'a> + DbTx<'a>>(
-        tx: &'a TX,
-        header: &SealedHeader,
-    ) -> Result<(), DbError> {
+    fn insert_header<TX: DbTxMut + DbTx>(tx: &TX, header: &SealedHeader) -> Result<(), DbError> {
         tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
         tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
         tx.put::<tables::Headers>(header.number, header.clone().unseal())
@@ -219,7 +216,7 @@ impl TestTransaction {
     /// Inserts total difficulty of headers into the corresponding tables.
     ///
     /// Superset functionality of [TestTransaction::insert_headers].
-    pub(crate) fn insert_headers_with_td<'a, I>(&self, headers: I) -> Result<(), DbError>
+    pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
@@ -379,16 +376,12 @@ impl TestTransaction {
         })
     }
 
-    pub fn insert_history<I>(
-        &self,
-        changesets: I,
-        block_offset: Option<u64>,
-    ) -> reth_interfaces::Result<()>
+    pub fn insert_history<I>(&self, changesets: I, block_offset: Option<u64>) -> RethResult<()>
     where
         I: IntoIterator<Item = ChangeSet>,
     {
         let mut accounts = BTreeMap::<Address, Vec<u64>>::new();
-        let mut storages = BTreeMap::<(Address, H256), Vec<u64>>::new();
+        let mut storages = BTreeMap::<(Address, B256), Vec<u64>>::new();
 
         for (block, changeset) in changesets.into_iter().enumerate() {
             for (address, _, storage_entries) in changeset {

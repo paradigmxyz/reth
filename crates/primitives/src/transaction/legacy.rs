@@ -1,7 +1,7 @@
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, H256};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, TxValue, B256};
+use alloy_rlp::{length_of_length, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{length_of_length, Encodable, Header};
 use std::mem;
 
 /// Legacy transaction.
@@ -33,11 +33,7 @@ pub struct TxLegacy {
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub value: u128,
+    pub value: TxValue,
     /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
     /// Some). pub init: An unlimited size byte array specifying the
     /// EVM-code for the account initialisation procedure CREATE,
@@ -55,7 +51,7 @@ impl TxLegacy {
         mem::size_of::<u128>() + // gas_price
         mem::size_of::<u64>() + // gas_limit
         self.to.size() + // to
-        mem::size_of::<u128>() + // value
+        mem::size_of::<TxValue>() + // value
         self.input.len() // input
     }
 
@@ -154,7 +150,7 @@ impl TxLegacy {
     /// hashing.
     ///
     /// See [Self::encode_for_signing] for more information on the encoding format.
-    pub(crate) fn signature_hash(&self) -> H256 {
+    pub(crate) fn signature_hash(&self) -> B256 {
         let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
@@ -166,7 +162,7 @@ mod tests {
     use super::TxLegacy;
     use crate::{
         transaction::{signature::Signature, TransactionKind},
-        Address, Transaction, TransactionSigned, H256, U256,
+        Address, Transaction, TransactionSigned, B256, U256,
     };
 
     #[test]
@@ -174,7 +170,7 @@ mod tests {
         use crate::hex_literal::hex;
 
         let signer: Address = hex!("398137383b3d25c92898c656696e41950e47316b").into();
-        let hash: H256 =
+        let hash: B256 =
             hex!("bb3a336e3f823ec18197f1e13ee875700f08f03e2cab75f0d0b118dabb44cba0").into();
 
         let tx = Transaction::Legacy(TxLegacy {

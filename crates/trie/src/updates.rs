@@ -6,7 +6,7 @@ use reth_db::{
 };
 use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
-    H256,
+    B256,
 };
 use std::collections::{hash_map::IntoIter, HashMap};
 
@@ -16,9 +16,9 @@ pub enum TrieKey {
     /// A node in the account trie.
     AccountNode(StoredNibbles),
     /// A node in the storage trie.
-    StorageNode(H256, StoredNibblesSubKey),
+    StorageNode(B256, StoredNibblesSubKey),
     /// Storage trie of an account.
-    StorageTrie(H256),
+    StorageTrie(B256),
 }
 
 /// The operation to perform on the trie.
@@ -77,7 +77,6 @@ impl TrieUpdates {
     }
 
     /// Extend the updates with account trie updates.
-    #[allow(clippy::mutable_key_type)]
     pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
         self.extend(updates.into_iter().map(|(nibbles, node)| {
             (TrieKey::AccountNode(nibbles.hex_data.to_vec().into()), TrieOp::Update(node))
@@ -85,10 +84,9 @@ impl TrieUpdates {
     }
 
     /// Extend the updates with storage trie updates.
-    #[allow(clippy::mutable_key_type)]
     pub fn extend_with_storage_updates(
         &mut self,
-        hashed_address: H256,
+        hashed_address: B256,
         updates: HashMap<Nibbles, BranchNodeCompact>,
     ) {
         self.extend(updates.into_iter().map(|(nibbles, node)| {
@@ -105,10 +103,7 @@ impl TrieUpdates {
     }
 
     /// Flush updates all aggregated updates to the database.
-    pub fn flush<'a, 'tx, TX>(self, tx: &'a TX) -> Result<(), reth_db::DatabaseError>
-    where
-        TX: DbTx<'tx> + DbTxMut<'tx>,
-    {
+    pub fn flush(self, tx: &(impl DbTx + DbTxMut)) -> Result<(), reth_db::DatabaseError> {
         if self.trie_operations.is_empty() {
             return Ok(())
         }

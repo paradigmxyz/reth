@@ -1,7 +1,7 @@
 use crate::{
     constants,
+    constants::DEFAULT_MAX_LOGS_PER_RESPONSE,
     error::{RpcError, ServerKind},
-    eth::DEFAULT_MAX_LOGS_PER_RESPONSE,
     EthConfig,
 };
 use hyper::header::AUTHORIZATION;
@@ -17,8 +17,8 @@ use reth_provider::{
 };
 use reth_rpc::{
     eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
-    JwtAuthValidator, JwtSecret, TracingCallPool,
+    AuthLayer, BlockingTaskPool, Claims, EngineEthApi, EthApi, EthFilter,
+    EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -66,7 +66,7 @@ where
         gas_oracle,
         EthConfig::default().rpc_gas_cap,
         Box::new(executor.clone()),
-        TracingCallPool::build().expect("failed to build tracing pool"),
+        BlockingTaskPool::build().expect("failed to build tracing pool"),
     );
     let eth_filter = EthFilter::new(
         provider,
@@ -74,6 +74,7 @@ where
         eth_cache.clone(),
         DEFAULT_MAX_LOGS_PER_RESPONSE,
         Box::new(executor.clone()),
+        EthConfig::default().stale_filter_ttl,
     );
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
@@ -139,6 +140,11 @@ impl AuthServerConfig {
     /// Convenience function to create a new `AuthServerConfig`.
     pub fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
         AuthServerConfigBuilder::new(secret)
+    }
+
+    /// Returns the address the server will listen on.
+    pub fn address(&self) -> SocketAddr {
+        self.socket_addr
     }
 
     /// Convenience function to start a server in one step.

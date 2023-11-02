@@ -21,7 +21,7 @@
 //!
 //! See also <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers>
 
-use reth_primitives::{bytes::Bytes, hex, Selector};
+use reth_primitives::{hex, Bytes, Selector};
 use reth_rpc_types::trace::geth::FourByteFrame;
 use revm::{
     interpreter::{CallInputs, Gas, InstructionResult},
@@ -51,7 +51,6 @@ where
         &mut self,
         _data: &mut EVMData<'_, DB>,
         call: &mut CallInputs,
-        _is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
         if call.input.len() >= 4 {
             let selector = Selector::try_from(&call.input[..4]).expect("input is at least 4 bytes");

@@ -1,9 +1,9 @@
 //! Clap parser utilities
 
 use reth_primitives::{
-    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, DEV, GOERLI, MAINNET, SEPOLIA,
+    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, GOERLI, HOLESKY, MAINNET,
+    SEPOLIA,
 };
-use reth_revm::primitives::B256 as H256;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -25,6 +25,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         "mainnet" => MAINNET.clone(),
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
+        "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
@@ -40,6 +41,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "mainnet" => MAINNET.clone(),
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
+        "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
@@ -51,7 +53,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
 
 /// Parse [BlockHashOrNumber]
 pub fn hash_or_num_value_parser(value: &str) -> eyre::Result<BlockHashOrNumber, eyre::Error> {
-    match H256::from_str(value) {
+    match B256::from_str(value) {
         Ok(hash) => Ok(BlockHashOrNumber::Hash(hash)),
         Err(_) => Ok(BlockHashOrNumber::Number(value.parse()?)),
     }
@@ -61,16 +63,16 @@ pub fn hash_or_num_value_parser(value: &str) -> eyre::Result<BlockHashOrNumber, 
 #[derive(thiserror::Error, Debug)]
 pub enum SocketAddressParsingError {
     /// Failed to convert the string into a socket addr
-    #[error("Cannot parse socket address: {0}")]
+    #[error("could not parse socket address: {0}")]
     Io(#[from] std::io::Error),
     /// Input must not be empty
-    #[error("Cannot parse socket address from empty string")]
+    #[error("cannot parse socket address from empty string")]
     Empty,
     /// Failed to parse the address
-    #[error("Could not parse socket address from {0}")]
+    #[error("could not parse socket address from {0}")]
     Parse(String),
     /// Failed to parse port
-    #[error("Could not parse port: {0}")]
+    #[error("could not parse port: {0}")]
     Port(#[from] std::num::ParseIntError),
 }
 
@@ -110,7 +112,7 @@ mod tests {
 
     #[test]
     fn parse_chain_spec() {
-        for chain in ["mainnet", "sepolia", "goerli"] {
+        for chain in ["mainnet", "sepolia", "goerli", "holesky"] {
             chain_spec_value_parser(chain).unwrap();
             genesis_value_parser(chain).unwrap();
         }

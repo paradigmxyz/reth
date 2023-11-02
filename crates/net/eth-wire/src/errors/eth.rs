@@ -2,7 +2,7 @@
 use crate::{
     errors::P2PStreamError, version::ParseVersionError, DisconnectReason, EthMessageID, EthVersion,
 };
-use reth_primitives::{Chain, ValidationError, H256};
+use reth_primitives::{Chain, ValidationError, B256};
 use std::io;
 
 /// Errors when sending/receiving messages
@@ -15,7 +15,7 @@ pub enum EthStreamError {
     ParseVersionError(#[from] ParseVersionError),
     #[error(transparent)]
     EthHandshakeError(#[from] EthHandshakeError),
-    #[error("For {0:?} version, message id({1:?}) is invalid")]
+    #[error("message id {1:?} is invalid for version {0:?}")]
     EthInvalidMessageError(EthVersion, EthMessageID),
     #[error("message size ({0}) exceeds max length (10MB)")]
     MessageTooBig(usize),
@@ -50,8 +50,8 @@ impl From<io::Error> for EthStreamError {
     }
 }
 
-impl From<reth_rlp::DecodeError> for EthStreamError {
-    fn from(err: reth_rlp::DecodeError) -> Self {
+impl From<alloy_rlp::Error> for EthStreamError {
+    fn from(err: alloy_rlp::Error) -> Self {
         P2PStreamError::from(err).into()
     }
 }
@@ -68,12 +68,12 @@ pub enum EthHandshakeError {
     NoResponse,
     #[error(transparent)]
     InvalidFork(#[from] ValidationError),
-    #[error("mismatched genesis in Status message. expected: {expected:?}, got: {got:?}")]
-    MismatchedGenesis { expected: H256, got: H256 },
-    #[error("mismatched protocol version in Status message. expected: {expected:?}, got: {got:?}")]
+    #[error("mismatched genesis in status message: got {got}, expected {expected}")]
+    MismatchedGenesis { expected: B256, got: B256 },
+    #[error("mismatched protocol version in status message: got {got}, expected {expected}")]
     MismatchedProtocolVersion { expected: u8, got: u8 },
-    #[error("mismatched chain in Status message. expected: {expected:?}, got: {got:?}")]
+    #[error("mismatched chain in status message: got {got}, expected {expected}")]
     MismatchedChain { expected: Chain, got: Chain },
-    #[error("total difficulty bitlen is too large. maximum: {maximum:?}, got: {got:?}")]
+    #[error("total difficulty bitlen is too large: got {got}, maximum {maximum}")]
     TotalDifficultyBitLenTooLarge { maximum: usize, got: usize },
 }

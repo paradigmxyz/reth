@@ -1,10 +1,11 @@
 use reth_db::open_db_read_only;
-use reth_primitives::{Address, ChainSpecBuilder, H256, U256};
+use reth_primitives::{Address, ChainSpecBuilder, B256, U256};
 use reth_provider::{
     AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
     StateProvider, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
+use reth_rpc_types_compat::log::from_primitive_log;
 
 use std::path::Path;
 
@@ -180,11 +181,11 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     // For a hypothetical address, we'll want to filter down for a specific indexed topic (e.g.
     // `from`).
     let addr = Address::random();
-    let topic = H256::random();
+    let topic = B256::random();
 
-    // TODO: Make it clearer how to choose between topic0 (event name) and the other 3 indexed
-    // topics. This API is a bit clunky and not obvious to use at the moemnt.
-    let filter = Filter::new().address(addr).topic0(topic);
+    // TODO: Make it clearer how to choose between event_signature(topic0) (event name) and the
+    // other 3 indexed topics. This API is a bit clunky and not obvious to use at the moemnt.
+    let filter = Filter::new().address(addr).event_signature(topic);
     let filter_params = FilteredParams::new(Some(filter));
     let address_filter = FilteredParams::address_filter(&addr.into());
     let topics_filter = FilteredParams::topics_filter(&[topic.into()]);
@@ -197,7 +198,8 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     {
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
-            if filter_params.filter_address(log) && filter_params.filter_topics(log) {
+            let log = from_primitive_log(log.clone());
+            if filter_params.filter_address(&log) && filter_params.filter_topics(&log) {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")
             }
@@ -209,7 +211,7 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
 
 fn state_provider_example<T: StateProvider + AccountReader>(provider: T) -> eyre::Result<()> {
     let address = Address::random();
-    let storage_key = H256::random();
+    let storage_key = B256::random();
 
     // Can get account / storage state with simple point queries
     let _account = provider.basic_account(address)?;

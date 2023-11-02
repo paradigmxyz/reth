@@ -18,7 +18,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256,
+    BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, B256,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -58,6 +58,7 @@ enum ReverseHeadersDownloaderError {
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
     consensus: Arc<dyn Consensus>,
@@ -643,8 +644,7 @@ where
         self.into_task_with(&TokioTaskExecutor::default())
     }
 
-    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
-    /// it via the given `spawner`.
+    /// Convert the downloader into a [`TaskDownloader`] by spawning it via the given `spawner`.
     pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader
     where
         S: TaskSpawner,
@@ -989,13 +989,13 @@ impl std::error::Error for HeadersResponseError {}
 #[derive(Clone, Debug)]
 pub enum SyncTargetBlock {
     /// Block hash of the targeted block
-    Hash(H256),
+    Hash(B256),
     /// Block number of the targeted block
     Number(u64),
     /// Both the block hash and number of the targeted block
     HashAndNumber {
         /// Block hash of the targeted block
-        hash: H256,
+        hash: B256,
         /// Block number of the targeted block
         number: u64,
     },
@@ -1003,7 +1003,7 @@ pub enum SyncTargetBlock {
 
 impl SyncTargetBlock {
     /// Create new instance from hash.
-    fn from_hash(hash: H256) -> Self {
+    fn from_hash(hash: B256) -> Self {
         Self::Hash(hash)
     }
 
@@ -1013,7 +1013,7 @@ impl SyncTargetBlock {
     }
 
     /// Set the hash for the sync target.
-    fn with_hash(self, hash: H256) -> Self {
+    fn with_hash(self, hash: B256) -> Self {
         match self {
             Self::Hash(_) => Self::Hash(hash),
             Self::Number(number) => Self::HashAndNumber { hash, number },
@@ -1054,7 +1054,7 @@ impl SyncTargetBlock {
     }
 
     /// Return the hash of the target block, if it is set.
-    fn hash(&self) -> Option<H256> {
+    fn hash(&self) -> Option<B256> {
         match self {
             Self::Hash(hash) => Some(*hash),
             Self::Number(_) => None,
@@ -1235,7 +1235,7 @@ mod tests {
 
         let fixtures = vec![
             Fixture {
-                sync_target_block: SyncTargetBlock::Hash(H256::random()),
+                sync_target_block: SyncTargetBlock::Hash(B256::random()),
                 // Hash maps to None here, all other variants map to Some
                 sync_target_option: None,
                 replace_number: 1,
@@ -1251,7 +1251,7 @@ mod tests {
             },
             Fixture {
                 sync_target_block: SyncTargetBlock::HashAndNumber {
-                    hash: H256::random(),
+                    hash: B256::random(),
                     number: 1,
                 },
                 sync_target_option: Some(1),
@@ -1284,16 +1284,16 @@ mod tests {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(genesis);
-        downloader.update_sync_target(SyncTarget::Tip(H256::random()));
+        downloader.update_sync_target(SyncTarget::Tip(B256::random()));
 
         downloader.sync_target_request.take();
 
-        let target = SyncTarget::Tip(H256::random());
+        let target = SyncTarget::Tip(B256::random());
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_some());
 
         downloader.sync_target_request.take();
-        let target = SyncTarget::Gap(Header::default().seal(H256::random()));
+        let target = SyncTarget::Gap(Header::default().seal(B256::random()));
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(
@@ -1312,12 +1312,12 @@ mod tests {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(header.clone());
-        downloader.update_sync_target(SyncTarget::Tip(H256::random()));
+        downloader.update_sync_target(SyncTarget::Tip(B256::random()));
 
         downloader.queued_validated_headers.push(header.clone());
         let mut next = header.as_ref().clone();
         next.number += 1;
-        downloader.update_local_head(next.seal(H256::random()));
+        downloader.update_local_head(next.seal(B256::random()));
         assert!(downloader.queued_validated_headers.is_empty());
     }
 
@@ -1353,7 +1353,7 @@ mod tests {
             .request_limit(batch_size)
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(genesis);
-        downloader.update_sync_target(SyncTarget::Tip(H256::random()));
+        downloader.update_sync_target(SyncTarget::Tip(B256::random()));
 
         downloader.next_request_block_number = start;
 

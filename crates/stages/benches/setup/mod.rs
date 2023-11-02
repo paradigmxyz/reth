@@ -12,7 +12,7 @@ use reth_interfaces::test_utils::{
         random_eoa_account_range,
     },
 };
-use reth_primitives::{Account, Address, SealedBlock, H256, MAINNET};
+use reth_primitives::{Account, Address, SealedBlock, B256, MAINNET};
 use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
@@ -41,7 +41,7 @@ pub(crate) fn stage_unwind<S: Clone + Stage<DatabaseEnv>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
         // Clear previous run
@@ -69,7 +69,7 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<DatabaseEnv>>(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
         StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
@@ -117,7 +117,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         .into_iter()
         .collect();
 
-        let mut blocks = random_block_range(&mut rng, 0..=num_blocks, H256::zero(), txs_range);
+        let mut blocks = random_block_range(&mut rng, 0..=num_blocks, B256::ZERO, txs_range);
 
         let (transitions, start_state) = random_changeset_range(
             &mut rng,

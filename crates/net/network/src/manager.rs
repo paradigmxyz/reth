@@ -41,9 +41,10 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{listener::EventListeners, ForkId, NodeRecord, PeerId, H256};
+use reth_primitives::{ForkId, NodeRecord, PeerId, B256};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_tokio_util::EventListeners;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -55,7 +56,7 @@ use std::{
 };
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 /// Manages the _entire_ state of the network.
 ///
@@ -85,6 +86,7 @@ use tracing::{debug, error, info, trace, warn};
 ///   ethrequest <--> |ETH request handing| NetworkManager
 ///   discovery --> |Discovered peers| NetworkManager
 /// ```
+#[derive(Debug)]
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
     /// The type that manages the actual network part, which includes connections.
@@ -300,7 +302,7 @@ where
     }
 
     /// Returns the configured genesis hash
-    pub fn genesis_hash(&self) -> H256 {
+    pub fn genesis_hash(&self) -> B256 {
         self.swarm.state().genesis_hash()
     }
 
@@ -358,7 +360,7 @@ where
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
-        trace!(target : "net", ?peer_id,  "received unexpected message");
+        trace!(target: "net", ?peer_id,  "received unexpected message");
         self.swarm
             .state_mut()
             .peers_mut()
@@ -504,7 +506,7 @@ where
                 unreachable!("Not emitted by session")
             }
             PeerMessage::Other(other) => {
-                debug!(target : "net", message_id=%other.id, "Ignoring unsupported message");
+                debug!(target: "net", message_id=%other.id, "Ignoring unsupported message");
             }
         }
     }
@@ -644,20 +646,20 @@ where
                             this.metrics.invalid_messages_received.increment(1);
                         }
                         SwarmEvent::TcpListenerClosed { remote_addr } => {
-                            trace!(target : "net", ?remote_addr, "TCP listener closed.");
+                            trace!(target: "net", ?remote_addr, "TCP listener closed.");
                         }
                         SwarmEvent::TcpListenerError(err) => {
-                            trace!(target : "net", ?err, "TCP connection error.");
+                            trace!(target: "net", ?err, "TCP connection error.");
                         }
                         SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
-                            trace!(target : "net", ?session_id, ?remote_addr, "Incoming connection");
+                            trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
                             this.metrics.total_incoming_connections.increment(1);
                             this.metrics
                                 .incoming_connections
                                 .set(this.swarm.state().peers().num_inbound_connections() as f64);
                         }
                         SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
-                            trace!(target : "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
+                            trace!(target: "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
                             this.metrics.total_outgoing_connections.increment(1);
                             this.metrics
                                 .outgoing_connections
@@ -676,15 +678,16 @@ where
                             let total_active =
                                 this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                             this.metrics.connected_peers.set(total_active as f64);
-                            info!(
-                                target : "net",
+                            trace!(
+                                target: "net",
                                 ?remote_addr,
                                 %client_version,
                                 ?peer_id,
                                 ?total_active,
+                                kind=%direction,
+                                peer_enode=%NodeRecord::new(remote_addr, peer_id),
                                 "Session established"
                             );
-                            debug!(target: "net", kind=%direction, peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
 
                             if direction.is_incoming() {
                                 this.swarm
@@ -721,7 +724,7 @@ where
                                 this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
                             this.metrics.connected_peers.set(total_active as f64);
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?peer_id,
                                 ?total_active,
@@ -765,8 +768,8 @@ where
                                 .notify(NetworkEvent::SessionClosed { peer_id, reason });
                         }
                         SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
-                            debug!(
-                                target : "net",
+                            trace!(
+                                target: "net",
                                 ?remote_addr,
                                 ?error,
                                 "Incoming pending session failed"
@@ -802,7 +805,7 @@ where
                             error,
                         } => {
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?peer_id,
                                 ?error,
@@ -836,7 +839,7 @@ where
                         }
                         SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?peer_id,
                                 ?error,

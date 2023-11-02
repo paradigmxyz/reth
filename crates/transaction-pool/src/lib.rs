@@ -1,22 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs)]
-#![deny(
-    unused_must_use,
-    rust_2018_idioms,
-    unreachable_pub,
-    missing_debug_implementations,
-    rustdoc::broken_intra_doc_links
-)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
 //! Reth's transaction pool implementation.
 //!
 //! This crate provides a generic transaction pool implementation.
@@ -79,12 +60,11 @@
 //!
 //! The lowest layer is the actual pool implementations that manages (validated) transactions:
 //! [`TxPool`](crate::pool::txpool::TxPool). This is contained in a higher level pool type that
-//! guards the low level pool and handles additional listeners or metrics:
-//! [`PoolInner`](crate::pool::PoolInner)
+//! guards the low level pool and handles additional listeners or metrics: [`PoolInner`].
 //!
 //! The transaction pool will be used by separate consumers (RPC, P2P), to make sharing easier, the
-//! [`Pool`](crate::Pool) type is just an `Arc` wrapper around `PoolInner`. This is the usable type
-//! that provides the `TransactionPool` interface.
+//! [`Pool`] type is just an `Arc` wrapper around `PoolInner`. This is the usable type that provides
+//! the `TransactionPool` interface.
 //!
 //!
 //! ## Blob Transactions
@@ -154,19 +134,26 @@
 //!
 //! - `serde` (default): Enable serde support
 //! - `test-utils`: Export utilities for testing
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use crate::pool::PoolInner;
 use aquamarine as _;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
-use crate::blobstore::{BlobStore, BlobStoreError};
 pub use crate::{
+    blobstore::{BlobStore, BlobStoreError},
     config::{
         PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
         TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
@@ -178,13 +165,7 @@ pub use crate::{
         state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
         TransactionEvents,
     },
-    traits::{
-        AllPoolTransactions, BestTransactions, BlockInfo, CanonicalStateUpdate, ChangedAccount,
-        EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
-        GetPooledTransactionLimit, NewTransactionEvent, PendingTransactionListenerKind, PoolSize,
-        PoolTransaction, PropagateKind, PropagatedTransactions, TransactionOrigin, TransactionPool,
-        TransactionPoolExt,
-    },
+    traits::*,
     validate::{
         EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
         TransactionValidator, ValidPoolTransaction,
@@ -207,6 +188,13 @@ mod traits;
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking a pool
 pub mod test_utils;
+
+/// Type alias for default ethereum transaction pool
+pub type EthTransactionPool<Client, S> = Pool<
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
+    CoinbaseTipOrdering<EthPooledTransaction>,
+    S,
+>;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
@@ -239,19 +227,21 @@ where
     }
 
     /// Returns future that validates all transaction in the given iterator.
+    ///
+    /// This returns the validated transactions in the iterator's order.
     async fn validate_all(
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
-        let outcome = futures_util::future::join_all(
+    ) -> PoolResult<Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)>> {
+        let outcomes = futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate(origin, tx)),
         )
         .await
         .into_iter()
-        .collect::<HashMap<_, _>>();
+        .collect();
 
-        Ok(outcome)
+        Ok(outcomes)
     }
 
     /// Validates the given transaction
@@ -278,12 +268,7 @@ where
     }
 }
 
-impl<Client, S>
-    Pool<
-        TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
-        CoinbaseTipOrdering<EthPooledTransaction>,
-        S,
-    >
+impl<Client, S> EthTransactionPool<Client, S>
 where
     Client: StateProviderFactory + Clone + 'static,
     S: BlobStore,
@@ -362,7 +347,8 @@ where
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         let validated = self.validate_all(origin, transactions).await?;
 
-        let transactions = self.pool.add_transactions(origin, validated.into_values());
+        let transactions =
+            self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx));
         Ok(transactions)
     }
 
@@ -374,15 +360,19 @@ where
         self.pool.add_all_transactions_event_listener()
     }
 
-    fn pending_transactions_listener_for(
-        &self,
-        kind: PendingTransactionListenerKind,
-    ) -> Receiver<TxHash> {
+    fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash> {
         self.pool.add_pending_listener(kind)
     }
 
-    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
-        self.pool.add_new_transaction_listener()
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
+        self.pool.add_blob_sidecar_listener()
+    }
+
+    fn new_transactions_listener_for(
+        &self,
+        kind: TransactionListenerKind,
+    ) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+        self.pool.add_new_transaction_listener(kind)
     }
 
     fn pooled_transaction_hashes(&self) -> Vec<TxHash> {
@@ -423,6 +413,13 @@ where
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         self.pool.best_transactions_with_base_fee(base_fee)
+    }
+
+    fn best_transactions_with_attributes(
+        &self,
+        best_transactions_attributes: BestTransactionsAttributes,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
+        self.pool.best_transactions_with_attributes(best_transactions_attributes)
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
@@ -480,6 +477,13 @@ where
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
         self.pool.blob_store().get_all(tx_hashes)
+    }
+
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+        self.pool.blob_store().get_exact(tx_hashes)
     }
 }
 

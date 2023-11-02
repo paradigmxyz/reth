@@ -10,7 +10,7 @@ use indexmap::IndexSet;
 use libc::{c_uint, c_void};
 use parking_lot::Mutex;
 use std::{
-    fmt, fmt::Debug, marker::PhantomData, mem::size_of, ptr, rc::Rc, result, slice,
+    fmt, fmt::Debug, marker::PhantomData, mem::size_of, ptr, rc::Rc, slice,
     sync::mpsc::sync_channel,
 };
 
@@ -23,26 +23,34 @@ mod private {
     impl Sealed for RW {}
 }
 
-pub trait TransactionKind: private::Sealed + Debug + 'static {
+pub trait TransactionKind: private::Sealed + Send + Sync + Debug + 'static {
     #[doc(hidden)]
     const ONLY_CLEAN: bool;
 
     #[doc(hidden)]
     const OPEN_FLAGS: MDBX_txn_flags_t;
+
+    #[doc(hidden)]
+    const IS_READ_ONLY: bool;
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct RO;
+
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct RW;
 
 impl TransactionKind for RO {
     const ONLY_CLEAN: bool = true;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_RDONLY;
+    const IS_READ_ONLY: bool = true;
 }
 impl TransactionKind for RW {
     const ONLY_CLEAN: bool = false;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_READWRITE;
+    const IS_READ_ONLY: bool = false;
 }
 
 /// An MDBX transaction.
@@ -256,8 +264,8 @@ where
     /// case the environment must be configured to allow named databases through
     /// [EnvironmentBuilder::set_max_dbs()](crate::EnvironmentBuilder::set_max_dbs).
     ///
-    /// This function will fail with [Error::BadRslot](crate::error::Error::BadRslot) if called by a
-    /// thread with an open transaction.
+    /// This function will fail with [Error::BadRslot] if called by a thread with an open
+    /// transaction.
     pub fn create_db<'txn>(
         &'txn self,
         name: Option<&str>,
@@ -421,7 +429,7 @@ where
     K: TransactionKind,
     E: EnvironmentKind,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RoTransaction").finish()
     }
 }

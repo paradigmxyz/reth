@@ -1,42 +1,27 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs)]
-#![deny(
-    unused_must_use,
-    rust_2018_idioms,
-    rustdoc::broken_intra_doc_links,
-    unused_crate_dependencies
-)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
-//! This crate defines the abstractions to create and update payloads:
-//!   - [PayloadJobGenerator]: a type that knows how to create new jobs for creating payloads based
-//!     on [PayloadAttributes](reth_rpc_types::engine::PayloadAttributes).
-//!   - [PayloadJob]: a type that can yields (better) payloads over time.
+//! This crate defines abstractions to create and update payloads (blocks):
+//! - [`PayloadJobGenerator`]: a type that knows how to create new jobs for creating payloads based
+//!   on [`PayloadAttributes`](reth_rpc_types::engine::PayloadAttributes).
+//! - [`PayloadJob`]: a type that yields (better) payloads over time.
 //!
-//! This crate comes with the generic [PayloadBuilderService] responsible for managing payload jobs.
+//! This crate comes with the generic [`PayloadBuilderService`] responsible for managing payload
+//! jobs.
 //!
 //! ## Node integration
 //!
-//! In a standard node the [PayloadBuilderService] sits downstream of the engine API or rather the
-//! component that handles requests from the Beacon Node like `engine_forkchoiceUpdatedV1`.
+//! In a standard node the [`PayloadBuilderService`] sits downstream of the engine API, or rather
+//! the component that handles requests from the consensus layer like `engine_forkchoiceUpdatedV1`.
+//!
 //! Payload building is enabled if the forkchoice update request contains payload attributes.
-//! See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
-//! If the forkchoice update request is VALID and contains payload attributes the
-//! [PayloadBuilderService] will create a new [PayloadJob] via the [PayloadJobGenerator] and start
-//! polling it until the payload is requested by the CL and the payload job is resolved:
-//! [PayloadJob::resolve]
+//!
+//! See also [the engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2)
+//! If the forkchoice update request is `VALID` and contains payload attributes the
+//! [`PayloadBuilderService`] will create a new [`PayloadJob`] via the given [`PayloadJobGenerator`]
+//! and start polling it until the payload is requested by the CL and the payload job is resolved
+//! (see [`PayloadJob::resolve`]).
 //!
 //! ## Example
 //!
-//! A simple example of a [PayloadJobGenerator] that creates empty blocks:
+//! A simple example of a [`PayloadJobGenerator`] that creates empty blocks:
 //!
 //! ```
 //! use std::future::Future;
@@ -83,6 +68,10 @@
 //!     Ok(Arc::new(payload))
 //! }
 //!
+//! fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError> {
+//!     Ok(self.attributes.clone())
+//! }
+//!
 //! fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
 //!        let payload = self.best_payload();
 //!        (futures_util::future::ready(payload), KeepPayloadJobAlive::No)
@@ -103,12 +92,23 @@
 //!
 //! - `test-utils`: Export utilities for testing
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 pub mod database;
 pub mod error;
 mod metrics;
 mod payload;
 mod service;
 mod traits;
+
+pub mod noop;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

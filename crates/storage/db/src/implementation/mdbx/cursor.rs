@@ -9,6 +9,7 @@ use crate::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
+    metrics::{Operation, OperationMetrics},
     table::{Compress, DupSort, Encode, Table},
     tables::utils::*,
     DatabaseError,
@@ -24,13 +25,38 @@ pub type CursorRW<'tx, T> = Cursor<'tx, RW, T>;
 #[derive(Debug)]
 pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     /// Inner `libmdbx` cursor.
-    pub inner: reth_libmdbx::Cursor<'tx, K>,
-    /// Table name as is inside the database.
-    pub table: &'static str,
-    /// Phantom data to enforce encoding/decoding.
-    pub _dbi: std::marker::PhantomData<T>,
+    pub(crate) inner: reth_libmdbx::Cursor<'tx, K>,
     /// Cache buffer that receives compressed values.
-    pub buf: Vec<u8>,
+    buf: Vec<u8>,
+    /// Whether to record metrics or not.
+    with_metrics: bool,
+    /// Phantom data to enforce encoding/decoding.
+    _dbi: PhantomData<T>,
+}
+
+impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
+    pub(crate) fn new_with_metrics(
+        inner: reth_libmdbx::Cursor<'tx, K>,
+        with_metrics: bool,
+    ) -> Self {
+        Self { inner, buf: Vec::new(), with_metrics, _dbi: PhantomData }
+    }
+
+    /// If `self.with_metrics == true`, record a metric with the provided operation and value size.
+    ///
+    /// Otherwise, just execute the closure.
+    fn execute_with_operation_metric<R>(
+        &mut self,
+        operation: Operation,
+        value_size: Option<usize>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        if self.with_metrics {
+            OperationMetrics::record(T::NAME, operation, value_size, || f(self))
+        } else {
+            f(self)
+        }
+    }
 }
 
 /// Takes `(key, value)` from the database and decodes it appropriately.
@@ -41,21 +67,21 @@ macro_rules! decode {
     };
 }
 
-/// Some types don't support compression (eg. H256), and we don't want to be copying them to the
+/// Some types don't support compression (eg. B256), and we don't want to be copying them to the
 /// allocated buffer when we can just use their reference.
-macro_rules! compress_or_ref {
+macro_rules! compress_to_buf_or_ref {
     ($self:expr, $value:expr) => {
         if let Some(value) = $value.uncompressable_ref() {
-            value
+            Some(value)
         } else {
             $self.buf.truncate(0);
             $value.compress_to_buf(&mut $self.buf);
-            $self.buf.as_ref()
+            None
         }
     };
 }
 
-impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T> {
+impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<'_, K, T> {
     fn first(&mut self) -> PairResult<T> {
         decode!(self.inner.first())
     }
@@ -84,10 +110,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         decode!(self.inner.get_current())
     }
 
-    fn walk<'cursor>(
-        &'cursor mut self,
-        start_key: Option<T::Key>,
-    ) -> Result<Walker<'cursor, 'tx, T, Self>, DatabaseError>
+    fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -103,10 +126,10 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         Ok(Walker::new(self, start))
     }
 
-    fn walk_range<'cursor>(
-        &'cursor mut self,
+    fn walk_range(
+        &mut self,
         range: impl RangeBounds<T::Key>,
-    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<RangeWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -123,10 +146,10 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
     }
 
-    fn walk_back<'cursor>(
-        &'cursor mut self,
+    fn walk_back(
+        &mut self,
         start_key: Option<T::Key>,
-    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, DatabaseError>
+    ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
@@ -141,7 +164,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
     }
 }
 
-impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, K, T> {
+impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<'_, K, T> {
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
         decode!(self.inner.next_dup())
@@ -179,11 +202,11 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
     /// - None, Some(subkey): like first case, but in the first key
     /// - None, None: first item in the table
     /// of a DUPSORT table.
-    fn walk_dup<'cursor>(
-        &'cursor mut self,
+    fn walk_dup(
+        &mut self,
         key: Option<T::Key>,
         subkey: Option<T::SubKey>,
-    ) -> Result<DupWalker<'cursor, 'tx, T, Self>, DatabaseError> {
+    ) -> Result<DupWalker<'_, T, Self>, DatabaseError> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
                 // encode key and decode it after.
@@ -218,11 +241,11 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
             (None, None) => self.first().transpose(),
         };
 
-        Ok(DupWalker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
+        Ok(DupWalker::<'_, T, Self> { cursor: self, start })
     }
 }
 
-impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
+impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     ///
@@ -232,61 +255,92 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     /// found, before calling `upsert`.
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        // Default `WriteFlags` is UPSERT
-        self.inner.put(key.as_ref(), compress_or_ref!(self, value), WriteFlags::UPSERT).map_err(
-            |e| DatabaseError::Write {
-                code: e.into(),
-                operation: DatabaseWriteOperation::CursorUpsert,
-                table_name: T::NAME,
-                key: Box::from(key.as_ref()),
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorUpsert,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
+                    .map_err(|e| DatabaseError::Write {
+                        code: e.into(),
+                        operation: DatabaseWriteOperation::CursorUpsert,
+                        table_name: T::NAME,
+                        key: Box::from(key.as_ref()),
+                    })
             },
         )
     }
 
     fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.inner
-            .put(key.as_ref(), compress_or_ref!(self, value), WriteFlags::NO_OVERWRITE)
-            .map_err(|e| DatabaseError::Write {
-                code: e.into(),
-                operation: DatabaseWriteOperation::CursorInsert,
-                table_name: T::NAME,
-                key: Box::from(key.as_ref()),
-            })
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorInsert,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
+                    .map_err(|e| DatabaseError::Write {
+                        code: e.into(),
+                        operation: DatabaseWriteOperation::CursorInsert,
+                        table_name: T::NAME,
+                        key: Box::from(key.as_ref()),
+                    })
+            },
+        )
     }
 
     /// Appends the data to the end of the table. Consequently, the append operation
     /// will fail if the inserted key is less than the last table key
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.inner.put(key.as_ref(), compress_or_ref!(self, value), WriteFlags::APPEND).map_err(
-            |e| DatabaseError::Write {
-                code: e.into(),
-                operation: DatabaseWriteOperation::CursorAppend,
-                table_name: T::NAME,
-                key: Box::from(key.as_ref()),
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorAppend,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
+                    .map_err(|e| DatabaseError::Write {
+                        code: e.into(),
+                        operation: DatabaseWriteOperation::CursorAppend,
+                        table_name: T::NAME,
+                        key: Box::from(key.as_ref()),
+                    })
             },
         )
     }
 
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
-        self.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
+        self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |this| {
+            this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
+        })
     }
 }
 
-impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
+impl<T: DupSort> DbDupCursorRW<T> for Cursor<'_, RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
-        self.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
+        self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, None, |this| {
+            this.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
+        })
     }
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        self.inner.put(key.as_ref(), compress_or_ref!(self, value), WriteFlags::APPEND_DUP).map_err(
-            |e| DatabaseError::Write {
-                code: e.into(),
-                operation: DatabaseWriteOperation::CursorAppendDup,
-                table_name: T::NAME,
-                key: Box::from(key.as_ref()),
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorAppendDup,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
+                    .map_err(|e| DatabaseError::Write {
+                        code: e.into(),
+                        operation: DatabaseWriteOperation::CursorAppendDup,
+                        table_name: T::NAME,
+                        key: Box::from(key.as_ref()),
+                    })
             },
         )
     }

@@ -6,10 +6,7 @@ use boa_engine::{
     Context, JsArgs, JsError, JsNativeError, JsResult, JsString, JsValue, NativeFunction, Source,
 };
 use boa_gc::{empty_trace, Finalize, Trace};
-use reth_primitives::{
-    contract::{create2_address_from_code, create_address},
-    hex, keccak256, Address, H256, U256,
-};
+use reth_primitives::{hex, Address, B256, U256};
 use std::collections::HashSet;
 
 /// bigIntegerJS is the minified version of <https://github.com/peterolson/BigInteger.js>.
@@ -107,8 +104,8 @@ pub(crate) fn bytes_to_address(buf: Vec<u8>) -> Address {
 /// Converts a buffer type to a hash.
 ///
 /// If the buffer is larger than the hash size, it will be cropped from the left
-pub(crate) fn bytes_to_hash(buf: Vec<u8>) -> H256 {
-    let mut hash = H256::default();
+pub(crate) fn bytes_to_hash(buf: Vec<u8>) -> B256 {
+    let mut hash = B256::default();
     let mut buf = &buf[..];
     let hash_len = hash.0.len();
     if buf.len() > hash_len {
@@ -161,11 +158,9 @@ pub(crate) fn to_contract2(
 
     // Convert the initcode to a byte buffer
     let code_buf = from_buf(initcode, ctx)?;
-    // Compute the code hash
-    let code_hash = keccak256(code_buf);
 
     // Compute the contract address
-    let contract_addr = create2_address_from_code(addr, salt, code_hash.into());
+    let contract_addr = addr.create2_from_code(salt, code_buf);
 
     // Convert the contract address to a byte buffer and return it as an ArrayBuffer
     to_buf_value(contract_addr.0.to_vec(), ctx)
@@ -186,7 +181,7 @@ pub(crate) fn to_contract(
     let addr = bytes_to_address(buf);
 
     // Compute the contract address
-    let contract_addr = create_address(addr, nonce);
+    let contract_addr = addr.create(nonce);
 
     // Convert the contract address to a byte buffer and return it as an ArrayBuffer
     to_buf_value(contract_addr.0.to_vec(), ctx)

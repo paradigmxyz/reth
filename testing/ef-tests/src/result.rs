@@ -2,6 +2,7 @@
 
 use crate::Case;
 use reth_db::DatabaseError;
+use reth_interfaces::RethError;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -14,10 +15,13 @@ use thiserror::Error;
 #[non_exhaustive]
 pub enum Error {
     /// The test was skipped
-    #[error("Test was skipped")]
+    #[error("test was skipped")]
     Skipped,
+    /// No post state found in test
+    #[error("no post state found for validation")]
+    MissingPostState,
     /// An IO error occurred
-    #[error("An error occurred interacting with the file system at {path}: {error}")]
+    #[error("an error occurred interacting with the file system at {path}: {error}")]
     Io {
         /// The path to the file or directory
         path: PathBuf,
@@ -26,7 +30,7 @@ pub enum Error {
         error: std::io::Error,
     },
     /// A deserialization error occurred
-    #[error("An error occurred deserializing the test at {path}: {error}")]
+    #[error("an error occurred deserializing the test at {path}: {error}")]
     CouldNotDeserialize {
         /// The path to the file we wanted to deserialize
         path: PathBuf,
@@ -38,14 +42,14 @@ pub enum Error {
     #[error(transparent)]
     Database(#[from] DatabaseError),
     /// A test assertion failed.
-    #[error("Test failed: {0}")]
+    #[error("test failed: {0}")]
     Assertion(String),
     /// An error internally in reth occurred.
-    #[error("Test failed: {0}")]
-    RethError(#[from] reth_interfaces::Error),
+    #[error("test failed: {0}")]
+    RethError(#[from] RethError),
     /// An error occurred while decoding RLP.
-    #[error("An error occurred deserializing RLP")]
-    RlpDecodeError(#[from] reth_rlp::DecodeError),
+    #[error("an error occurred deserializing RLP: {0}")]
+    RlpDecodeError(#[from] alloy_rlp::Error),
 }
 
 /// The result of running a test.

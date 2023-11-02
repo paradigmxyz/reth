@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_codecs::Compact;
 use reth_db::{
     database::Database,
@@ -10,7 +10,7 @@ use reth_primitives::{
     hex,
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
-    BlockNumber, SealedHeader, H256,
+    BlockNumber, SealedHeader, B256,
 };
 use reth_provider::{
     DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
@@ -80,7 +80,7 @@ impl MerkleStage {
     /// Check that the computed state root matches the root in the expected header.
     fn validate_state_root(
         &self,
-        got: H256,
+        got: B256,
         expected: SealedHeader,
         target_block: BlockNumber,
     ) -> Result<(), StageError> {
@@ -88,12 +88,12 @@ impl MerkleStage {
             Ok(())
         } else {
             warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root");
-            Err(StageError::Validation {
+            Err(StageError::Block {
                 block: expected.clone(),
-                error: consensus::ConsensusError::BodyStateRootDiff {
+                error: BlockErrorKind::Validation(consensus::ConsensusError::BodyStateRootDiff {
                     got,
                     expected: expected.state_root,
-                },
+                }),
             })
         }
     }
@@ -224,7 +224,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
                         state.last_account_key,
-                        state.last_walker_key.hex_data.to_vec(),
                         state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
                         state.hash_builder.into(),
                     );
@@ -356,7 +355,7 @@ mod tests {
         },
     };
     use reth_primitives::{
-        keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, H256, U256,
+        keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, B256, U256,
     };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
@@ -574,7 +573,7 @@ mod tests {
                     let mut storage_cursor =
                         tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
 
-                    let mut tree: BTreeMap<H256, BTreeMap<H256, U256>> = BTreeMap::new();
+                    let mut tree: BTreeMap<B256, BTreeMap<B256, U256>> = BTreeMap::new();
 
                     let mut rev_changeset_walker =
                         storage_changesets_cursor.walk_back(None).unwrap();

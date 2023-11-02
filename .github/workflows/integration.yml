@@ -6,7 +6,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  GETH_BUILD: 1.12.0-e501b3b0
+  GETH_BUILD: 1.13.4-3f907d6a
   SEED: rustethereumethereumrust
 
 concurrency:
@@ -22,13 +22,12 @@ jobs:
     strategy:
       matrix:
         partition: [1, 2]
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -38,6 +37,7 @@ jobs:
           mkdir -p "$HOME/bin"
           wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
           tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
+          rm geth-linux-amd64-$GETH_BUILD.tar.gz
           mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
           chmod u+x "$HOME/bin/geth"
           export PATH=$HOME/bin:$PATH
@@ -46,22 +46,13 @@ jobs:
 
       - name: Install latest nextest release
         uses: taiki-e/install-action@nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Run tests
         run: |
-          cargo llvm-cov nextest --lcov --output-path lcov.info \
+          cargo nextest run \
             --locked --all-features --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(test)'
-
-      - name: Upload coverage data to codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
-          flags: integration-tests
 
   sync:
     name: sync / 100k blocks
@@ -71,6 +62,7 @@ jobs:
       group: Reth
     env:
       RUST_LOG: info,sync=error
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -92,6 +84,11 @@ jobs:
             --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 \
             --debug.max-block 100000 \
             --debug.terminate
+      
+      - name: Verify the target block hash
+        run: |
+          cargo run --profile release \
+            db get CanonicalHeaders 100000 | grep 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4
 
   integration-success:
     if: always()
@@ -99,6 +96,7 @@ jobs:
     runs-on:
       group: Reth
     needs: [test]
+    timeout-minutes: 60
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1

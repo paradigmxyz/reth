@@ -21,35 +21,25 @@ jobs:
     strategy:
       matrix:
         partition: [1, 2]
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
       - name: Install latest nextest release
         uses: taiki-e/install-action@nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Run tests
         run: |
-          cargo llvm-cov nextest --lcov --output-path lcov.info \
+          cargo nextest run \
             --locked --all-features --workspace --exclude examples --exclude ef-tests  \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
-
-      - name: Upload coverage data to codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
-          flags: unit-tests
 
   eth-blockchain:
     name: ethereum / state tests (stable)
@@ -57,6 +47,7 @@ jobs:
       group: Reth
     env:
       RUST_LOG: info,sync=error
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -67,7 +58,7 @@ jobs:
           repository: ethereum/tests
           path: testing/ef-tests/ethereum-tests
           submodules: recursive
-          depth: 1
+          fetch-depth: 1
 
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
@@ -88,6 +79,7 @@ jobs:
     name: rustdoc
     runs-on:
       group: Reth
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
@@ -99,8 +91,9 @@ jobs:
   unit-success:
     if: always()
     name: unit success
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     needs: [test, eth-blockchain, doc-test]
+    timeout-minutes: 60
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1

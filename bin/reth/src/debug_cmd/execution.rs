@@ -12,7 +12,6 @@ use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{database::Database, init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -23,7 +22,7 @@ use reth_interfaces::{
 };
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
+use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
 use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,
@@ -35,7 +34,7 @@ use reth_stages::{
 };
 use reth_tasks::TaskExecutor;
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
 };
@@ -63,6 +62,7 @@ pub struct Command {
     /// - mainnet
     /// - goerli
     /// - sepolia
+    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
@@ -112,7 +112,7 @@ impl Command {
 
         let stage_conf = &config.stages;
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let factory = reth_revm::Factory::new(self.chain.clone());
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
@@ -135,13 +135,17 @@ impl Command {
                 })
                 .set(ExecutionStage::new(
                     factory,
-                    ExecutionStageThresholds { max_blocks: None, max_changes: None },
+                    ExecutionStageThresholds {
+                        max_blocks: None,
+                        max_changes: None,
+                        max_cumulative_gas: None,
+                    },
                     stage_conf
                         .merkle
                         .clean_threshold
                         .max(stage_conf.account_hashing.clean_threshold)
                         .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.as_ref().map(|prune| prune.parts.clone()).unwrap_or_default(),
+                    config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
                 )),
             )
             .build(db, self.chain.clone());
@@ -162,13 +166,10 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
-            )))
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.discovery.addr,
+                self.network.discovery.port,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
             .start_network()
@@ -182,7 +183,7 @@ impl Command {
         &self,
         client: Client,
         block: BlockNumber,
-    ) -> eyre::Result<H256> {
+    ) -> eyre::Result<B256> {
         info!(target: "reth::cli", ?block, "Fetching block from the network.");
         loop {
             match get_single_header(&client, BlockHashOrNumber::Number(block)).await {

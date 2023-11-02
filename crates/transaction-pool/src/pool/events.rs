@@ -1,5 +1,5 @@
 use crate::{traits::PropagateKind, PoolTransaction, ValidPoolTransaction};
-use reth_primitives::{TxHash, H256};
+use reth_primitives::{TxHash, B256};
 use std::sync::Arc;
 
 #[cfg(feature = "serde")]
@@ -17,7 +17,7 @@ pub enum FullTransactionEvent<T: PoolTransaction> {
         /// The hash of the mined transaction.
         tx_hash: TxHash,
         /// The hash of the mined block that contains the transaction.
-        block_hash: H256,
+        block_hash: B256,
     },
     /// Transaction has been replaced by the transaction belonging to the hash.
     ///
@@ -63,7 +63,7 @@ pub enum TransactionEvent {
     /// Transaction has been added to the queued pool.
     Queued,
     /// Transaction has been included in the block belonging to this hash.
-    Mined(H256),
+    Mined(B256),
     /// Transaction has been replaced by the transaction belonging to the hash.
     ///
     /// E.g. same (sender + nonce) pair

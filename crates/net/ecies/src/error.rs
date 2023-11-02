@@ -7,8 +7,6 @@ pub struct ECIESError {
     inner: Box<ECIESErrorImpl>,
 }
 
-// === impl ===
-
 impl ECIESError {
     /// Consumes the type and returns the error enum
     pub fn into_inner(self) -> ECIESErrorImpl {
@@ -38,7 +36,7 @@ impl std::error::Error for ECIESError {
 #[derive(Debug, Error)]
 pub enum ECIESErrorImpl {
     /// Error during IO
-    #[error("IO error")]
+    #[error(transparent)]
     IO(std::io::Error),
     /// Error when checking the HMAC tag against the tag on the message being decrypted
     #[error("tag check failure in read_header")]
@@ -63,7 +61,7 @@ pub enum ECIESErrorImpl {
     Secp256k1(secp256k1::Error),
     /// Error when decoding RLP data
     #[error(transparent)]
-    RLPDecoding(reth_rlp::DecodeError),
+    RLPDecoding(alloy_rlp::Error),
     /// Error when converting to integer
     #[error(transparent)]
     FromInt(std::num::TryFromIntError),
@@ -89,7 +87,7 @@ pub enum ECIESErrorImpl {
     /// [`Framed`](tokio_util::codec::Framed) is closed by the peer, See
     /// [ConnectionReset](std::io::ErrorKind::ConnectionReset) and the ecies codec fails to decode
     /// a message from the (partially filled) buffer.
-    #[error("Stream closed due to not being readable.")]
+    #[error("stream closed due to not being readable")]
     UnreadableStream,
 }
 
@@ -111,8 +109,8 @@ impl From<secp256k1::Error> for ECIESError {
     }
 }
 
-impl From<reth_rlp::DecodeError> for ECIESError {
-    fn from(source: reth_rlp::DecodeError) -> Self {
+impl From<alloy_rlp::Error> for ECIESError {
+    fn from(source: alloy_rlp::Error) -> Self {
         ECIESErrorImpl::RLPDecoding(source).into()
     }
 }

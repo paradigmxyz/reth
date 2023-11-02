@@ -21,7 +21,7 @@ pub trait SyncStateProvider: Send + Sync {
 /// which point the node is considered fully synced.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait NetworkSyncUpdater: std::fmt::Debug + Send + Sync + 'static {
-    /// Notifies about an [SyncState] update.
+    /// Notifies about a [SyncState] update.
     fn update_sync_state(&self, state: SyncState);
 
     /// Updates the status of the p2p node
@@ -29,7 +29,7 @@ pub trait NetworkSyncUpdater: std::fmt::Debug + Send + Sync + 'static {
 }
 
 /// The state the network is currently in when it comes to synchronization.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum SyncState {
     /// Node sync is complete.
     ///
@@ -49,7 +49,7 @@ impl SyncState {
 }
 
 /// A [NetworkSyncUpdater] implementation that does nothing.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 #[non_exhaustive]
 pub struct NoopSyncStateUpdater;
 

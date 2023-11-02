@@ -1,5 +1,5 @@
 use crate::{Block, BlockTransactions, Rich, Transaction, TransactionReceipt};
-use reth_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
 /// Operation type enum for `InternalOperation` struct

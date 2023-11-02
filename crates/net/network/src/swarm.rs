@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// Contains the connectivity related state of the network.
 ///
@@ -61,6 +61,7 @@ use tracing::{debug, trace};
 ///   fetchRequest --> |request Headers, Bodies| StateFetch
 ///   State --> |poll pending requests| StateFetch
 /// ```
+#[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
     /// Listens for new incoming connections.
@@ -225,7 +226,7 @@ where
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
-                        debug!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
+                        trace!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
                         self.state_mut()
                             .peers_mut()
                             .on_incoming_pending_session_rejected_internally();
@@ -428,7 +429,7 @@ pub(crate) enum SwarmEvent {
 
 /// Represents the state of the connection of the node. If shutting down,
 /// new connections won't be established.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) enum NetworkConnectionState {
     #[default]
     Active,

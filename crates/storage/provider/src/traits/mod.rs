@@ -7,7 +7,10 @@ mod storage;
 pub use storage::StorageReader;
 
 mod block;
-pub use block::{BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter};
+pub use block::{
+    BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
+    TransactionVariant,
+};
 
 mod block_hash;
 pub use block_hash::BlockHashReader;
@@ -29,18 +32,18 @@ pub use receipts::{ReceiptProvider, ReceiptProviderIdExt};
 
 mod state;
 pub use state::{
-    BlockchainTreePendingStateProvider, PostStateDataProvider, StateProvider, StateProviderBox,
+    BlockchainTreePendingStateProvider, BundleStateDataProvider, StateProvider, StateProviderBox,
     StateProviderFactory, StateRootProvider,
 };
 
 mod transactions;
-pub use transactions::TransactionsProvider;
+pub use transactions::{TransactionsProvider, TransactionsProviderExt};
 
 mod withdrawals;
 pub use withdrawals::WithdrawalsProvider;
 
 mod executor;
-pub use executor::{BlockExecutor, ExecutorFactory};
+pub use executor::{BlockExecutor, BlockExecutorStats, ExecutorFactory, PrunableBlockExecutor};
 
 mod chain;
 pub use chain::{

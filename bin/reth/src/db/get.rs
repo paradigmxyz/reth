@@ -1,7 +1,7 @@
 use crate::utils::DbTool;
 use clap::Parser;
 
-use reth_db::{database::Database, table::Table, TableType, TableViewer, Tables};
+use reth_db::{database::Database, table::Table, RawKey, RawTable, TableType, TableViewer, Tables};
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -10,12 +10,15 @@ pub struct Command {
     /// The table name
     ///
     /// NOTE: The dupsort tables are not supported now.
-    #[arg()]
     pub table: Tables,
 
-    /// The key to get content for   
+    /// The key to get content for
     #[arg(value_parser = maybe_json_value_parser)]
     pub key: String,
+
+    /// Output bytes instead of human-readable decoded value
+    #[clap(long)]
+    pub raw: bool,
 }
 
 impl Command {
@@ -52,9 +55,17 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
         // get a key for given table
         let key = self.args.table_key::<T>()?;
 
-        match self.tool.get::<T>(key)? {
+        let content = if self.args.raw {
+            self.tool
+                .get::<RawTable<T>>(RawKey::from(key))?
+                .map(|content| format!("{:?}", content.raw_value()))
+        } else {
+            self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
+        };
+
+        match content {
             Some(content) => {
-                println!("{}", serde_json::to_string_pretty(&content)?);
+                println!("{}", content);
             }
             None => {
                 error!(target: "reth::cli", "No content for the given table key.");
@@ -82,7 +93,7 @@ mod tests {
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         AccountHistory, HashedAccount, Headers, StorageHistory, SyncStage,
     };
-    use reth_primitives::{H160, H256};
+    use reth_primitives::{Address, B256};
     use std::str::FromStr;
 
     /// A helper type to parse Args more easily
@@ -105,7 +116,7 @@ mod tests {
         .args;
         assert_eq!(
             args.table_key::<HashedAccount>().unwrap(),
-            H256::from_str("0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac")
+            B256::from_str("0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac")
                 .unwrap()
         );
     }
@@ -123,8 +134,8 @@ mod tests {
         assert_eq!(
             args.table_key::<StorageHistory>().unwrap(),
             StorageShardedKey::new(
-                H160::from_str("0x01957911244e546ce519fbac6f798958fafadb41").unwrap(),
-                H256::from_str(
+                Address::from_str("0x01957911244e546ce519fbac6f798958fafadb41").unwrap(),
+                B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000003"
                 )
                 .unwrap(),
@@ -139,7 +150,7 @@ mod tests {
         assert_eq!(
             args.table_key::<AccountHistory>().unwrap(),
             ShardedKey::new(
-                H160::from_str("0x4448e1273fd5a8bfdb9ed111e96889c960eee145").unwrap(),
+                Address::from_str("0x4448e1273fd5a8bfdb9ed111e96889c960eee145").unwrap(),
                 18446744073709551615
             )
         );

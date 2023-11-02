@@ -1,4 +1,3 @@
-extern crate proc_macro2;
 use proc_macro::{self, TokenStream};
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
@@ -25,7 +24,7 @@ type FieldType = String;
 /// `Compact` has alternative functions that can be used as a workaround for type
 /// specialization of fixed sized types.
 ///
-/// Example: `Vec<H256>` vs `Vec<U256>`. The first does not
+/// Example: `Vec<B256>` vs `Vec<U256>`. The first does not
 /// require the len of the element, while the latter one does.
 type UseAlternative = bool;
 // Helper Alias type
@@ -134,7 +133,7 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
 }
 
 /// Since there's no impl specialization in rust stable atm, once we find we have a
-/// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type, e.g. `Vec<H256>`.
+/// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type, e.g. `Vec<B256>`.
 ///
 /// If so, we use another impl to code/decode its data.
 fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
@@ -144,7 +143,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["H256", "H160", "Address", "Bloom", "TxHash"]
+                    if ["B256", "Address", "Address", "Bloom", "TxHash"]
                         .contains(&path.ident.to_string().as_str())
                     {
                         return true
@@ -165,6 +164,11 @@ pub fn get_bit_size(ftype: &str) -> u8 {
         "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
         "U256" => 6,
+        #[cfg(not(feature = "value-256"))]
+        "TxValue" => 5, // u128 for ethereum chains assuming high order bits are not used
+        #[cfg(feature = "value-256")]
+        // for fuzz/prop testing and chains that may require full 256 bits
+        "TxValue" => 6,
         _ => 0,
     }
 }
@@ -178,6 +182,7 @@ pub fn is_flag_type(ftype: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
     use syn::parse2;
 
     #[test]
@@ -190,10 +195,10 @@ mod tests {
                 f_bool_t: bool,
                 f_bool_f: bool,
                 f_option_none: Option<U256>,
-                f_option_some: Option<H256>,
+                f_option_some: Option<B256>,
                 f_option_some_u64: Option<u64>,
                 f_vec_empty: Vec<U256>,
-                f_vec_some: Vec<H160>,
+                f_vec_some: Vec<Address>,
             }
         };
 
@@ -207,11 +212,11 @@ mod tests {
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
             pub use TestStruct_flags::TestStructFlags;
+            #[allow(non_snake_case)]
             mod TestStruct_flags {
                 use bytes::Buf;
                 use modular_bitfield::prelude::*;
-
-                #[doc="Fieldset that facilitates compacting the parent type. Used bytes: 2 | Unused bits: 1"]
+                #[doc = "Fieldset that facilitates compacting the parent type. Used bytes: 2 | Unused bits: 1"]
                 #[bitfield]
                 #[derive(Clone, Copy, Debug, Default)]
                 pub struct TestStructFlags {
@@ -226,7 +231,7 @@ mod tests {
                     unused: B1,
                 }
                 impl TestStructFlags {
-                    #[doc=r" Deserializes this fieldset and returns it, alongside the original slice in an advanced position."]
+                    #[doc = r" Deserializes this fieldset and returns it, alongside the original slice in an advanced position."]
                     pub fn from(mut buf: &[u8]) -> (Self, &[u8]) {
                         (
                             TestStructFlags::from_bytes([buf.get_u8(), buf.get_u8(),]),
@@ -311,6 +316,9 @@ mod tests {
             }
         };
 
-        assert_eq!(output.to_string(), should_output.to_string());
+        assert_eq!(
+            syn::parse2::<syn::File>(output).unwrap(),
+            syn::parse2::<syn::File>(should_output).unwrap()
+        );
     }
 }

@@ -26,3 +26,9 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth = { workspace = true }
+tempfile = { workspace = true }
+clap = { workspace = true }
+jsonrpsee = { workspace = true }
+eyre = { workspace = true }
+serde_json = { workspace = true }

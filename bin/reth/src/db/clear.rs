@@ -1,5 +1,4 @@
 use clap::Parser;
-
 use reth_db::{
     database::Database,
     table::Table,
@@ -11,7 +10,6 @@ use reth_db::{
 #[derive(Parser, Debug)]
 pub struct Command {
     /// Table name
-    #[arg()]
     pub table: Tables,
 }
 
