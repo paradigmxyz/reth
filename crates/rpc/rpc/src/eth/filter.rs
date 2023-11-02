@@ -508,8 +508,7 @@ pub struct EthFilterConfig {
 }
 
 impl EthFilterConfig {
-    /// Sets the maximum number of logs that can be returned in a single response in `eth_getLogs`
-    /// calls.
+    /// Sets the maximum number of blocks that a filter can scan for logs.
     pub fn max_blocks_per_filter(mut self, num: u64) -> Self {
         self.max_blocks_per_filter = Some(num);
         self
