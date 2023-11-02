@@ -86,7 +86,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         Some(tx.transaction.into())
     }
 
-    /// Get txs by sender
+    /// Get transactions by sender
     pub(crate) fn get_txs_by_sender(
         &self,
         sender: &Address,
@@ -100,7 +100,8 @@ impl<T: ParkedOrd> ParkedPool<T> {
         txs
     }
 
-    /// Get submission ids by sender with oldest first
+    /// Get submission ids by sender, sorted by submission id. This means that the oldest
+    /// submission id will be first.
     pub(crate) fn get_submission_ids_by_sender(&self, sender: &Address) -> Vec<u64> {
         let mut ids = Vec::new();
         for tx in self.by_id.values() {
@@ -113,7 +114,9 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 
     /// Returns addresses sorted by their last submission id. Addresses with older last submission
-    /// ids are first.
+    /// ids are first. Note that _last_ submission ids are the newest submission id for that
+    /// sender, so this sorts senders by the last time they submitted a transaction in descending
+    /// order. Senders that have least recently submitted a transaction are first.
     ///
     /// Similar to `Heartbeat` in Geth
     pub(crate) fn get_senders_by_submission_id(&self) -> Vec<Address> {
@@ -136,7 +139,8 @@ impl<T: ParkedOrd> ParkedPool<T> {
         senders
     }
 
-    /// Truncates the pool by dropping the oldest transaction first
+    /// Truncates the pool by dropping transactions, first dropping transactions from senders that
+    /// have not recently submitted a transaction.
     pub(crate) fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
@@ -151,7 +155,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
         while drop > 0 && !addresses.is_empty() {
             // SAFETY: This will not panic due to `!addresses.is_empty()`
             let addr = addresses.pop().unwrap();
-            // problem: we have to iterate through the entire pool for this
             let mut list = self.get_txs_by_sender(&addr);
 
             // Drop all transactions if they are less than the overflow
