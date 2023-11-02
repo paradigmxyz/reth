@@ -1,6 +1,7 @@
 //! `reth count-opcodes` comamnd. Tool to count opcodes occurrencies.
 use crate::primitives::Bytes;
 use clap::Parser;
+use comfy_table::{Cell, Row, Table};
 use itertools::Itertools;
 use reth_db::{open_db_read_only, tables};
 use reth_primitives::ChainSpecBuilder;
@@ -105,7 +106,11 @@ impl OpCodeCounter {
     }
 
     fn print_counts(&self, size: usize) {
-        println!("Single opcodes:");
+        let mut table = Table::new();
+
+        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+        table.set_header(["Opcode", "Occurrencies"]);
+
         let opcodes_vec = self
             .opcodes
             .iter()
@@ -115,9 +120,18 @@ impl OpCodeCounter {
             .collect::<Vec<(OpCode, usize)>>();
 
         for el in &opcodes_vec {
-            println!("{}: {}", el.0, el.1);
+            let mut row = Row::new();
+            row.add_cell(Cell::new(el.0));
+            row.add_cell(Cell::new(el.1));
+            table.add_row(row);
         }
-        println!("----------------------------------------------");
+
+        println!("\n{}", table);
+
+        table = Table::new();
+
+        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+        table.set_header(["Opcodes tuples", "Occurrencies"]);
 
         let tuple_vec = self
             .tuple_opcodes
@@ -127,12 +141,20 @@ impl OpCodeCounter {
             .take(size)
             .collect::<Vec<(OpCode, OpCode, usize)>>();
 
-        println!("Tuple opcodes:");
         for el in &tuple_vec {
-            println!("{} {}: {}", el.0, el.1, el.2);
+            let mut row = Row::new();
+            let tuple = format!("{} {}", el.0, el.1);
+            row.add_cell(Cell::new(tuple));
+            row.add_cell(Cell::new(el.2));
+            table.add_row(row);
         }
 
-        println!("----------------------------------------------");
+        println!("\n{}", table);
+
+        table = Table::new();
+
+        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+        table.set_header(["Opcodes triplets", "Occurrencies"]);
 
         let triplets_vec = self
             .triplets_opcodes
@@ -144,12 +166,20 @@ impl OpCodeCounter {
             .take(size)
             .collect::<Vec<(OpCode, OpCode, OpCode, usize)>>();
 
-        println!("Triplet opcodes:");
         for el in &triplets_vec {
-            println!("{} {} {}: {}", el.0, el.1, el.2, el.3);
+            let mut row = Row::new();
+            let triplet = format!("{} {} {}", el.0, el.1, el.2);
+            row.add_cell(Cell::new(triplet));
+            row.add_cell(Cell::new(el.3));
+            table.add_row(row);
         }
 
-        println!("----------------------------------------------");
+        println!("\n{}", table);
+
+        table = Table::new();
+
+        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+        table.set_header(["Opcodes quadruplets", "Occurrencies"]);
 
         let quadruplets_vec = self
             .quadruplets_opcodes
@@ -167,11 +197,15 @@ impl OpCodeCounter {
             .take(size)
             .collect::<Vec<(OpCode, OpCode, OpCode, OpCode, usize)>>();
 
-        println!("Quadruplets opcodes:");
         for el in &quadruplets_vec {
-            println!("{} {} {} {}: {}", el.0, el.1, el.2, el.3, el.4);
+            let mut row = Row::new();
+            let quadruplet = format!("{} {} {} {}", el.0, el.1, el.2, el.3);
+            row.add_cell(Cell::new(quadruplet));
+            row.add_cell(Cell::new(el.4));
+            table.add_row(row);
         }
-        println!("----------------------------------------------");
+
+        println!("\n{}", table);
     }
 }
 
@@ -218,6 +252,8 @@ mod test {
                 assert_eq!(opcode_counter.opcodes.get(&i), Some(1_usize).as_ref());
             }
         }
+
+        opcode_counter.print_counts(10);
     }
 
     #[test]
