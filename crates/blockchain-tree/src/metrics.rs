@@ -31,31 +31,30 @@ pub struct BlockBufferMetrics {
 
 #[derive(Debug)]
 pub(crate) struct MakeCanonicalDurationsRecorder {
+    start: Instant,
     pub(crate) actions: Vec<(MakeCanonicalAction, Duration)>,
-    latest: Instant,
+    latest: Option<Duration>,
 }
 
 impl Default for MakeCanonicalDurationsRecorder {
     fn default() -> Self {
-        Self { actions: Vec::new(), latest: Instant::now() }
+        Self { start: Instant::now(), actions: Vec::new(), latest: None }
     }
 }
 
 impl MakeCanonicalDurationsRecorder {
-    /// Saves the provided duration for future logging and instantly reports as a metric with
-    /// `action` label.
-    pub(crate) fn record_duration(&mut self, action: MakeCanonicalAction, duration: Duration) {
-        self.actions.push((action, duration));
-        MakeCanonicalMetrics::new_with_labels(&[("action", format!("{action:?}"))])
-            .duration
-            .record(duration);
-        self.latest = Instant::now();
-    }
-
     /// Records the duration since last record, saves it for future logging and instantly reports as
     /// a metric with `action` label.
     pub(crate) fn record_relative(&mut self, action: MakeCanonicalAction) {
-        self.record_duration(action, self.latest.elapsed());
+        let elapsed = self.start.elapsed();
+        let duration = elapsed - self.latest.unwrap_or_default();
+
+        self.actions.push((action, duration));
+        MakeCanonicalMetrics::new_with_labels(&[("action", action.as_str())])
+            .duration
+            .record(duration);
+
+        self.latest = Some(elapsed);
     }
 }
 
@@ -70,6 +69,26 @@ pub(crate) enum MakeCanonicalAction {
     CommitCanonicalChainToDatabase,
     RevertCanonicalChainFromDatabase,
     InsertOldCanonicalChain,
+}
+
+impl MakeCanonicalAction {
+    fn as_str(&self) -> &'static str {
+        match self {
+            MakeCanonicalAction::CloneOldBlocks => "clone old blocks",
+            MakeCanonicalAction::FindCanonicalHeader => "find canonical header",
+            MakeCanonicalAction::SplitChain => "split chain",
+            MakeCanonicalAction::SplitChainForks => "split chain forks",
+            MakeCanonicalAction::MergeAllChains => "merge all chains",
+            MakeCanonicalAction::UpdateCanonicalIndex => "update canonical index",
+            MakeCanonicalAction::CommitCanonicalChainToDatabase => {
+                "commit canonical chain to database"
+            }
+            MakeCanonicalAction::RevertCanonicalChainFromDatabase => {
+                "revert canonical chain from database"
+            }
+            MakeCanonicalAction::InsertOldCanonicalChain => "insert old canonical chain",
+        }
+    }
 }
 
 #[derive(Metrics)]
