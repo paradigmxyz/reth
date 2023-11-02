@@ -18,9 +18,14 @@ pub type SnapshotterWithResult<DB> = (Snapshotter<DB>, SnapshotterResult);
 /// Snapshotting routine. Main snapshotting logic happens in [Snapshotter::run].
 #[derive(Debug)]
 pub struct Snapshotter<DB> {
+    /// Provider factory
     provider_factory: ProviderFactory<DB>,
+    /// Highest snapshot block number for each
     highest_snapshots: HighestSnapshots,
-    highest_snapshots_tracker: watch::Sender<Option<HighestSnapshots>>,
+    /// Channel sender to notify other components of the new highest snapshot values
+    highest_snapshots_notifier: watch::Sender<Option<HighestSnapshots>>,
+    /// Channel receiver to be cloned and shared that already comes with the newest value
+    highest_snapshots_tracker: HighestSnapshotsTracker,
     /// Block interval after which the snapshot is taken.
     block_interval: u64,
 }
@@ -75,12 +80,13 @@ impl SnapshotTargets {
 impl<DB: Database> Snapshotter<DB> {
     /// Creates a new [Snapshotter].
     pub fn new(db: DB, chain_spec: Arc<ChainSpec>, block_interval: u64) -> Self {
-        let (highest_snapshots_tracker, _) = watch::channel(None);
+        let (highest_snapshots_notifier, highest_snapshots_tracker) = watch::channel(None);
 
         let snapshotter = Self {
             provider_factory: ProviderFactory::new(db, chain_spec),
             // TODO(alexey): fill from on-disk snapshot data
             highest_snapshots: HighestSnapshots::default(),
+            highest_snapshots_notifier,
             highest_snapshots_tracker,
             block_interval,
         };
@@ -104,14 +110,14 @@ impl<DB: Database> Snapshotter<DB> {
     }
 
     fn update_highest_snapshots_tracker(&self) {
-        let _ = self.highest_snapshots_tracker.send(Some(self.highest_snapshots)).map_err(|_| {
+        let _ = self.highest_snapshots_notifier.send(Some(self.highest_snapshots)).map_err(|_| {
             warn!(target: "snapshot", "Highest snapshots channel closed");
         });
     }
 
     /// Returns a new [`HighestSnapshotsTracker`].
     pub fn highest_snapshot_receiver(&self) -> HighestSnapshotsTracker {
-        self.highest_snapshots_tracker.subscribe()
+        self.highest_snapshots_tracker.clone()
     }
 
     /// Run the snapshotter
