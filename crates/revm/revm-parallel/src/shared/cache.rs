@@ -1,10 +1,9 @@
 use super::SharedCacheAccount;
 use dashmap::DashMap;
-use rayon::prelude::*;
 use revm::{
     db::states::plain_account::PlainStorage,
     primitives::{Account, AccountInfo, Address, Bytecode, HashMap, State as EVMState, B256},
-    TransitionAccount, TransitionState,
+    TransitionState,
 };
 
 /// Cache state contains both modified and original values.
@@ -72,15 +71,13 @@ impl SharedCacheState {
 
     /// Take account transitions from shared cache state.
     pub fn take_transitions(&mut self) -> TransitionState {
-        let transitions: Vec<(Address, TransitionAccount)> = self
-            .accounts
-            .par_iter_mut()
-            .filter_map(|mut account| {
-                account
-                    .finalize_transition(self.has_state_clear)
-                    .map(|transition| (*account.key(), transition))
-            })
-            .collect();
+        let mut transitions = HashMap::with_capacity(self.accounts.len());
+        self.accounts.alter_all(|address, mut account| {
+            if let Some(transition) = account.finalize_transition(self.has_state_clear) {
+                transitions.insert(*address, transition);
+            }
+            account
+        });
         TransitionState { transitions: HashMap::from_iter(transitions) }
     }
 
