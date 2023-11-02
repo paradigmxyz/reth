@@ -96,7 +96,7 @@ where
                     let tx = tx.into_ecrecovered_transaction();
                     hash_bytes.extend_from_slice(tx.hash().as_slice());
                     let gas_price = tx
-                        .effective_gas_tip(basefee)
+                        .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)?;
                     tx.try_fill_tx_env(&mut evm.env.tx)?;
                     let ResultAndState { result, state } = evm.transact()?;

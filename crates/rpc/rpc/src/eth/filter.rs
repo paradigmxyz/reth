@@ -51,29 +51,32 @@ where
     /// Creates a new, shareable instance.
     ///
     /// This uses the given pool to get notified about new transactions, the provider to interact
-    /// with the blockchain, the cache to fetch cacheable data, like the logs and the
-    /// max_logs_per_response to limit the amount of logs returned in a single response
-    /// `eth_getLogs`
+    /// with the blockchain, the cache to fetch cacheable data, like the logs.
+    ///
+    /// See also [EthFilterConfig].
     ///
     /// This also spawns a task that periodically clears stale filters.
     pub fn new(
         provider: Provider,
         pool: Pool,
         eth_cache: EthStateCache,
-        max_logs_per_response: usize,
+        config: EthFilterConfig,
         task_spawner: Box<dyn TaskSpawner>,
-        stale_filter_ttl: Duration,
     ) -> Self {
+        let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
+            config;
         let inner = EthFilterInner {
             provider,
             active_filters: Default::default(),
             pool,
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
-            max_logs_per_response,
             eth_cache,
             max_headers_range: MAX_HEADERS_RANGE,
             task_spawner,
             stale_filter_ttl,
+            // if not set, use the max value, which is effectively no limit
+            max_blocks_per_filter: max_blocks_per_filter.unwrap_or(u64::MAX),
+            max_logs_per_response: max_logs_per_response.unwrap_or(usize::MAX),
         };
 
         let eth_filter = Self { inner: Arc::new(inner) };
@@ -324,6 +327,8 @@ struct EthFilterInner<Provider, Pool> {
     active_filters: ActiveFilters,
     /// Provides ids to identify filters
     id_provider: Arc<dyn IdProvider>,
+    /// Maximum number of blocks that could be scanned per filter
+    max_blocks_per_filter: u64,
     /// Maximum number of logs that can be returned in a response
     max_logs_per_response: usize,
     /// The async cache frontend for eth related data
@@ -424,14 +429,16 @@ where
     ) -> Result<Vec<Log>, FilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
+        if to_block - from_block > self.max_blocks_per_filter {
+            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
+        }
+
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
         // derive bloom filters from filter input
         let address_filter = FilteredParams::address_filter(&filter.address);
         let topics_filter = FilteredParams::topics_filter(&filter.topics);
-
-        let is_multi_block_range = from_block != to_block;
 
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
@@ -467,6 +474,7 @@ where
 
                         // size check but only if range is multiple blocks, so we always return all
                         // logs of a single block
+                        let is_multi_block_range = from_block != to_block;
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
@@ -478,6 +486,56 @@ where
         }
 
         Ok(all_logs)
+    }
+}
+
+/// Config for the filter
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EthFilterConfig {
+    /// Maximum number of blocks that a filter can scan for logs.
+    ///
+    /// If `None` then no limit is enforced.
+    pub max_blocks_per_filter: Option<u64>,
+    /// Maximum number of logs that can be returned in a single response in `eth_getLogs` calls.
+    ///
+    /// If `None` then no limit is enforced.
+    pub max_logs_per_response: Option<usize>,
+    /// How long a filter remains valid after the last poll.
+    ///
+    /// A filter is considered stale if it has not been polled for longer than this duration and
+    /// will be removed.
+    pub stale_filter_ttl: Duration,
+}
+
+impl EthFilterConfig {
+    /// Sets the maximum number of blocks that a filter can scan for logs.
+    pub fn max_blocks_per_filter(mut self, num: u64) -> Self {
+        self.max_blocks_per_filter = Some(num);
+        self
+    }
+
+    /// Sets the maximum number of logs that can be returned in a single response in `eth_getLogs`
+    /// calls.
+    pub fn max_logs_per_response(mut self, num: usize) -> Self {
+        self.max_logs_per_response = Some(num);
+        self
+    }
+
+    /// Sets how long a filter remains valid after the last poll before it will be removed.
+    pub fn stale_filter_ttl(mut self, duration: Duration) -> Self {
+        self.stale_filter_ttl = duration;
+        self
+    }
+}
+
+impl Default for EthFilterConfig {
+    fn default() -> Self {
+        Self {
+            max_blocks_per_filter: None,
+            max_logs_per_response: None,
+            // 5min
+            stale_filter_ttl: Duration::from_secs(5 * 60),
+        }
     }
 }
 
@@ -599,6 +657,8 @@ enum FilterKind {
 pub enum FilterError {
     #[error("filter not found")]
     FilterNotFound(FilterId),
+    #[error("query exceeds max block range {0}")]
+    QueryExceedsMaxBlocks(u64),
     #[error("query exceeds max results {0}")]
     QueryExceedsMaxResults(usize),
     #[error(transparent)]
@@ -620,6 +680,9 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             FilterError::EthAPIError(err) => err.into(),
+            err @ FilterError::QueryExceedsMaxBlocks(_) => {
+                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
+            }
             err @ FilterError::QueryExceedsMaxResults(_) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }

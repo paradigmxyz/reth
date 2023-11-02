@@ -1,9 +1,8 @@
 //! Helpers for working with EIP-4844 blob fee
-use crate::{
-    constants::eip4844::{TARGET_DATA_GAS_PER_BLOCK, VERSIONED_HASH_VERSION_KZG},
-    kzg::KzgCommitment,
-    B256,
-};
+use crate::constants::eip4844::TARGET_DATA_GAS_PER_BLOCK;
+#[cfg(feature = "c-kzg")]
+use crate::{constants::eip4844::VERSIONED_HASH_VERSION_KZG, kzg::KzgCommitment, B256};
+#[cfg(feature = "c-kzg")]
 use sha2::{Digest, Sha256};
 
 // re-exports from revm for calculating blob fee
@@ -12,6 +11,7 @@ pub use revm_primitives::calc_blob_gasprice;
 /// Calculates the versioned hash for a KzgCommitment
 ///
 /// Specified in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension)
+#[cfg(feature = "c-kzg")]
 pub fn kzg_to_versioned_hash(commitment: KzgCommitment) -> B256 {
     let mut res = Sha256::digest(commitment.as_slice());
     res[0] = VERSIONED_HASH_VERSION_KZG;
