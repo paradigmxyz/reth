@@ -54,7 +54,9 @@ fn fill(
             // baseFee`
             let gas_price = base_fee
                 .and_then(|base_fee| {
-                    signed_tx.effective_tip_per_gas(base_fee).map(|tip| tip + base_fee as u128)
+                    signed_tx
+                        .effective_tip_per_gas(Some(base_fee))
+                        .map(|tip| tip + base_fee as u128)
                 })
                 .unwrap_or_else(|| signed_tx.max_fee_per_gas());
 
