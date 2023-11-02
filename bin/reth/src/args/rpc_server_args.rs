@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
 use crate::{
-    args::GasPriceOracleArgs,
+    args::{types::ZeroAsNone, GasPriceOracleArgs},
     cli::{
         components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
         config::RethRpcConfig,
@@ -140,9 +140,13 @@ pub struct RpcServerArgs {
     #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_TRACING_REQUESTS)]
     pub rpc_max_tracing_requests: u32,
 
-    /// Maximum number of logs that can be returned in a single response.
-    #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_LOGS_PER_RESPONSE)]
-    pub rpc_max_logs_per_response: usize,
+    /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
+    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNone::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
+    pub rpc_max_blocks_per_filter: ZeroAsNone,
+
+    /// Maximum number of logs that can be returned in a single response. (0 = no limit)
+    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNone::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
+    pub rpc_max_logs_per_response: ZeroAsNone,
 
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     #[arg(
@@ -326,7 +330,8 @@ impl RethRpcConfig for RpcServerArgs {
     fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
-            .max_logs_per_response(self.rpc_max_logs_per_response)
+            .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
+            .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
             .rpc_gas_cap(self.rpc_gas_cap)
             .gpo_config(self.gas_price_oracle_config())
     }
@@ -597,5 +602,37 @@ mod tests {
             SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8888))
         );
         assert_eq!(config.ipc_endpoint().unwrap().path(), constants::DEFAULT_IPC_ENDPOINT);
+    }
+
+    #[test]
+    fn test_zero_filter_limits() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc-max-blocks-per-filter",
+            "0",
+            "--rpc-max-logs-per-response",
+            "0",
+        ])
+        .args;
+
+        let config = args.eth_config().filter_config();
+        assert_eq!(config.max_blocks_per_filter, Some(u64::MAX));
+        assert_eq!(config.max_logs_per_response, Some(usize::MAX));
+    }
+
+    #[test]
+    fn test_custom_filter_limits() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc-max-blocks-per-filter",
+            "100",
+            "--rpc-max-logs-per-response",
+            "200",
+        ])
+        .args;
+
+        let config = args.eth_config().filter_config();
+        assert_eq!(config.max_blocks_per_filter, Some(100));
+        assert_eq!(config.max_logs_per_response, Some(200));
     }
 }
