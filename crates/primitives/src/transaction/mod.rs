@@ -16,13 +16,15 @@ use std::mem;
 pub use access_list::{AccessList, AccessListItem};
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
-pub use eip4844::{
-    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError, TxEip4844,
-};
+pub use eip4844::TxEip4844;
+
 pub use error::InvalidTransactionError;
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
+#[cfg(feature = "c-kzg")]
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
+#[cfg(feature = "c-kzg")]
+pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
 pub use signature::Signature;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
@@ -37,7 +39,10 @@ mod eip4844;
 mod error;
 mod legacy;
 mod meta;
+#[cfg(feature = "c-kzg")]
 mod pooled;
+#[cfg(feature = "c-kzg")]
+mod sidecar;
 mod signature;
 mod tx_type;
 mod tx_value;
@@ -1286,6 +1291,7 @@ impl FromRecoveredTransaction for TransactionSignedEcRecovered {
 ///
 /// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
 /// transaction type that the transaction pool uses.
+#[cfg(feature = "c-kzg")]
 pub trait FromRecoveredPooledTransaction {
     /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
     fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
