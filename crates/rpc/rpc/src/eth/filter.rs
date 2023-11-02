@@ -428,9 +428,8 @@ where
         to_block: u64,
     ) -> Result<Vec<Log>, FilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
-        let is_multi_block_range = from_block != to_block;
 
-        if is_multi_block_range && to_block - from_block > self.max_blocks_per_filter {
+        if to_block - from_block > self.max_blocks_per_filter {
             return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
         }
 
@@ -475,6 +474,7 @@ where
 
                         // size check but only if range is multiple blocks, so we always return all
                         // logs of a single block
+                        let is_multi_block_range = from_block != to_block;
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
