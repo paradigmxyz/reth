@@ -212,7 +212,7 @@ impl Command {
         let mut parallel_cache_accounts = parallel_state
             .read()
             .cache
-            .accounts
+            .retired_accounts
             .clone()
             .into_iter()
             .sorted_by_key(|(address, _)| *address)

@@ -240,6 +240,11 @@ impl SharedCacheAccount {
         Self::new(AccountStatus::Changed).with_info(info).with_storage(storage)
     }
 
+    /// Return storage slot value.
+    pub fn storage_slot(&self, slot: U256) -> Option<U256> {
+        self.storage.get(&slot).map(|value| value.present_value)
+    }
+
     /// Get or load and insert storage slot.
     pub fn get_or_insert_storage_slot<Error>(
         &mut self,

@@ -128,20 +128,24 @@ impl<DB: DatabaseRef> SharedState<DB> {
         &self,
         address: Address,
     ) -> Result<RefMut<'_, Address, SharedCacheAccount>, DB::Error> {
-        let account = match self.cache.accounts.get_mut(&address) {
+        let account = match self.cache.active_accounts.get_mut(&address) {
             Some(account) => account,
             None => {
-                // if not found in bundle, load it from database
-                let info = self.database.basic_ref(address)?;
-                let account = match info {
-                    None => SharedCacheAccount::new_loaded_not_existing(),
-                    Some(acc) if acc.is_empty() => {
-                        SharedCacheAccount::new_loaded_empty_eip161(HashMap::new())
+                let account = match self.cache.retired_accounts.get(&address) {
+                    Some(account) => account.clone(),
+                    None => {
+                        // if not found in bundle, load it from database
+                        let info = self.database.basic_ref(address)?;
+                        match info {
+                            None => SharedCacheAccount::new_loaded_not_existing(),
+                            Some(acc) if acc.is_empty() => {
+                                SharedCacheAccount::new_loaded_empty_eip161(HashMap::new())
+                            }
+                            Some(acc) => SharedCacheAccount::new_loaded(acc, HashMap::new()),
+                        }
                     }
-                    Some(acc) => SharedCacheAccount::new_loaded(acc, HashMap::new()),
                 };
-
-                self.cache.accounts.entry(address).insert(account)
+                self.cache.active_accounts.entry(address).insert(account)
             }
         };
         Ok(account)
@@ -182,9 +186,18 @@ impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
         // Account is guaranteed to be loaded.
         // Note that storage from bundle is already loaded with account.
-        let value = match self.cache.accounts.get_mut(&address) {
-            Some(mut account) => account
-                .get_or_insert_storage_slot(index, || self.database.storage_ref(address, index))?,
+        let value = match self.cache.active_accounts.get_mut(&address) {
+            Some(mut account) => account.get_or_insert_storage_slot(index, || {
+                match self
+                    .cache
+                    .retired_accounts
+                    .get(&address)
+                    .and_then(|account| account.storage_slot(index))
+                {
+                    Some(value) => Ok(value),
+                    None => self.database.storage_ref(address, index),
+                }
+            })?,
             None => unreachable!(
                 "For accessing any storage account is guaranteed to be loaded beforehand"
             ),

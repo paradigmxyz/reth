@@ -15,7 +15,9 @@ use revm::{
 #[derive(Debug)]
 pub struct SharedCacheState {
     /// Block state account with account state
-    pub accounts: DashMap<Address, SharedCacheAccount>,
+    pub active_accounts: DashMap<Address, SharedCacheAccount>,
+    /// TODO:
+    pub retired_accounts: HashMap<Address, SharedCacheAccount>,
     /// Mapping of the code hash of created contracts to the respective bytecode.
     pub contracts: DashMap<B256, Bytecode>,
     /// Has EIP-161 state clear enabled (Spurious Dragon hardfork).
@@ -31,7 +33,12 @@ impl Default for SharedCacheState {
 impl SharedCacheState {
     /// New default state.
     pub fn new(has_state_clear: bool) -> Self {
-        Self { accounts: DashMap::default(), contracts: DashMap::default(), has_state_clear }
+        Self {
+            active_accounts: DashMap::default(),
+            retired_accounts: HashMap::default(),
+            contracts: DashMap::default(),
+            has_state_clear,
+        }
     }
 
     /// Set state clear flag. EIP-161.
@@ -41,7 +48,7 @@ impl SharedCacheState {
 
     /// Insert not existing account.
     pub fn insert_not_existing(&self, address: Address) {
-        self.accounts.insert(address, SharedCacheAccount::new_loaded_not_existing());
+        self.active_accounts.insert(address, SharedCacheAccount::new_loaded_not_existing());
     }
 
     /// Insert Loaded (Or LoadedEmptyEip161 if account is empty) account.
@@ -51,7 +58,7 @@ impl SharedCacheState {
         } else {
             SharedCacheAccount::new_loaded_empty_eip161(HashMap::default())
         };
-        self.accounts.insert(address, account);
+        self.active_accounts.insert(address, account);
     }
 
     /// Similar to `insert_account` but with storage.
@@ -66,18 +73,23 @@ impl SharedCacheState {
         } else {
             SharedCacheAccount::new_loaded_empty_eip161(storage)
         };
-        self.accounts.insert(address, account);
+        self.active_accounts.insert(address, account);
     }
 
     /// Take account transitions from shared cache state.
+    /// TODO: safety
     pub fn take_transitions(&mut self) -> TransitionState {
-        let mut transitions = HashMap::with_capacity(self.accounts.len());
-        self.accounts.alter_all(|address, mut account| {
+        let mut transitions = HashMap::with_capacity(self.active_accounts.len());
+
+        let active = std::mem::take(&mut self.active_accounts);
+        let shards = active.into_shards().into_vec();
+        for (address, account) in shards.into_iter().flat_map(|lock| lock.into_inner()) {
+            let mut account = account.into_inner();
             if let Some(transition) = account.finalize_transition(self.has_state_clear) {
-                transitions.insert(*address, transition);
+                transitions.insert(address, transition);
             }
-            account
-        });
+            self.retired_accounts.insert(address, account);
+        }
         TransitionState { transitions: HashMap::from_iter(transitions) }
     }
 
@@ -92,7 +104,7 @@ impl SharedCacheState {
 
         for (address, account_states) in accounts {
             let mut this_account =
-                self.accounts.get_mut(&address).expect("account must be present");
+                self.active_accounts.get_mut(&address).expect("account must be present");
             let previous_info = this_account.account_info();
 
             for (revision, account) in account_states {
