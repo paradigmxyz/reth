@@ -148,16 +148,14 @@ pub struct PayloadBuilderAttributes {
 }
 
 /// Optimism Payload Builder Attributes
+#[cfg(feature = "optimism")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimismPayloadBuilderAttributes {
     /// NoTxPool option for the generated payload
-    #[cfg(feature = "optimism")]
     pub no_tx_pool: bool,
     /// Transactions for the generated payload
-    #[cfg(feature = "optimism")]
     pub transactions: Vec<TransactionSigned>,
     /// The gas limit for the generated payload
-    #[cfg(feature = "optimism")]
     pub gas_limit: Option<u64>,
 }
 

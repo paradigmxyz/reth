@@ -10,9 +10,6 @@ use derive_more::{AsRef, Deref};
 use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "optimism")]
-use crate::TxDeposit;
-
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
 /// non-4844 signed transaction.
 #[add_arbitrary_tests]
@@ -51,7 +48,7 @@ pub enum PooledTransactionsElement {
     #[cfg(feature = "optimism")]
     Deposit {
         /// The inner transaction
-        transaction: TxDeposit,
+        transaction: crate::TxDeposit,
         /// The signature
         signature: Signature,
         /// The hash of the transaction

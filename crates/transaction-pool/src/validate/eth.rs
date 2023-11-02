@@ -27,8 +27,6 @@ use std::{
 use tokio::sync::Mutex;
 
 #[cfg(feature = "optimism")]
-use reth_primitives::{bytes::BytesMut, BlockNumberOrTag};
-#[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
 
 /// Validator for Ethereum transactions.
@@ -377,7 +375,10 @@ where
 
         #[cfg(feature = "optimism")]
         let cost = {
-            let block = match self.client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
+            let block = match self
+                .client
+                .block_by_number_or_tag(reth_primitives::BlockNumberOrTag::Latest)
+            {
                 Ok(Some(block)) => block,
                 Ok(None) => {
                     return TransactionValidationOutcome::Error(
@@ -390,7 +391,7 @@ where
                 }
             };
 
-            let mut encoded = BytesMut::default();
+            let mut encoded = reth_primitives::bytes::BytesMut::default();
             transaction.to_recovered_transaction().encode_enveloped(&mut encoded);
             let cost_addition = match reth_revm::optimism::extract_l1_info(&block).map(|info| {
                 info.l1_tx_data_fee(

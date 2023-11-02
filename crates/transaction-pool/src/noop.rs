@@ -20,9 +20,6 @@ use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
-#[cfg(feature = "optimism")]
-use reth_primitives::InvalidTransactionError;
-
 /// A [`TransactionPool`] implementation that does nothing.
 ///
 /// All transactions are rejected and no events are emitted.
@@ -242,7 +239,7 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         if transaction.is_deposit() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidTransactionError::TxTypeNotSupported.into(),
+                reth_primitives::InvalidTransactionError::TxTypeNotSupported.into(),
             )
         }
 
