@@ -43,25 +43,10 @@ impl<'a> Deserialize<'a> for JsonU256 {
         deserializer.deserialize_any(JsonU256Visitor)
     }
 }
-/// Implementation of the `Display` trait for `JsonU256`.
-///
-/// This allows instances of `JsonU256` to be easily printed and formatted as strings.
-/// The default representation is the decimal format of the `U256` value.
+
 impl fmt::Display for JsonU256 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-impl JsonU256 {
-    /// Returns the hexadecimal representation of the `JsonU256` value.
-
-    pub fn to_hex_string(&self) -> String {
-        format!("{:x}", self.0)
-    }
-    /// Returns the decimal representation of the `JsonU256` value.
-
-    pub fn to_dec_string(&self) -> String {
-        format!("{}", self.0)
     }
 }
 /// Visitor pattern for `JsonU256` deserialization.
