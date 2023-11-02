@@ -42,7 +42,7 @@ use revm::{
 use revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State};
 
 #[cfg(feature = "optimism")]
-use crate::eth::api::block::OptimismTxMeta;
+use crate::eth::api::optimism::OptimismTxMeta;
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
 #[cfg(feature = "optimism")]

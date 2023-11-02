@@ -16,43 +16,6 @@ use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
 
-#[cfg(feature = "optimism")]
-use reth_primitives::U256;
-#[cfg(feature = "optimism")]
-use revm::L1BlockInfo;
-#[cfg(feature = "optimism")]
-use std::rc::Rc;
-
-/// Optimism Transaction Metadata
-///
-/// Includes the L1 fee and data gas for the tx along with the L1
-/// block info. In order to pass the [OptimismTxMeta] into the
-/// async colored `build_transaction_receipt_with_block_receipts`
-/// function, a reference counter for the L1 block info is
-/// used so the L1 block info can be shared between receipts.
-#[cfg(feature = "optimism")]
-#[derive(Debug, Default, Clone)]
-pub(crate) struct OptimismTxMeta {
-    /// The L1 block info.
-    pub(crate) l1_block_info: Option<Rc<L1BlockInfo>>,
-    /// The L1 fee for the block.
-    pub(crate) l1_fee: Option<U256>,
-    /// The L1 data gas for the block.
-    pub(crate) l1_data_gas: Option<U256>,
-}
-
-#[cfg(feature = "optimism")]
-impl OptimismTxMeta {
-    /// Creates a new [OptimismTxMeta].
-    pub(crate) fn new(
-        l1_block_info: Option<Rc<L1BlockInfo>>,
-        l1_fee: Option<U256>,
-        l1_data_gas: Option<U256>,
-    ) -> Self {
-        Self { l1_block_info, l1_fee, l1_data_gas }
-    }
-}
-
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider:
@@ -150,7 +113,7 @@ where
                     )
                 })
                 .collect::<EthResult<Vec<_>>>();
-            return receipts.map(Some)
+            return receipts.map(Some);
         }
 
         Ok(None)
@@ -167,7 +130,7 @@ where
 
         if block_id.is_pending() {
             // Pending block can be fetched directly without need for caching
-            return Ok(self.provider().pending_block()?.map(|block| block.body.len()))
+            return Ok(self.provider().pending_block()?.map(|block| block.body.len()));
         }
 
         let block_hash = match self.provider().block_hash_for_id(block_id)? {
@@ -189,10 +152,10 @@ where
             // Pending block can be fetched directly without need for caching
             let maybe_pending = self.provider().pending_block()?;
             return if maybe_pending.is_some() {
-                return Ok(maybe_pending)
+                return Ok(maybe_pending);
             } else {
                 self.local_pending_block().await
-            }
+            };
         }
 
         let block_hash = match self.provider().block_hash_for_id(block_id)? {
