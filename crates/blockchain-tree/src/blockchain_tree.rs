@@ -1071,7 +1071,6 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         let provider = DatabaseProvider::new_rw(
             self.externals.db.tx_mut()?,
             self.externals.chain_spec.clone(),
-            None,
         );
 
         let (blocks, state) = chain.into_inner();
@@ -1117,7 +1116,6 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         let provider = DatabaseProvider::new_rw(
             self.externals.db.tx_mut()?,
             self.externals.chain_spec.clone(),
-            None,
         );
 
         let tip = provider.last_block_number()?;

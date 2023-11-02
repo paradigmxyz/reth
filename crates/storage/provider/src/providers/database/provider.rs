@@ -104,12 +104,8 @@ pub struct DatabaseProvider<TX> {
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
-    pub fn new_rw(
-        tx: TX,
-        chain_spec: Arc<ChainSpec>,
-        snapshot_provider: Option<Arc<SnapshotProvider>>,
-    ) -> Self {
-        Self { tx, chain_spec, snapshot_provider }
+    pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
+        Self { tx, chain_spec, snapshot_provider: None }
     }
 }
 
@@ -163,12 +159,14 @@ where
 
 impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
-    pub fn new(
-        tx: TX,
-        chain_spec: Arc<ChainSpec>,
-        snapshot_provider: Option<Arc<SnapshotProvider>>,
-    ) -> Self {
-        Self { tx, chain_spec, snapshot_provider }
+    pub fn new(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
+        Self { tx, chain_spec, snapshot_provider: None }
+    }
+
+    /// Creates a new [`Self`] with access to a [`SnapshotProvider`].
+    pub fn with_snapshot_provider(mut self, snapshot_provider: Arc<SnapshotProvider>) -> Self {
+        self.snapshot_provider = Some(snapshot_provider);
+        self
     }
 
     /// Consume `DbTx` or `DbTxMut`.

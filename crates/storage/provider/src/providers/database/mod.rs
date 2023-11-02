@@ -47,11 +47,13 @@ impl<DB: Database> ProviderFactory<DB> {
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     pub fn provider(&self) -> RethResult<DatabaseProviderRO<'_, DB>> {
-        Ok(DatabaseProvider::new(
-            self.db.tx()?,
-            self.chain_spec.clone(),
-            self.snapshot_provider.clone(),
-        ))
+        let mut provider = DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone());
+
+        if let Some(snapshot_provider) = &self.snapshot_provider {
+            provider = provider.with_snapshot_provider(snapshot_provider.clone());
+        }
+
+        Ok(provider)
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -59,11 +61,13 @@ impl<DB: Database> ProviderFactory<DB> {
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     pub fn provider_rw(&self) -> RethResult<DatabaseProviderRW<'_, DB>> {
-        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
-            self.db.tx_mut()?,
-            self.chain_spec.clone(),
-            self.snapshot_provider.clone(),
-        )))
+        let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
+
+        if let Some(snapshot_provider) = &self.snapshot_provider {
+            provider = provider.with_snapshot_provider(snapshot_provider.clone());
+        }
+
+        Ok(DatabaseProviderRW(provider))
     }
 }
 
