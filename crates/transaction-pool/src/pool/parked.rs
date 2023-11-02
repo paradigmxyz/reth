@@ -4,7 +4,12 @@ use crate::{
 };
 use fnv::FnvHashMap;
 use reth_primitives::Address;
-use std::{cmp::Ordering, collections::BTreeSet, ops::Deref, sync::Arc};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeSet, HashSet},
+    ops::Deref,
+    sync::Arc,
+};
 
 /// A pool of transactions that are currently parked and are waiting for external changes (e.g.
 /// basefee, ancestor transactions, balance) that eventually move the transaction into the pending
@@ -107,21 +112,26 @@ impl<T: ParkedOrd> ParkedPool<T> {
         ids
     }
 
-    /// Returns addresses sorted by their last submission id
+    /// Returns addresses sorted by their last submission id. Addresses with older last submission
+    /// ids are first.
     ///
     /// Similar to `Heartbeat` in Geth
     pub(crate) fn get_senders_by_submission_id(&self) -> Vec<Address> {
-        let mut senders = Vec::new();
+        let mut senders = HashSet::new();
         for tx in self.by_id.values() {
-            if senders.contains(&tx.transaction.sender()) {
-                continue
-            }
-            senders.push(tx.transaction.sender());
+            senders.insert(tx.transaction.sender());
         }
+
+        // collect into vec for sorting
+        let mut senders = senders.into_iter().collect::<Vec<_>>();
+
+        // sort s.t. senders with older submission ids are first
         senders.sort_by(|a, b| {
             let a_ids = self.get_submission_ids_by_sender(a);
             let b_ids = self.get_submission_ids_by_sender(b);
-            a_ids.last().unwrap().cmp(b_ids.last().unwrap())
+            // SAFETY: we just retrieved senders from by_id, and get_submission_ids_by_sender
+            // checks by_id, so these lists should not be empty.
+            b_ids.last().unwrap().cmp(a_ids.last().unwrap())
         });
         senders
     }
@@ -413,6 +423,10 @@ impl<T: PoolTransaction> Ord for QueuedOrd<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
+    use reth_primitives::address;
+
     use super::*;
     use crate::test_utils::{MockTransaction, MockTransactionFactory};
 
@@ -468,5 +482,90 @@ mod tests {
         let removed = pool.enforce_basefee(root_tx.max_fee_per_gas() as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn truncate_parked_by_submission_id() {
+        // this test ensures that we evict from the pending pool by sender
+        // TODO: Ensure local transactions are not evicted
+        let mut f = MockTransactionFactory::default();
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+
+        let a = address!("000000000000000000000000000000000000000a");
+        let b = address!("000000000000000000000000000000000000000b");
+        let c = address!("000000000000000000000000000000000000000c");
+        let d = address!("000000000000000000000000000000000000000d");
+
+        // TODO: make creating these mock tx chains easier
+        // create a chain of transactions by sender A, B, C
+        let a1 = MockTransaction::eip1559().with_sender(a);
+        let a2 = a1.clone().with_nonce(1);
+        let a3 = a1.clone().with_nonce(2);
+        let a4 = a1.clone().with_nonce(3);
+
+        let b1 = MockTransaction::eip1559().with_sender(b);
+        let b2 = b1.clone().with_nonce(1);
+        let b3 = b1.clone().with_nonce(2);
+
+        // C has the same number of txs as B
+        let c1 = MockTransaction::eip1559().with_sender(c);
+        let c2 = c1.clone().with_nonce(1);
+        let c3 = c1.clone().with_nonce(2);
+
+        let d1 = MockTransaction::eip1559().with_sender(d);
+
+        // just construct a list of all txs to add
+        let expected_parked = vec![c1.clone(), c2.clone(), c3.clone(), d1.clone()]
+            .into_iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
+
+        // we expect the truncate operation to go through the senders with the most txs, removing
+        // txs based on when they were submitted, removing the oldest txs first, until the pool is
+        // not over the limit
+        let expected_removed = vec![
+            a1.clone(),
+            a2.clone(),
+            a3.clone(),
+            a4.clone(),
+            b1.clone(),
+            b2.clone(),
+            b3.clone(),
+        ]
+        .into_iter()
+        .map(|tx| (tx.sender(), tx.nonce()))
+        .collect::<HashSet<_>>();
+        let all_txs = vec![a1, a2, a3, a4, b1, b2, b3, c1, c2, c3, d1];
+
+        // add all the transactions to the pool
+        for tx in all_txs {
+            pool.add_transaction(f.validated_arc(tx));
+        }
+
+        // let's set the max_account_slots to 2, and the max total txs to 4, we should end up with
+        // only the first transactions
+        let max_account_slots = 1;
+        let pool_limit = SubPoolLimit {
+            max_txs: 4,
+            // TODO: size is going to make this complicated i think....
+            max_size: usize::MAX,
+        };
+
+        // truncate the pool
+        let removed = pool.truncate_pool(pool_limit, max_account_slots);
+        assert_eq!(removed.len(), expected_removed.len());
+
+        // get the inner txs from the removed txs
+        let removed =
+            removed.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        assert_eq!(removed, expected_removed);
+
+        // get the parked pool
+        let parked = pool.all().collect::<Vec<_>>();
+        assert_eq!(parked.len(), expected_parked.len());
+
+        // get the inner txs from the parked txs
+        let parked = parked.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        assert_eq!(parked, expected_parked);
     }
 }
