@@ -4,7 +4,8 @@ use crate::{
     queue::{BlockQueue, BlockQueueStore, TransactionBatch},
     shared::{LockedSharedState, SharedState},
 };
-use futures::{stream::FuturesOrdered, Future, FutureExt, StreamExt};
+use futures::{Future, FutureExt};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
     RethError, RethResult,
@@ -28,7 +29,7 @@ use reth_revm_executor::{
 };
 use revm::{
     db::WrapDatabaseRef,
-    primitives::{EVMResult, Env, ExecutionResult, ResultAndState},
+    primitives::{EVMResult, Env, ExecutionResult, ResultAndState, TxEnv},
     DatabaseRef, EVM,
 };
 use std::{
@@ -88,36 +89,76 @@ impl<'a> ParallelExecutor<'a> {
         transactions: &[TransactionSigned],
         senders: &[Address],
     ) -> Result<Vec<(usize, ExecutionResult)>, BlockExecutionError> {
-        let mut fut_batch = FuturesOrdered::default();
-        for tx_idx in batch.iter() {
-            let tx_idx = *tx_idx as usize;
-            let transaction = transactions.get(tx_idx).unwrap(); // TODO:
-            let sender = senders.get(tx_idx).unwrap(); // TODO:
-            let mut env = env.clone();
-            fill_tx_env(&mut env.tx, transaction, *sender);
-
-            let (tx, rx) = oneshot::channel();
-            self.pool.scope(|scope| {
-                let state = self.state.clone();
-                scope.spawn(move |_scope| {
-                    let mut evm = EVM::with_env(env);
-                    evm.database(state);
-                    let _result = tx.send(evm.transact_ref());
-                });
-            });
-            fut_batch.push_back(TransactionExecutionFut::new(tx_idx, transaction.hash, rx));
-        }
+        let transactions = batch
+            .iter()
+            .map(|tx_idx| {
+                let tx_idx = *tx_idx as usize;
+                let transaction = transactions.get(tx_idx).unwrap(); // TODO:
+                let sender = senders.get(tx_idx).unwrap(); // TODO:
+                let mut env = env.clone();
+                fill_tx_env(&mut env.tx, transaction, *sender);
+                (tx_idx, transaction.hash, env)
+            })
+            .collect::<Vec<_>>();
+        let exec_results = transactions
+            .into_par_iter()
+            .map(|(tx_idx, hash, env)| {
+                let mut evm = EVM::with_env(env);
+                evm.database(self.state.clone());
+                (
+                    tx_idx,
+                    evm.transact_ref().map_err(|e| {
+                        BlockExecutionError::Validation(BlockValidationError::EVM {
+                            hash,
+                            error: e.into(),
+                        })
+                    }),
+                )
+            })
+            .collect::<Vec<_>>();
 
         let mut results = Vec::with_capacity(batch.len());
         let mut states = Vec::with_capacity(batch.len());
-        while let Some((tx_idx, hash, result)) = fut_batch.next().await {
-            let ResultAndState { state, result } = result.unwrap().map_err(|e| {
-                BlockExecutionError::Validation(BlockValidationError::EVM { hash, error: e.into() })
-            })?;
+        for (tx_idx, result) in exec_results {
+            let ResultAndState { state, result } = result?;
             results.push((tx_idx, result));
             states.push((tx_idx, state));
         }
         self.state.write().commit(states);
+
+        // let mut fut_batch = FuturesOrdered::default();
+
+        // for tx_idx in batch.iter() {
+        //     let tx_idx = *tx_idx as usize;
+        //     let transaction = transactions.get(tx_idx).unwrap(); // TODO:
+        //     let sender = senders.get(tx_idx).unwrap(); // TODO:
+        //     let state = self.state.clone();
+        //     let mut env = env.clone();
+        //     fill_tx_env(&mut env.tx, transaction, *sender);
+
+        //     let (tx, rx) = oneshot::channel();
+
+        //     self.pool.scope(|scope| {
+        //         let state = self.state.clone();
+        //         scope.spawn(move |_scope| {
+        //             let mut evm = EVM::with_env(env);
+        //             evm.database(state);
+        //             let _result = tx.send(evm.transact_ref());
+        //         });
+        //     });
+        //     fut_batch.push_back(TransactionExecutionFut::new(tx_idx, transaction.hash, rx));
+        // }
+
+        // let mut results = Vec::with_capacity(batch.len());
+        // let mut states = Vec::with_capacity(batch.len());
+        // while let Some((tx_idx, hash, result)) = fut_batch.next().await {
+        //     let ResultAndState { state, result } = result.unwrap().map_err(|e| {
+        //         BlockExecutionError::Validation(BlockValidationError::EVM { hash, error: e.into()
+        // })     })?;
+        //     results.push((tx_idx, result));
+        //     states.push((tx_idx, state));
+        // }
+        // self.state.write().commit(states);
 
         Ok(results)
     }
@@ -410,23 +451,23 @@ impl PrunableAsyncBlockExecutor for ParallelExecutor<'_> {
     }
 }
 
-struct TransactionExecutionFut {
-    tx_idx: usize,
-    tx_hash: B256,
-    rx: oneshot::Receiver<EVMResult<RethError>>,
-}
+// struct TransactionExecutionFut {
+//     tx_idx: usize,
+//     tx_hash: B256,
+//     rx: oneshot::Receiver<EVMResult<RethError>>,
+// }
 
-impl TransactionExecutionFut {
-    fn new(tx_idx: usize, tx_hash: B256, rx: oneshot::Receiver<EVMResult<RethError>>) -> Self {
-        Self { tx_idx, tx_hash, rx }
-    }
-}
+// impl TransactionExecutionFut {
+//     fn new(tx_idx: usize, tx_hash: B256, rx: oneshot::Receiver<EVMResult<RethError>>) -> Self {
+//         Self { tx_idx, tx_hash, rx }
+//     }
+// }
 
-impl Future for TransactionExecutionFut {
-    type Output = (usize, B256, Result<EVMResult<RethError>, RecvError>);
+// impl Future for TransactionExecutionFut {
+//     type Output = (usize, B256, Result<EVMResult<RethError>, RecvError>);
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        this.rx.poll_unpin(cx).map(|result| (this.tx_idx, this.tx_hash, result))
-    }
-}
+//     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+//         let this = self.get_mut();
+//         this.rx.poll_unpin(cx).map(|result| (this.tx_idx, this.tx_hash, result))
+//     }
+// }

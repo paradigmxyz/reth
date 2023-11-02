@@ -76,23 +76,6 @@ impl SharedCacheState {
         self.active_accounts.insert(address, account);
     }
 
-    /// Take account transitions from shared cache state.
-    /// TODO: safety
-    pub fn take_transitions(&mut self) -> TransitionState {
-        let mut transitions = HashMap::with_capacity(self.active_accounts.len());
-
-        let active = std::mem::take(&mut self.active_accounts);
-        let shards = active.into_shards().into_vec();
-        for (address, account) in shards.into_iter().flat_map(|lock| lock.into_inner()) {
-            let mut account = account.into_inner();
-            if let Some(transition) = account.finalize_transition(self.has_state_clear) {
-                transitions.insert(address, transition);
-            }
-            self.retired_accounts.insert(address, account);
-        }
-        TransitionState { transitions: HashMap::from_iter(transitions) }
-    }
-
     /// Apply outputs of EVM execution.
     pub fn apply_evm_states(&mut self, evm_states: Vec<(usize, EVMState)>) {
         let mut accounts = HashMap::<Address, Vec<(usize, Account)>>::default();
@@ -111,5 +94,22 @@ impl SharedCacheState {
                 this_account.apply_account_revision(&previous_info, account, revision);
             }
         }
+    }
+
+    /// Take account transitions from shared cache state.
+    /// TODO: safety comment
+    pub fn take_transitions(&mut self) -> TransitionState {
+        let mut transitions = HashMap::with_capacity(self.active_accounts.len());
+
+        let active = std::mem::take(&mut self.active_accounts);
+        let shards = active.into_shards().into_vec();
+        for (address, account) in shards.into_iter().flat_map(|lock| lock.into_inner()) {
+            let mut account = account.into_inner();
+            if let Some(transition) = account.finalize_transition(self.has_state_clear) {
+                transitions.insert(address, transition);
+            }
+            self.retired_accounts.insert(address, account);
+        }
+        TransitionState { transitions: HashMap::from_iter(transitions) }
     }
 }
