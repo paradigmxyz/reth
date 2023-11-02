@@ -3,8 +3,8 @@
 use crate::tracing::{
     js::{
         builtins::{
-            address_to_buf, bytes_to_address, bytes_to_hash, from_buf, to_bigint, to_bigint_array,
-            to_buf, to_buf_value,
+            address_to_buf, bytes_to_address, bytes_to_hash, from_buf, to_bigint, to_buf,
+            to_buf_value,
         },
         JsDbRequest,
     },
@@ -67,32 +67,36 @@ macro_rules! js_value_capture_getter {
 /// These functions could get garbage collected, however the data accessed by the function is
 /// supposed to be ephemeral and only valid for the duration of the function call.
 ///
-/// This type supports garbage collection of references and prevents access to the value if it has
-/// been dropped.
+/// This type supports garbage collection of (rust) references and prevents access to the value if
+/// it has been dropped.
+#[derive(Debug)]
 pub(crate) struct GuardedNullableGcRef<Val: 'static> {
-    val: &'static Val,
-    dropped: Rc<RefCell<bool>>,
+    /// The lifetime is a lie to make it possible to use a reference in boa which requires 'static
+    inner: Rc<RefCell<Option<&'static Val>>>,
 }
 
 impl<Val: 'static> GuardedNullableGcRef<Val> {
     /// Creates a garbage collectible reference to the given reference.
     ///
     /// SAFETY; the caller must ensure that the guard is dropped before the value is dropped.
-    pub(crate) fn new(val: &Val) -> (Self, RefGuard) {
-        let dropped = Rc::new(RefCell::new(false));
-        // SAFETY: caller must ensure that the guard is dropped before the value is dropped
-        let this = Self { val: unsafe { std::mem::transmute(val) }, dropped: Rc::clone(&dropped) };
-        (this, RefGuard { dropped })
+    pub(crate) fn new(val: &Val) -> (Self, RefGuard<'_, Val>) {
+        let inner = Rc::new(RefCell::new(Some(val)));
+        let guard = RefGuard { inner: Rc::clone(&inner) };
+
+        // SAFETY: guard enforces that the value is removed from the refcell before it is dropped
+        let this = Self { inner: unsafe { std::mem::transmute(inner) } };
+
+        (this, guard)
     }
 
-    /// Gets the value if it has not been dropped.
-    pub(crate) fn get(&self) -> Option<&'static Val> {
-        if *RefCell::borrow(&*self.dropped) {
-            // value has been dropped
-            None
-        } else {
-            Some(self.val)
-        }
+    /// Executes the given closure with a reference to the inner value if it is still present.
+    pub(crate) fn with_inner<F, R>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&Val) -> R,
+    {
+        let inner = RefCell::borrow(&self.inner);
+        let inner = inner.as_ref()?;
+        Some(f(inner))
     }
 }
 
@@ -102,14 +106,17 @@ unsafe impl<Val: 'static> Trace for GuardedNullableGcRef<Val> {
     empty_trace!();
 }
 
+/// Guard the inner references, once this value is dropped the inner reference is also removed.
+///
+/// This type guarantees that it never outlives the wrapped reference.
 #[derive(Debug)]
-pub(crate) struct RefGuard {
-    dropped: Rc<RefCell<bool>>,
+pub(crate) struct RefGuard<'a, Val> {
+    inner: Rc<RefCell<Option<&'a Val>>>,
 }
 
-impl Drop for RefGuard {
+impl<'a, Val> Drop for RefGuard<'a, Val> {
     fn drop(&mut self) {
-        *self.dropped.borrow_mut() = true;
+        self.inner.borrow_mut().take();
     }
 }
 
@@ -117,7 +124,7 @@ impl Drop for RefGuard {
 #[derive(Debug)]
 pub(crate) struct StepLog {
     /// Stack before step execution
-    pub(crate) stack: StackObj,
+    pub(crate) stack: StackRef,
     /// Opcode to be executed
     pub(crate) op: OpObj,
     /// All allocated memory in a step
@@ -323,15 +330,39 @@ impl From<u8> for OpObj {
 }
 
 /// Represents the stack object
-#[derive(Debug, Clone)]
-pub(crate) struct StackObj(pub(crate) Stack);
+#[derive(Debug)]
+pub(crate) struct StackRef(pub(crate) GuardedNullableGcRef<Stack>);
 
-impl StackObj {
+impl StackRef {
+    /// Creates a new stack reference
+    pub(crate) fn new(stack: &Stack) -> (Self, RefGuard<'_, Stack>) {
+        let (inner, guard) = GuardedNullableGcRef::new(stack);
+        (StackRef(inner), guard)
+    }
+
+    fn peek(&self, idx: usize, ctx: &mut Context<'_>) -> JsResult<JsValue> {
+        self.0
+            .with_inner(|stack| {
+                let value = stack.peek(idx).map_err(|_| {
+                    JsError::from_native(JsNativeError::typ().with_message(format!(
+                        "tracer accessed out of bound stack: size {}, index {}",
+                        stack.len(),
+                        idx
+                    )))
+                })?;
+                to_bigint(value, ctx)
+            })
+            .ok_or_else(|| {
+                JsError::from_native(JsNativeError::typ().with_message(format!(
+                    "tracer accessed out of bound stack: size 0, index {}",
+                    idx
+                )))
+            })?
+    }
+
     pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
         let obj = JsObject::default();
-        let stack = self.0;
-        let len = stack.len();
-        let stack_arr = to_bigint_array(stack.data(), context)?;
+        let len = self.0.with_inner(|stack| stack.len()).unwrap_or_default();
         let length = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure(move |_this, _args, _ctx| Ok(JsValue::from(len))),
@@ -343,7 +374,7 @@ impl StackObj {
         let peek = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure_with_captures(
-                move |_this, args, stack_arr, ctx| {
+                move |_this, args, stack, ctx| {
                     let idx_f64 = args.get_or_undefined(0).to_number(ctx)?;
                     let idx = idx_f64 as usize;
                     if len <= idx || idx_f64 < 0. {
@@ -353,12 +384,9 @@ impl StackObj {
                             ),
                         )))
                     }
-                    // idx is from the top of the stack, so we need to reverse it
-                    // SAFETY: bounds checked above
-                    let idx = len - idx - 1;
-                    stack_arr.get(idx as u64, ctx)
+                    stack.peek(idx, ctx)
                 },
-                stack_arr,
+                self,
             ),
         )
         .length(1)
@@ -368,6 +396,12 @@ impl StackObj {
         obj.set("peek", peek, false, context)?;
         Ok(obj)
     }
+}
+
+impl Finalize for StackRef {}
+
+unsafe impl Trace for StackRef {
+    empty_trace!();
 }
 
 /// Represents the contract object

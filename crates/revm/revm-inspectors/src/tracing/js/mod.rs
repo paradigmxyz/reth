@@ -3,7 +3,7 @@
 use crate::tracing::{
     js::{
         bindings::{
-            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, StackObj, StepLog,
+            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, StackRef, StepLog,
         },
         builtins::{register_builtins, PrecompileList},
     },
@@ -293,8 +293,9 @@ where
 
         let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
 
+        let (stack, _stack_guard) = StackRef::new(&interp.stack);
         let step = StepLog {
-            stack: StackObj(interp.stack.clone()),
+            stack,
             op: interp.current_opcode().into(),
             memory: MemoryObj(interp.shared_memory.clone()),
             pc: interp.program_counter() as u64,
@@ -328,8 +329,9 @@ where
         if matches!(interp.instruction_result, return_revert!()) {
             let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
 
+            let (stack, _stack_guard) = StackRef::new(&interp.stack);
             let step = StepLog {
-                stack: StackObj(interp.stack.clone()),
+                stack,
                 op: interp.current_opcode().into(),
                 memory: MemoryObj(interp.shared_memory.clone()),
                 pc: interp.program_counter() as u64,
