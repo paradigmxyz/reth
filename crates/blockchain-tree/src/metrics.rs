@@ -29,25 +29,33 @@ pub struct BlockBufferMetrics {
     pub blocks: Gauge,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct MakeCanonicalDurationsRecorder {
     pub(crate) actions: Vec<(MakeCanonicalAction, Duration)>,
+    latest: Instant,
+}
+
+impl Default for MakeCanonicalDurationsRecorder {
+    fn default() -> Self {
+        Self { actions: Vec::new(), latest: Instant::now() }
+    }
 }
 
 impl MakeCanonicalDurationsRecorder {
-    /// Records the duration of `f` execution, saves for future logging and instantly reports as a
-    /// metric with `action` label.
-    pub(crate) fn record<T>(&mut self, action: MakeCanonicalAction, f: impl FnOnce() -> T) -> T {
-        let start = Instant::now();
-        let result = f();
-        let elapsed = start.elapsed();
-
-        self.actions.push((action, elapsed));
+    /// Saves the provided duration for future logging and instantly reports as a metric with
+    /// `action` label.
+    pub(crate) fn record_duration(&mut self, action: MakeCanonicalAction, duration: Duration) {
+        self.actions.push((action, duration));
         MakeCanonicalMetrics::new_with_labels(&[("action", format!("{action:?}"))])
             .duration
-            .record(elapsed);
+            .record(duration);
+        self.latest = Instant::now();
+    }
 
-        result
+    /// Records the duration since last record, saves it for future logging and instantly reports as
+    /// a metric with `action` label.
+    pub(crate) fn record_relative(&mut self, action: MakeCanonicalAction) {
+        self.record_duration(action, self.latest.elapsed());
     }
 }
 

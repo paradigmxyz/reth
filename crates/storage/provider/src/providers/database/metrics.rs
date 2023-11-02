@@ -2,26 +2,31 @@ use metrics::Histogram;
 use reth_metrics::Metrics;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct DurationsRecorder {
     pub(crate) actions: Vec<(Action, Duration)>,
+    latest: Instant,
+}
+
+impl Default for DurationsRecorder {
+    fn default() -> Self {
+        Self { actions: Vec::new(), latest: Instant::now() }
+    }
 }
 
 impl DurationsRecorder {
-    /// Records the duration of `f` closure execution, saves for future logging and instantly
-    /// reports as a metric with `action` label.
-    pub(crate) fn record_closure<T>(&mut self, action: Action, f: impl FnOnce() -> T) -> T {
-        let start = Instant::now();
-        let result = f();
-        self.record_duration(action, start.elapsed());
-        result
-    }
-
     /// Saves the provided duration for future logging and instantly reports as a metric with
     /// `action` label.
     pub(crate) fn record_duration(&mut self, action: Action, duration: Duration) {
         self.actions.push((action, duration));
         Metrics::new_with_labels(&[("action", format!("{action:?}"))]).duration.record(duration);
+        self.latest = Instant::now();
+    }
+
+    /// Records the duration since last record, saves it for future logging and instantly reports as
+    /// a metric with `action` label.
+    pub(crate) fn record_relative(&mut self, action: Action) {
+        self.record_duration(action, self.latest.elapsed());
     }
 }
 

@@ -913,17 +913,14 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
         let mut durations_recorder = MakeCanonicalDurationsRecorder::default();
 
-        let (old_block_indices, old_buffered_blocks) = durations_recorder
-            .record(MakeCanonicalAction::CloneOldBlocks, || {
-                (self.block_indices().clone(), self.state.buffered_blocks.parent_to_child.clone())
-            });
+        let old_block_indices = self.block_indices().clone();
+        let old_buffered_blocks = self.state.buffered_blocks.parent_to_child.clone();
+        durations_recorder.record_relative(MakeCanonicalAction::CloneOldBlocks);
 
         // If block is already canonical don't return error.
-        if let Some(header) = durations_recorder
-            .record(MakeCanonicalAction::FindCanonicalHeader, || {
-                self.find_canonical_header(block_hash)
-            })?
-        {
+        let canonical_header = self.find_canonical_header(block_hash)?;
+        durations_recorder.record_relative(MakeCanonicalAction::FindCanonicalHeader);
+        if let Some(header) = canonical_header {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
             // TODO: this could be fetched from the chainspec first
             let td = self.externals.database().provider()?.header_td(block_hash)?.ok_or(
@@ -952,51 +949,42 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         trace!(target: "blockchain_tree", ?chain, "Found chain to make canonical");
 
         // we are splitting chain at the block hash that we want to make canonical
-        let canonical = durations_recorder.record(MakeCanonicalAction::SplitChain, || {
-            self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash))
-        });
+        let canonical = self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash));
+        durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
         let mut block_fork = canonical.fork_block();
         let mut block_fork_number = canonical.fork_block_number();
         let mut chains_to_promote = vec![canonical];
 
         // loop while fork blocks are found in Tree.
-        durations_recorder.record(MakeCanonicalAction::SplitChainForks, || {
-            while let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block_fork.hash) {
-                let chain = self.state.chains.remove(&chain_id).expect("To fork to be present");
-                block_fork = chain.fork_block();
-                // canonical chain is lower part of the chain.
-                let canonical =
-                    self.split_chain(chain_id, chain, SplitAt::Number(block_fork_number));
-                block_fork_number = canonical.fork_block_number();
-                chains_to_promote.push(canonical);
-            }
-        });
+        while let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block_fork.hash) {
+            let chain = self.state.chains.remove(&chain_id).expect("To fork to be present");
+            block_fork = chain.fork_block();
+            // canonical chain is lower part of the chain.
+            let canonical = self.split_chain(chain_id, chain, SplitAt::Number(block_fork_number));
+            block_fork_number = canonical.fork_block_number();
+            chains_to_promote.push(canonical);
+        }
+        durations_recorder.record_relative(MakeCanonicalAction::SplitChainForks);
 
         let old_tip = self.block_indices().canonical_tip();
         // Merge all chains into one chain.
-        let (new_canon_chain, chain_appended) =
-            durations_recorder.record(MakeCanonicalAction::MergeAllChains, || {
-                let mut new_canon_chain =
-                    chains_to_promote.pop().expect("There is at least one block");
-                trace!(target: "blockchain_tree", ?new_canon_chain, "Merging chains");
-                let mut chain_appended = false;
-                for chain in chains_to_promote.into_iter().rev() {
-                    chain_appended = true;
-                    trace!(target: "blockchain_tree", ?chain, "Appending chain");
-                    new_canon_chain.append_chain(chain).expect("We have just build the chain.");
-                }
-
-                (new_canon_chain, chain_appended)
-            });
+        let mut new_canon_chain = chains_to_promote.pop().expect("There is at least one block");
+        trace!(target: "blockchain_tree", ?new_canon_chain, "Merging chains");
+        let mut chain_appended = false;
+        for chain in chains_to_promote.into_iter().rev() {
+            chain_appended = true;
+            trace!(target: "blockchain_tree", ?chain, "Appending chain");
+            new_canon_chain.append_chain(chain).expect("We have just build the chain.");
+        }
+        durations_recorder.record_relative(MakeCanonicalAction::MergeAllChains);
 
         if chain_appended {
             trace!(target: "blockchain_tree", ?new_canon_chain, "Canonical chain appended");
         }
         // update canonical index
-        durations_recorder.record(MakeCanonicalAction::UpdateCanonicalIndex, || {
-            self.block_indices_mut().canonicalize_blocks(new_canon_chain.blocks())
-        });
+        self.block_indices_mut().canonicalize_blocks(new_canon_chain.blocks());
+        durations_recorder.record_relative(MakeCanonicalAction::UpdateCanonicalIndex);
 
         // event about new canonical chain.
         let chain_notification;
@@ -1010,10 +998,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             chain_notification =
                 CanonStateNotification::Commit { new: Arc::new(new_canon_chain.clone()) };
             // append to database
-            durations_recorder
-                .record(MakeCanonicalAction::CommitCanonicalChainToDatabase, || {
-                    self.commit_canonical_to_database(new_canon_chain)
-                })?;
+            self.commit_canonical_to_database(new_canon_chain)?;
+            durations_recorder.record_relative(MakeCanonicalAction::CommitCanonicalChainToDatabase);
         } else {
             // it forks to canonical block that is not the tip.
 
@@ -1029,10 +1015,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 unreachable!("all chains should point to canonical chain.");
             }
 
-            let old_canon_chain = durations_recorder
-                .record(MakeCanonicalAction::RevertCanonicalChainFromDatabase, || {
-                    self.revert_canonical_from_database(canon_fork.number)
-                });
+            let old_canon_chain = self.revert_canonical_from_database(canon_fork.number);
+            durations_recorder
+                .record_relative(MakeCanonicalAction::RevertCanonicalChainFromDatabase);
 
             let old_canon_chain = match old_canon_chain {
                 val @ Err(_) => {
@@ -1049,10 +1034,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 Ok(val) => val,
             };
             // commit new canonical chain.
-            durations_recorder
-                .record(MakeCanonicalAction::CommitCanonicalChainToDatabase, || {
-                    self.commit_canonical_to_database(new_canon_chain.clone())
-                })?;
+            self.commit_canonical_to_database(new_canon_chain.clone())?;
+            durations_recorder.record_relative(MakeCanonicalAction::CommitCanonicalChainToDatabase);
 
             if let Some(old_canon_chain) = old_canon_chain {
                 // state action
@@ -1063,9 +1046,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 let reorg_depth = old_canon_chain.len();
 
                 // insert old canon chain
-                durations_recorder.record(MakeCanonicalAction::InsertOldCanonicalChain, || {
-                    self.insert_chain(AppendableChain::new(old_canon_chain))
-                });
+                self.insert_chain(AppendableChain::new(old_canon_chain));
+                durations_recorder.record_relative(MakeCanonicalAction::InsertOldCanonicalChain);
 
                 self.update_reorg_metrics(reorg_depth as f64);
             } else {

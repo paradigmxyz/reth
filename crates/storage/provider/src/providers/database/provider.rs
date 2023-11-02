@@ -1598,80 +1598,68 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         end_block_hash: B256,
         expected_state_root: B256,
     ) -> RethResult<()> {
-        let mut durations_recorder = metrics::DurationsRecorder::default();
-
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
         let mut storage_prefix_set: HashMap<B256, PrefixSetMut> = HashMap::default();
         let mut destroyed_accounts = HashSet::default();
 
-        // storage hashing stage
-        durations_recorder.record_closure::<RethResult<()>>(
-            metrics::Action::InsertStorageHashing,
-            || {
-                let lists = self.changed_storages_with_range(range.clone())?;
-                let storages = self.plainstate_storages(lists)?;
-                let storage_entries = self.insert_storage_for_hashing(storages)?;
-                for (hashed_address, hashed_slots) in storage_entries {
-                    account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                    for slot in hashed_slots {
-                        storage_prefix_set
-                            .entry(hashed_address)
-                            .or_default()
-                            .insert(Nibbles::unpack(slot));
-                    }
-                }
+        let mut durations_recorder = metrics::DurationsRecorder::default();
 
-                Ok(())
-            },
-        )?;
+        // storage hashing stage
+        {
+            let lists = self.changed_storages_with_range(range.clone())?;
+            let storages = self.plainstate_storages(lists)?;
+            let storage_entries = self.insert_storage_for_hashing(storages)?;
+            for (hashed_address, hashed_slots) in storage_entries {
+                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                for slot in hashed_slots {
+                    storage_prefix_set
+                        .entry(hashed_address)
+                        .or_default()
+                        .insert(Nibbles::unpack(slot));
+                }
+            }
+        }
+        durations_recorder.record_relative(metrics::Action::InsertStorageHashing);
 
         // account hashing stage
-        durations_recorder.record_closure::<RethResult<()>>(
-            metrics::Action::InsertAccountHashing,
-            || {
-                let lists = self.changed_accounts_with_range(range.clone())?;
-                let accounts = self.basic_accounts(lists)?;
-                let hashed_addresses = self.insert_account_for_hashing(accounts)?;
-                for (hashed_address, account) in hashed_addresses {
-                    account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                    if account.is_none() {
-                        destroyed_accounts.insert(hashed_address);
-                    }
+        {
+            let lists = self.changed_accounts_with_range(range.clone())?;
+            let accounts = self.basic_accounts(lists)?;
+            let hashed_addresses = self.insert_account_for_hashing(accounts)?;
+            for (hashed_address, account) in hashed_addresses {
+                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                if account.is_none() {
+                    destroyed_accounts.insert(hashed_address);
                 }
-
-                Ok(())
-            },
-        )?;
+            }
+        }
+        durations_recorder.record_relative(metrics::Action::InsertAccountHashing);
 
         // merkle tree
-        durations_recorder.record_closure::<RethResult<()>>(
-            metrics::Action::InsertMerkleTree,
-            || {
-                // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix
-                // sets are pre-loaded.
-                let (state_root, trie_updates) = StateRoot::new(&self.tx)
-                    .with_changed_account_prefixes(account_prefix_set.freeze())
-                    .with_changed_storage_prefixes(
-                        storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
-                    )
-                    .with_destroyed_accounts(destroyed_accounts)
-                    .root_with_updates()
-                    .map_err(Into::<reth_db::DatabaseError>::into)?;
-                if state_root != expected_state_root {
-                    return Err(ProviderError::StateRootMismatch {
-                        got: state_root,
-                        expected: expected_state_root,
-                        block_number: *range.end(),
-                        block_hash: end_block_hash,
-                    }
-                    .into())
+        {
+            // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
+            // are pre-loaded.
+            let (state_root, trie_updates) = StateRoot::new(&self.tx)
+                .with_changed_account_prefixes(account_prefix_set.freeze())
+                .with_changed_storage_prefixes(
+                    storage_prefix_set.into_iter().map(|(k, v)| (k, v.freeze())).collect(),
+                )
+                .with_destroyed_accounts(destroyed_accounts)
+                .root_with_updates()
+                .map_err(Into::<reth_db::DatabaseError>::into)?;
+            if state_root != expected_state_root {
+                return Err(ProviderError::StateRootMismatch {
+                    got: state_root,
+                    expected: expected_state_root,
+                    block_number: *range.end(),
+                    block_hash: end_block_hash,
                 }
-                trie_updates.flush(&self.tx)?;
-
-                Ok(())
-            },
-        )?;
+                .into())
+            }
+            trie_updates.flush(&self.tx)?;
+        }
+        durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
 
         debug!(target: "providers::db", ?range, actions = ?durations_recorder.actions, "Inserted hashes");
 
@@ -2084,61 +2072,49 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         senders: Option<Vec<Address>>,
         prune_modes: Option<&PruneModes>,
     ) -> RethResult<StoredBlockBodyIndices> {
-        let mut durations_recorder = metrics::DurationsRecorder::default();
-
         let block_number = block.number;
 
-        durations_recorder.record_closure(metrics::Action::InsertCanonicalHeaders, || {
-            self.tx.put::<tables::CanonicalHeaders>(block_number, block.hash())
-        })?;
+        let mut durations_recorder = metrics::DurationsRecorder::default();
+
+        self.tx.put::<tables::CanonicalHeaders>(block_number, block.hash())?;
+        durations_recorder.record_relative(metrics::Action::InsertCanonicalHeaders);
 
         // Put header with canonical hashes.
-        durations_recorder.record_closure(metrics::Action::InsertHeaders, || {
-            self.tx.put::<tables::Headers>(block_number, block.header.as_ref().clone())
-        })?;
+        self.tx.put::<tables::Headers>(block_number, block.header.as_ref().clone())?;
+        durations_recorder.record_relative(metrics::Action::InsertHeaders);
 
-        durations_recorder.record_closure(metrics::Action::InsertHeaderNumbers, || {
-            self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)
-        })?;
+        self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
+        durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
 
         // total difficulty
         let ttd = if block_number == 0 {
             block.difficulty
         } else {
             let parent_block_number = block_number - 1;
-            let parent_ttd = durations_recorder
-                .record_closure(metrics::Action::GetParentTD, || {
-                    self.header_td_by_number(parent_block_number)
-                })?
-                .unwrap_or_default();
+            let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
+            durations_recorder.record_relative(metrics::Action::GetParentTD);
             parent_ttd + block.difficulty
         };
 
-        durations_recorder.record_closure(metrics::Action::InsertHeaderTD, || {
-            self.tx.put::<tables::HeaderTD>(block_number, ttd.into())
-        })?;
+        self.tx.put::<tables::HeaderTD>(block_number, ttd.into())?;
+        durations_recorder.record_relative(metrics::Action::InsertHeaderTD);
 
         // insert body ommers data
         if !block.ommers.is_empty() {
-            durations_recorder.record_closure(metrics::Action::InsertBlockOmmers, || {
-                self.tx.put::<tables::BlockOmmers>(
-                    block_number,
-                    StoredBlockOmmers { ommers: block.ommers },
-                )
-            })?;
+            self.tx.put::<tables::BlockOmmers>(
+                block_number,
+                StoredBlockOmmers { ommers: block.ommers },
+            )?;
+            durations_recorder.record_relative(metrics::Action::InsertBlockOmmers);
         }
 
-        let mut next_tx_num = durations_recorder.record_closure::<RethResult<_>>(
-            metrics::Action::GetNextTxNum,
-            || {
-                Ok(self
-                    .tx
-                    .cursor_read::<tables::Transactions>()?
-                    .last()?
-                    .map(|(n, _)| n + 1)
-                    .unwrap_or_default())
-            },
-        )?;
+        let mut next_tx_num = self
+            .tx
+            .cursor_read::<tables::Transactions>()?
+            .last()?
+            .map(|(n, _)| n + 1)
+            .unwrap_or_default();
+        durations_recorder.record_relative(metrics::Action::GetNextTxNum);
         let first_tx_num = next_tx_num;
 
         let tx_count = block.body.len() as u64;
@@ -2147,12 +2123,10 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         let tx_iter = if Some(block.body.len()) == senders_len {
             block.body.into_iter().zip(senders.unwrap()).collect::<Vec<(_, _)>>()
         } else {
-            let senders =
-                durations_recorder.record_closure(metrics::Action::RecoverSigners, || {
-                    TransactionSigned::recover_signers(&block.body, block.body.len()).ok_or(
-                        BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError),
-                    )
-                })?;
+            let senders = TransactionSigned::recover_signers(&block.body, block.body.len()).ok_or(
+                BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError),
+            )?;
+            durations_recorder.record_relative(metrics::Action::RecoverSigners);
             debug_assert_eq!(senders.len(), block.body.len(), "missing one or more senders");
             block.body.into_iter().zip(senders).collect()
         };
@@ -2196,27 +2170,21 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         if let Some(withdrawals) = block.withdrawals {
             if !withdrawals.is_empty() {
-                durations_recorder.record_closure(
-                    metrics::Action::InsertBlockWithdrawals,
-                    || {
-                        self.tx.put::<tables::BlockWithdrawals>(
-                            block_number,
-                            StoredBlockWithdrawals { withdrawals },
-                        )
-                    },
+                self.tx.put::<tables::BlockWithdrawals>(
+                    block_number,
+                    StoredBlockWithdrawals { withdrawals },
                 )?;
+                durations_recorder.record_relative(metrics::Action::InsertBlockWithdrawals);
             }
         }
 
         let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
-        durations_recorder.record_closure(metrics::Action::InsertBlockBodyIndices, || {
-            self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())
-        })?;
+        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())?;
+        durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
 
         if !block_indices.is_empty() {
-            durations_recorder.record_closure(metrics::Action::InsertTransactionBlock, || {
-                self.tx.put::<tables::TransactionBlock>(block_indices.last_tx_num(), block_number)
-            })?;
+            self.tx.put::<tables::TransactionBlock>(block_indices.last_tx_num(), block_number)?;
+            durations_recorder.record_relative(metrics::Action::InsertTransactionBlock);
         }
 
         debug!(
@@ -2253,33 +2221,24 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // Insert the blocks
         for block in blocks {
             let (block, senders) = block.into_components();
-            durations_recorder.record_closure(metrics::Action::InsertBlock, || {
-                self.insert_block(block, Some(senders), prune_modes)
-            })?;
+            self.insert_block(block, Some(senders), prune_modes)?;
+            durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        durations_recorder.record_closure(metrics::Action::InsertState, || {
-            state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)
-        })?;
+        state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)?;
+        durations_recorder.record_relative(metrics::Action::InsertState);
 
-        durations_recorder.record_closure(metrics::Action::InsertHashes, || {
-            self.insert_hashes(
-                first_number..=last_block_number,
-                last_block_hash,
-                expected_state_root,
-            )
-        })?;
+        self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
+        durations_recorder.record_relative(metrics::Action::InsertHashes);
 
-        durations_recorder.record_closure(metrics::Action::InsertHistoryIndices, || {
-            self.update_history_indices(first_number..=last_block_number)
-        })?;
+        self.update_history_indices(first_number..=last_block_number)?;
+        durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
 
         // Update pipeline progress
-        durations_recorder.record_closure(metrics::Action::UpdatePipelineStages, || {
-            self.update_pipeline_stages(new_tip_number, false)
-        })?;
+        self.update_pipeline_stages(new_tip_number, false)?;
+        durations_recorder.record_relative(metrics::Action::UpdatePipelineStages);
 
         debug!(target: "providers::db", actions = ?durations_recorder.actions, "Appended blocks");
 
