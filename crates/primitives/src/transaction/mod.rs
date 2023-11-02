@@ -322,7 +322,7 @@ impl Transaction {
 
         // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
-            return None;
+            return None
         }
 
         // Calculate the difference between max_fee_per_gas and base_fee
