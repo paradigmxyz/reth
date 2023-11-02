@@ -33,7 +33,7 @@ use revm::{
 };
 use std::{
     pin::Pin,
-    sync::{Arc, RwLockWriteGuard},
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::oneshot::{self, error::RecvError};
@@ -80,11 +80,6 @@ impl<'a> ParallelExecutor<'a> {
         Arc::clone(&self.state)
     }
 
-    /// Return mutable reference to state.
-    pub fn state_mut(&self) -> RwLockWriteGuard<'_, SharedState<DatabaseRefBox<'a, RethError>>> {
-        self.state.write().unwrap()
-    }
-
     /// Execute a batch of transactions in parallel.
     pub async fn execute_batch(
         &mut self,
@@ -122,7 +117,7 @@ impl<'a> ParallelExecutor<'a> {
             results.push((tx_idx, result));
             states.push((tx_idx, state));
         }
-        self.state_mut().commit(states);
+        self.state.write().commit(states);
 
         Ok(results)
     }
@@ -171,6 +166,7 @@ impl<'a> ParallelExecutor<'a> {
         Ok((receipts, cumulative_gas_used))
     }
 
+    /// Execute transactions.
     pub fn execute_transactions(
         &mut self,
         env: Env,
@@ -208,7 +204,7 @@ impl<'a> ParallelExecutor<'a> {
                 })
             })?;
 
-            self.state_mut().commit(Vec::from([(idx, state)]));
+            self.state.write().commit(Vec::from([(idx, state)]));
 
             // append gas used
             cumulative_gas_used += result.gas_used();
@@ -250,7 +246,8 @@ impl<'a> ParallelExecutor<'a> {
         if self.data.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
-                .state_mut()
+                .state
+                .write()
                 .drain_balances(DAO_HARDKFORK_ACCOUNTS)
                 .map_err(|_| BlockValidationError::IncrementBalanceFailed)?
                 .into_iter()
@@ -261,7 +258,8 @@ impl<'a> ParallelExecutor<'a> {
         }
 
         // increment balances
-        self.state_mut()
+        self.state
+            .write()
             .increment_balances(balance_increments.into_iter().map(|(k, v)| (k, v)))
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
@@ -277,7 +275,7 @@ impl<'a> ParallelExecutor<'a> {
     ) -> Result<Vec<Receipt>, BlockExecutionError> {
         // Set state clear flag.
         let state_clear_enabled = self.data.state_clear_enabled(block.number);
-        self.state_mut().set_state_clear_flag(state_clear_enabled);
+        self.state.write().set_state_clear_flag(state_clear_enabled);
 
         let mut env = Env::default();
         fill_cfg_and_block_env(
@@ -298,7 +296,7 @@ impl<'a> ParallelExecutor<'a> {
             block.parent_beacon_block_root,
             &mut evm,
         )? {
-            self.state_mut().commit(Vec::from([(0, state)]));
+            self.state.write().commit(Vec::from([(0, state)]));
         }
 
         let (receipts, cumulative_gas_used) = match self.store.get_queue(block.number).cloned() {
@@ -322,7 +320,7 @@ impl<'a> ParallelExecutor<'a> {
         self.apply_post_execution_state_change(block, total_difficulty)?;
 
         let retention = self.data.retention_for_block(block.number);
-        self.state_mut().merge_transitions(retention);
+        self.state.write().merge_transitions(retention);
 
         if self.data.first_block.is_none() {
             self.data.first_block = Some(block.number);
@@ -383,7 +381,7 @@ impl AsyncBlockExecutor for ParallelExecutor<'_> {
 
     /// Return the bundle state.
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
-        let bundle_state = self.state_mut().take_bundle();
+        let bundle_state = self.state.write().take_bundle();
         let receipts = std::mem::take(&mut self.data.receipts);
         BundleStateWithReceipts::new(
             bundle_state,
@@ -398,7 +396,7 @@ impl AsyncBlockExecutor for ParallelExecutor<'_> {
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.state.read().unwrap().bundle_size_hint())
+        Some(self.state.read().bundle_size_hint())
     }
 }
 

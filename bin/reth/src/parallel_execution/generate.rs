@@ -193,7 +193,7 @@ impl Command {
         parallel_executor.execute(&block, td, Some(senders)).await?;
         tracing::debug!(target: "reth::cli", block_number = block.number, ?queue, "Successfully executed in parallel");
 
-        let parallel_state = parallel_executor.state_mut();
+        let parallel_state = parallel_executor.state();
 
         // PATCH: remove unchanged storage entries.
         let mut removed = 0;
@@ -210,6 +210,7 @@ impl Command {
         expected.bundle_state.state_size -= removed;
 
         let mut parallel_cache_accounts = parallel_state
+            .read()
             .cache
             .accounts
             .clone()
@@ -264,6 +265,7 @@ impl Command {
         pretty_assertions::assert_eq!(
             BTreeMap::from_iter(
                 parallel_state
+                    .read()
                     .cache
                     .contracts
                     .clone()
@@ -280,7 +282,7 @@ impl Command {
             "Cache contracts mismatch"
         );
 
-        let parallel_bundle_state = parallel_state.bundle_state.clone();
+        let parallel_bundle_state = parallel_state.read().bundle_state.clone();
 
         // Assert reverts
         let parallel_reverts = BTreeMap::<Address, AccountRevert>::from_iter(

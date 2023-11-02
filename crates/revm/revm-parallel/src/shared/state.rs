@@ -1,6 +1,7 @@
 use super::{SharedCacheAccount, SharedCacheState};
 use dashmap::{mapref::one::RefMut, DashMap};
 use derive_more::Deref;
+use parking_lot::RwLock;
 use reth_primitives::U256;
 use revm::{
     db::{
@@ -13,10 +14,7 @@ use revm::{
     DatabaseRef,
 };
 use std::{
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        RwLock,
-    },
+    sync::atomic::{AtomicU64, Ordering},
     vec::Vec,
 };
 
@@ -239,18 +237,18 @@ impl<DB: DatabaseRef> DatabaseRef for LockedSharedState<DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.read().unwrap().basic_ref(address)
+        self.read().basic_ref(address)
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.read().unwrap().code_by_hash_ref(code_hash)
+        self.read().code_by_hash_ref(code_hash)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.read().unwrap().storage_ref(address, index)
+        self.read().storage_ref(address, index)
     }
 
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        self.read().unwrap().block_hash_ref(number)
+        self.read().block_hash_ref(number)
     }
 }

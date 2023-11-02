@@ -6389,6 +6389,7 @@ dependencies = [
  "derive_more",
  "futures",
  "num_cpus",
+ "parking_lot 0.12.1",
  "rayon",
  "reth-interfaces",
  "reth-primitives",
