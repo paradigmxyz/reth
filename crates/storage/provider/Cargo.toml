@@ -25,6 +25,10 @@ tokio-stream = { workspace = true, features = ["sync"] }
 # tracing
 tracing.workspace = true
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 # misc
 auto_impl = "1.0"
 itertools.workspace = true
