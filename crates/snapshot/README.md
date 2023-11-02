@@ -25,6 +25,7 @@ graph TD;
     CS --> |create| IF(NippyJar::InclusionFilters)
     CS -- iterates --> DC(DatabaseCursor) -->HN{HasNext} 
     HN --> |true| NJC(NippyJar::Compression)
+    NJC --> HN
     NJC --store--> NJ
     HN --> |false| NJ 
     IF --store--> NJ(NippyJar)
@@ -84,4 +85,4 @@ In descending order of abstraction hierarchy:
 
 [`NippyJarCursor`](../../crates/storage/nippy-jar/src/cursor.rs#L12) Accessor of data in a `NippyJar` file. It enables queries either by row number (e.g., block number 1) or by a predefined key not part of the file (e.g., transaction hashes). If a file has multiple columns (e.g., `Tx | TxSender | Signature`), and one wishes to access only one of the column values, this can be accomplished by bitmasks. (e.g., for `TxSender`, the mask would be `0b010`).
 
-[`NippyJar`](../../crates/storage/nippy-jar/src/lib.rs#57) A create-only file format. No data can be appended after creation. It supports multiple columns, compression (e.g., Zstd (with and without dictionaries), lz4, uncompressed) and inclusion filters (e.g., cuckoo filter: `is hash X part of this dataset`). Snapshots are organized by block ranges. (e.g., `TransactionSnapshot_500_000.jar` contains a transaction per row for all transactions until block `500_000`). For more check the struct documentation.
+[`NippyJar`](../../crates/storage/nippy-jar/src/lib.rs#57) A create-only file format. No data can be appended after creation. It supports multiple columns, compression (e.g., Zstd (with and without dictionaries), lz4, uncompressed) and inclusion filters (e.g., cuckoo filter: `is hash X part of this dataset`). Snapshots are organized by block ranges. (e.g., `TransactionSnapshot_499_999.jar` contains a transaction per row for all transactions from block `0` to block `499_999`). For more check the struct documentation.
