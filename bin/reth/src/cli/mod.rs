@@ -3,7 +3,7 @@ use crate::{
     args::utils::genesis_value_parser,
     chain,
     cli::ext::RethCliExt,
-    count_opcodes, db, debug_cmd,
+    db, debug_cmd,
     dirs::{LogsDir, PlatformPath},
     node, p2p, recover,
     runner::CliRunner,
@@ -95,7 +95,6 @@ impl<Ext: RethCliExt> Cli<Ext> {
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-            Commands::CountOpcodes(command) => runner.run_until_ctrl_c(command.execute()),
         }
     }
 
@@ -164,9 +163,6 @@ pub enum Commands<Ext: RethCliExt = ()> {
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command),
-    /// Script for counting opcodes occurrencies
-    #[command(name = "count-opcodes")]
-    CountOpcodes(count_opcodes::Command),
 }
 
 impl<Ext: RethCliExt> Commands<Ext> {

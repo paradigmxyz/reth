@@ -16,7 +16,7 @@ pub struct Command {
     #[arg(long, value_name = "DB_DIR", verbatim_doc_comment)]
     db_dir: PathBuf,
     /// The top `take` opcodes to display.
-    #[arg(long, value_name = "TAKE_SIZE", verbatim_doc_comment)]
+    #[arg(long, value_name = "TAKE_SIZE", verbatim_doc_comment, default_value = "10")]
     take: usize,
 }
 
@@ -51,7 +51,7 @@ impl Command {
 }
 
 /// Takes bytecode bytes and returns filtered bytes without `PUSH` data
-pub fn filter_bytecode_bytes(bytes: &Bytes) -> Bytes {
+fn filter_bytecode_bytes(bytes: &Bytes) -> Bytes {
     let mut push_data_to_skip = 0_usize;
 
     let iter = bytes.iter().filter(|op| {

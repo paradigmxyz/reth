@@ -29,7 +29,6 @@ pub mod args;
 pub mod chain;
 pub mod cli;
 pub mod config;
-pub mod count_opcodes;
 pub mod db;
 pub mod debug_cmd;
 pub mod dirs;
