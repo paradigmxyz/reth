@@ -98,17 +98,16 @@ impl Command {
             .wrap_err("failed to read parallel queue store")?;
         let queues = serde_json::from_str(&queue_store_content)
             .wrap_err("failed to deserialize queue store")?;
-        let parallel_factory = ParallelExecutorFactory::new(
-            self.chain.clone(),
-            Arc::new(BlockQueueStore::new(queues)),
-        );
+        let queue_store = Arc::new(BlockQueueStore::new(queues));
+        let parallel_factory =
+            ParallelExecutorFactory::new(self.chain.clone(), queue_store.clone());
         let mut parallel_executor = parallel_factory.with_state(&state_provider);
 
         let provider = factory.provider().map_err(PipelineError::Interface)?;
 
         let mut regular_better_blocks = 0;
         let mut parallel_better_blocks = 0;
-        let mut total_diff_ms = 0_i128;
+        let mut total_diff_ns = 0_i128;
         for block_number in self.from..=self.to {
             debug!(target: "reth::cli", block_number, "Comparing execution");
 
@@ -131,24 +130,32 @@ impl Command {
             trace!(
                 target: "reth::cli",
                 block_number,
-                regular_elapsed_ms = regular_elapsed.as_millis(),
-                parallel_elapsed_ms = parallel_elapsed.as_millis(),
+                regular_elapsed_ms = regular_elapsed.as_nanos(),
+                parallel_elapsed_ms = parallel_elapsed.as_nanos(),
                 "Finished executing block"
             );
             if regular_elapsed < parallel_elapsed {
                 regular_better_blocks += 1;
             } else {
                 parallel_better_blocks += 1;
+                info!(
+                    target: "reth::cli",
+                    block_number,
+                    regular_elapsed_ns = regular_elapsed.as_nanos(),
+                    parallel_elapsed_ns = parallel_elapsed.as_nanos(),
+                    queue = ?queue_store.get_queue(block_number),
+                    "Parallel execution is better"
+                );
             }
-            total_diff_ms +=
-                regular_elapsed.as_millis() as i128 - parallel_elapsed.as_millis() as i128;
+            total_diff_ns +=
+                regular_elapsed.as_nanos() as i128 - parallel_elapsed.as_nanos() as i128;
         }
 
         info!(
             target: "reth::cli",
             regular_better_blocks,
             parallel_better_blocks,
-            total_diff_ms,
+            total_diff_ns,
             "Finished comparing execution"
         );
 
