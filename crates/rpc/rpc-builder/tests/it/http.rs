@@ -70,10 +70,13 @@ impl RawRpcBuilder {
     /// Constructs the JSON-RPC request string based on the provided configurations.
 
     fn build(self) -> String {
+        let method = self.method.unwrap_or_else(|| panic!("JSON-RPC method not set"));
+        let id = self.id.unwrap_or_else(|| panic!("JSON-RPC id not set"));
+
         json!({
             "jsonrpc": "2.0",
-            "id": self.id,
-            "method": self.method,
+            "id": id,
+            "method": method,
             "params": self.params,
         })
         .to_string()
