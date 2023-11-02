@@ -958,8 +958,6 @@ impl TransactionSigned {
     ///
     /// Refer to the docs for [Self::decode_rlp_legacy_transaction] for details on the exact
     /// format expected.
-    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
-    // so decoding methods do not need to manually advance the buffer
     pub(crate) fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
@@ -967,6 +965,13 @@ impl TransactionSigned {
         let original_encoding = *data;
 
         let header = Header::decode(data)?;
+        let remaining_len = data.len();
+
+        let transaction_payload_len = header.payload_length;
+
+        if transaction_payload_len > remaining_len {
+            return Err(RlpError::InputTooShort)
+        }
 
         let mut transaction = TxLegacy {
             nonce: Decodable::decode(data)?,
@@ -979,6 +984,12 @@ impl TransactionSigned {
         };
         let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
         transaction.chain_id = extracted_id;
+
+        // check the new length, compared to the original length and the header length
+        let decoded = remaining_len - data.len();
+        if decoded != transaction_payload_len {
+            return Err(RlpError::UnexpectedLength)
+        }
 
         let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
@@ -1029,6 +1040,8 @@ impl TransactionSigned {
             return Err(RlpError::Custom("typed tx fields must be encoded as a list"))
         }
 
+        let remaining_len = data.len();
+
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
         let tx_length = 1 + header.length() + header.payload_length;
 
@@ -1041,6 +1054,11 @@ impl TransactionSigned {
         };
 
         let signature = Signature::decode(data)?;
+
+        let bytes_consumed = remaining_len - data.len();
+        if bytes_consumed != header.payload_length {
+            return Err(RlpError::UnexpectedLength)
+        }
 
         let hash = keccak256(&original_encoding[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };
@@ -1141,9 +1159,21 @@ impl Decodable for TransactionSigned {
         let mut original_encoding = *buf;
         let header = Header::decode(buf)?;
 
+        let remaining_len = buf.len();
+
         // if the transaction is encoded as a string then it is a typed transaction
         if !header.list {
-            TransactionSigned::decode_enveloped_typed_transaction(buf)
+            let tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
+
+            let bytes_consumed = remaining_len - buf.len();
+            // because Header::decode works for single bytes (including the tx type), returning a
+            // string Header with payload_length of 1, we need to make sure this check is only
+            // performed for transactions with a string header
+            if bytes_consumed != header.payload_length && original_encoding[0] > EMPTY_STRING_CODE {
+                return Err(RlpError::UnexpectedLength)
+            }
+
+            Ok(tx)
         } else {
             let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut original_encoding)?;
 
