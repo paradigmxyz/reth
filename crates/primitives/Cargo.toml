@@ -23,7 +23,7 @@ ethers-core = { workspace = true, default-features = false, optional = true }
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 
 # for eip-4844
-c-kzg = { workspace = true, features = ["serde"] }
+c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # used for forkid
 crc = "3"
@@ -88,8 +88,9 @@ criterion = "0.5"
 pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
-default = []
+default = ["c-kzg"]
 arbitrary = ["revm-primitives/arbitrary", "reth-rpc-types/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+c-kzg = ["revm-primitives/c-kzg", "dep:c-kzg"]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 # value-256 controls whether transaction Value fields are DB-encoded as 256 bits instead of the
 # default of 128 bits.
