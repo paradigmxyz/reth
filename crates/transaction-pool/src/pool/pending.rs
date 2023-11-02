@@ -645,7 +645,6 @@ mod tests {
     #[test]
     fn truncate_by_sender() {
         // this test ensures that we evict from the pending pool by sender
-        // TODO: Ensure local transactions are not evicted
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
 
@@ -702,7 +701,6 @@ mod tests {
         let max_account_slots = 1;
         let pool_limit = SubPoolLimit {
             max_txs: 4,
-            // TODO: size is going to make this complicated i think....
             max_size: usize::MAX,
         };
 

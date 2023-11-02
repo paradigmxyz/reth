@@ -490,7 +490,6 @@ mod tests {
     #[test]
     fn truncate_parked_by_submission_id() {
         // this test ensures that we evict from the pending pool by sender
-        // TODO: Ensure local transactions are not evicted
         let mut f = MockTransactionFactory::default();
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
 
@@ -545,12 +544,10 @@ mod tests {
             pool.add_transaction(f.validated_arc(tx));
         }
 
-        // let's set the max_account_slots to 2, and the max total txs to 4, we should end up with
-        // only the first transactions
+        // we should end up with the most recently submitted transactions
         let max_account_slots = 1;
         let pool_limit = SubPoolLimit {
             max_txs: 4,
-            // TODO: size is going to make this complicated i think....
             max_size: usize::MAX,
         };
 
