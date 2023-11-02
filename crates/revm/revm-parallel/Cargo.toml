@@ -22,11 +22,8 @@ revm.workspace = true
 # misc
 derive_more = "0.99"
 serde = { workspace = true, features = ["derive"] }
-tokio = { workspace = true, features = ["sync"] }
 rayon.workspace = true
-num_cpus = "1"
 dashmap = { version = "5", features = ["rayon", "raw-api"] }
-futures.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
 parking_lot.workspace = true

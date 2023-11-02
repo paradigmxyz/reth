@@ -4,7 +4,6 @@ use crate::{
     queue::{BlockQueue, BlockQueueStore, TransactionBatch},
     shared::{LockedSharedState, SharedState},
 };
-use futures::{Future, FutureExt};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
@@ -16,7 +15,7 @@ use reth_primitives::{
         env::{fill_cfg_and_block_env, fill_tx_env},
     },
     Address, Block, BlockNumber, ChainSpec, Hardfork, PruneModes, Receipt, Receipts,
-    TransactionSigned, B256, U256,
+    TransactionSigned, U256,
 };
 use reth_provider::{
     AsyncBlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableAsyncBlockExecutor,
@@ -29,15 +28,10 @@ use reth_revm_executor::{
 };
 use revm::{
     db::WrapDatabaseRef,
-    primitives::{EVMResult, Env, ExecutionResult, ResultAndState, TxEnv},
+    primitives::{Env, ExecutionResult, ResultAndState},
     DatabaseRef, EVM,
 };
-use std::{
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
-use tokio::sync::oneshot::{self, error::RecvError};
+use std::sync::Arc;
 
 /// Database boxed with a lifetime and Send.
 pub type DatabaseRefBox<'a, E> = Box<dyn DatabaseRef<Error = E> + Send + Sync + 'a>;
@@ -51,8 +45,6 @@ pub struct ParallelExecutor<'a> {
     data: ExecutionData,
     /// EVM state database.
     state: Arc<LockedSharedState<DatabaseRefBox<'a, RethError>>>,
-    /// Thread pool for spawning transaction execution onto.
-    pool: rayon::ThreadPool,
 }
 
 impl<'a> ParallelExecutor<'a> {
@@ -61,18 +53,12 @@ impl<'a> ParallelExecutor<'a> {
         chain_spec: Arc<ChainSpec>,
         store: Arc<BlockQueueStore>,
         database: DatabaseRefBox<'a, RethError>,
-        num_threads: Option<usize>,
+        _num_threads: Option<usize>, // TODO:
     ) -> RethResult<Self> {
         Ok(Self {
             store,
             data: ExecutionData::new(chain_spec),
             state: Arc::new(LockedSharedState::new(SharedState::new(database))),
-            pool: rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads.unwrap_or_else(num_cpus::get))
-                .build()
-                .map_err(|error| {
-                    RethError::Custom(format!("thread pool builder error: {error}"))
-                })?,
         })
     }
 
@@ -100,6 +86,7 @@ impl<'a> ParallelExecutor<'a> {
                 (tx_idx, transaction.hash, env)
             })
             .collect::<Vec<_>>();
+
         let exec_results = transactions
             .into_par_iter()
             .map(|(tx_idx, hash, env)| {
@@ -125,40 +112,6 @@ impl<'a> ParallelExecutor<'a> {
             states.push((tx_idx, state));
         }
         self.state.write().commit(states);
-
-        // let mut fut_batch = FuturesOrdered::default();
-
-        // for tx_idx in batch.iter() {
-        //     let tx_idx = *tx_idx as usize;
-        //     let transaction = transactions.get(tx_idx).unwrap(); // TODO:
-        //     let sender = senders.get(tx_idx).unwrap(); // TODO:
-        //     let state = self.state.clone();
-        //     let mut env = env.clone();
-        //     fill_tx_env(&mut env.tx, transaction, *sender);
-
-        //     let (tx, rx) = oneshot::channel();
-
-        //     self.pool.scope(|scope| {
-        //         let state = self.state.clone();
-        //         scope.spawn(move |_scope| {
-        //             let mut evm = EVM::with_env(env);
-        //             evm.database(state);
-        //             let _result = tx.send(evm.transact_ref());
-        //         });
-        //     });
-        //     fut_batch.push_back(TransactionExecutionFut::new(tx_idx, transaction.hash, rx));
-        // }
-
-        // let mut results = Vec::with_capacity(batch.len());
-        // let mut states = Vec::with_capacity(batch.len());
-        // while let Some((tx_idx, hash, result)) = fut_batch.next().await {
-        //     let ResultAndState { state, result } = result.unwrap().map_err(|e| {
-        //         BlockExecutionError::Validation(BlockValidationError::EVM { hash, error: e.into()
-        // })     })?;
-        //     results.push((tx_idx, result));
-        //     states.push((tx_idx, state));
-        // }
-        // self.state.write().commit(states);
 
         Ok(results)
     }
@@ -450,24 +403,3 @@ impl PrunableAsyncBlockExecutor for ParallelExecutor<'_> {
         self.data.prune_modes = prune_modes;
     }
 }
-
-// struct TransactionExecutionFut {
-//     tx_idx: usize,
-//     tx_hash: B256,
-//     rx: oneshot::Receiver<EVMResult<RethError>>,
-// }
-
-// impl TransactionExecutionFut {
-//     fn new(tx_idx: usize, tx_hash: B256, rx: oneshot::Receiver<EVMResult<RethError>>) -> Self {
-//         Self { tx_idx, tx_hash, rx }
-//     }
-// }
-
-// impl Future for TransactionExecutionFut {
-//     type Output = (usize, B256, Result<EVMResult<RethError>, RecvError>);
-
-//     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-//         let this = self.get_mut();
-//         this.rx.poll_unpin(cx).map(|result| (this.tx_idx, this.tx_hash, result))
-//     }
-// }

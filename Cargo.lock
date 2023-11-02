@@ -6388,8 +6388,6 @@ dependencies = [
  "async-trait",
  "dashmap",
  "derive_more",
- "futures",
- "num_cpus",
  "parking_lot 0.12.1",
  "rayon",
  "reth-interfaces",
@@ -6399,7 +6397,6 @@ dependencies = [
  "reth-revm-executor",
  "revm",
  "serde",
- "tokio",
  "tracing",
 ]
 

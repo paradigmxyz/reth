@@ -36,6 +36,16 @@ pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     lowest_available_blocks: LowestAvailableBlocks,
 }
 
+impl<'b, TX: DbTx> Clone for HistoricalStateProviderRef<'b, TX> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx,
+            block_number: self.block_number,
+            lowest_available_blocks: self.lowest_available_blocks.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum HistoryInfo {
     NotYetWritten,

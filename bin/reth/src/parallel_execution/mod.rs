@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 use crate::runner::CliContext;
 
+mod compare;
 mod generate;
 mod trace_diff;
 
@@ -20,6 +21,8 @@ pub enum Subcommands {
     Generate(generate::Command),
     /// The command for comparing traces between normal and parallel execution.
     TraceDiff(trace_diff::Command),
+    /// The command for comparing the regular and parallel execution.
+    Compare(compare::Command),
 }
 
 impl Command {
@@ -28,6 +31,7 @@ impl Command {
         match self.command {
             Subcommands::Generate(command) => command.execute(ctx).await,
             Subcommands::TraceDiff(command) => command.execute(ctx).await,
+            Subcommands::Compare(command) => command.execute(ctx).await,
         }
     }
 }

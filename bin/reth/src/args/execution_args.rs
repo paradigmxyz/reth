@@ -19,7 +19,7 @@ pub struct ExecutionArgs {
     pub parallel: bool,
 
     /// Path to the block queues for parallel execution.
-    #[arg(long = "execution.parallel-queue-store-path", required_if_eq("parallel", "true"))]
+    #[arg(long = "execution.parallel-queue-store", required_if_eq("parallel", "true"))]
     pub queue_store: Option<PathBuf>,
 }
 
