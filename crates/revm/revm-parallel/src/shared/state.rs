@@ -1,5 +1,5 @@
 use super::{SharedCacheAccount, SharedCacheState};
-use dashmap::{mapref::one::RefMut, DashMap};
+use dashmap::DashMap;
 use derive_more::Deref;
 use parking_lot::RwLock;
 use reth_primitives::U256;
@@ -9,7 +9,8 @@ use revm::{
         BundleState,
     },
     primitives::{
-        AccountInfo, Address, Bytecode, HashMap, State as EVMState, B256, BLOCK_HASH_HISTORY,
+        hash_map, AccountInfo, Address, Bytecode, HashMap, State as EVMState, B256,
+        BLOCK_HASH_HISTORY,
     },
     DatabaseRef,
 };
@@ -67,8 +68,15 @@ impl<DB: DatabaseRef> SharedState<DB> {
         &mut self,
         balances: impl IntoIterator<Item = (Address, u128)>,
     ) -> Result<(), DB::Error> {
+        let mut accounts = self.cache.accounts.lock();
         for (address, balance) in balances.into_iter().filter(|(_, incr)| *incr != 0) {
-            self.load_cache_account(address)?.increment_balance(balance);
+            match accounts.entry(address) {
+                hash_map::Entry::Occupied(mut entry) => entry.get_mut().increment_balance(balance),
+                hash_map::Entry::Vacant(entry) => {
+                    let account = self.load_account_from_database(address)?;
+                    entry.insert(account).increment_balance(balance)
+                }
+            }
         }
         Ok(())
     }
@@ -81,8 +89,15 @@ impl<DB: DatabaseRef> SharedState<DB> {
         addresses: impl IntoIterator<Item = Address>,
     ) -> Result<Vec<u128>, DB::Error> {
         let mut balances = Vec::new();
+        let mut accounts = self.cache.accounts.lock();
         for address in addresses {
-            let balance = self.load_cache_account(address)?.drain_balance();
+            let balance = match accounts.entry(address) {
+                hash_map::Entry::Occupied(mut entry) => entry.get_mut().drain_balance(),
+                hash_map::Entry::Vacant(entry) => {
+                    let account = self.load_account_from_database(address)?;
+                    entry.insert(account).drain_balance()
+                }
+            };
             balances.push(balance);
         }
 
@@ -123,30 +138,19 @@ impl<DB: DatabaseRef> SharedState<DB> {
         self.bundle_state.apply_transitions_and_create_reverts(transitions, retention);
     }
 
-    /// Load account from cache or, if missing, from underlying database.
-    pub fn load_cache_account(
+    /// Load account from database.
+    pub fn load_account_from_database(
         &self,
         address: Address,
-    ) -> Result<RefMut<'_, Address, SharedCacheAccount>, DB::Error> {
-        let account = match self.cache.active_accounts.get_mut(&address) {
-            Some(account) => account,
-            None => {
-                let account = match self.cache.retired_accounts.get(&address) {
-                    Some(account) => account.clone(),
-                    None => {
-                        // if not found in bundle, load it from database
-                        let info = self.database.basic_ref(address)?;
-                        match info {
-                            None => SharedCacheAccount::new_loaded_not_existing(),
-                            Some(acc) if acc.is_empty() => {
-                                SharedCacheAccount::new_loaded_empty_eip161(HashMap::new())
-                            }
-                            Some(acc) => SharedCacheAccount::new_loaded(acc, HashMap::new()),
-                        }
-                    }
-                };
-                self.cache.active_accounts.entry(address).insert(account)
+    ) -> Result<SharedCacheAccount, DB::Error> {
+        // if not found in bundle, load it from database
+        let info = self.database.basic_ref(address)?;
+        let account = match info {
+            None => SharedCacheAccount::new_loaded_not_existing(),
+            Some(acc) if acc.is_empty() => {
+                SharedCacheAccount::new_loaded_empty_eip161(HashMap::new())
             }
+            Some(acc) => SharedCacheAccount::new_loaded(acc, HashMap::new()),
         };
         Ok(account)
     }
@@ -167,7 +171,15 @@ impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.load_cache_account(address).map(|a| a.account_info())
+        let mut accounts = self.cache.accounts.lock();
+        let account = match accounts.entry(address) {
+            hash_map::Entry::Occupied(entry) => entry.get().account_info(),
+            hash_map::Entry::Vacant(entry) => {
+                let account = self.load_account_from_database(address)?;
+                entry.insert(account).account_info()
+            }
+        };
+        Ok(account)
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
@@ -186,18 +198,10 @@ impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
         // Account is guaranteed to be loaded.
         // Note that storage from bundle is already loaded with account.
-        let value = match self.cache.active_accounts.get_mut(&address) {
-            Some(mut account) => account.get_or_insert_storage_slot(index, || {
-                match self
-                    .cache
-                    .retired_accounts
-                    .get(&address)
-                    .and_then(|account| account.storage_slot(index))
-                {
-                    Some(value) => Ok(value),
-                    None => self.database.storage_ref(address, index),
-                }
-            })?,
+        let mut active_accounts = self.cache.accounts.lock();
+        let value = match active_accounts.get_mut(&address) {
+            Some(account) => account
+                .get_or_insert_storage_slot(index, || self.database.storage_ref(address, index))?,
             None => unreachable!(
                 "For accessing any storage account is guaranteed to be loaded beforehand"
             ),
