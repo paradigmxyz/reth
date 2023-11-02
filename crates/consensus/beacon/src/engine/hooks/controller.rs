@@ -26,16 +26,16 @@ pub(crate) struct EngineHooksController {
     /// Collection of hooks.
     ///
     /// Hooks might be removed from the collection, and returned upon completion.
-    /// In the current implementation, it only happens when moved to `running_hook_with_db_write`.
+    /// In the current implementation, it only happens when moved to `active_db_write_hook`.
     hooks: VecDeque<Box<dyn EngineHook>>,
     /// Currently running hook with DB write access, if any.
-    running_hook_with_db_write: Option<Box<dyn EngineHook>>,
+    active_db_write_hook: Option<Box<dyn EngineHook>>,
 }
 
 impl EngineHooksController {
     /// Creates a new [`EngineHooksController`].
     pub(crate) fn new(hooks: EngineHooks) -> Self {
-        Self { hooks: hooks.inner.into(), running_hook_with_db_write: None }
+        Self { hooks: hooks.inner.into(), active_db_write_hook: None }
     }
 
     /// Polls currently running hook with DB write access, if any.
@@ -49,12 +49,12 @@ impl EngineHooksController {
     /// 2. Currently running hook with DB write access returned [`Poll::Pending`] on polling.
     /// 3. Currently running hook with DB write access returned [`Poll::Ready`] on polling, but no
     ///    action to act upon.
-    pub(crate) fn poll_running_hook_with_db_write(
+    pub(crate) fn poll_active_db_write_hook(
         &mut self,
         cx: &mut Context<'_>,
         args: EngineContext,
     ) -> Poll<Result<PolledHook, EngineHookError>> {
-        let Some(mut hook) = self.running_hook_with_db_write.take() else { return Poll::Pending };
+        let Some(mut hook) = self.active_db_write_hook.take() else { return Poll::Pending };
 
         match hook.poll(cx, args)? {
             Poll::Ready((event, action)) => {
@@ -73,7 +73,7 @@ impl EngineHooksController {
                 );
 
                 if !result.event.is_finished() {
-                    self.running_hook_with_db_write = Some(hook);
+                    self.active_db_write_hook = Some(hook);
                 } else {
                     self.hooks.push_back(hook);
                 }
@@ -81,7 +81,7 @@ impl EngineHooksController {
                 return Poll::Ready(Ok(result))
             }
             Poll::Pending => {
-                self.running_hook_with_db_write = Some(hook);
+                self.active_db_write_hook = Some(hook);
             }
         }
 
@@ -118,8 +118,8 @@ impl EngineHooksController {
                 ..
             }))
         ) {
-            // If a read-write hook started, set `running_hook_with_db_write` to it
-            self.running_hook_with_db_write = Some(hook);
+            // If a read-write hook started, set `active_db_write_hook` to it
+            self.active_db_write_hook = Some(hook);
         } else {
             // Otherwise, push it back to the collection of hooks to poll it next time
             self.hooks.push_back(hook);
@@ -138,7 +138,7 @@ impl EngineHooksController {
         // Hook with DB write access level is not allowed to run due to already running hook with DB
         // write access level or active DB write according to passed argument
         if hook.db_access_level().is_read_write() &&
-            (self.running_hook_with_db_write.is_some() || db_write_active)
+            (self.active_db_write_hook.is_some() || db_write_active)
         {
             return Poll::Pending
         }
@@ -164,9 +164,9 @@ impl EngineHooksController {
         Poll::Pending
     }
 
-    /// Returns `true` if there's a hook with DB write access running.
-    pub(crate) fn is_hook_with_db_write_running(&self) -> bool {
-        self.running_hook_with_db_write.is_some()
+    /// Returns a running hook with DB write access, if there's any.
+    pub(crate) fn active_db_write_hook(&self) -> Option<&dyn EngineHook> {
+        self.active_db_write_hook.as_ref().map(|hook| hook.as_ref())
     }
 }
 
@@ -230,19 +230,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn poll_running_hook_with_db_write() {
+    async fn poll_active_db_write_hook() {
         let mut controller = EngineHooksController::new(EngineHooks::new());
 
         let context = EngineContext { tip_block_number: 2, finalized_block_number: Some(1) };
 
         // No currently running hook with DB write access is set
-        let result = poll!(poll_fn(|cx| controller.poll_running_hook_with_db_write(cx, context)));
+        let result = poll!(poll_fn(|cx| controller.poll_active_db_write_hook(cx, context)));
         assert!(result.is_pending());
 
         // Currently running hook with DB write access returned `Pending` on polling
-        controller.running_hook_with_db_write = Some(Box::new(TestHook::new_rw("read-write")));
+        controller.active_db_write_hook = Some(Box::new(TestHook::new_rw("read-write")));
 
-        let result = poll!(poll_fn(|cx| controller.poll_running_hook_with_db_write(cx, context)));
+        let result = poll!(poll_fn(|cx| controller.poll_active_db_write_hook(cx, context)));
         assert!(result.is_pending());
 
         // Currently running hook with DB write access returned `Ready` on polling, but didn't
@@ -250,9 +250,9 @@ mod tests {
         // Currently running hooks with DB write should still be set.
         let mut hook = TestHook::new_rw("read-write");
         hook.add_result(Ok((EngineHookEvent::Started, None)));
-        controller.running_hook_with_db_write = Some(Box::new(hook));
+        controller.active_db_write_hook = Some(Box::new(hook));
 
-        let result = poll!(poll_fn(|cx| controller.poll_running_hook_with_db_write(cx, context)));
+        let result = poll!(poll_fn(|cx| controller.poll_active_db_write_hook(cx, context)));
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
@@ -262,7 +262,7 @@ mod tests {
             }),
             Poll::Ready(true)
         );
-        assert!(controller.running_hook_with_db_write.is_some());
+        assert!(controller.active_db_write_hook.is_some());
         assert!(controller.hooks.is_empty());
 
         // Currently running hook with DB write access returned `Ready` on polling and
@@ -270,9 +270,9 @@ mod tests {
         // Currently running hooks with DB write should be moved to collection of hooks.
         let mut hook = TestHook::new_rw("read-write");
         hook.add_result(Ok((EngineHookEvent::Finished(Ok(())), None)));
-        controller.running_hook_with_db_write = Some(Box::new(hook));
+        controller.active_db_write_hook = Some(Box::new(hook));
 
-        let result = poll!(poll_fn(|cx| controller.poll_running_hook_with_db_write(cx, context)));
+        let result = poll!(poll_fn(|cx| controller.poll_active_db_write_hook(cx, context)));
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
@@ -282,7 +282,7 @@ mod tests {
             }),
             Poll::Ready(true)
         );
-        assert!(controller.running_hook_with_db_write.is_none());
+        assert!(controller.active_db_write_hook.is_none());
         assert!(controller.hooks.pop_front().is_some());
     }
 
@@ -305,7 +305,7 @@ mod tests {
         // Read-write hook can't be polled when external DB write is active
         let result = poll!(poll_fn(|cx| controller.poll_next_hook(cx, context, true)));
         assert!(result.is_pending());
-        assert!(controller.running_hook_with_db_write.is_none());
+        assert!(controller.active_db_write_hook.is_none());
 
         // Read-only hook can be polled when external DB write is active
         let result = poll!(poll_fn(|cx| controller.poll_next_hook(cx, context, true)));
@@ -360,7 +360,7 @@ mod tests {
             Poll::Ready(true)
         );
         assert_eq!(
-            controller.running_hook_with_db_write.as_ref().map(|hook| hook.name()),
+            controller.active_db_write_hook.as_ref().map(|hook| hook.name()),
             Some(hook_rw_1_name)
         );
 
@@ -393,7 +393,7 @@ mod tests {
         let result = poll!(poll_fn(|cx| controller.poll_next_hook(cx, context, false)));
         assert_eq!(result.map(|result| { result.is_err() }), Poll::Ready(true));
 
-        assert!(controller.running_hook_with_db_write.is_some());
+        assert!(controller.active_db_write_hook.is_some());
         assert_eq!(controller.hooks.len(), hooks_len - 1)
     }
 }
