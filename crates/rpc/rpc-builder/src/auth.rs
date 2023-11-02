@@ -128,7 +128,7 @@ where
 pub struct AuthServerConfig {
     /// Where the server should listen.
     pub(crate) socket_addr: SocketAddr,
-    /// The secrete for the auth layer of the server.
+    /// The secret for the auth layer of the server.
     pub(crate) secret: JwtSecret,
     /// Configs for JSON-RPC Http.
     pub(crate) server_config: ServerBuilder,
