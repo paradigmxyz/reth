@@ -25,7 +25,7 @@ serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["sync"] }
 rayon.workspace = true
 num_cpus = "1"
-dashmap = "5"
+dashmap = { version = "5", features = ["rayon"] }
 futures.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
