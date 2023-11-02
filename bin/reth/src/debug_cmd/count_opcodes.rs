@@ -1,4 +1,4 @@
-//! `reth count-opcodes` comamnd. Tool to count opcodes occurrencies.
+//! `reth debug count-opcodes` comamnd. Tool to count opcodes occurrencies.
 use crate::primitives::Bytes;
 use clap::Parser;
 use comfy_table::{Cell, Row, Table};
@@ -37,16 +37,13 @@ impl Command {
 
         let mut opcode_counter = OpCodeCounter::new();
 
-        info!("start opcodes processing...");
         for (_address, bytecode) in bytecodes {
             let filtered_bytes = filter_bytecode_bytes(bytecode.bytes());
             opcode_counter.count_sequences(&filtered_bytes);
         }
-        info!("opcodes processing done!");
-        info!("start opcodes printing...");
+
         opcode_counter.print_counts(self.take);
 
-        info!("opcodes printing done!");
         Ok(())
     }
 }
