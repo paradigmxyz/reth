@@ -30,7 +30,7 @@ impl TaskExecutorMetrics {
     }
 }
 
-/// Helper type for increasing counters even if a task fails.
+/// Helper type for increasing counters even if a task fails
 pub struct IncCounterOnDrop(Counter);
 
 impl fmt::Debug for IncCounterOnDrop {
