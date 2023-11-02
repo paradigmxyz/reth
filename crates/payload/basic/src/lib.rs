@@ -802,8 +802,9 @@ where
         }));
 
         // update add to total fees
-        let miner_fee =
-            tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
+        let miner_fee = tx
+            .effective_tip_per_gas(Some(base_fee))
+            .expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
         // append transaction to the list of executed transactions
