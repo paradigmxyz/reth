@@ -406,7 +406,7 @@ impl SharedCacheAccount {
         } else if self.selfdestruct_index.is_some() {
             if current_info.is_some() {
                 AccountStatus::DestroyedChanged
-            } else if self.selfdestruct_count > 1 {
+            } else if self.previous_status.was_destroyed() || self.selfdestruct_count > 1 {
                 AccountStatus::DestroyedAgain
             } else {
                 AccountStatus::Destroyed
