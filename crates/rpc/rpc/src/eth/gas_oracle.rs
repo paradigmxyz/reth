@@ -237,7 +237,7 @@ where
         let parent_hash = block.parent_hash;
 
         // sort the functions by ascending effective tip first
-        block.body.sort_by_cached_key(|tx| tx.effective_gas_tip(base_fee_per_gas));
+        block.body.sort_by_cached_key(|tx| tx.effective_tip_per_gas(base_fee_per_gas));
 
         let mut prices = Vec::with_capacity(limit);
 
@@ -245,7 +245,7 @@ where
             let mut effective_gas_tip = None;
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {
-                let tip = tx.effective_gas_tip(base_fee_per_gas);
+                let tip = tx.effective_tip_per_gas(base_fee_per_gas);
                 effective_gas_tip = Some(tip);
                 if tip < Some(ignore_under) {
                     continue
@@ -262,7 +262,7 @@ where
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
             // less than the base fee which would be invalid
             let effective_gas_tip = effective_gas_tip
-                .unwrap_or_else(|| tx.effective_gas_tip(base_fee_per_gas))
+                .unwrap_or_else(|| tx.effective_tip_per_gas(base_fee_per_gas))
                 .ok_or(RpcInvalidTransactionError::FeeCapTooLow)?;
 
             prices.push(U256::from(effective_gas_tip));

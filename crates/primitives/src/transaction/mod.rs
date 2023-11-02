@@ -307,50 +307,35 @@ impl Transaction {
         }
     }
 
-    // TODO: dedup with effective_tip_per_gas
-    /// Determine the effective gas limit for the given transaction and base fee.
-    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
-    /// transactions is returned.
-    ///
-    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
-    pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
-        if let Some(base_fee) = base_fee {
-            let max_fee_per_gas = self.max_fee_per_gas();
-
-            if max_fee_per_gas < base_fee as u128 {
-                None
-            } else {
-                let effective_max_fee = max_fee_per_gas - base_fee as u128;
-                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
-            }
-        } else {
-            Some(self.priority_fee_or_price())
-        }
-    }
-
     /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee:
     /// `min(maxFeePerGas - baseFee, maxPriorityFeePerGas)`
     ///
+    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
+    /// transactions is returned.
+    ///
     /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
-    pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        let base_fee = base_fee as u128;
+    pub fn effective_tip_per_gas(&self, base_fee: Option<u64>) -> Option<u128> {
+        let base_fee = match base_fee {
+            Some(base_fee) => base_fee as u128,
+            None => return Some(self.priority_fee_or_price()),
+        };
+
         let max_fee_per_gas = self.max_fee_per_gas();
 
+        // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
             return None
         }
 
-        // the miner tip is the difference between the max fee and the base fee or the
-        // max_priority_fee_per_gas, whatever is lower
-
-        // SAFETY: max_fee_per_gas >= base_fee
+        // Calculate the difference between max_fee_per_gas and base_fee
         let fee = max_fee_per_gas - base_fee;
 
+        // Compare the fee with max_priority_fee_per_gas (or gas price for non-EIP1559 transactions)
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee))
+            Some(fee.min(priority_fee))
+        } else {
+            Some(fee)
         }
-
-        Some(fee)
     }
 
     /// Get the transaction's input field.
