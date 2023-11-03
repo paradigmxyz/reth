@@ -1619,7 +1619,7 @@ struct WsHttpServer {
     ws_local_addr: Option<SocketAddr>,
     /// Configured ws,http servers
     server: WsHttpServers,
-    /// The jwt secret.
+    /// The jwt secret
     jwt_secret: Option<JwtSecret>,
 }
 
