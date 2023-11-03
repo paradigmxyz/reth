@@ -116,9 +116,22 @@ pub struct RpcServerArgs {
     #[arg(long = "authrpc.port", default_value_t = constants::DEFAULT_AUTH_PORT)]
     pub auth_port: u16,
 
-    /// Path to a JWT secret to use for authenticated RPC endpoints
+    /// Path to a JWT secret to use for the authenticated engine-API RPC server.
+    ///
+    /// This will enforce JWT authentication for all requests coming from the consensus layer.
+    ///
+    /// If no path is provided, a secret will be generated and stored in the datadir under
+    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
     pub auth_jwtsecret: Option<PathBuf>,
+
+    /// Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and
+    /// `--ws.api`.
+    ///
+    /// This is __not__ used for the authenticated engine-API RPC server, see
+    /// `--authrpc.jwtsecret`.
+    #[arg(long = "rpc.jwtsecret", value_name = "HEX", global = true, required = false)]
+    pub rpc_jwtsecret: Option<JwtSecret>,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
     #[arg(long, default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB)]
@@ -397,7 +410,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn rpc_server_config(&self) -> RpcServerConfig {
-        let mut config = RpcServerConfig::default();
+        let mut config = RpcServerConfig::default().with_jwt_secret(self.rpc_secret_key());
 
         if self.http {
             let socket_address = SocketAddr::new(self.http_addr, self.http_port);
@@ -427,7 +440,7 @@ impl RethRpcConfig for RpcServerArgs {
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
     }
 
-    fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
+    fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
         match self.auth_jwtsecret.as_ref() {
             Some(fpath) => {
                 debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
@@ -443,6 +456,10 @@ impl RethRpcConfig for RpcServerArgs {
                 }
             }
         }
+    }
+
+    fn rpc_secret_key(&self) -> Option<JwtSecret> {
+        self.rpc_jwtsecret.clone()
     }
 }
 
