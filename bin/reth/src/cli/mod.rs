@@ -127,18 +127,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
 /// Convenience function for parsing CLI options, set up logging and run the chosen command.
 #[inline]
 pub fn run() -> eyre::Result<()> {
-    let cli = Cli::<()>::parse();
-
-    // Runtime safety check for the `optimism` feature flag
-    // being enabled on a non-OP Stack chain.
-    #[cfg(feature = "optimism")]
-    if !cli.chain.is_optimism() {
-        eyre::bail!(
-            "The `optimism` feature flag is enabled, but the chain is a non OP Stack chain."
-        )
-    }
-
-    cli.run()
+    Cli::<()>::parse().run()
 }
 
 /// Commands to be executed
