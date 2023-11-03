@@ -1,17 +1,35 @@
-use crate::{snapshot::PerfectHashingFunction, BlockNumber, TxNumber};
+use crate::{
+    snapshot::{Compression, Filters, InclusionFilter},
+    BlockNumber, TxNumber,
+};
 use serde::{Deserialize, Serialize};
-use std::{ops::RangeInclusive, path::PathBuf};
+use std::{ops::RangeInclusive, path::PathBuf, str::FromStr};
+use strum::{AsRefStr, EnumString};
 
-use super::{Compression, Filters, InclusionFilter};
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    EnumString,
+    AsRefStr,
+)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be snapshotted.
 pub enum SnapshotSegment {
+    #[strum(serialize = "headers")]
     /// Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables.
     Headers,
+    #[strum(serialize = "transactions")]
     /// Snapshot segment responsible for the `Transactions` table.
     Transactions,
+    #[strum(serialize = "receipts")]
     /// Snapshot segment responsible for the `Receipts` table.
     Receipts,
 }
@@ -44,35 +62,23 @@ impl SnapshotSegment {
         compression: Compression,
         range: &RangeInclusive<BlockNumber>,
     ) -> PathBuf {
-        let segment_name = match self {
-            SnapshotSegment::Headers => "headers",
-            SnapshotSegment::Transactions => "transactions",
-            SnapshotSegment::Receipts => "receipts",
-        };
+        let segment_name = self.as_ref();
+
         let filters_name = match filters {
             Filters::WithFilters(inclusion_filter, phf) => {
-                let inclusion_filter = match inclusion_filter {
-                    InclusionFilter::Cuckoo => "cuckoo",
-                };
-                let phf = match phf {
-                    PerfectHashingFunction::Fmph => "fmph",
-                    PerfectHashingFunction::GoFmph => "gofmph",
-                };
-                format!("{inclusion_filter}-{phf}")
+                format!("{}-{}", inclusion_filter.as_ref(), phf.as_ref())
             }
             Filters::WithoutFilters => "none".to_string(),
         };
-        let compression_name = match compression {
-            Compression::Lz4 => "lz4",
-            Compression::Zstd => "zstd",
-            Compression::ZstdWithDictionary => "zstd-dict",
-            Compression::Uncompressed => "uncompressed",
-        };
 
+        // ATTENTION: if changing the name format, be sure to reflect those changes in
+        // [`Self::parse_filename`.]
         format!(
-            "snapshot_{segment_name}_{}_{}_{filters_name}_{compression_name}",
+            "snapshot_{segment_name}_{}_{}_{}_{}",
             range.start(),
             range.end(),
+            filters_name,
+            compression.as_ref()
         )
         .into()
     }
