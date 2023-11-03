@@ -282,7 +282,7 @@ where
     pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlock>> {
         let pending = self.pending_block_env_and_cfg()?;
         if pending.origin.is_actual_pending() {
-            return Ok(pending.origin.into_actual_pending());
+            return Ok(pending.origin.into_actual_pending())
         }
 
         // no pending block from the CL yet, so we need to build it ourselves via txpool
@@ -297,13 +297,13 @@ where
                     pending.origin.header().hash == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
-                    return Ok(Some(pending_block.block.clone()));
+                    return Ok(Some(pending_block.block.clone()))
                 }
             }
 
             // if we're currently syncing, we're unable to build a pending block
             if this.network().is_syncing() {
-                return Ok(None);
+                return Ok(None)
             }
 
             // we rebuild the block
@@ -311,7 +311,7 @@ where
                 Ok(block) => block,
                 Err(err) => {
                     tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None);
+                    return Ok(None)
                 }
             };
 

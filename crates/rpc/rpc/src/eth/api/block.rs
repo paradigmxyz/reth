@@ -113,7 +113,7 @@ where
                     )
                 })
                 .collect::<EthResult<Vec<_>>>();
-            return receipts.map(Some);
+            return receipts.map(Some)
         }
 
         Ok(None)
@@ -152,10 +152,10 @@ where
             // Pending block can be fetched directly without need for caching
             let maybe_pending = self.provider().pending_block()?;
             return if maybe_pending.is_some() {
-                return Ok(maybe_pending);
+                return Ok(maybe_pending)
             } else {
                 self.local_pending_block().await
-            };
+            }
         }
 
         let block_hash = match self.provider().block_hash_for_id(block_id)? {
