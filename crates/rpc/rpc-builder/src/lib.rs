@@ -1956,7 +1956,7 @@ impl RpcServerHandle {
         let mut builder = jsonrpsee::ws_client::WsClientBuilder::default();
 
         if let Some(token) = self.bearer_token() {
-            let headers = http::HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]);
+            let headers = HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]);
             builder = builder.set_headers(headers);
         }
 
