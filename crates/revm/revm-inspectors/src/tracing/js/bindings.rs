@@ -236,7 +236,9 @@ impl MemoryRef {
                             ),
                         )))
                     }
-                    let size = (end - start as usize);
+                    let start = start as usize;
+                    let end = end as usize;
+                    let size = end - start;
                     let slice = memory
                         .0
                         .with_inner(|mem| mem.slice(start, size).to_vec())
