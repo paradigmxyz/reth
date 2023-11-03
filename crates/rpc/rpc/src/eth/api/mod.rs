@@ -33,6 +33,8 @@ use tokio::sync::{oneshot, Mutex};
 mod block;
 mod call;
 mod fees;
+#[cfg(feature = "optimism")]
+mod optimism;
 mod pending_block;
 mod server;
 mod sign;

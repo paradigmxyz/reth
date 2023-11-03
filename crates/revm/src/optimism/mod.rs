@@ -4,7 +4,6 @@ use revm::{
     primitives::{BedrockSpec, RegolithSpec},
     L1BlockInfo,
 };
-use std::sync::Arc;
 
 /// Optimism-specific processor implementation for the `EVMProcessor`
 pub mod processor;
@@ -87,7 +86,7 @@ pub trait RethL1BlockInfo {
     /// - `is_deposit`: Whether or not the transaction is a deposit.
     fn l1_tx_data_fee(
         &self,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: &ChainSpec,
         timestamp: u64,
         input: &Bytes,
         is_deposit: bool,
@@ -101,7 +100,7 @@ pub trait RethL1BlockInfo {
     /// - `input`: The calldata of the transaction.
     fn l1_data_gas(
         &self,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: &ChainSpec,
         timestamp: u64,
         input: &Bytes,
     ) -> Result<U256, BlockExecutionError>;
@@ -110,7 +109,7 @@ pub trait RethL1BlockInfo {
 impl RethL1BlockInfo for L1BlockInfo {
     fn l1_tx_data_fee(
         &self,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: &ChainSpec,
         timestamp: u64,
         input: &Bytes,
         is_deposit: bool,
@@ -134,7 +133,7 @@ impl RethL1BlockInfo for L1BlockInfo {
 
     fn l1_data_gas(
         &self,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: &ChainSpec,
         timestamp: u64,
         input: &Bytes,
     ) -> Result<U256, BlockExecutionError> {

@@ -42,15 +42,13 @@ use revm::{
 use revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State};
 
 #[cfg(feature = "optimism")]
-use crate::eth::api::block::OptimismTxMeta;
+use crate::eth::api::optimism::OptimismTxMeta;
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
 #[cfg(feature = "optimism")]
 use revm::L1BlockInfo;
 #[cfg(feature = "optimism")]
 use std::ops::Div;
-#[cfg(feature = "optimism")]
-use std::rc::Rc;
 
 /// Helper alias type for the state's [CacheDB]
 pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBox<'r>>>;
@@ -892,33 +890,36 @@ where
         meta: TransactionMeta,
         receipt: Receipt,
     ) -> EthResult<TransactionReceipt> {
-        // get all receipts for the block
-        let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
-            Some(recpts) => recpts,
-            None => return Err(EthApiError::UnknownBlockNumber),
-        };
-        let block = self
-            .provider()
-            .block_by_number(meta.block_number)?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+        let receipt_fut = self.cache().get_receipts(meta.block_hash);
+        let block_fut = self.cache().get_block(meta.block_hash);
 
-        let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok().map(Rc::new);
+        let (receipts, block) = futures::try_join!(receipt_fut, block_fut)?;
+        let (receipts, block) = (
+            receipts.ok_or(EthApiError::InternalEthError)?,
+            block.ok_or(EthApiError::InternalEthError)?,
+        );
+
+        let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok();
         let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
 
         build_transaction_receipt_with_block_receipts(
             tx,
             meta,
             receipt,
-            &all_receipts,
+            &receipts,
             optimism_tx_meta,
         )
     }
 
+    /// Builds [OptimismTxMeta] object using the provided [TransactionSigned],
+    /// [L1BlockInfo] and `block_timestamp`. The [L1BlockInfo] is used to calculate
+    /// the l1 fee and l1 data gas for the transaction.
+    /// If the [L1BlockInfo] is not provided, the [OptimismTxMeta] will be empty.
     #[cfg(feature = "optimism")]
     pub(crate) fn build_op_tx_meta(
         &self,
         tx: &TransactionSigned,
-        l1_block_info: Option<Rc<L1BlockInfo>>,
+        l1_block_info: Option<L1BlockInfo>,
         block_timestamp: u64,
     ) -> EthResult<OptimismTxMeta> {
         if let Some(l1_block_info) = l1_block_info {
@@ -928,27 +929,33 @@ where
                 envelope_buf.freeze().into()
             };
 
-            let l1_fee = (!tx.is_deposit())
+            let (l1_fee, l1_data_gas) = match (!tx.is_deposit())
                 .then(|| {
-                    l1_block_info.l1_tx_data_fee(
-                        self.inner.provider.chain_spec(),
+                    let inner_l1_fee = match l1_block_info.l1_tx_data_fee(
+                        &self.inner.provider.chain_spec(),
                         block_timestamp,
                         &envelope_buf,
                         tx.is_deposit(),
-                    )
-                })
-                .transpose()
-                .map_err(|_| EthApiError::InternalEthError)?;
-            let l1_data_gas = (!tx.is_deposit())
-                .then(|| {
-                    l1_block_info.l1_data_gas(
-                        self.inner.provider.chain_spec(),
+                    ) {
+                        Ok(inner_l1_fee) => inner_l1_fee,
+                        Err(e) => return Err(e),
+                    };
+                    let inner_l1_data_gas = match l1_block_info.l1_data_gas(
+                        &self.inner.provider.chain_spec(),
                         block_timestamp,
                         &envelope_buf,
-                    )
+                    ) {
+                        Ok(inner_l1_data_gas) => inner_l1_data_gas,
+                        Err(e) => return Err(e),
+                    };
+                    Ok((inner_l1_fee, inner_l1_data_gas))
                 })
                 .transpose()
-                .map_err(|_| EthApiError::InternalEthError)?;
+                .map_err(|_| EthApiError::InternalEthError)?
+            {
+                Some((l1_fee, l1_data_gas)) => (Some(l1_fee), Some(l1_data_gas)),
+                None => (None, None),
+            };
 
             Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
         } else {

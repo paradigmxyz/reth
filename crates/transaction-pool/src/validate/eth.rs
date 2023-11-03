@@ -395,7 +395,7 @@ where
             transaction.to_recovered_transaction().encode_enveloped(&mut encoded);
             let cost_addition = match reth_revm::optimism::extract_l1_info(&block).map(|info| {
                 info.l1_tx_data_fee(
-                    Arc::clone(&self.chain_spec),
+                    &self.chain_spec,
                     block.timestamp,
                     &encoded.freeze().into(),
                     transaction.is_deposit(),
