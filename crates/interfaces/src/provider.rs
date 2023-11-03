@@ -111,4 +111,7 @@ pub enum ProviderError {
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{0} is pruned")]
     StateAtBlockPruned(BlockNumber),
+    /// Provider does not support this particular request.
+    #[error("this provider does not support this request")]
+    UnsupportedProvider,
 }
