@@ -15,7 +15,7 @@ use boa_engine::{
     object::{builtins::JsArrayBuffer, FunctionObjectBuilder},
     Context, JsArgs, JsError, JsNativeError, JsObject, JsResult, JsValue,
 };
-use boa_gc::{empty_trace, Finalize, Gc, Trace};
+use boa_gc::{empty_trace, Finalize, Trace};
 use reth_primitives::{Account, Address, Bytes, B256, KECCAK_EMPTY, U256};
 use revm::{
     interpreter::{
@@ -24,7 +24,7 @@ use revm::{
     },
     primitives::State,
 };
-use std::{borrow::Borrow, cell::RefCell, rc::Rc, sync::mpsc::channel};
+use std::{cell::RefCell, rc::Rc, sync::mpsc::channel};
 use tokio::sync::mpsc;
 
 /// A macro that creates a native function that returns via [JsValue::from]
@@ -69,7 +69,7 @@ macro_rules! js_value_capture_getter {
 ///
 /// This type supports garbage collection of (rust) references and prevents access to the value if
 /// it has been dropped.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct GuardedNullableGcRef<Val: 'static> {
     /// The lifetime is a lie to make it possible to use a reference in boa which requires 'static
     inner: Rc<RefCell<Option<&'static Val>>>,
@@ -126,7 +126,7 @@ pub(crate) struct StepLog {
     /// Opcode to be executed
     pub(crate) op: OpObj,
     /// All allocated memory in a step
-    pub(crate) memory: MemoryObj,
+    pub(crate) memory: MemoryRef,
     /// Program counter before step execution
     pub(crate) pc: u64,
     /// Remaining gas before step execution
@@ -195,15 +195,23 @@ impl StepLog {
 }
 
 /// Represents the memory object
-#[derive(Debug)]
-pub(crate) struct MemoryObj(pub(crate) SharedMemory);
+#[derive(Debug, Clone)]
+pub(crate) struct MemoryRef(pub(crate) GuardedNullableGcRef<SharedMemory>);
 
-impl MemoryObj {
+impl MemoryRef {
+    /// Creates a new stack reference
+    pub(crate) fn new(mem: &SharedMemory) -> (Self, RefGuard<'_, SharedMemory>) {
+        let (inner, guard) = GuardedNullableGcRef::new(mem);
+        (MemoryRef(inner), guard)
+    }
+
+    fn len(&self) -> usize {
+        self.0.with_inner(|mem| mem.len()).unwrap_or_default()
+    }
+
     pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
         let obj = JsObject::default();
-        let len = self.0.len();
-        // TODO: add into data <https://github.com/bluealloy/revm/pull/516>
-        let value = to_buf(self.0.slice(0, len).to_vec(), context)?;
+        let len = self.len();
 
         let length = FunctionObjectBuilder::new(
             context,
@@ -214,13 +222,14 @@ impl MemoryObj {
         .length(0)
         .build();
 
+        // slice returns the requested range of memory as a byte slice.
         let slice = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure_with_captures(
-                |_this, args, memory, ctx| {
+                move |_this, args, memory, ctx| {
                     let start = args.get_or_undefined(0).to_number(ctx)?;
                     let end = args.get_or_undefined(1).to_number(ctx)?;
-                    if end < start || start < 0. {
+                    if end < start || start < 0. || (end as usize) < memory.len() {
                         return Err(JsError::from_native(JsNativeError::typ().with_message(
                             format!(
                                 "tracer accessed out of bound memory: offset {start}, end {end}"
@@ -229,12 +238,15 @@ impl MemoryObj {
                     }
                     let start = start as usize;
                     let end = end as usize;
+                    let size = end - start;
+                    let slice = memory
+                        .0
+                        .with_inner(|mem| mem.slice(start, size).to_vec())
+                        .unwrap_or_default();
 
-                    let mut mem = memory.take()?;
-                    let slice = mem.drain(start..end).collect::<Vec<u8>>();
                     to_buf_value(slice, ctx)
                 },
-                value.clone(),
+                self.clone(),
             ),
         )
         .length(2)
@@ -243,21 +255,19 @@ impl MemoryObj {
         let get_uint = FunctionObjectBuilder::new(
             context,
             NativeFunction::from_copy_closure_with_captures(
-                 |_this, args, memory, ctx|  {
+                move |_this, args, memory, ctx|  {
                     let offset_f64 = args.get_or_undefined(0).to_number(ctx)?;
-
-                     let mut mem = memory.take()?;
+                     let len = memory.len();
                      let offset = offset_f64 as usize;
-                     if mem.len() < offset+32 || offset_f64 < 0. {
+                     if len < offset+32 || offset_f64 < 0. {
                          return Err(JsError::from_native(
-                             JsNativeError::typ().with_message(format!("tracer accessed out of bound memory: available {}, offset {}, size 32", mem.len(), offset))
+                             JsNativeError::typ().with_message(format!("tracer accessed out of bound memory: available {len}, offset {offset}, size 32"))
                          ));
                      }
-
-                    let slice = mem.drain(offset..offset+32).collect::<Vec<u8>>();
+                    let slice = memory.0.with_inner(|mem| mem.slice(offset, 32).to_vec()).unwrap_or_default();
                      to_buf_value(slice, ctx)
                 },
-                value
+                 self
             ),
         )
             .length(1)
@@ -268,6 +278,40 @@ impl MemoryObj {
         obj.set("length", length, false, context)?;
         Ok(obj)
     }
+}
+
+impl Finalize for MemoryRef {}
+
+unsafe impl Trace for MemoryRef {
+    empty_trace!();
+}
+
+/// Represents the state object
+#[derive(Debug, Clone)]
+pub(crate) struct StateRef(pub(crate) GuardedNullableGcRef<State>);
+
+impl StateRef {
+    /// Creates a new stack reference
+    pub(crate) fn new(state: &State) -> (Self, RefGuard<'_, State>) {
+        let (inner, guard) = GuardedNullableGcRef::new(state);
+        (StateRef(inner), guard)
+    }
+
+    fn get_account(&self, address: &Address) -> Option<Account> {
+        self.0.with_inner(|state| {
+            state.get(address).map(|acc| Account {
+                nonce: acc.info.nonce,
+                balance: acc.info.balance,
+                bytecode_hash: Some(acc.info.code_hash),
+            })
+        })?
+    }
+}
+
+impl Finalize for StateRef {}
+
+unsafe impl Trace for StateRef {
+    empty_trace!();
 }
 
 /// Represents the opcode object
@@ -646,123 +690,28 @@ impl EvmContext {
 }
 
 /// DB is the object that allows the js inspector to interact with the database.
-pub(crate) struct EvmDb {
-    db: EvmDBInner,
-}
-
-impl EvmDb {
-    pub(crate) fn new(state: State, to_db: mpsc::Sender<JsDbRequest>) -> Self {
-        Self { db: EvmDBInner { state, to_db } }
-    }
-}
-
-impl EvmDb {
-    pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
-        let obj = JsObject::default();
-
-        let db = Gc::new(self.db);
-        let exists = FunctionObjectBuilder::new(
-            context,
-            NativeFunction::from_copy_closure_with_captures(
-                move |_this, args, db, ctx| {
-                    let val = args.get_or_undefined(0).clone();
-                    let db: &EvmDBInner = db.borrow();
-                    let acc = db.read_basic(val, ctx)?;
-                    let exists = acc.is_some();
-                    Ok(JsValue::from(exists))
-                },
-                db.clone(),
-            ),
-        )
-        .length(1)
-        .build();
-
-        let get_balance = FunctionObjectBuilder::new(
-            context,
-            NativeFunction::from_copy_closure_with_captures(
-                move |_this, args, db, ctx| {
-                    let val = args.get_or_undefined(0).clone();
-                    let db: &EvmDBInner = db.borrow();
-                    let acc = db.read_basic(val, ctx)?;
-                    let balance = acc.map(|acc| acc.balance).unwrap_or_default();
-                    to_bigint(balance, ctx)
-                },
-                db.clone(),
-            ),
-        )
-        .length(1)
-        .build();
-
-        let get_nonce = FunctionObjectBuilder::new(
-            context,
-            NativeFunction::from_copy_closure_with_captures(
-                move |_this, args, db, ctx| {
-                    let val = args.get_or_undefined(0).clone();
-                    let db: &EvmDBInner = db.borrow();
-                    let acc = db.read_basic(val, ctx)?;
-                    let nonce = acc.map(|acc| acc.nonce).unwrap_or_default();
-                    Ok(JsValue::from(nonce))
-                },
-                db.clone(),
-            ),
-        )
-        .length(1)
-        .build();
-
-        let get_code = FunctionObjectBuilder::new(
-            context,
-            NativeFunction::from_copy_closure_with_captures(
-                move |_this, args, db, ctx| {
-                    let val = args.get_or_undefined(0).clone();
-                    let db: &EvmDBInner = db.borrow();
-                    Ok(db.read_code(val, ctx)?.into())
-                },
-                db.clone(),
-            ),
-        )
-        .length(1)
-        .build();
-
-        let get_state = FunctionObjectBuilder::new(
-            context,
-            NativeFunction::from_copy_closure_with_captures(
-                move |_this, args, db, ctx| {
-                    let addr = args.get_or_undefined(0).clone();
-                    let slot = args.get_or_undefined(1).clone();
-                    let db: &EvmDBInner = db.borrow();
-                    Ok(db.read_state(addr, slot, ctx)?.into())
-                },
-                db,
-            ),
-        )
-        .length(2)
-        .build();
-
-        obj.set("getBalance", get_balance, false, context)?;
-        obj.set("getNonce", get_nonce, false, context)?;
-        obj.set("getCode", get_code, false, context)?;
-        obj.set("getState", get_state, false, context)?;
-        obj.set("exists", exists, false, context)?;
-        Ok(obj)
-    }
-}
-
-#[derive(Clone)]
-struct EvmDBInner {
-    state: State,
+#[derive(Debug, Clone)]
+pub(crate) struct EvmDbRef {
+    state: StateRef,
     to_db: mpsc::Sender<JsDbRequest>,
 }
 
-impl EvmDBInner {
+impl EvmDbRef {
+    /// Creates a new DB reference
+    pub(crate) fn new(
+        state: &State,
+        to_db: mpsc::Sender<JsDbRequest>,
+    ) -> (Self, RefGuard<'_, State>) {
+        let (state, guard) = StateRef::new(state);
+        let this = Self { state, to_db };
+        (this, guard)
+    }
+
     fn read_basic(&self, address: JsValue, ctx: &mut Context<'_>) -> JsResult<Option<Account>> {
         let buf = from_buf(address, ctx)?;
         let address = bytes_to_address(buf);
-        if let Some(acc) = self.state.get(&address) {
-            return Ok(Some(Account {
-                nonce: acc.info.nonce,
-                balance: acc.info.balance,
-                bytecode_hash: Some(acc.info.code_hash),
-            }))
+        if let acc @ Some(_) = self.state.get_account(&address) {
+            return Ok(acc)
         }
         let (tx, rx) = channel();
         if self.to_db.try_send(JsDbRequest::Basic { address, resp: tx }).is_err() {
@@ -842,11 +791,93 @@ impl EvmDBInner {
         let value: B256 = value.into();
         to_buf(value.as_slice().to_vec(), ctx)
     }
+
+    pub(crate) fn into_js_object(self, context: &mut Context<'_>) -> JsResult<JsObject> {
+        let obj = JsObject::default();
+        let exists = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let val = args.get_or_undefined(0).clone();
+                    let acc = db.read_basic(val, ctx)?;
+                    let exists = acc.is_some();
+                    Ok(JsValue::from(exists))
+                },
+                self.clone(),
+            ),
+        )
+        .length(1)
+        .build();
+
+        let get_balance = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let val = args.get_or_undefined(0).clone();
+                    let acc = db.read_basic(val, ctx)?;
+                    let balance = acc.map(|acc| acc.balance).unwrap_or_default();
+                    to_bigint(balance, ctx)
+                },
+                self.clone(),
+            ),
+        )
+        .length(1)
+        .build();
+
+        let get_nonce = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let val = args.get_or_undefined(0).clone();
+                    let acc = db.read_basic(val, ctx)?;
+                    let nonce = acc.map(|acc| acc.nonce).unwrap_or_default();
+                    Ok(JsValue::from(nonce))
+                },
+                self.clone(),
+            ),
+        )
+        .length(1)
+        .build();
+
+        let get_code = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let val = args.get_or_undefined(0).clone();
+                    Ok(db.read_code(val, ctx)?.into())
+                },
+                self.clone(),
+            ),
+        )
+        .length(1)
+        .build();
+
+        let get_state = FunctionObjectBuilder::new(
+            context,
+            NativeFunction::from_copy_closure_with_captures(
+                move |_this, args, db, ctx| {
+                    let addr = args.get_or_undefined(0).clone();
+                    let slot = args.get_or_undefined(1).clone();
+                    Ok(db.read_state(addr, slot, ctx)?.into())
+                },
+                self,
+            ),
+        )
+        .length(2)
+        .build();
+
+        obj.set("getBalance", get_balance, false, context)?;
+        obj.set("getNonce", get_nonce, false, context)?;
+        obj.set("getCode", get_code, false, context)?;
+        obj.set("getState", get_state, false, context)?;
+        obj.set("exists", exists, false, context)?;
+        Ok(obj)
+    }
 }
 
-impl Finalize for EvmDBInner {}
+impl Finalize for EvmDbRef {}
 
-unsafe impl Trace for EvmDBInner {
+unsafe impl Trace for EvmDbRef {
     empty_trace!();
 }
 
