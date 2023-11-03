@@ -475,25 +475,16 @@ impl Default for FeeHistoryCacheConfig {
 
 /// Wrapper struct for BTreeMap
 #[derive(Debug, Clone)]
-pub struct FeeHistoryCache<Provider> {
+pub struct FeeHistoryCache {
     lower_bound: Arc<AtomicU64>,
     upper_bound: Arc<AtomicU64>,
     config: FeeHistoryCacheConfig,
-    provider: Provider,
     entries: Arc<tokio::sync::RwLock<BTreeMap<u64, SealedHeader>>>,
 }
 
-impl<Provider> FeeHistoryCache<Provider>
-where
-    Provider: BlockReaderIdExt
-        + ChainSpecProvider
-        + StateProviderFactory
-        + EvmEnvProvider
-        + BlockNumReader
-        + 'static,
-{
+impl FeeHistoryCache {
     /// Creates new FeeHistoryCache instance, initialize it with the mose recent data, set bounds
-    pub fn new(config: FeeHistoryCacheConfig, provider: Provider) -> Self {
+    pub fn new(config: FeeHistoryCacheConfig) -> Self {
         let mut init_tree_map = BTreeMap::new();
 
         let last_block_number = provider.last_block_number().unwrap_or(0);
@@ -521,7 +512,7 @@ where
         let upper_bound = Arc::new(AtomicU64::new(upper_bound));
         let lower_bound = Arc::new(AtomicU64::new(lower_bound));
 
-        FeeHistoryCache { config, entries, provider, upper_bound, lower_bound }
+        FeeHistoryCache { config, entries, upper_bound, lower_bound }
     }
 
     /// Processing of the arriving blocks
@@ -541,45 +532,15 @@ where
         self.upper_bound.store(upper_bound, SeqCst);
         self.lower_bound.store(lower_bound, SeqCst);
     }
-
-    /// Collect fee history for given range. It will try to use a cache to take the most recent
-    /// headers or if the range is out of caching config it will fallback to the database provider
-    pub async fn get_history(
-        &self,
-        start_block: u64,
-        end_block: u64,
-    ) -> RethResult<Vec<SealedHeader>> {
-        let headers: Vec<SealedHeader>;
-
-        let lower_bound = self.lower_bound.load(SeqCst);
-        let upper_bound = self.upper_bound.load(SeqCst);
-        if start_block >= lower_bound && end_block <= upper_bound {
-            let entries = self.entries.read().await;
-            headers = entries
-                .range(start_block..=end_block + 1)
-                .map(|(_, header)| header.clone())
-                .collect();
-        } else {
-            headers = self.provider.sealed_headers_range(start_block..=end_block)?;
-        }
-
-        Ok(headers)
-    }
 }
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
 pub async fn fee_history_cache_new_blocks_task<St, Provider>(
-    fee_history_cache: FeeHistoryCache<Provider>,
+    fee_history_cache: FeeHistoryCache,
     mut events: St,
 ) where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
-    Provider: BlockReaderIdExt
-        + ChainSpecProvider
-        + StateProviderFactory
-        + EvmEnvProvider
-        + BlockNumReader
-        + 'static,
 {
     while let Some(event) = events.next().await {
         if let Some(committed) = event.committed() {

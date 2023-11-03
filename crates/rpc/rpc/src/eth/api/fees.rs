@@ -76,10 +76,9 @@ where
             block_count = end_block_plus;
         }
 
-        // If reward percentiles were specified, we  + schnellru::Limiter<u64,
-        // reth_primitives::Header>need to validate that they are monotonically
+        // If reward percentiles were specified, we
+        // need to validate that they are monotonically
         // increasing and 0 <= p <= 100
-        //
         // Note: The types used ensure that the percentiles are never < 0
         if let Some(percentiles) = &reward_percentiles {
             if percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.) {
@@ -202,4 +201,22 @@ where
 
         Ok(rewards_in_block)
     }
+}
+
+/// Collect fee history for given range. It will try to use a cache to take the most recent
+/// headers or if the range is out of caching config it will fallback to the database provider
+pub async fn get_history(start_block: u64, end_block: u64) -> RethResult<Vec<SealedHeader>> {
+    let headers: Vec<SealedHeader>;
+
+    let lower_bound = self.lower_bound.load(SeqCst);
+    let upper_bound = self.upper_bound.load(SeqCst);
+    if start_block >= lower_bound && end_block <= upper_bound {
+        let entries = self.entries.read().await;
+        headers =
+            entries.range(start_block..=end_block + 1).map(|(_, header)| header.clone()).collect();
+    } else {
+        headers = self.provider.sealed_headers_range(start_block..=end_block)?;
+    }
+
+    Ok(headers)
 }
