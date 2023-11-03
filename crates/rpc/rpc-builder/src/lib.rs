@@ -1309,8 +1309,11 @@ impl RpcServerConfig {
             Ipv4Addr::LOCALHOST,
             DEFAULT_HTTP_RPC_PORT,
         )));
-        let jwt_secret = self.jwt_secret.clone().expect("Expected JWT.");
-
+        // let jwt_secret = self.jwt_secret.clone().expect("Expected JWT secret to be set.");
+        let jwt_secret = self
+            .jwt_secret
+            .clone()
+            .ok_or_else(|| RpcError::Custom("JWT Secret is missing".into()))?;
 
         let ws_socket_addr = self
             .ws_addr
@@ -1620,7 +1623,7 @@ struct WsHttpServer {
     ws_local_addr: Option<SocketAddr>,
     /// Configured ws,http servers
     server: WsHttpServers,
-    /// The jwt secret
+    /// The jwt secret.
     jwt_secret: Option<JwtSecret>,
 }
 
