@@ -14,7 +14,10 @@ use reth_provider::{
     ReceiptProvider, TransactionsProvider, TransactionsProviderExt,
 };
 use reth_snapshot::{segments, segments::Segment};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 impl Command {
     pub(crate) fn generate_receipts_snapshot<DB: Database>(
@@ -24,15 +27,24 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let segment = segments::Receipts::new(
-            compression,
-            if self.with_filters {
-                Filters::WithFilters(inclusion_filter, phf)
-            } else {
-                Filters::WithoutFilters
-            },
-        );
-        segment.snapshot::<DB>(provider, self.from..=(self.from + self.block_interval - 1))?;
+        let range = self.from..=(self.from + self.block_interval - 1);
+        let filters = if self.with_filters {
+            Filters::WithFilters(inclusion_filter, phf)
+        } else {
+            Filters::WithoutFilters
+        };
+
+        let segment = segments::Receipts::new(compression, filters);
+
+        segment.snapshot::<DB>(provider, range.clone())?;
+
+        // Default name doesn't have any configuration
+        let default_name: PathBuf = SnapshotSegment::Receipts.filename(&range).into();
+        let new_name: PathBuf = SnapshotSegment::Receipts
+            .filename_with_configuration(filters, compression, &range)
+            .into();
+
+        std::fs::rename(default_name, new_name)?;
 
         Ok(())
     }
@@ -62,11 +74,10 @@ impl Command {
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
-        let path = SnapshotSegment::Receipts.filename_with_configuration(
-            filters,
-            compression,
-            &block_range,
-        );
+        let path = SnapshotSegment::Receipts
+            .filename_with_configuration(filters, compression, &block_range)
+            .into();
+
         let provider = SnapshotProvider::default();
         let jar_provider =
             provider.get_segment_provider(SnapshotSegment::Receipts, self.from, Some(path))?;

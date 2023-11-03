@@ -12,8 +12,11 @@ use reth_primitives::{
 use reth_provider::{
     providers::SnapshotProvider, DatabaseProviderRO, HeaderProvider, ProviderError, ProviderFactory,
 };
-use reth_snapshot::segments::{Headers, Segment};
-use std::{path::Path, sync::Arc};
+use reth_snapshot::{segments, segments::Segment};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 impl Command {
     pub(crate) fn generate_headers_snapshot<DB: Database>(
@@ -23,15 +26,24 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let segment = Headers::new(
-            compression,
-            if self.with_filters {
-                Filters::WithFilters(inclusion_filter, phf)
-            } else {
-                Filters::WithoutFilters
-            },
-        );
-        segment.snapshot::<DB>(provider, self.from..=(self.from + self.block_interval - 1))?;
+        let range = self.from..=(self.from + self.block_interval - 1);
+        let filters = if self.with_filters {
+            Filters::WithFilters(inclusion_filter, phf)
+        } else {
+            Filters::WithoutFilters
+        };
+
+        let segment = segments::Headers::new(compression, filters);
+
+        segment.snapshot::<DB>(provider, range.clone())?;
+
+        // Default name doesn't have any configuration
+        let default_name: PathBuf = SnapshotSegment::Headers.filename(&range).into();
+        let new_name: PathBuf = SnapshotSegment::Headers
+            .filename_with_configuration(filters, compression, &range)
+            .into();
+
+        std::fs::rename(default_name, new_name)?;
 
         Ok(())
     }
@@ -55,8 +67,9 @@ impl Command {
 
         let mut row_indexes = range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
-        let path =
-            SnapshotSegment::Headers.filename_with_configuration(filters, compression, &range);
+        let path = SnapshotSegment::Headers
+            .filename_with_configuration(filters, compression, &range)
+            .into();
         let provider = SnapshotProvider::default();
         let jar_provider =
             provider.get_segment_provider(SnapshotSegment::Headers, self.from, Some(path))?;

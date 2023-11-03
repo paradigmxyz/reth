@@ -3,7 +3,7 @@ use crate::{
     BlockNumber, TxNumber,
 };
 use serde::{Deserialize, Serialize};
-use std::{ops::RangeInclusive, path::PathBuf, str::FromStr};
+use std::{ops::RangeInclusive, str::FromStr};
 use strum::{AsRefStr, EnumString};
 
 #[derive(
@@ -36,7 +36,7 @@ pub enum SnapshotSegment {
 
 impl SnapshotSegment {
     /// Returns the default configuration of the segment.
-    const fn config(&self) -> (Filters, Compression) {
+    pub const fn config(&self) -> (Filters, Compression) {
         let default_config = (
             Filters::WithFilters(InclusionFilter::Cuckoo, super::PerfectHashingFunction::Fmph),
             Compression::Lz4,
@@ -50,19 +50,20 @@ impl SnapshotSegment {
     }
 
     /// Returns the default file name for the provided segment and range.
-    pub fn filename(&self, range: &RangeInclusive<BlockNumber>) -> PathBuf {
-        let (filters, compression) = self.config();
-        self.filename_with_configuration(filters, compression, range)
+    pub fn filename(&self, range: &RangeInclusive<BlockNumber>) -> String {
+        // ATTENTION: if changing the name format, be sure to reflect those changes in
+        // [`Self::parse_filename`.]
+        format!("snapshot_{}_{}_{}", self.as_ref(), range.start(), range.end(),)
     }
 
-    /// Returns file name for the provided segment, filters, compression and range.
+    /// Returns file name for the provided segment and range, alongisde filters, compression.
     pub fn filename_with_configuration(
         &self,
         filters: Filters,
         compression: Compression,
         range: &RangeInclusive<BlockNumber>,
-    ) -> PathBuf {
-        let segment_name = self.as_ref();
+    ) -> String {
+        let prefix = self.filename(range);
 
         let filters_name = match filters {
             Filters::WithFilters(inclusion_filter, phf) => {
@@ -73,14 +74,7 @@ impl SnapshotSegment {
 
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`.]
-        format!(
-            "snapshot_{segment_name}_{}_{}_{}_{}",
-            range.start(),
-            range.end(),
-            filters_name,
-            compression.as_ref()
-        )
-        .into()
+        format!("{prefix}_{}_{}", filters_name, compression.as_ref())
     }
 
     /// Takes a filename and parses the [`SnapshotSegment`] and its inclusive range.

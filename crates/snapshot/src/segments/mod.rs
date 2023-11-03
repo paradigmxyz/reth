@@ -19,7 +19,7 @@ use reth_primitives::{
     BlockNumber, SnapshotSegment,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, path::Path};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
@@ -61,7 +61,7 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
     let mut nippy_jar = NippyJar::new(
         COLUMNS,
-        &segment.filename_with_configuration(filters, compression, &block_range),
+        Path::new(segment.filename(&block_range).as_str()),
         SegmentHeader::new(block_range, tx_range, segment),
     );
 
