@@ -1801,7 +1801,7 @@ impl RpcServer {
         self.ws_http.http_local_addr
     }
     /// Return the JwtSecret of the the server
-    pub fn thing(&self) -> Option<JwtSecret> {
+    pub fn jwt(&self) -> Option<JwtSecret> {
         self.ws_http.jwt_secret.clone()
     }
 
