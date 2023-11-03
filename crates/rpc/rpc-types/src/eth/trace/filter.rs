@@ -63,6 +63,11 @@ pub struct TraceFilterMatcher {
 impl TraceFilterMatcher {
     /// Returns `true` if the given `from` and `to` addresses match this filter.
     pub fn matches(&self, from: Address, to: Option<Address>) -> bool {
+        // If `from_addresses` and `to_addresses` are empty, then match all transactions.
+        if self.from_addresses.is_empty() && self.to_addresses.is_empty() {
+            return true;
+        }
+
         match self.mode {
             TraceFilterMode::Union => {
                 self.from_addresses.contains(&from) ||
