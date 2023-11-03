@@ -890,15 +890,13 @@ where
         meta: TransactionMeta,
         receipt: Receipt,
     ) -> EthResult<TransactionReceipt> {
-        let receipt_fut = self.cache().get_receipts(meta.block_hash);
-        let block_fut = self.cache().get_block(meta.block_hash);
+        let (block, receipts) = self
+            .cache()
+            .get_block_and_receipts(meta.block_hash)
+            .await?
+            .ok_or(EthApiError::UnknownBlockNumber)?;
 
-        let (receipts, block) = futures::try_join!(receipt_fut, block_fut)?;
-        let (receipts, block) = (
-            receipts.ok_or(EthApiError::InternalEthError)?,
-            block.ok_or(EthApiError::InternalEthError)?,
-        );
-
+        let block = block.unseal();
         let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok();
         let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
 
@@ -976,7 +974,13 @@ where
                 "params": [format!("0x{}", alloy_primitives::hex::encode(tx))],
                 "id": self.network().chain_id()
             }))
-            .map_err(|_| EthApiError::InternalEthError)?;
+            .map_err(|_| {
+                tracing::warn!(
+                    target = "rpc::eth",
+                    "Failed to serialize transaction for forwarding to sequencer"
+                );
+                EthApiError::InternalEthError
+            })?;
 
             let client = reqwest::Client::new();
 
