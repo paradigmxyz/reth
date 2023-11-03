@@ -932,7 +932,7 @@ where
             let (l1_fee, l1_data_gas) = match (!tx.is_deposit())
                 .then(|| {
                     let inner_l1_fee = match l1_block_info.l1_tx_data_fee(
-                        self.inner.provider.chain_spec(),
+                        &self.inner.provider.chain_spec(),
                         block_timestamp,
                         &envelope_buf,
                         tx.is_deposit(),
@@ -941,7 +941,7 @@ where
                         Err(e) => return Err(e),
                     };
                     let inner_l1_data_gas = match l1_block_info.l1_data_gas(
-                        self.inner.provider.chain_spec(),
+                        &self.inner.provider.chain_spec(),
                         block_timestamp,
                         &envelope_buf,
                     ) {
