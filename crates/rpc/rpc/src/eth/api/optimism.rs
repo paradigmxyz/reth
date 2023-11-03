@@ -1,6 +1,5 @@
 use reth_primitives::U256;
 use revm::L1BlockInfo;
-use std::rc::Rc;
 
 /// Optimism Transaction Metadata
 ///
@@ -12,7 +11,7 @@ use std::rc::Rc;
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OptimismTxMeta {
     /// The L1 block info.
-    pub(crate) l1_block_info: Option<Rc<L1BlockInfo>>,
+    pub(crate) l1_block_info: Option<L1BlockInfo>,
     /// The L1 fee for the block.
     pub(crate) l1_fee: Option<U256>,
     /// The L1 data gas for the block.
@@ -22,7 +21,7 @@ pub(crate) struct OptimismTxMeta {
 impl OptimismTxMeta {
     /// Creates a new [OptimismTxMeta].
     pub(crate) fn new(
-        l1_block_info: Option<Rc<L1BlockInfo>>,
+        l1_block_info: Option<L1BlockInfo>,
         l1_fee: Option<U256>,
         l1_data_gas: Option<U256>,
     ) -> Self {

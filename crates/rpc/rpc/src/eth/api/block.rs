@@ -81,7 +81,7 @@ where
                 let body = reth_revm::optimism::parse_l1_info_tx(
                     &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
                 );
-                (block.timestamp, body.ok().map(Rc::new))
+                (block.timestamp, body.ok())
             };
 
             let receipts = block
