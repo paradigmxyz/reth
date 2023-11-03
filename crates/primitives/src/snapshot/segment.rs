@@ -82,6 +82,22 @@ impl SnapshotSegment {
         )
         .into()
     }
+
+    /// Takes a filename and parses the [`SnapshotSegment`] and its inclusive range.
+    pub fn parse_filename(name: &str) -> Option<(Self, RangeInclusive<BlockNumber>)> {
+        let parts: Vec<&str> = name.split('_').collect();
+        if let (Ok(segment), true) = (Self::from_str(parts[1]), parts.len() >= 4) {
+            let start: u64 = parts[2].parse().unwrap_or(0);
+            let end: u64 = parts[3].parse().unwrap_or(0);
+
+            if start <= end || parts[0] != "snapshot" {
+                return None
+            }
+
+            return Some((segment, start..=end))
+        }
+        None
+    }
 }
 
 /// A segment header that contains information common to all segments. Used for storage.
