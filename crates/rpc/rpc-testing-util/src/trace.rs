@@ -389,4 +389,26 @@ mod tests {
             }
         }
     }
+    #[tokio::test]
+    #[ignore]
+    async fn can_create_trace_get_stream() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+
+        let tx_hash: B256 = "".parse().unwrap();
+
+        let indices: Vec<Index> = vec![Index::from(0)];
+
+        let mut stream = client.trace_get_stream(tx_hash, indices);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(trace) => {
+                    println!("Received trace: {:?}", trace);
+                }
+                Err(e) => {
+                    println!("Error fetching trace: {:?}", e);
+                }
+            }
+        }
+    }
 }
