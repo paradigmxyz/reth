@@ -6,13 +6,20 @@ use reth_primitives::{
     BlockNumber, SnapshotSegment, TxNumber,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, path::PathBuf};
 
 /// Snapshot segment responsible for [SnapshotSegment::Receipts] part of data.
 #[derive(Debug)]
 pub struct Receipts {
     compression: Compression,
     filters: Filters,
+}
+
+impl Default for Receipts {
+    fn default() -> Self {
+        let (filters, compression) = SnapshotSegment::Receipts.config();
+        Self { compression, filters }
+    }
 }
 
 impl Receipts {
@@ -23,9 +30,14 @@ impl Receipts {
 }
 
 impl Segment for Receipts {
+    fn segment() -> SnapshotSegment {
+        SnapshotSegment::Receipts
+    }
+
     fn snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<'_, DB>,
+        directory: PathBuf,
         block_range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()> {
         let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
@@ -33,7 +45,8 @@ impl Segment for Receipts {
 
         let mut jar = prepare_jar::<DB, 1>(
             provider,
-            SnapshotSegment::Receipts,
+            directory,
+            Self::segment(),
             self.filters,
             self.compression,
             block_range,

@@ -19,7 +19,7 @@ use reth_primitives::{
     BlockNumber, SnapshotSegment,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
-use std::{ops::RangeInclusive, path::Path};
+use std::{ops::RangeInclusive, path::PathBuf};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
@@ -29,8 +29,12 @@ pub trait Segment {
     fn snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<'_, DB>,
+        directory: PathBuf,
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()>;
+
+    /// Returns this struct's [`SnapshotSegment`].
+    fn segment() -> SnapshotSegment;
 
     /// Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
     fn dataset_for_compression<DB: Database, T: Table<Key = u64>>(
@@ -51,6 +55,7 @@ pub trait Segment {
 /// Returns a [`NippyJar`] according to the desired configuration.
 pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     provider: &DatabaseProviderRO<'_, DB>,
+    directory: PathBuf,
     segment: SnapshotSegment,
     filters: Filters,
     compression: Compression,
@@ -61,7 +66,7 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
     let mut nippy_jar = NippyJar::new(
         COLUMNS,
-        Path::new(segment.filename(&block_range).as_str()),
+        &directory.join(segment.filename(&block_range).as_str()),
         SegmentHeader::new(block_range, tx_range, segment),
     );
 

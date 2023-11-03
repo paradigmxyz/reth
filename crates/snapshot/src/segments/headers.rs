@@ -9,7 +9,7 @@ use reth_primitives::{
     BlockNumber, SnapshotSegment,
 };
 use reth_provider::DatabaseProviderRO;
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, path::PathBuf};
 
 /// Snapshot segment responsible for [SnapshotSegment::Headers] part of data.
 #[derive(Debug)]
@@ -25,16 +25,29 @@ impl Headers {
     }
 }
 
+impl Default for Headers {
+    fn default() -> Self {
+        let (filters, compression) = SnapshotSegment::Headers.config();
+        Self { compression, filters }
+    }
+}
+
 impl Segment for Headers {
+    fn segment() -> SnapshotSegment {
+        SnapshotSegment::Headers
+    }
+
     fn snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<'_, DB>,
+        directory: PathBuf,
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()> {
         let range_len = range.clone().count();
         let mut jar = prepare_jar::<DB, 3>(
             provider,
-            SnapshotSegment::Headers,
+            directory,
+            Self::segment(),
             self.filters,
             self.compression,
             range.clone(),
