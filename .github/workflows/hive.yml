@@ -1,7 +1,11 @@
+# Runs `ethereum/hive` tests.
+
+name: hive
+
 on:
   schedule:
     # every day
-    - cron: '0 0 * * *'
+    - cron: "0 0 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -10,16 +14,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
-name: hive
 jobs:
   prepare:
     runs-on:
       group: Reth
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: mkdir artifacts
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
       - name: Build and export reth image
@@ -33,7 +34,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Checkout hive tests
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: ethereum/hive
           ref: master
@@ -41,7 +42,7 @@ jobs:
 
       - uses: actions/setup-go@v3
         with:
-          go-version: '^1.13.1'
+          go-version: "^1.13.1"
       - run: go version
       - name: Build hive tool
         run: |
@@ -54,7 +55,6 @@ jobs:
         with:
           name: artifacts
           path: ./artifacts
-
 
   test:
     continue-on-error: ${{ matrix.experimental }}
@@ -71,7 +71,17 @@ jobs:
             # we have excluded these tests because we do not support block
             # announcements
             # exclude: [TestLargeAnnounce, TestBroadcast, TestBlockHashAnnounce]
-            include: [TestStatus, TestGetBlockHeaders, TestSimultaneousRequests, TestSameRequestID, TestZeroRequestID, TestGetBlockBodies, TestMaliciousHandshake, TestMaliciousStatus, TestTransaction, TestMaliciousTx]
+            include:
+              - TestStatus
+              - TestGetBlockHeaders
+              - TestSimultaneousRequests
+              - TestSameRequestID
+              - TestZeroRequestID
+              - TestGetBlockBodies
+              - TestMaliciousHandshake
+              - TestMaliciousStatus
+              - TestTransaction
+              - TestMaliciousTx
             experimental: true
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
@@ -93,7 +103,23 @@ jobs:
             experimental: true
             # eth_ rpc methods
           - sim: ethereum/rpc-compat
-            include: [eth_blockNumber, eth_call, eth_chainId, eth_createAccessList, eth_estimateGas, eth_feeHistory, eth_getBalance, eth_getBlockBy, eth_getBlockTransactionCountBy, eth_getCode, eth_getStorage, eth_getTransactionBy, eth_getTransactionCount, eth_getTransactionReceipt, eth_sendRawTransaction, eth_syncing]
+            include:
+              - eth_blockNumber
+              - eth_call
+              - eth_chainId
+              - eth_createAccessList
+              - eth_estimateGas
+              - eth_feeHistory
+              - eth_getBalance
+              - eth_getBlockBy
+              - eth_getBlockTransactionCountBy
+              - eth_getCode
+              - eth_getStorage
+              - eth_getTransactionBy
+              - eth_getTransactionCount
+              - eth_getTransactionReceipt
+              - eth_sendRawTransaction
+              - eth_syncing
             experimental: true
             # not running eth_getProof tests because we do not support
             # eth_getProof yet
@@ -175,7 +201,7 @@ jobs:
           chmod +x /usr/local/bin/hive
 
       - name: Checkout hive tests
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: ethereum/hive
           ref: master
