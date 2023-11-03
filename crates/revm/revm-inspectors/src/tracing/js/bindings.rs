@@ -94,9 +94,7 @@ impl<Val: 'static> GuardedNullableGcRef<Val> {
     where
         F: FnOnce(&Val) -> R,
     {
-        let inner = RefCell::borrow(&self.inner);
-        let inner = inner.as_ref()?;
-        Some(f(inner))
+        self.inner.borrow().map(f)
     }
 }
 
