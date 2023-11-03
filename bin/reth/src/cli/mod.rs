@@ -84,6 +84,15 @@ impl<Ext: RethCliExt> Cli<Ext> {
 
         let _guard = self.init_tracing()?;
 
+        // Runtime safety check for the `optimism` feature flag being enabled on a non-OP Stack
+        // chain.
+        #[cfg(feature = "optimism")]
+        if !self.chain.is_optimism() {
+            eyre::bail!(
+                "The `optimism` feature flag is enabled, but the chain is a non OP Stack chain."
+            )
+        }
+
         let runner = CliRunner;
         match self.command {
             Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
