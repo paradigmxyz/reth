@@ -67,24 +67,6 @@ pub(crate) fn to_buf_value(bytes: Vec<u8>, context: &mut Context<'_>) -> JsResul
     Ok(to_buf(bytes, context)?.into())
 }
 
-/// Create a new array buffer object from byte block.
-pub(crate) fn to_bigint_array(items: &[U256], ctx: &mut Context<'_>) -> JsResult<JsArray> {
-    let arr = JsArray::new(ctx);
-    let bigint = ctx.global_object().get("bigint", ctx)?;
-    if !bigint.is_callable() {
-        return Err(JsError::from_native(
-            JsNativeError::typ().with_message("global object bigint is not callable"),
-        ))
-    }
-    let bigint = bigint.as_callable().unwrap();
-
-    for item in items {
-        let val = bigint.call(&JsValue::undefined(), &[JsValue::from(item.to_string())], ctx)?;
-        arr.push(val, ctx)?;
-    }
-    Ok(arr)
-}
-
 /// Converts a buffer type to an address.
 ///
 /// If the buffer is larger than the address size, it will be cropped from the left
