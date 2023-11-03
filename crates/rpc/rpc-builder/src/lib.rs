@@ -1309,6 +1309,7 @@ impl RpcServerConfig {
             Ipv4Addr::LOCALHOST,
             DEFAULT_HTTP_RPC_PORT,
         )));
+        let jwt_secret = self.jwt_secret.clone().unwrap();
 
         let ws_socket_addr = self
             .ws_addr
@@ -1355,6 +1356,7 @@ impl RpcServerConfig {
                 http_local_addr: Some(addr),
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
+                jwt_secret: Some(jwt_secret),
             })
         }
 
@@ -1397,6 +1399,7 @@ impl RpcServerConfig {
             http_local_addr,
             ws_local_addr,
             server: WsHttpServers::DifferentPort { http: http_server, ws: ws_server },
+            jwt_secret: Some(jwt_secret),
         })
     }
 
@@ -1616,6 +1619,8 @@ struct WsHttpServer {
     ws_local_addr: Option<SocketAddr>,
     /// Configured ws,http servers
     server: WsHttpServers,
+    /// The jwt secret.
+    jwt_secret: Option<JwtSecret>,
 }
 
 /// Enum for holding the http and ws servers in all possible combinations.
@@ -1790,6 +1795,10 @@ impl RpcServer {
     pub fn http_local_addr(&self) -> Option<SocketAddr> {
         self.ws_http.http_local_addr
     }
+    /// Return the JwtSecret of the the server
+    pub fn thing(&self) -> Option<JwtSecret> {
+        self.ws_http.jwt_secret.clone()
+    }
 
     /// Returns the [`SocketAddr`] of the ws server if started.
     pub fn ws_local_addr(&self) -> Option<SocketAddr> {
@@ -1817,6 +1826,7 @@ impl RpcServer {
             ws: None,
             ipc_endpoint: None,
             ipc: None,
+            jwt_secret: None,
         };
 
         let (http, ws) = ws_http.server.start(http, ws, &config).await?;
@@ -1857,11 +1867,17 @@ pub struct RpcServerHandle {
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
     ipc: Option<ServerHandle>,
+    jwt_secret: Option<JwtSecret>,
 }
 
 // === impl RpcServerHandle ===
 
 impl RpcServerHandle {
+    /// Configures the JWT secret for authentication.
+    pub fn with_jwt_secret(mut self, secret: Option<JwtSecret>) -> Self {
+        self.jwt_secret = secret;
+        self
+    }
     /// Returns the [`SocketAddr`] of the http server if started.
     pub fn http_local_addr(&self) -> Option<SocketAddr> {
         self.http_local_addr
