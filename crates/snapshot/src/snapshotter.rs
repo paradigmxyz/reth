@@ -89,6 +89,16 @@ impl<DB: Database> Snapshotter<DB> {
         chain_spec: Arc<ChainSpec>,
         block_interval: u64,
     ) -> RethResult<Self> {
+        // Create directory for snapshots if it doesn't exist.
+        if !snapshots_path.exists() {
+            std::fs::create_dir_all(&snapshots_path).map_err(|e| {
+                RethError::Custom(format!(
+                    "Could not create snapshots directory {}: {e}",
+                    snapshots_path.display()
+                ))
+            })?;
+        }
+
         let (highest_snapshots_notifier, highest_snapshots_tracker) = watch::channel(None);
 
         let mut snapshotter = Self {
