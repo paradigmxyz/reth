@@ -1393,10 +1393,9 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
                 return Err(RethError::Custom(String::from("Invalid inclusive range: `start` corresponds to a greater blockheight than `end`")));
             }
 
-            // Gather all block body indices for blocks in the inclusive block range of [start,
-            // end].
+            // Gather all block body indices for blocks in the inclusive block range of
+            // [start, end].
             let block_body_tx_indices = (start_number..=end_number)
-                .into_iter()
                 .map(|block_no| Ok((block_no, self.block_body_indices(block_no)?)))
                 .collect::<RethResult<Vec<_>>>()?;
 

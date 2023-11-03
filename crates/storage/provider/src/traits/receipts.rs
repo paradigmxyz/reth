@@ -25,6 +25,7 @@ pub trait ReceiptProvider: Send + Sync {
     /// [BlockHashOrNumber] must be less than or equal to the `end` [BlockHashOrNumber].
     ///
     /// Returns `None` if either the start or end block is not found.
+    #[allow(clippy::type_complexity)]
     fn receipts_by_block_range(
         &self,
         start: BlockHashOrNumber,
