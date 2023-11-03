@@ -132,6 +132,7 @@ optimism = [
   "reth-network/optimism",
   "reth-network-api/optimism"
 ]
+# no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
 
 [build-dependencies]
