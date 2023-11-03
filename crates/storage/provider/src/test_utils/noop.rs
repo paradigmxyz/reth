@@ -210,6 +210,14 @@ impl ReceiptProvider for NoopProvider {
     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> RethResult<Option<Vec<Receipt>>> {
         Ok(None)
     }
+
+    fn receipts_by_block_range(
+        &self,
+        _start: BlockHashOrNumber,
+        _end: BlockHashOrNumber,
+    ) -> RethResult<Option<Vec<(u64, Vec<Receipt>)>>> {
+        Ok(None)
+    }
 }
 
 impl ReceiptProviderIdExt for NoopProvider {}

@@ -97,7 +97,7 @@ impl<DB: Database> ProviderFactory<DB> {
         if block_number == provider.best_block_number().unwrap_or_default() &&
             block_number == provider.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())))
+            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -331,6 +331,14 @@ impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> RethResult<Option<Vec<Receipt>>> {
         self.provider()?.receipts_by_block(block)
+    }
+
+    fn receipts_by_block_range(
+        &self,
+        start: BlockHashOrNumber,
+        end: BlockHashOrNumber,
+    ) -> RethResult<Option<Vec<(u64, Vec<Receipt>)>>> {
+        self.provider()?.receipts_by_block_range(start, end)
     }
 }
 

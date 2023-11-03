@@ -20,6 +20,16 @@ pub trait ReceiptProvider: Send + Sync {
     ///
     /// Returns `None` if the block is not found.
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> RethResult<Option<Vec<Receipt>>>;
+
+    /// Get receipts by contiguous block range, with inclusive bounds. The `start`
+    /// [BlockHashOrNumber] must be less than or equal to the `end` [BlockHashOrNumber].
+    ///
+    /// Returns `None` if either the start or end block is not found.
+    fn receipts_by_block_range(
+        &self,
+        start: BlockHashOrNumber,
+        end: BlockHashOrNumber,
+    ) -> RethResult<Option<Vec<(u64, Vec<Receipt>)>>>;
 }
 
 /// Trait extension for `ReceiptProvider`, for types that implement `BlockId` conversion.
@@ -41,7 +51,7 @@ pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
                 if let Some(num) = self.convert_block_number(num_tag)? {
                     BlockHashOrNumber::Number(num)
                 } else {
-                    return Ok(None)
+                    return Ok(None);
                 }
             }
         };
