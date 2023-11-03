@@ -63,6 +63,11 @@ pub struct TraceFilterMatcher {
 impl TraceFilterMatcher {
     /// Returns `true` if the given `from` and `to` addresses match this filter.
     pub fn matches(&self, from: Address, to: Option<Address>) -> bool {
+        // If `from_addresses` and `to_addresses` are empty, then match all transactions.
+        if self.from_addresses.is_empty() && self.to_addresses.is_empty() {
+            return true;
+        }
+
         match self.mode {
             TraceFilterMode::Union => {
                 self.from_addresses.contains(&from) ||
@@ -86,5 +91,28 @@ mod tests {
         let filter: TraceFilter = serde_json::from_str(s).unwrap();
         assert_eq!(filter.from_block, Some(3));
         assert_eq!(filter.to_block, Some(5));
+    }
+
+    #[test]
+    fn test_filter_matcher() {
+        let s = r#"{"fromBlock":  "0x3","toBlock":  "0x5"}"#;
+        let filter: TraceFilter = serde_json::from_str(s).unwrap();
+        let matcher = filter.matcher();
+        assert!(
+            matcher.matches("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap(), None)
+        );
+        assert!(
+            matcher.matches("0x160f5f00288e9e1cc8655b327e081566e580a71d".parse().unwrap(), None)
+        );
+
+        let s = r#"{"fromBlock":  "0x3","toBlock":  "0x5", "fromAddress": ["0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"]}"#;
+        let filter: TraceFilter = serde_json::from_str(s).unwrap();
+        let matcher = filter.matcher();
+        assert!(
+            matcher.matches("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap(), None)
+        );
+        assert!(
+            !matcher.matches("0x160f5f00288e9e1cc8655b327e081566e580a71d".parse().unwrap(), None)
+        );
     }
 }
