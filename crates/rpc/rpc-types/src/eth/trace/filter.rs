@@ -70,7 +70,7 @@ impl TraceFilterMatcher {
 
         match self.mode {
             TraceFilterMode::Union => {
-                self.from_addresses.contains(&from) || 
+                self.from_addresses.contains(&from) ||
                     to.map_or(false, |to| self.to_addresses.contains(&to))
             }
             TraceFilterMode::Intersection => {
