@@ -274,7 +274,7 @@ impl ActiveSession {
                 unreachable!("Not emitted by network")
             }
             PeerMessage::Other(other) => {
-                debug!(target : "net::session", message_id=%other.id, "Ignoring unsupported message");
+                debug!(target: "net::session", message_id=%other.id, "Ignoring unsupported message");
             }
         }
     }
@@ -294,7 +294,7 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {
-                debug!(target : "net", ?err, "Failed to respond to received request");
+                debug!(target: "net", ?err, "Failed to respond to received request");
             }
         }
     }
@@ -312,7 +312,7 @@ impl ActiveSession {
             Ok(_) => Ok(()),
             Err(err) => {
                 trace!(
-                    target : "net",
+                    target: "net",
                     %err,
                     "no capacity for incoming broadcast",
                 );
@@ -338,7 +338,7 @@ impl ActiveSession {
             Ok(_) => Ok(()),
             Err(err) => {
                 trace!(
-                    target : "net",
+                    target: "net",
                     %err,
                     "no capacity for incoming request",
                 );
