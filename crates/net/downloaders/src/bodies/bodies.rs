@@ -762,4 +762,30 @@ mod tests {
             header += resp.len();
         }
     }
+
+    // Check that the downloader can tolerate a few completely empty responses
+    #[tokio::test]
+    async fn can_tolerate_empty_responses() {
+        // Generate some random blocks
+        let db = create_test_rw_db();
+        let (headers, mut bodies) = generate_bodies(0..=99);
+
+        insert_headers(db.db(), &headers);
+
+        // respond with empty bodies for every other request.
+        let client = Arc::new(
+            TestBodiesClient::default().with_bodies(bodies.clone()).with_empty_responses(2),
+        );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_request_limit(3)
+            .with_stream_batch_size(100)
+            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+
+        // Download the requested range
+        downloader.set_download_range(0..=99).expect("failed to set download range");
+        assert_matches!(
+            downloader.next().await,
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
+        );
+    }
 }
