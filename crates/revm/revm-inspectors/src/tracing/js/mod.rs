@@ -3,7 +3,7 @@
 use crate::tracing::{
     js::{
         bindings::{
-            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, StackObj, StepLog,
+            CallFrame, Contract, EvmContext, EvmDbRef, FrameResult, MemoryRef, StackRef, StepLog,
         },
         builtins::{register_builtins, PrecompileList},
     },
@@ -151,7 +151,7 @@ impl JsInspector {
     /// Calls the result function and returns the result.
     pub fn result(&mut self, res: ResultAndState, env: &Env) -> Result<JsValue, JsInspectorError> {
         let ResultAndState { result, state } = res;
-        let db = EvmDb::new(state, self.to_db_service.clone());
+        let (db, _db_guard) = EvmDbRef::new(&state, self.to_db_service.clone());
 
         let gas_used = result.gas_used();
         let mut to = None;
@@ -206,14 +206,14 @@ impl JsInspector {
         )?)
     }
 
-    fn try_fault(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
+    fn try_fault(&mut self, step: StepLog, db: EvmDbRef) -> JsResult<()> {
         let step = step.into_js_object(&mut self.ctx)?;
         let db = db.into_js_object(&mut self.ctx)?;
         self.fault_fn.call(&(self.obj.clone().into()), &[step.into(), db.into()], &mut self.ctx)?;
         Ok(())
     }
 
-    fn try_step(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
+    fn try_step(&mut self, step: StepLog, db: EvmDbRef) -> JsResult<()> {
         if let Some(step_fn) = &self.step_fn {
             let step = step.into_js_object(&mut self.ctx)?;
             let db = db.into_js_object(&mut self.ctx)?;
@@ -291,12 +291,15 @@ where
             return
         }
 
-        let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+        let (db, _db_guard) =
+            EvmDbRef::new(&data.journaled_state.state, self.to_db_service.clone());
 
+        let (stack, _stack_guard) = StackRef::new(&interp.stack);
+        let (memory, _memory_guard) = MemoryRef::new(interp.shared_memory);
         let step = StepLog {
-            stack: StackObj(interp.stack.clone()),
+            stack,
             op: interp.current_opcode().into(),
-            memory: MemoryObj(interp.shared_memory.clone()),
+            memory,
             pc: interp.program_counter() as u64,
             gas_remaining: interp.gas.remaining(),
             cost: interp.gas.spend(),
@@ -326,12 +329,15 @@ where
         }
 
         if matches!(interp.instruction_result, return_revert!()) {
-            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+            let (db, _db_guard) =
+                EvmDbRef::new(&data.journaled_state.state, self.to_db_service.clone());
 
+            let (stack, _stack_guard) = StackRef::new(&interp.stack);
+            let (memory, _memory_guard) = MemoryRef::new(interp.shared_memory);
             let step = StepLog {
-                stack: StackObj(interp.stack.clone()),
+                stack,
                 op: interp.current_opcode().into(),
-                memory: MemoryObj(interp.shared_memory.clone()),
+                memory,
                 pc: interp.program_counter() as u64,
                 gas_remaining: interp.gas.remaining(),
                 cost: interp.gas.spend(),
