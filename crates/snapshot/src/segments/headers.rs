@@ -5,7 +5,7 @@ use reth_db::{
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    snapshot::{Compression, Filters},
+    snapshot::{Compression, Filters, SegmentConfig},
     BlockNumber, SnapshotSegment,
 };
 use reth_provider::DatabaseProviderRO;
@@ -14,21 +14,19 @@ use std::{ops::RangeInclusive, path::PathBuf};
 /// Snapshot segment responsible for [SnapshotSegment::Headers] part of data.
 #[derive(Debug)]
 pub struct Headers {
-    compression: Compression,
-    filters: Filters,
+    config: SegmentConfig,
 }
 
 impl Headers {
     /// Creates new instance of [Headers] snapshot segment.
     pub fn new(compression: Compression, filters: Filters) -> Self {
-        Self { compression, filters }
+        Self { config: SegmentConfig { compression, filters } }
     }
 }
 
 impl Default for Headers {
     fn default() -> Self {
-        let (filters, compression) = SnapshotSegment::Headers.config();
-        Self { compression, filters }
+        Self { config: SnapshotSegment::Headers.config() }
     }
 }
 
@@ -48,8 +46,7 @@ impl Segment for Headers {
             provider,
             directory,
             Self::segment(),
-            self.filters,
-            self.compression,
+            self.config,
             range.clone(),
             range_len,
             || {
@@ -70,7 +67,7 @@ impl Segment for Headers {
         // Generate list of hashes for filters & PHF
         let mut cursor = provider.tx_ref().cursor_read::<RawTable<tables::CanonicalHeaders>>()?;
         let mut hashes = None;
-        if self.filters.has_filters() {
+        if self.config.filters.has_filters() {
             hashes = Some(
                 cursor
                     .walk(Some(RawKey::from(*range.start())))?

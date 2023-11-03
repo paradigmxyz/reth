@@ -15,7 +15,9 @@ use reth_db::{
 use reth_interfaces::RethResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
+    snapshot::{
+        Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentConfig, SegmentHeader,
+    },
     BlockNumber, SnapshotSegment,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
@@ -57,8 +59,7 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     provider: &DatabaseProviderRO<'_, DB>,
     directory: PathBuf,
     segment: SnapshotSegment,
-    filters: Filters,
-    compression: Compression,
+    segment_config: SegmentConfig,
     block_range: RangeInclusive<BlockNumber>,
     total_rows: usize,
     prepare_compression: impl Fn() -> RethResult<Rows<COLUMNS>>,
@@ -70,7 +71,7 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
         SegmentHeader::new(block_range, tx_range, segment),
     );
 
-    nippy_jar = match compression {
+    nippy_jar = match segment_config.compression {
         Compression::Lz4 => nippy_jar.with_lz4(),
         Compression::Zstd => nippy_jar.with_zstd(false, 0),
         Compression::ZstdWithDictionary => {
@@ -83,7 +84,7 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
         Compression::Uncompressed => nippy_jar,
     };
 
-    if let Filters::WithFilters(inclusion_filter, phf) = filters {
+    if let Filters::WithFilters(inclusion_filter, phf) = segment_config.filters {
         nippy_jar = match inclusion_filter {
             InclusionFilter::Cuckoo => nippy_jar.with_cuckoo_filter(total_rows),
         };

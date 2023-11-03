@@ -2,7 +2,7 @@ use crate::segments::{prepare_jar, Segment};
 use reth_db::{database::Database, snapshot::create_snapshot_T1, tables};
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    snapshot::{Compression, Filters, SegmentHeader},
+    snapshot::{Compression, Filters, SegmentConfig, SegmentHeader},
     BlockNumber, SnapshotSegment, TxNumber,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
@@ -11,21 +11,19 @@ use std::{ops::RangeInclusive, path::PathBuf};
 /// Snapshot segment responsible for [SnapshotSegment::Receipts] part of data.
 #[derive(Debug)]
 pub struct Receipts {
-    compression: Compression,
-    filters: Filters,
-}
-
-impl Default for Receipts {
-    fn default() -> Self {
-        let (filters, compression) = SnapshotSegment::Receipts.config();
-        Self { compression, filters }
-    }
+    config: SegmentConfig,
 }
 
 impl Receipts {
     /// Creates new instance of [Receipts] snapshot segment.
     pub fn new(compression: Compression, filters: Filters) -> Self {
-        Self { compression, filters }
+        Self { config: SegmentConfig { compression, filters } }
+    }
+}
+
+impl Default for Receipts {
+    fn default() -> Self {
+        Self { config: SnapshotSegment::Receipts.config() }
     }
 }
 
@@ -47,8 +45,7 @@ impl Segment for Receipts {
             provider,
             directory,
             Self::segment(),
-            self.filters,
-            self.compression,
+            self.config,
             block_range,
             tx_range_len,
             || {
@@ -62,7 +59,7 @@ impl Segment for Receipts {
 
         // Generate list of hashes for filters & PHF
         let mut hashes = None;
-        if self.filters.has_filters() {
+        if self.config.filters.has_filters() {
             hashes = Some(
                 provider
                     .transaction_hashes_by_range(*tx_range.start()..(*tx_range.end() + 1))?
