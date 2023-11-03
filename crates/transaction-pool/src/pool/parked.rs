@@ -546,10 +546,7 @@ mod tests {
 
         // we should end up with the most recently submitted transactions
         let max_account_slots = 1;
-        let pool_limit = SubPoolLimit {
-            max_txs: 4,
-            max_size: usize::MAX,
-        };
+        let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
 
         // truncate the pool
         let removed = pool.truncate_pool(pool_limit, max_account_slots);

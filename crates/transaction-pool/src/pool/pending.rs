@@ -699,10 +699,7 @@ mod tests {
         // let's set the max_account_slots to 2, and the max total txs to 4, we should end up with
         // only the first transactions
         let max_account_slots = 1;
-        let pool_limit = SubPoolLimit {
-            max_txs: 4,
-            max_size: usize::MAX,
-        };
+        let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
 
         // find the spammers - this should be A, B, C, but not D
         let spammers = pool.get_spammers(max_account_slots);
