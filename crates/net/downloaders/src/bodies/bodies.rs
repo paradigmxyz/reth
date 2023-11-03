@@ -100,6 +100,7 @@ where
         max_non_empty: u64,
     ) -> DownloadResult<Option<Vec<SealedHeader>>> {
         if range.is_empty() || max_non_empty == 0 {
+            tracing::trace!(target: "downloaders::bodies", ?range, max_non_empty, "No more headers to request");
             return Ok(None)
         }
 
@@ -405,7 +406,10 @@ where
                         );
                         new_request_submitted = true;
                     }
-                    Ok(None) => break 'inner,
+                    Ok(None) => {
+                        tracing::trace!(target: "downloaders::bodies", last_requested_block_number=this.in_progress_queue.last_requested_block_number, "Not pushing new requests");
+                        break 'inner;
+                    }
                     Err(error) => {
                         tracing::error!(target: "downloaders::bodies", ?error, "Failed to download from next request");
                         this.clear();
@@ -429,6 +433,7 @@ where
         // All requests are handled, stream is finished
         if this.in_progress_queue.is_empty() {
             if this.queued_bodies.is_empty() {
+                tracing::trace!(target: "downloaders::bodies", "Yielding empty batch");
                 return Poll::Ready(None)
             }
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
