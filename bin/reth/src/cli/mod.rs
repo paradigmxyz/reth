@@ -25,7 +25,7 @@ pub mod ext;
 
 /// Default [Directive] for [EnvFilter] which disables high-frequency debug logs from `hyper` and
 /// `trust-dns`
-const DEFAULT_ENV_FILTER_DIRECTIVE: &'static str =
+const DEFAULT_ENV_FILTER_DIRECTIVE: &str =
     "hyper::proto::h1=off,trust_dns_proto=off,trust_dns_resolver=off";
 
 /// The main reth cli interface.
