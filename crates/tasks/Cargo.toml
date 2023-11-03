@@ -10,16 +10,16 @@ description = "Task management"
 
 [dependencies]
 
-## async
+# async
 tokio = { workspace = true, features = ["sync", "rt"] }
 tracing-futures = "0.2"
 futures-util.workspace = true
 
-## metrics
+# metrics
 reth-metrics.workspace = true
 metrics.workspace = true
 
-## misc
+# misc
 tracing.workspace = true
 thiserror.workspace = true
 dyn-clone = "1.0"

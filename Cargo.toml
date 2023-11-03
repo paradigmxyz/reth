@@ -87,7 +87,7 @@ codegen-units = 1
 incremental = false
 
 [workspace.dependencies]
-## reth
+# reth
 reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
@@ -110,11 +110,12 @@ reth-eth-wire = { path = "./crates/net/eth-wire" }
 reth-ecies = { path = "./crates/net/ecies" }
 reth-tracing = { path = "./crates/tracing" }
 reth-tokio-util = { path = "crates/tokio-util" }
+
 # revm
 revm = { git = "https://github.com/bluealloy/revm", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
 
-## eth
+# eth
 alloy-primitives = "0.4"
 alloy-dyn-abi = "0.4"
 alloy-sol-types = "0.4"
@@ -126,11 +127,11 @@ ethers-middleware = { version = "2.0", default-features = false }
 discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
 igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
 
-## js
+# js
 boa_engine = "0.17"
 boa_gc = "0.17"
 
-## misc
+# misc
 aquamarine = "0.3"
 bytes = "1.5"
 bitflags = "2.4"
@@ -151,27 +152,27 @@ hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
 
-### proc-macros
+# proc-macros
 proc-macro2 = "1.0"
 quote = "1.0"
 
-## tokio
+# tokio
 tokio-stream = "0.1.11"
 tokio = { version = "1.21", default-features = false }
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
-## async
+# async
 async-trait = "0.1.68"
 futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
 
-## json
+# rpc
 jsonrpsee = { version = "0.20" }
 jsonrpsee-core = { version = "0.20" }
 jsonrpsee-types = { version = "0.20" }
 
-## crypto
+# crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [
     "global-context",
     "rand-std",
@@ -181,11 +182,11 @@ enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
 c-kzg = "0.4.0"
 
-## config
+# config
 confy = "0.5"
 toml = "0.8"
 
-### misc-testing
+# misc-testing
 arbitrary = "1.1"
 assert_matches = "1.5.0"
 tempfile = "3.8"
