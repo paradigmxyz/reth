@@ -392,6 +392,7 @@ where
                             target: "sync::pipeline",
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
+                            ?target,
                             %progress,
                             %done,
                             "Stage committed progress"
@@ -401,6 +402,7 @@ where
                             target: "sync::pipeline",
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
+                            ?target,
                             %done,
                             "Stage committed progress"
                         );
