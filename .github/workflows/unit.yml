@@ -76,7 +76,6 @@ jobs:
       - run: cargo test --doc --workspace --all-features
 
   unit-success:
-    name: success
     runs-on: ubuntu-latest
     if: always()
     needs: [test, state, doc]
