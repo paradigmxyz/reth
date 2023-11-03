@@ -1309,7 +1309,8 @@ impl RpcServerConfig {
             Ipv4Addr::LOCALHOST,
             DEFAULT_HTTP_RPC_PORT,
         )));
-        let jwt_secret = self.jwt_secret.clone().unwrap();
+        let jwt_secret = self.jwt_secret.clone().expect("Expected JWT.");
+
 
         let ws_socket_addr = self
             .ws_addr
