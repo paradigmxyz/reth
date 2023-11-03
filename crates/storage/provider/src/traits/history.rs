@@ -37,5 +37,5 @@ pub trait HistoryWriter: Send + Sync {
     ) -> RethResult<()>;
 
     /// Read account/storage changesets and update account/storage history indices.
-    fn calculate_history_indices(&self, range: RangeInclusive<BlockNumber>) -> RethResult<()>;
+    fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> RethResult<()>;
 }

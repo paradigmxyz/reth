@@ -18,6 +18,12 @@ impl<'a> SnapshotCursor<'a> {
         Ok(Self(NippyJarCursor::with_handle(jar, mmap_handle)?))
     }
 
+    /// Returns the current `BlockNumber` or `TxNumber` of the cursor depending on the kind of
+    /// snapshot segment.
+    pub fn number(&self) -> u64 {
+        self.row_index() + self.jar().user_header().start()
+    }
+
     /// Gets a row of values.
     pub fn get(
         &mut self,
