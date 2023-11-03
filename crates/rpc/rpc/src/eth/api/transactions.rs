@@ -890,15 +890,14 @@ where
         meta: TransactionMeta,
         receipt: Receipt,
     ) -> EthResult<TransactionReceipt> {
-        // get all receipts for the block
-        let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
-            Some(recpts) => recpts,
-            None => return Err(EthApiError::UnknownBlockNumber),
-        };
-        let block = self
-            .provider()
-            .block_by_number(meta.block_number)?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+        let receipt_fut = self.cache().get_receipts(meta.block_hash);
+        let block_fut = self.cache().get_block(meta.block_hash);
+
+        let (receipts, block) = futures::try_join!(receipt_fut, block_fut)?;
+        let (receipts, block) = (
+            receipts.ok_or(EthApiError::InternalEthError)?,
+            block.ok_or(EthApiError::InternalEthError)?,
+        );
 
         let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok();
         let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
@@ -907,7 +906,7 @@ where
             tx,
             meta,
             receipt,
-            &all_receipts,
+            &receipts,
             optimism_tx_meta,
         )
     }
