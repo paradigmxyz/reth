@@ -40,5 +40,9 @@ optimism = []
 
 [dev-dependencies]
 # misc
+alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde", "arbitrary"] }
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-derive.workspace = true
 rand.workspace = true
 similar-asserts = "1.4"

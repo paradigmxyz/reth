@@ -1,6 +1,6 @@
 use crate::{
     constants,
-    constants::DEFAULT_MAX_LOGS_PER_RESPONSE,
+    constants::{DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE},
     error::{RpcError, ServerKind},
     EthConfig,
 };
@@ -16,7 +16,7 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+    eth::{cache::EthStateCache, gas_oracle::GasPriceOracle, EthFilterConfig},
     AuthLayer, BlockingTaskPool, Claims, EngineEthApi, EthApi, EthFilter,
     EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret,
 };
@@ -68,14 +68,11 @@ where
         Box::new(executor.clone()),
         BlockingTaskPool::build().expect("failed to build tracing pool"),
     );
-    let eth_filter = EthFilter::new(
-        provider,
-        pool,
-        eth_cache.clone(),
-        DEFAULT_MAX_LOGS_PER_RESPONSE,
-        Box::new(executor.clone()),
-        EthConfig::default().stale_filter_ttl,
-    );
+    let config = EthFilterConfig::default()
+        .max_logs_per_response(DEFAULT_MAX_LOGS_PER_RESPONSE)
+        .max_blocks_per_filter(DEFAULT_MAX_BLOCKS_PER_FILTER);
+    let eth_filter =
+        EthFilter::new(provider, pool, eth_cache.clone(), config, Box::new(executor.clone()));
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
 
@@ -128,7 +125,7 @@ where
 pub struct AuthServerConfig {
     /// Where the server should listen.
     pub(crate) socket_addr: SocketAddr,
-    /// The secrete for the auth layer of the server.
+    /// The secret for the auth layer of the server.
     pub(crate) secret: JwtSecret,
     /// Configs for JSON-RPC Http.
     pub(crate) server_config: ServerBuilder,

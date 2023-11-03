@@ -518,7 +518,7 @@ impl Default for BodiesDownloaderBuilder {
     fn default() -> Self {
         Self {
             request_limit: 200,
-            stream_batch_size: 10_000,
+            stream_batch_size: 1_000,
             max_buffered_blocks_size_bytes: 2 * 1024 * 1024 * 1024, // ~2GB
             concurrent_requests_range: 5..=100,
         }

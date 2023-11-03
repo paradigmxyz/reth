@@ -6,8 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 mod storage;
 pub use storage::*;
 
-mod jsonu256;
-pub use jsonu256::*;
+pub use reth_rpc_types::json_u256::*;
 
 pub mod num;
 

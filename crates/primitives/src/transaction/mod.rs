@@ -16,13 +16,15 @@ use std::mem;
 pub use access_list::{AccessList, AccessListItem};
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
-pub use eip4844::{
-    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError, TxEip4844,
-};
+pub use eip4844::TxEip4844;
+
 pub use error::InvalidTransactionError;
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
+#[cfg(feature = "c-kzg")]
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
+#[cfg(feature = "c-kzg")]
+pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
 pub use signature::Signature;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
@@ -37,7 +39,10 @@ mod eip4844;
 mod error;
 mod legacy;
 mod meta;
+#[cfg(feature = "c-kzg")]
 mod pooled;
+#[cfg(feature = "c-kzg")]
+mod sidecar;
 mod signature;
 mod tx_type;
 mod tx_value;
@@ -347,50 +352,35 @@ impl Transaction {
         }
     }
 
-    // TODO: dedup with effective_tip_per_gas
-    /// Determine the effective gas limit for the given transaction and base fee.
-    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
-    /// transactions is returned.
-    ///
-    /// If the `max_fee_per_gas` is less than the base fee, `None` returned.
-    pub fn effective_gas_tip(&self, base_fee: Option<u64>) -> Option<u128> {
-        if let Some(base_fee) = base_fee {
-            let max_fee_per_gas = self.max_fee_per_gas();
-
-            if max_fee_per_gas < base_fee as u128 {
-                None
-            } else {
-                let effective_max_fee = max_fee_per_gas - base_fee as u128;
-                Some(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
-            }
-        } else {
-            Some(self.priority_fee_or_price())
-        }
-    }
-
     /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee:
     /// `min(maxFeePerGas - baseFee, maxPriorityFeePerGas)`
     ///
+    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
+    /// transactions is returned.
+    ///
     /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
-    pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        let base_fee = base_fee as u128;
+    pub fn effective_tip_per_gas(&self, base_fee: Option<u64>) -> Option<u128> {
+        let base_fee = match base_fee {
+            Some(base_fee) => base_fee as u128,
+            None => return Some(self.priority_fee_or_price()),
+        };
+
         let max_fee_per_gas = self.max_fee_per_gas();
 
+        // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
             return None
         }
 
-        // the miner tip is the difference between the max fee and the base fee or the
-        // max_priority_fee_per_gas, whatever is lower
-
-        // SAFETY: max_fee_per_gas >= base_fee
+        // Calculate the difference between max_fee_per_gas and base_fee
         let fee = max_fee_per_gas - base_fee;
 
+        // Compare the fee with max_priority_fee_per_gas (or gas price for non-EIP1559 transactions)
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee))
+            Some(fee.min(priority_fee))
+        } else {
+            Some(fee)
         }
-
-        Some(fee)
     }
 
     /// Get the transaction's input field.
@@ -1098,8 +1088,6 @@ impl TransactionSigned {
     ///
     /// Refer to the docs for [Self::decode_rlp_legacy_transaction] for details on the exact
     /// format expected.
-    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
-    // so decoding methods do not need to manually advance the buffer
     pub(crate) fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
@@ -1107,6 +1095,13 @@ impl TransactionSigned {
         let original_encoding = *data;
 
         let header = Header::decode(data)?;
+        let remaining_len = data.len();
+
+        let transaction_payload_len = header.payload_length;
+
+        if transaction_payload_len > remaining_len {
+            return Err(RlpError::InputTooShort)
+        }
 
         let mut transaction = TxLegacy {
             nonce: Decodable::decode(data)?,
@@ -1119,6 +1114,12 @@ impl TransactionSigned {
         };
         let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
         transaction.chain_id = extracted_id;
+
+        // check the new length, compared to the original length and the header length
+        let decoded = remaining_len - data.len();
+        if decoded != transaction_payload_len {
+            return Err(RlpError::UnexpectedLength)
+        }
 
         let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
@@ -1169,6 +1170,8 @@ impl TransactionSigned {
             return Err(RlpError::Custom("typed tx fields must be encoded as a list"))
         }
 
+        let remaining_len = data.len();
+
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
         let tx_length = 1 + header.length() + header.payload_length;
 
@@ -1191,6 +1194,11 @@ impl TransactionSigned {
         } else {
             Signature::decode(data)?
         };
+
+        let bytes_consumed = remaining_len - data.len();
+        if bytes_consumed != header.payload_length {
+            return Err(RlpError::UnexpectedLength)
+        }
 
         let hash = keccak256(&original_encoding[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };
@@ -1293,9 +1301,21 @@ impl Decodable for TransactionSigned {
         let mut original_encoding = *buf;
         let header = Header::decode(buf)?;
 
+        let remaining_len = buf.len();
+
         // if the transaction is encoded as a string then it is a typed transaction
         if !header.list {
-            TransactionSigned::decode_enveloped_typed_transaction(buf)
+            let tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
+
+            let bytes_consumed = remaining_len - buf.len();
+            // because Header::decode works for single bytes (including the tx type), returning a
+            // string Header with payload_length of 1, we need to make sure this check is only
+            // performed for transactions with a string header
+            if bytes_consumed != header.payload_length && original_encoding[0] > EMPTY_STRING_CODE {
+                return Err(RlpError::UnexpectedLength)
+            }
+
+            Ok(tx)
         } else {
             let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut original_encoding)?;
 
@@ -1438,6 +1458,7 @@ impl FromRecoveredTransaction for TransactionSignedEcRecovered {
 ///
 /// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
 /// transaction type that the transaction pool uses.
+#[cfg(feature = "c-kzg")]
 pub trait FromRecoveredPooledTransaction {
     /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
     fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;

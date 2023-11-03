@@ -539,7 +539,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // extract the jwt secret from the args if possible
         let default_jwt_path = data_dir.jwt_path();
-        let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
+        let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
 
         // adjust rpc port numbers based on instance number
         self.adjust_instance_ports();
@@ -1038,7 +1038,7 @@ async fn run_network_until_shutdown<C>(
     if let Some(file_path) = persistent_peers_file {
         let known_peers = network.all_peers().collect::<Vec<_>>();
         if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
-            trace!(target : "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
+            trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
             let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
             match parent_dir.and_then(|_| std::fs::write(&file_path, known_peers)) {
                 Ok(_) => {
