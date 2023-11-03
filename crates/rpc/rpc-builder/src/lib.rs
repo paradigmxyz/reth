@@ -1266,9 +1266,9 @@ impl RpcServerConfig {
         self
     }
 
-    /// Configures the JWT secret for authentication
-    pub fn with_jwt_secret(mut self, secret: JwtSecret) -> Self {
-        self.jwt_secret = Some(secret);
+    /// Configures the JWT secret for authentication.
+    pub fn with_jwt_secret(mut self, secret: Option<JwtSecret>) -> Self {
+        self.jwt_secret = secret;
         self
     }
 
@@ -1336,7 +1336,7 @@ impl RpcServerConfig {
             }
             .cloned();
 
-            let secret = self.jwt_secret.take();
+            let secret = self.jwt_secret.clone();
 
             // we merge this into one server using the http setup
             self.ws_server_config.take();
@@ -1369,7 +1369,7 @@ impl RpcServerConfig {
                 builder,
                 ws_socket_addr,
                 self.ws_cors_domains.take(),
-                self.jwt_secret.take(),
+                self.jwt_secret.clone(),
                 ServerKind::WS(ws_socket_addr),
                 metrics.clone(),
             )
@@ -1384,7 +1384,7 @@ impl RpcServerConfig {
                 builder,
                 http_socket_addr,
                 self.http_cors_domains.take(),
-                self.jwt_secret.take(),
+                self.jwt_secret.clone(),
                 ServerKind::Http(http_socket_addr),
                 metrics.clone(),
             )
@@ -1708,14 +1708,14 @@ impl WsHttpServerKind {
         builder: ServerBuilder,
         socket_addr: SocketAddr,
         cors_domains: Option<String>,
-        auth_secret: Option<JwtSecret>,
+        jwt_secret: Option<JwtSecret>,
         server_kind: ServerKind,
         metrics: RpcServerMetrics,
     ) -> Result<(Self, SocketAddr), RpcError> {
         if let Some(cors) = cors_domains.as_deref().map(cors::create_cors_layer) {
             let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
 
-            if let Some(secret) = auth_secret {
+            if let Some(secret) = jwt_secret {
                 // stack cors and auth layers
                 let middleware = tower::ServiceBuilder::new()
                     .layer(cors)
@@ -1742,7 +1742,7 @@ impl WsHttpServerKind {
                 let server = WsHttpServerKind::WithCors(server);
                 Ok((server, local_addr))
             }
-        } else if let Some(secret) = auth_secret {
+        } else if let Some(secret) = jwt_secret {
             // jwt auth layered service
             let middleware = tower::ServiceBuilder::new()
                 .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
