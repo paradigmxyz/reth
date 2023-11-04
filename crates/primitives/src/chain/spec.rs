@@ -708,10 +708,10 @@ impl ForkTimestamps {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum AllGenesisFormats {
-    /// The geth genesis format
-    Geth(Genesis),
     /// The reth genesis format
     Reth(ChainSpec),
+    /// The geth genesis format
+    Geth(Genesis),
 }
 
 impl From<Genesis> for AllGenesisFormats {
@@ -1189,10 +1189,13 @@ impl DepositContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{b256, hex, NamedChain, B256, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA, U256};
+    use crate::{
+        b256, hex, ChainConfig, GenesisAccount, NamedChain, B256, DEV, GOERLI, HOLESKY, MAINNET,
+        SEPOLIA, U256,
+    };
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
-    use std::str::FromStr;
+    use std::{collections::HashMap, str::FromStr};
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
@@ -1444,7 +1447,7 @@ Post-merge hard forks (timestamp based):
         // technically unecessary - but we include it here for thoroughness
         let fork_cond_block_only_case = ChainSpec::builder()
             .chain(Chain::mainnet())
-            .genesis(empty_genesis.clone())
+            .genesis(empty_genesis)
             .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
             .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
             .build();
@@ -1959,7 +1962,7 @@ Post-merge hard forks (timestamp based):
                 timestamp + 1,
             ),
             (
-                construct_chainspec(default_spec_builder.clone(), timestamp + 1, timestamp + 2),
+                construct_chainspec(default_spec_builder, timestamp + 1, timestamp + 2),
                 timestamp + 1,
             ),
         ];
@@ -2251,6 +2254,27 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
+    fn test_parse_cancun_genesis_all_formats() {
+        let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0,"cancunTime":4661},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x3b9aca00"}"#;
+        let genesis: AllGenesisFormats = serde_json::from_str(s).unwrap();
+
+        // this should be the genesis format
+        let genesis = match genesis {
+            AllGenesisFormats::Geth(genesis) => genesis,
+            _ => panic!("expected geth genesis format"),
+        };
+
+        // assert that the alloc was picked up
+        let acc = genesis
+            .alloc
+            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
+            .unwrap();
+        assert_eq!(acc.balance, U256::from(1));
+        // assert that the cancun time was picked up
+        assert_eq!(genesis.config.cancun_time, Some(4661));
+    }
+
+    #[test]
     fn test_default_cancun_header_forkhash() {
         // set the gas limit from the hive test genesis according to the hash
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
@@ -2292,5 +2316,62 @@ Post-merge hard forks (timestamp based):
         assert!(HOLESKY
             .fork(Hardfork::Paris)
             .active_at_ttd(HOLESKY.genesis.difficulty, HOLESKY.genesis.difficulty));
+    }
+
+    #[test]
+    fn test_all_genesis_formats_deserialization() {
+        // custom genesis with chain config
+        let config = ChainConfig {
+            chain_id: 2600,
+            homestead_block: Some(0),
+            eip150_block: Some(0),
+            eip155_block: Some(0),
+            eip158_block: Some(0),
+            byzantium_block: Some(0),
+            constantinople_block: Some(0),
+            petersburg_block: Some(0),
+            istanbul_block: Some(0),
+            berlin_block: Some(0),
+            london_block: Some(0),
+            shanghai_time: Some(0),
+            terminal_total_difficulty: Some(U256::ZERO),
+            terminal_total_difficulty_passed: true,
+            ..Default::default()
+        };
+        // genesis
+        let genesis = Genesis {
+            config,
+            nonce: 0,
+            timestamp: 1698688670,
+            gas_limit: 5000,
+            difficulty: U256::ZERO,
+            mix_hash: B256::ZERO,
+            coinbase: Address::ZERO,
+            ..Default::default()
+        };
+
+        // seed accounts after genesis struct created
+        let address = hex!("6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b").into();
+        let account = GenesisAccount::default().with_balance(U256::from(33));
+        let genesis = genesis.extend_accounts(HashMap::from([(address, account)]));
+
+        // ensure genesis is deserialized correctly
+        let serialized_genesis = serde_json::to_string(&genesis).unwrap();
+        let deserialized_genesis: AllGenesisFormats =
+            serde_json::from_str(&serialized_genesis).unwrap();
+        assert!(matches!(deserialized_genesis, AllGenesisFormats::Geth(_)));
+
+        // build chain
+        let chain_spec = ChainSpecBuilder::default()
+            .chain(2600.into())
+            .genesis(genesis)
+            .cancun_activated()
+            .build();
+
+        // ensure chain spec is deserialized correctly
+        let serialized_chain_spec = serde_json::to_string(&chain_spec).unwrap();
+        let deserialized_chain_spec: AllGenesisFormats =
+            serde_json::from_str(&serialized_chain_spec).unwrap();
+        assert!(matches!(deserialized_chain_spec, AllGenesisFormats::Reth(_)))
     }
 }

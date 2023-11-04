@@ -1,8 +1,6 @@
 //! [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) protocol constants and utils for shard Blob Transactions.
-
-use crate::kzg::KzgSettings;
-use once_cell::sync::Lazy;
-use std::{io::Write, sync::Arc};
+#[cfg(feature = "c-kzg")]
+pub use trusted_setup::*;
 
 /// Size a single field element in bytes.
 pub const FIELD_ELEMENT_BYTES: u64 = 32;
@@ -34,44 +32,55 @@ pub const BLOB_TX_MIN_BLOB_GASPRICE: u128 = 1u128;
 /// Commitment version of a KZG commitment
 pub const VERSIONED_HASH_VERSION_KZG: u8 = 0x01;
 
-/// KZG Trusted setup raw
-const TRUSTED_SETUP_RAW: &[u8] = include_bytes!("../../res/eip4844/trusted_setup.txt");
+#[cfg(feature = "c-kzg")]
+mod trusted_setup {
+    use crate::kzg::KzgSettings;
+    use once_cell::sync::Lazy;
+    use std::{io::Write, sync::Arc};
 
-/// KZG trusted setup
-pub static MAINNET_KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
-    Arc::new(
-        load_trusted_setup_from_bytes(TRUSTED_SETUP_RAW).expect("Failed to load trusted setup"),
-    )
-});
+    /// KZG trusted setup
+    pub static MAINNET_KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
+        Arc::new(
+            c_kzg::KzgSettings::load_trusted_setup(
+                &revm_primitives::kzg::G1_POINTS.0,
+                &revm_primitives::kzg::G2_POINTS.0,
+            )
+            .expect("failed to load trusted setup"),
+        )
+    });
 
-/// Loads the trusted setup parameters from the given bytes and returns the [KzgSettings].
-///
-/// This creates a temp file to store the bytes and then loads the [KzgSettings] from the file via
-/// [KzgSettings::load_trusted_setup_file].
-pub fn load_trusted_setup_from_bytes(bytes: &[u8]) -> Result<KzgSettings, LoadKzgSettingsError> {
-    let mut file = tempfile::NamedTempFile::new().map_err(LoadKzgSettingsError::TempFileErr)?;
-    file.write_all(bytes).map_err(LoadKzgSettingsError::TempFileErr)?;
-    KzgSettings::load_trusted_setup_file(file.path()).map_err(LoadKzgSettingsError::KzgError)
-}
+    /// Loads the trusted setup parameters from the given bytes and returns the [KzgSettings].
+    ///
+    /// This creates a temp file to store the bytes and then loads the [KzgSettings] from the file
+    /// via [KzgSettings::load_trusted_setup_file].
+    pub fn load_trusted_setup_from_bytes(
+        bytes: &[u8],
+    ) -> Result<KzgSettings, LoadKzgSettingsError> {
+        let mut file = tempfile::NamedTempFile::new().map_err(LoadKzgSettingsError::TempFileErr)?;
+        file.write_all(bytes).map_err(LoadKzgSettingsError::TempFileErr)?;
+        KzgSettings::load_trusted_setup_file(file.path()).map_err(LoadKzgSettingsError::KzgError)
+    }
 
-/// Error type for loading the trusted setup.
-#[derive(Debug, thiserror::Error)]
-pub enum LoadKzgSettingsError {
-    /// Failed to create temp file to store bytes for loading [KzgSettings] via
-    /// [KzgSettings::load_trusted_setup_file].
-    #[error("Failed to setup temp file: {0:?}")]
-    TempFileErr(#[from] std::io::Error),
-    /// Kzg error
-    #[error("Kzg error: {0:?}")]
-    KzgError(c_kzg::Error),
-}
+    /// Error type for loading the trusted setup.
+    #[derive(Debug, thiserror::Error)]
+    pub enum LoadKzgSettingsError {
+        /// Failed to create temp file to store bytes for loading [KzgSettings] via
+        /// [KzgSettings::load_trusted_setup_file].
+        #[error("failed to setup temp file: {0}")]
+        TempFileErr(#[from] std::io::Error),
+        /// Kzg error
+        #[error("KZG error: {0:?}")]
+        KzgError(#[from] c_kzg::Error),
+    }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::sync::Arc;
 
-    #[test]
-    fn ensure_load_kzg_settings() {
-        let _settings = Arc::clone(&MAINNET_KZG_TRUSTED_SETUP);
+        #[test]
+        fn ensure_load_kzg_settings() {
+            let _settings = Arc::clone(&MAINNET_KZG_TRUSTED_SETUP);
+        }
     }
 }

@@ -18,6 +18,6 @@ pub use api::{
     FeeHistoryCacheConfig, TransactionSource, RPC_DEFAULT_GAS_CAP,
 };
 pub use bundle::EthBundle;
-pub use filter::EthFilter;
+pub use filter::{EthFilter, EthFilterConfig};
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pubsub::EthPubSub;

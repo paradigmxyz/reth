@@ -1,4 +1,6 @@
-use crate::U256;
+//! Json U256 serde helpers.
+
+use alloy_primitives::U256;
 use serde::{
     de::{Error, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -21,6 +23,12 @@ impl From<U256> for JsonU256 {
     }
 }
 
+impl fmt::Display for JsonU256 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl Serialize for JsonU256 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -39,6 +47,7 @@ impl<'a> Deserialize<'a> for JsonU256 {
     }
 }
 
+/// Visitor pattern for `JsonU256` deserialization.
 struct JsonU256Visitor;
 
 impl<'a> Visitor<'a> for JsonU256Visitor {
@@ -102,7 +111,7 @@ where
 #[cfg(test)]
 mod test {
     use super::JsonU256;
-    use crate::U256;
+    use alloy_primitives::U256;
 
     #[test]
     fn jsonu256_deserialize() {

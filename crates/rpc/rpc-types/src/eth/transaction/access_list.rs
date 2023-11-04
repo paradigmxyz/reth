@@ -1,4 +1,4 @@
-use reth_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// A list of addresses and storage keys that the transaction plans to access.

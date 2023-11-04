@@ -168,7 +168,7 @@ impl HeadersClient for FileClient {
     ) -> Self::Output {
         // this just searches the buffer, and fails if it can't find the header
         let mut headers = Vec::new();
-        trace!(target : "downloaders::file", request=?request, "Getting headers");
+        trace!(target: "downloaders::file", request=?request, "Getting headers");
 
         let start_num = match request.start {
             BlockHashOrNumber::Hash(hash) => match self.hash_to_number.get(&hash) {
@@ -192,7 +192,7 @@ impl HeadersClient for FileClient {
             }
         };
 
-        trace!(target : "downloaders::file", range=?range, "Getting headers with range");
+        trace!(target: "downloaders::file", range=?range, "Getting headers with range");
 
         for block_number in range {
             match self.headers.get(&block_number).cloned() {
@@ -281,7 +281,7 @@ mod tests {
         let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         // create an empty file
         let file = tempfile::tempfile().unwrap();
@@ -368,7 +368,7 @@ mod tests {
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
 
         // insert headers in db for the bodies downloader
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),

@@ -72,6 +72,7 @@ pub use handle::BeaconConsensusEngineHandle;
 mod forkchoice;
 use crate::hooks::{EngineHookEvent, EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
+use reth_interfaces::blockchain_tree::BlockValidationKind;
 
 mod metrics;
 
@@ -347,7 +348,7 @@ where
             // If the checkpoint of any stage is less than the checkpoint of the first stage,
             // retrieve and return the block hash of the latest header and use it as the target.
             if stage_checkpoint < first_stage_checkpoint {
-                warn!(
+                debug!(
                     target: "consensus::engine",
                     first_stage_checkpoint,
                     inconsistent_stage_id = %stage_id,
@@ -631,8 +632,9 @@ where
             return Ok(OnForkChoiceUpdated::invalid_state())
         }
 
+        // check if the new head hash is connected to any ancestor that we previously marked as
+        // invalid
         let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
-
         if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu) {
             return Ok(OnForkChoiceUpdated::with_invalid(status))
         }
@@ -644,11 +646,12 @@ where
             return Ok(OnForkChoiceUpdated::syncing())
         }
 
-        if self.hooks.is_hook_with_db_write_running() {
+        if let Some(hook) = self.hooks.active_db_write_hook() {
             // We can only process new forkchoice updates if no hook with db write is running,
             // since it requires exclusive access to the database
             warn!(
                 target: "consensus::engine",
+                hook = %hook.name(),
                 "Hook is in progress, skipping forkchoice update. \
                 This may affect the performance of your node as a validator."
             );
@@ -658,6 +661,7 @@ where
         let start = Instant::now();
         let make_canonical_result = self.blockchain.make_canonical(&state.head_block_hash);
         let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
+
         let status = match make_canonical_result {
             Ok(outcome) => {
                 match outcome {
@@ -868,7 +872,7 @@ where
         head_block.total_difficulty =
             self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
                 RethError::Provider(ProviderError::TotalDifficultyNotFound {
-                    number: head_block.number,
+                    block_number: head_block.number,
                 })
             })?;
         self.sync_state_updater.update_status(head_block);
@@ -952,7 +956,9 @@ where
                 })
                 .with_latest_valid_hash(B256::ZERO)
             }
-            RethError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. }) => {
+            RethError::Canonical(CanonicalError::BlockchainTree(
+                BlockchainTreeError::BlockHashNotFoundInChain { .. },
+            )) => {
                 // This just means we couldn't find the block when attempting to make it canonical,
                 // so we should not warn the user, since this will result in us attempting to sync
                 // to a new target and is considered normal operation during sync
@@ -1099,13 +1105,17 @@ where
             return Ok(status)
         }
 
-        let res = if self.sync.is_pipeline_idle() && !self.hooks.is_hook_with_db_write_running() {
+        let res = if self.sync.is_pipeline_idle() && self.hooks.active_db_write_hook().is_none() {
             // we can only insert new payloads if the pipeline and any hook with db write
             // are _not_ running, because they hold exclusive access to the database
             self.try_insert_new_payload(block)
         } else {
-            if self.hooks.is_hook_with_db_write_running() {
-                debug!(target: "consensus::engine", "Hook is in progress, buffering new payload.");
+            if let Some(hook) = self.hooks.active_db_write_hook() {
+                debug!(
+                    target: "consensus::engine",
+                    hook = %hook.name(),
+                    "Hook is in progress, buffering new payload."
+                );
             }
             self.try_buffer_payload(block)
         };
@@ -1294,7 +1304,9 @@ where
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
         let block_hash = block.hash;
-        let status = self.blockchain.insert_block_without_senders(block.clone())?;
+        let status = self
+            .blockchain
+            .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive)?;
         let mut latest_valid_hash = None;
         let block = Arc::new(block);
         let status = match status {
@@ -1415,7 +1427,10 @@ where
             return
         }
 
-        match self.blockchain.insert_block_without_senders(block) {
+        match self
+            .blockchain
+            .insert_block_without_senders(block, BlockValidationKind::SkipStateRootValidation)
+        {
             Ok(status) => {
                 match status {
                     InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -1796,7 +1811,7 @@ where
             loop {
                 // Poll a running hook with db write access first, as we will not be able to process
                 // any engine messages until it's finished.
-                if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
+                if let Poll::Ready(result) = this.hooks.poll_active_db_write_hook(
                     cx,
                     EngineContext {
                         tip_block_number: this.blockchain.canonical_tip().number,
