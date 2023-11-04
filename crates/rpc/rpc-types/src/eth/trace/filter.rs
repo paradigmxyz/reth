@@ -63,30 +63,19 @@ pub struct TraceFilterMatcher {
 impl TraceFilterMatcher {
     /// Returns `true` if the given `from` and `to` addresses match this filter.
     pub fn matches(&self, from: Address, to: Option<Address>) -> bool {
-        let from_matches = self.from_addresses.contains(&from);
-        let to_matches = to.map_or(false, |to_addr| self.to_addresses.contains(&to_addr));
-
-        enum Match {
-            All,
-            From,
-            To,
-            Both(TraceFilterMode),
-        }
-
-        let match_type = match (self.from_addresses.is_empty(), self.to_addresses.is_empty()) {
-            (true, true) => Match::All,
-            (false, true) => Match::From,
-            (true, false) => Match::To,
-            (false, false) => Match::Both(self.mode),
-        };
-
-        match match_type {
-            Match::All => true,
-            Match::From => from_matches,
-            Match::To => to_matches,
-            Match::Both(mode) => match mode {
-                TraceFilterMode::Union => from_matches || to_matches,
-                TraceFilterMode::Intersection => from_matches && to_matches,
+        match (self.from_addresses.is_empty(), self.to_addresses.is_empty()) {
+            (true, true) => true,
+            (false, true) => self.from_addresses.contains(&from),
+            (true, false) => to.map_or(false, |to_addr| self.to_addresses.contains(&to_addr)),
+            (false, false) => match self.mode {
+                TraceFilterMode::Union => {
+                    self.from_addresses.contains(&from) ||
+                        to.map_or(false, |to_addr| self.to_addresses.contains(&to_addr))
+                }
+                TraceFilterMode::Intersection => {
+                    self.from_addresses.contains(&from) &&
+                        to.map_or(false, |to_addr| self.to_addresses.contains(&to_addr))
+                }
             },
         }
     }
