@@ -66,6 +66,9 @@ jobs:
   unused-deps:
     runs-on: ubuntu-latest
     name: unused dependencies
+    strategy:
+      matrix:
+        network: ["ethereum", "optimism"]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -76,7 +79,7 @@ jobs:
         run: cargo install cargo-udeps --locked
 
       - name: Check for unused dependencies
-        run: cargo +nightly udeps --all-features --all-targets
+        run: cargo +nightly udeps --features "jemalloc,${{ matrix.network }}"
 
       - uses: JasonEtco/create-an-issue@v2
         if: ${{ failure() }}

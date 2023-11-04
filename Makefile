@@ -139,7 +139,7 @@ cov-unit: ## Run unit tests with coverage.
 	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS)
 
 .PHONY: cov-unit-op
-cov-unit: ## Run unit tests with coverage.
+cov-unit-op: ## Run unit tests with coverage (with optimism feature flag enabled).
 	rm -f $(COV_FILE)
 	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS_OP)
 
