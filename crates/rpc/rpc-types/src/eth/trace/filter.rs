@@ -41,6 +41,20 @@ impl TraceFilter {
     }
 }
 
+impl Default for TraceFilter {
+    fn default() -> Self {
+        TraceFilter {
+            from_block: None,
+            to_block: None,
+            from_address: Vec::new(),
+            to_address: Vec::new(),
+            mode: TraceFilterMode::Union,
+            after: None,
+            count: None,
+        }
+    }
+}
+
 /// How to apply `from_address` and `to_address` filters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
