@@ -47,20 +47,46 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
         _ => {
-            // both serialized Genesis and ChainSpec structs supported
-            let genesis: AllGenesisFormats =
-                // try to read json from path first
+            // try to read json from path first
+            let mut raw =
                 match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
-                    Ok(raw) => serde_json::from_str(&raw)?,
+                    Ok(raw) => raw,
                     Err(io_err) => {
                         // valid json may start with "\n", but must contain "{"
                         if s.contains('{') {
-                            serde_json::from_str(s)?
+                            s.to_string()
                         } else {
                             return Err(io_err.into()) // assume invalid path
                         }
                     }
                 };
+
+            // The ethereum mainnet TTD is 58750000000000000000000, and geth serializes this
+            // without quotes, because that is how golang `big.Int`s marshal in JSON. Numbers
+            // are arbitrary precision in JSON, so this is valid JSON. This number is also
+            // greater than a `u64`.
+            //
+            // Unfortunately, serde_json only supports parsing up to `u64`, resorting to `f64`
+            // once `u64` overflows:
+            // <https://github.com/serde-rs/json/blob/4bc1eaa03a6160593575bc9bc60c94dba4cab1e3/src/de.rs#L1411-L1415>
+            // <https://github.com/serde-rs/json/blob/4bc1eaa03a6160593575bc9bc60c94dba4cab1e3/src/de.rs#L479-L484>
+            // <https://github.com/serde-rs/json/blob/4bc1eaa03a6160593575bc9bc60c94dba4cab1e3/src/de.rs#L102-L108>
+            //
+            // serde_json does have an arbitrary precision feature, but this breaks untagged
+            // enums in serde:
+            // <https://github.com/serde-rs/serde/issues/2230>
+            // <https://github.com/serde-rs/serde/issues/1183>
+            //
+            // To solve this, we surround the mainnet TTD with quotes, which our custom Visitor
+            // accepts.
+            if raw.contains("58750000000000000000000") &&
+                !raw.contains("\"58750000000000000000000\"")
+            {
+                raw = raw.replacen("58750000000000000000000", "\"58750000000000000000000\"", 1);
+            }
+
+            // both serialized Genesis and ChainSpec structs supported
+            let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
 
             Arc::new(genesis.into())
         }
