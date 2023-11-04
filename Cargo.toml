@@ -1,8 +1,6 @@
 [workspace]
 members = [
     "bin/reth",
-    "bin/ethereum",
-    "bin/optimism",
     "crates/config",
     "crates/consensus/auto-seal",
     "crates/consensus/beacon",

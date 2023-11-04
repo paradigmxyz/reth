@@ -6015,16 +6015,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-ethereum"
-version = "0.1.0-alpha.10"
-dependencies = [
- "jemalloc-ctl",
- "jemallocator",
- "reth",
- "vergen",
-]
-
-[[package]]
 name = "reth-interfaces"
 version = "0.1.0-alpha.10"
 dependencies = [
@@ -6229,16 +6219,6 @@ dependencies = [
  "thiserror",
  "tracing",
  "zstd 0.12.4",
-]
-
-[[package]]
-name = "reth-optimism"
-version = "0.1.0-alpha.10"
-dependencies = [
- "jemalloc-ctl",
- "jemallocator",
- "reth",
- "vergen",
 ]
 
 [[package]]
