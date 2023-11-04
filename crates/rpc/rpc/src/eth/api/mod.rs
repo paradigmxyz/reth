@@ -479,7 +479,7 @@ pub struct FeeHistoryCache {
     lower_bound: Arc<AtomicU64>,
     upper_bound: Arc<AtomicU64>,
     config: FeeHistoryCacheConfig,
-    entries: Arc<tokio::sync::RwLock<BTreeMap<u64, SealedHeader>>>,
+    entries: Arc<tokio::sync::RwLock<BTreeMap<u64, FeeHistoryEntry>>>,
 }
 
 impl FeeHistoryCache {
@@ -502,7 +502,7 @@ impl FeeHistoryCache {
     {
         let mut entries = self.entries.write().await;
         for header in headers {
-            entries.insert(header.number, header.clone());
+            entries.insert(header.number, FeeHistoryEntry::from(header));
         }
         while entries.len() > self.config.max_blocks as usize {
             entries.pop_first();
@@ -534,20 +534,20 @@ impl FeeHistoryCache {
         &self,
         start_block: u64,
         end_block: u64,
-    ) -> RethResult<Vec<SealedHeader>> {
-        let mut headers = Vec::new();
+    ) -> RethResult<Vec<FeeHistoryEntry>> {
+        let mut result = Vec::new();
 
         let lower_bound = self.lower_bound();
         let upper_bound = self.upper_bound();
         if start_block >= lower_bound && end_block <= upper_bound {
             let entries = self.entries.read().await;
-            headers = entries
+            result = entries
                 .range(start_block..=end_block + 1)
-                .map(|(_, header)| header.clone())
+                .map(|(_, fee_entry)| fee_entry.clone())
                 .collect();
         }
 
-        Ok(headers)
+        Ok(result)
     }
 }
 
@@ -585,6 +585,27 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
             let headers = blocks.iter().map(|(_, block)| block.header.clone()).collect::<Vec<_>>();
 
             fee_history_cache.on_new_block(headers.iter()).await;
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FeeHistoryEntry {
+    base_fee_per_gas: u64,
+    gas_used_ratio: f64,
+    gas_used: u64,
+    gas_limit: u64,
+    header_hash: B256,
+}
+
+impl From<&SealedHeader> for FeeHistoryEntry {
+    fn from(header: &SealedHeader) -> Self {
+        FeeHistoryEntry {
+            base_fee_per_gas: header.base_fee_per_gas.unwrap_or_default(),
+            gas_used_ratio: header.gas_used as f64 / header.gas_limit as f64,
+            gas_used: header.gas_used,
+            header_hash: header.hash,
+            gas_limit: header.gas_limit,
         }
     }
 }

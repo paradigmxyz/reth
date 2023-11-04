@@ -6,13 +6,13 @@ use crate::{
 };
 
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    basefee::calculate_next_block_base_fee, BlockNumberOrTag, SealedHeader, U256,
-};
+use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
 use tracing::debug;
+
+use super::FeeHistoryEntry;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -94,12 +94,17 @@ where
 
         let start_block = end_block_plus - block_count;
 
-        let mut headers = self.fee_history_cache().get_history(start_block, end_block).await?;
-        if headers.is_empty() {
-            headers = self.provider().sealed_headers_range(start_block..=end_block)?;
+        let mut fee_entries = self.fee_history_cache().get_history(start_block, end_block).await?;
+        if fee_entries.is_empty() {
+            fee_entries = self
+                .provider()
+                .sealed_headers_range(start_block..=end_block)?
+                .into_iter()
+                .map(|header| FeeHistoryEntry::from(&header))
+                .collect();
         }
 
-        if headers.len() != block_count as usize {
+        if fee_entries.len() != block_count as usize {
             return Err(EthApiError::InvalidBlockRange)
         }
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
@@ -107,12 +112,11 @@ where
         let mut gas_used_ratio: Vec<f64> = Vec::new();
         let mut rewards: Vec<Vec<U256>> = Vec::new();
 
-        for header in &headers {
-            base_fee_per_gas
-                .push(U256::try_from(header.base_fee_per_gas.unwrap_or_default()).unwrap());
-            gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
+        for entry in &fee_entries {
+            base_fee_per_gas.push(U256::try_from(entry.base_fee_per_gas).unwrap());
+            gas_used_ratio.push(entry.gas_used_ratio);
             if let Some(percentiles) = &reward_percentiles {
-                rewards.push(self.calculate_reward_percentiles(percentiles, header).await?);
+                rewards.push(self.calculate_reward_percentiles(percentiles, entry).await?);
             }
         }
 
@@ -121,14 +125,14 @@ where
         //
         // The unwrap is safe since we checked earlier that we got at least 1 header.
 
-        let last_header = headers.last().unwrap();
+        let last_entry = fee_entries.last().unwrap();
 
         let chain_spec = self.provider().chain_spec();
 
         base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
-            last_header.gas_used,
-            last_header.gas_limit,
-            last_header.base_fee_per_gas.unwrap_or_default(),
+            last_entry.gas_used,
+            last_entry.gas_limit,
+            last_entry.base_fee_per_gas,
             chain_spec.base_fee_params,
         )));
 
@@ -148,11 +152,11 @@ where
     async fn calculate_reward_percentiles(
         &self,
         percentiles: &[f64],
-        header: &SealedHeader,
+        fee_entry: &FeeHistoryEntry,
     ) -> Result<Vec<U256>, EthApiError> {
         let (transactions, receipts) = self
             .cache()
-            .get_transactions_and_receipts(header.hash)
+            .get_transactions_and_receipts(fee_entry.header_hash)
             .await?
             .ok_or(EthApiError::InvalidBlockRange)?;
 
@@ -171,7 +175,9 @@ where
 
                 Some(TxGasAndReward {
                     gas_used,
-                    reward: tx.effective_tip_per_gas(header.base_fee_per_gas).unwrap_or_default(),
+                    reward: tx
+                        .effective_tip_per_gas(Some(fee_entry.base_fee_per_gas))
+                        .unwrap_or_default(),
                 })
             })
             .collect::<Vec<_>>();
@@ -194,7 +200,7 @@ where
                 continue
             }
 
-            let threshold = (header.gas_used as f64 * percentile / 100.) as u64;
+            let threshold = (fee_entry.gas_used as f64 * percentile / 100.) as u64;
             while cumulative_gas_used < threshold && tx_index < transactions.len() - 1 {
                 tx_index += 1;
                 cumulative_gas_used += transactions[tx_index].gas_used;
