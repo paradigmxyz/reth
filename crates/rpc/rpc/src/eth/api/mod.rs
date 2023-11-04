@@ -89,6 +89,7 @@ where
     Provider: BlockReaderIdExt + ChainSpecProvider,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         pool: Pool,
