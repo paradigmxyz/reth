@@ -52,7 +52,7 @@ pub enum TraceFilterMode {
     Intersection,
 }
 
-/// Helper type for matching `from` and `to` addresses.
+/// Helper type for matching `from` and `to` addresses. Empty sets match all addresses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceFilterMatcher {
     mode: TraceFilterMode,
@@ -63,20 +63,20 @@ pub struct TraceFilterMatcher {
 impl TraceFilterMatcher {
     /// Returns `true` if the given `from` and `to` addresses match this filter.
     pub fn matches(&self, from: Address, to: Option<Address>) -> bool {
-        // If `from_addresses` and `to_addresses` are empty, then match all transactions.
-        if self.from_addresses.is_empty() && self.to_addresses.is_empty() {
-            return true;
-        }
-
-        match self.mode {
-            TraceFilterMode::Union => {
-                self.from_addresses.contains(&from) ||
-                    to.map_or(false, |to| self.to_addresses.contains(&to))
-            }
-            TraceFilterMode::Intersection => {
-                self.from_addresses.contains(&from) &&
-                    to.map_or(false, |to| self.to_addresses.contains(&to))
-            }
+        match (self.from_addresses.is_empty(), self.to_addresses.is_empty()) {
+            (true, true) => true,
+            (false, true) => self.from_addresses.contains(&from),
+            (true, false) => to.map_or(false, |to_addr| self.to_addresses.contains(&to_addr)),
+            (false, false) => match self.mode {
+                TraceFilterMode::Union => {
+                    self.from_addresses.contains(&from) ||
+                        to.map_or(false, |to_addr| self.to_addresses.contains(&to_addr))
+                }
+                TraceFilterMode::Intersection => {
+                    self.from_addresses.contains(&from) &&
+                        to.map_or(false, |to_addr| self.to_addresses.contains(&to_addr))
+                }
+            },
         }
     }
 }
@@ -84,6 +84,7 @@ impl TraceFilterMatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_parse_filter() {
@@ -94,25 +95,89 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_matcher() {
-        let s = r#"{"fromBlock":  "0x3","toBlock":  "0x5"}"#;
-        let filter: TraceFilter = serde_json::from_str(s).unwrap();
+    fn test_filter_matcher_addresses_unspecified() {
+        let test_addr_d8 = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap();
+        let test_addr_16 = "0x160f5f00288e9e1cc8655b327e081566e580a71d".parse().unwrap();
+        let filter_json = json!({
+            "fromBlock": "0x3",
+            "toBlock": "0x5",
+        });
+        let filter: TraceFilter =
+            serde_json::from_value(filter_json).expect("Failed to parse filter");
         let matcher = filter.matcher();
-        assert!(
-            matcher.matches("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap(), None)
-        );
-        assert!(
-            matcher.matches("0x160f5f00288e9e1cc8655b327e081566e580a71d".parse().unwrap(), None)
-        );
+        assert!(matcher.matches(test_addr_d8, None));
+        assert!(matcher.matches(test_addr_16, None));
+        assert!(matcher.matches(test_addr_d8, Some(test_addr_16)));
+        assert!(matcher.matches(test_addr_16, Some(test_addr_d8)));
+    }
 
-        let s = r#"{"fromBlock":  "0x3","toBlock":  "0x5", "fromAddress": ["0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"]}"#;
-        let filter: TraceFilter = serde_json::from_str(s).unwrap();
+    #[test]
+    fn test_filter_matcher_from_address() {
+        let test_addr_d8 = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap();
+        let test_addr_16 = "0x160f5f00288e9e1cc8655b327e081566e580a71d".parse().unwrap();
+        let filter_json = json!({
+            "fromBlock": "0x3",
+            "toBlock": "0x5",
+            "fromAddress": [test_addr_d8]
+        });
+        let filter: TraceFilter = serde_json::from_value(filter_json).unwrap();
         let matcher = filter.matcher();
-        assert!(
-            matcher.matches("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap(), None)
-        );
-        assert!(
-            !matcher.matches("0x160f5f00288e9e1cc8655b327e081566e580a71d".parse().unwrap(), None)
-        );
+        assert!(matcher.matches(test_addr_d8, None));
+        assert!(!matcher.matches(test_addr_16, None));
+        assert!(matcher.matches(test_addr_d8, Some(test_addr_16)));
+        assert!(!matcher.matches(test_addr_16, Some(test_addr_d8)));
+    }
+
+    #[test]
+    fn test_filter_matcher_to_address() {
+        let test_addr_d8 = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap();
+        let test_addr_16 = "0x160f5f00288e9e1cc8655b327e081566e580a71d".parse().unwrap();
+        let filter_json = json!({
+            "fromBlock": "0x3",
+            "toBlock": "0x5",
+            "toAddress": [test_addr_d8],
+        });
+        let filter: TraceFilter = serde_json::from_value(filter_json).unwrap();
+        let matcher = filter.matcher();
+        assert!(matcher.matches(test_addr_16, Some(test_addr_d8)));
+        assert!(!matcher.matches(test_addr_16, None));
+        assert!(!matcher.matches(test_addr_d8, Some(test_addr_16)));
+    }
+
+    #[test]
+    fn test_filter_matcher_both_addresses_union() {
+        let test_addr_d8 = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap();
+        let test_addr_16 = "0x160f5f00288e9e1cc8655b327e081566e580a71d".parse().unwrap();
+        let filter_json = json!({
+            "fromBlock": "0x3",
+            "toBlock": "0x5",
+            "fromAddress": [test_addr_16],
+            "toAddress": [test_addr_d8],
+        });
+        let filter: TraceFilter = serde_json::from_value(filter_json).unwrap();
+        let matcher = filter.matcher();
+        assert!(matcher.matches(test_addr_16, Some(test_addr_d8)));
+        assert!(matcher.matches(test_addr_16, None));
+        assert!(matcher.matches(test_addr_d8, Some(test_addr_d8)));
+        assert!(!matcher.matches(test_addr_d8, Some(test_addr_16)));
+    }
+
+    #[test]
+    fn test_filter_matcher_both_addresses_intersection() {
+        let test_addr_d8 = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap();
+        let test_addr_16 = "0x160f5f00288e9e1cc8655b327e081566e580a71d".parse().unwrap();
+        let filter_json = json!({
+            "fromBlock": "0x3",
+            "toBlock": "0x5",
+            "fromAddress": [test_addr_16],
+            "toAddress": [test_addr_d8],
+            "mode": "intersection",
+        });
+        let filter: TraceFilter = serde_json::from_value(filter_json).unwrap();
+        let matcher = filter.matcher();
+        assert!(matcher.matches(test_addr_16, Some(test_addr_d8)));
+        assert!(!matcher.matches(test_addr_16, None));
+        assert!(!matcher.matches(test_addr_d8, Some(test_addr_d8)));
+        assert!(!matcher.matches(test_addr_d8, Some(test_addr_16)));
     }
 }
