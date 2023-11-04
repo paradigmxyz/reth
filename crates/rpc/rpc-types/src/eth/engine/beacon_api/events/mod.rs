@@ -270,7 +270,7 @@ pub struct PayloadAttributesData {
     ///
     /// Note: this uses the beacon API format which uses snake-case and quoted decimals rather than
     /// big-endian hex.
-    #[serde(with = "crate::eth::engine::payload::beacon_api_payload_attributes")]
+    #[serde(with = "crate::beacon::payload::beacon_api_payload_attributes")]
     pub payload_attributes: PayloadAttributes,
 }
 

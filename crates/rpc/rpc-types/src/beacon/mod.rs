@@ -5,8 +5,8 @@ use alloy_primitives::FixedBytes;
 use constants::{BLS_PUBLIC_KEY_BYTES_LEN, BLS_SIGNATURE_BYTES_LEN};
 
 pub mod constants;
-pub mod macros;
 pub mod payload;
+pub mod withdrawals;
 
 /// BLS signature type
 pub type BlsSignature = FixedBytes<BLS_SIGNATURE_BYTES_LEN>;

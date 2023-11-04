@@ -1,9 +1,8 @@
-use crate::eth::{transaction::BlobTransactionSidecar, withdrawal::BeaconAPIWithdrawal};
+use crate::eth::transaction::BlobTransactionSidecar;
 pub use crate::Withdrawal;
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
 use c_kzg::{Blob, Bytes48};
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
-use serde_with::{serde_as, DisplayFromStr};
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
@@ -400,63 +399,6 @@ pub struct PayloadAttributes {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
-}
-
-#[serde_as]
-#[derive(Serialize, Deserialize)]
-struct BeaconAPIPayloadAttributes {
-    #[serde_as(as = "DisplayFromStr")]
-    timestamp: u64,
-    prev_randao: B256,
-    suggested_fee_recipient: Address,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde_as(as = "Option<Vec<BeaconAPIWithdrawal>>")]
-    withdrawals: Option<Vec<Withdrawal>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent_beacon_block_root: Option<B256>,
-}
-/// A helper module for serializing and deserializing the payload attributes for the beacon API.
-///
-/// The beacon API encoded object has equivalent fields to the [PayloadAttributes] with two
-/// differences:
-/// 1) `snake_case` identifiers must be used rather than `camelCase`;
-/// 2) integers must be encoded as quoted decimals rather than big-endian hex.
-pub mod beacon_api_payload_attributes {
-    use super::*;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    /// Serialize the payload attributes for the beacon API.
-    pub fn serialize<S>(
-        payload_attributes: &PayloadAttributes,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let beacon_api_payload_attributes = BeaconAPIPayloadAttributes {
-            timestamp: payload_attributes.timestamp.to(),
-            prev_randao: payload_attributes.prev_randao,
-            suggested_fee_recipient: payload_attributes.suggested_fee_recipient,
-            withdrawals: payload_attributes.withdrawals.clone(),
-            parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
-        };
-        beacon_api_payload_attributes.serialize(serializer)
-    }
-
-    /// Deserialize the payload attributes for the beacon API.
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<PayloadAttributes, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let beacon_api_payload_attributes = BeaconAPIPayloadAttributes::deserialize(deserializer)?;
-        Ok(PayloadAttributes {
-            timestamp: U64::from(beacon_api_payload_attributes.timestamp),
-            prev_randao: beacon_api_payload_attributes.prev_randao,
-            suggested_fee_recipient: beacon_api_payload_attributes.suggested_fee_recipient,
-            withdrawals: beacon_api_payload_attributes.withdrawals,
-            parent_beacon_block_root: beacon_api_payload_attributes.parent_beacon_block_root,
-        })
-    }
 }
 
 /// This structure contains the result of processing a payload or fork choice update.
@@ -928,7 +870,7 @@ mod tests {
         #[derive(Serialize, Deserialize)]
         #[serde(transparent)]
         struct Event {
-            #[serde(with = "beacon_api_payload_attributes")]
+            #[serde(with = "crate::beacon::payload::beacon_api_payload_attributes")]
             payload: PayloadAttributes,
         }
 
