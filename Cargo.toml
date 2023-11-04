@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "bin/reth",
+    "bin/ethereum",
+    "bin/optimism",
     "crates/config",
     "crates/consensus/auto-seal",
     "crates/consensus/beacon",
@@ -54,7 +56,6 @@ members = [
     "examples/beacon-api-sse",
     "examples/trace-transaction-cli"
 ]
-default-members = ["bin/reth"]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html

@@ -42,7 +42,14 @@ help: ## Display this help.
 
 .PHONY: install
 install: ## Build and install the reth binary under `~/.cargo/bin`.
-	cargo install --path bin/reth --bin reth --force --locked \
+	cargo install --path bin/reth-ethereum --bin reth --force --locked \
+		--features "$(FEATURES)" \
+		--profile "$(PROFILE)" \
+		$(CARGO_INSTALL_EXTRA_FLAGS)
+
+.PHONY: install-op
+install: ## Build and install the op-reth binary under `~/.cargo/bin`.
+	cargo install --path bin/reth-optimism --bin op-reth --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
@@ -105,7 +112,8 @@ build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR dir
 
 ##@ Test
 
-UNIT_TEST_ARGS := --locked --workspace --all-features -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
+UNIT_TEST_ARGS := --locked --workspace --features 'jemalloc-prof' -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
+UNIT_TEST_ARGS_OP := --locked --workspace --features 'jemalloc-prof,optimism' -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 COV_FILE := lcov.info
 
 .PHONY: test-unit
@@ -113,10 +121,20 @@ test-unit: ## Run unit tests.
 	cargo install cargo-nextest --locked
 	cargo nextest run $(UNIT_TEST_ARGS)
 
+.PHONY: test-unit-op
+test-unit-op: ## Run unit tests (with optimism feature flag enabled).
+	cargo install cargo-nextest --locked
+	cargo nextest run $(UNIT_TEST_ARGS_OP)
+
 .PHONY: cov-unit
 cov-unit: ## Run unit tests with coverage.
 	rm -f $(COV_FILE)
 	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS)
+
+.PHONY: cov-unit-op
+cov-unit: ## Run unit tests with coverage.
+	rm -f $(COV_FILE)
+	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS_OP)
 
 .PHONY: cov-report-html
 cov-report-html: cov-unit ## Generate a HTML coverage report and open it in the browser.
