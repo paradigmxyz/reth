@@ -16,8 +16,8 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, SealedHeader, B256, U256, U64,
 };
 use reth_provider::{
-    BlockNumReader, BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, EvmEnvProvider,
-    StateProviderBox, StateProviderFactory,
+    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, EvmEnvProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -97,7 +97,7 @@ where
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache<Provider>,
+        fee_history_cache: FeeHistoryCache,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -123,7 +123,7 @@ where
         gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache<Provider>,
+        fee_history_cache: FeeHistoryCache,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -202,7 +202,7 @@ where
     }
 
     /// Returns fee history cache
-    pub fn fee_history_cache(&self) -> &FeeHistoryCache<Provider> {
+    pub fn fee_history_cache(&self) -> &FeeHistoryCache {
         &self.inner.fee_history_cache
     }
 }
@@ -454,7 +454,7 @@ struct EthApiInner<Provider, Pool, Network> {
     /// A pool dedicated to blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
-    fee_history_cache: FeeHistoryCache<Provider>,
+    fee_history_cache: FeeHistoryCache,
 }
 
 /// Settings for the [EthStateCache](crate::eth::cache::EthStateCache).
@@ -485,40 +485,25 @@ pub struct FeeHistoryCache {
 impl FeeHistoryCache {
     /// Creates new FeeHistoryCache instance, initialize it with the mose recent data, set bounds
     pub fn new(config: FeeHistoryCacheConfig) -> Self {
-        let mut init_tree_map = BTreeMap::new();
-
-        let last_block_number = provider.last_block_number().unwrap_or(0);
-
-        let start_block = if last_block_number > config.max_blocks {
-            last_block_number - config.max_blocks
-        } else {
-            0
-        };
-
-        let headers =
-            provider.sealed_headers_range(start_block..=last_block_number).unwrap_or_default();
-
-        let (mut lower_bound, mut upper_bound) = (0, 0);
-        for header in headers {
-            init_tree_map.insert(header.number, header.clone());
-            upper_bound = header.number;
-            if lower_bound == 0 {
-                lower_bound = header.number;
-            }
-        }
+        let init_tree_map = BTreeMap::new();
 
         let entries = Arc::new(tokio::sync::RwLock::new(init_tree_map));
 
-        let upper_bound = Arc::new(AtomicU64::new(upper_bound));
-        let lower_bound = Arc::new(AtomicU64::new(lower_bound));
+        let upper_bound = Arc::new(AtomicU64::new(0));
+        let lower_bound = Arc::new(AtomicU64::new(0));
 
         FeeHistoryCache { config, entries, upper_bound, lower_bound }
     }
 
     /// Processing of the arriving blocks
-    pub async fn on_new_block(&self, block: &SealedBlock) {
+    pub async fn on_new_block<'a, I>(&self, headers: I)
+    where
+        I: Iterator<Item = &'a SealedHeader>,
+    {
         let mut entries = self.entries.write().await;
-        entries.insert(block.number, block.header.clone());
+        for header in headers {
+            entries.insert(header.number, header.clone());
+        }
         while entries.len() > self.config.max_blocks as usize {
             entries.pop_first();
         }
@@ -527,10 +512,42 @@ impl FeeHistoryCache {
             self.lower_bound.store(0, SeqCst);
             return
         }
-        let upper_bound = *entries.last_entry().expect("Contains be at least one entry").key();
+        let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
         let lower_bound = *entries.first_entry().expect("Contains at least one entry").key();
         self.upper_bound.store(upper_bound, SeqCst);
         self.lower_bound.store(lower_bound, SeqCst);
+    }
+
+    /// Get UpperBound value for FeeHistoryCache
+    pub fn upper_bound(&self) -> u64 {
+        self.upper_bound.load(SeqCst)
+    }
+
+    /// Get LowerBound value for FeeHistoryCache
+    pub fn lower_bound(&self) -> u64 {
+        self.lower_bound.load(SeqCst)
+    }
+
+    /// Collect fee history for given range. It will try to use a cache to take the most recent
+    /// headers or if the range is out of caching config it will fallback to the database provider
+    pub async fn get_history(
+        &self,
+        start_block: u64,
+        end_block: u64,
+    ) -> RethResult<Vec<SealedHeader>> {
+        let mut headers = Vec::new();
+
+        let lower_bound = self.lower_bound();
+        let upper_bound = self.upper_bound();
+        if start_block >= lower_bound && end_block <= upper_bound {
+            let entries = self.entries.read().await;
+            headers = entries
+                .range(start_block..=end_block + 1)
+                .map(|(_, header)| header.clone())
+                .collect();
+        }
+
+        Ok(headers)
     }
 }
 
@@ -539,19 +556,35 @@ impl FeeHistoryCache {
 pub async fn fee_history_cache_new_blocks_task<St, Provider>(
     fee_history_cache: FeeHistoryCache,
     mut events: St,
+    provider: Provider,
 ) where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
+    Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
 {
+    // Init default state
+    if fee_history_cache.upper_bound() == 0 {
+        let last_block_number = provider.last_block_number().unwrap_or(0);
+
+        let start_block = if last_block_number > fee_history_cache.config.max_blocks {
+            last_block_number - fee_history_cache.config.max_blocks
+        } else {
+            0
+        };
+
+        let headers =
+            provider.sealed_headers_range(start_block..=last_block_number).unwrap_or_default();
+
+        fee_history_cache.on_new_block(headers.iter()).await;
+    }
+
     while let Some(event) = events.next().await {
         if let Some(committed) = event.committed() {
             // we're only interested in new committed blocks
             let (blocks, _) = committed.inner();
 
-            let blocks = blocks.iter().map(|(_, block)| block.block.clone()).collect::<Vec<_>>();
+            let headers = blocks.iter().map(|(_, block)| block.header.clone()).collect::<Vec<_>>();
 
-            for block in blocks {
-                fee_history_cache.on_new_block(&block).await;
-            }
+            fee_history_cache.on_new_block(headers.iter()).await;
         }
     }
 }

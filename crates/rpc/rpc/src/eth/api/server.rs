@@ -428,7 +428,7 @@ mod tests {
             GasPriceOracle::new(provider.clone(), Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(FeeHistoryCacheConfig::default(), provider.clone()),
+            FeeHistoryCache::new(FeeHistoryCacheConfig::default()),
         )
     }
 
