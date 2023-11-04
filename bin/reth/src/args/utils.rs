@@ -82,7 +82,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
             if raw.contains("58750000000000000000000") &&
                 !raw.contains("\"58750000000000000000000\"")
             {
-                raw = raw.replacen("58750000000000000000000", "\"58750000000000000000000\"",1);
+                raw = raw.replacen("58750000000000000000000", "\"58750000000000000000000\"", 1);
             }
 
             // both serialized Genesis and ChainSpec structs supported
