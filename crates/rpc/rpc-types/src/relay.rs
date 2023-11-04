@@ -18,18 +18,18 @@ pub struct Validator {
     pub slot: u64,
     #[serde_as(as = "DisplayFromStr")]
     pub validator_index: u64,
-    pub entry: ValidatorEntry,
+    pub entry: ValidatorRegistration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ValidatorEntry {
-    pub message: ValidatorMessage,
+pub struct ValidatorRegistration {
+    pub message: ValidatorRegistrationMessage,
     pub signature: BlsSignature,
 }
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ValidatorMessage {
+pub struct ValidatorRegistrationMessage {
     #[serde(rename = "fee_recipient")]
     pub fee_recipient: Address,
     #[serde_as(as = "DisplayFromStr")]
@@ -39,6 +39,9 @@ pub struct ValidatorMessage {
     pub pubkey: BlsPublicKey,
 }
 
+/// Represents public information about a block sent by a builder to the relay, or from the relay to
+/// the proposer. Depending on the context, value might represent the claimed value by a builder
+/// (not necessarily a value confirmed by the relay).
 #[serde_as]
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BidTrace {
@@ -59,8 +62,14 @@ pub struct BidTrace {
     pub value: U256,
 }
 
-/// Submission for the `/relay/v1/builder/blocks` endpoint.
+/// SignedBidTrace is a BidTrace with a signature
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedBidTrace {
+    pub message: BidTrace,
+    pub signature: BlsSignature,
+}
 
+/// Submission for the `/relay/v1/builder/blocks` endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignedBidSubmission {
     pub message: BidTrace,
@@ -73,6 +82,141 @@ pub struct SignedBidSubmission {
     // TODO should this be combined with `execution_payload`?
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blobs_bundle: Option<BlobsBundleV1>,
+}
+
+/// Query for the GET `/relay/v1/data/bidtraces/proposer_payload_delivered`
+///
+/// Provides [BidTrace]s for payloads that were delivered to proposers.
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposerPayloadsDeliveredQuery {
+    /// A specific slot
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u64>,
+    /// Maximum number of entries (200 max)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    /// Search for a specific blockhash
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_hash: Option<B256>,
+    /// Search for a specific EL block number
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_number: Option<u64>,
+    /// filter results by a proposer public key
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposer_key: Option<BlsPublicKey>,
+    /// How to order results
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_by: Option<OrderBy>,
+}
+
+impl ProposerPayloadsDeliveredQuery {
+    /// Sets the specific slot
+    pub fn slot(mut self, slot: u64) -> Self {
+        self.slot = Some(slot);
+        self
+    }
+
+    /// Sets the maximum number of entries (200 max)
+    pub fn limit(mut self, limit: u64) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    /// Sets the specific blockhash
+    pub fn block_hash(mut self, block_hash: B256) -> Self {
+        self.block_hash = Some(block_hash);
+        self
+    }
+
+    /// Sets the specific EL block number
+    pub fn block_number(mut self, block_number: u64) -> Self {
+        self.block_number = Some(block_number);
+        self
+    }
+
+    /// Sets the proposer public key
+    pub fn proposer_key(mut self, proposer_key: BlsPublicKey) -> Self {
+        self.proposer_key = Some(proposer_key);
+        self
+    }
+
+    /// Configures how to order results
+    pub fn order_by(mut self, order_by: OrderBy) -> Self {
+        self.order_by = Some(order_by);
+        self
+    }
+
+    /// Order results by descending value (highest value first)
+    pub fn order_by_desc(self) -> Self {
+        self.order_by(OrderBy::Desc)
+    }
+
+    /// Order results by ascending value (lowest value first)
+    pub fn order_by_asc(self) -> Self {
+        self.order_by(OrderBy::Asc)
+    }
+}
+
+/// OrderBy : Sort results in either ascending or descending values.  * `-value` - descending value
+/// (highest value first)  * `value` - ascending value (lowest value first) Sort results in either
+/// ascending or descending values.  * `-value` - descending value (highest value first)  * `value`
+/// - ascending value (lowest value first)
+#[derive(
+    Default, Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize,
+)]
+pub enum OrderBy {
+    /// Sort result by descending value (highest value first)
+    #[default]
+    #[serde(rename = "-value")]
+    Desc,
+    /// Sort result by ascending value (lowest value first)
+    #[serde(rename = "value")]
+    Asc,
+}
+
+/// Query for the GET `/relay/v1/data/bidtraces/builder_blocks_received` endpoint.
+/// This endpoint provides BidTraces for the builder block submission for a given slot (that were
+/// verified successfully).
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuilderBlocksReceivedQuery {
+    /// A specific slot
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u64>,
+    /// Maximum number of entries (200 max)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    /// Search for a specific blockhash
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_hash: Option<B256>,
+    /// Search for a specific EL block number
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_number: Option<u64>,
+}
+
+impl BuilderBlocksReceivedQuery {
+    /// Sets the specific slot
+    pub fn slot(mut self, slot: u64) -> Self {
+        self.slot = Some(slot);
+        self
+    }
+
+    /// Sets the maximum number of entries (200 max)
+    pub fn limit(mut self, limit: u64) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    /// Sets the specific blockhash
+    pub fn block_hash(mut self, block_hash: B256) -> Self {
+        self.block_hash = Some(block_hash);
+        self
+    }
+
+    /// Sets the specific EL block number
+    pub fn block_number(mut self, block_number: u64) -> Self {
+        self.block_number = Some(block_number);
+        self
+    }
 }
 
 #[cfg(test)]
