@@ -1,4 +1,4 @@
-#![allow(missing_docs, private_interfaces)]
+#![allow(missing_docs)]
 //! Payload support for the beacon API.
 //!
 //! Internal helper module to deserialize/serialize the payload attributes for the beacon API, which
@@ -9,10 +9,9 @@
 //!
 //! See also <https://github.com/ethereum/consensus-specs/blob/master/specs/deneb/beacon-chain.md#executionpayload>
 
-pub use crate::Withdrawal;
 use crate::{
     beacon::withdrawals::BeaconWithdrawal, engine::ExecutionPayloadV3, ExecutionPayload,
-    ExecutionPayloadV1, ExecutionPayloadV2,
+    ExecutionPayloadV1, ExecutionPayloadV2, Withdrawal,
 };
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256, U64};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -35,8 +34,8 @@ struct BeaconPayloadAttributes {
 
 /// A helper module for serializing and deserializing the payload attributes for the beacon API.
 ///
-/// The beacon API encoded object has equivalent fields to the [PayloadAttributes] with two
-/// differences:
+/// The beacon API encoded object has equivalent fields to the
+/// [PayloadAttributes](crate::engine::PayloadAttributes) with two differences:
 /// 1) `snake_case` identifiers must be used rather than `camelCase`;
 /// 2) integers must be encoded as quoted decimals rather than big-endian hex.
 pub mod beacon_api_payload_attributes {
@@ -80,25 +79,26 @@ pub mod beacon_api_payload_attributes {
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct BeaconExecutionPayloadV1<'a> {
-    pub(crate) parent_hash: Cow<'a, B256>,
-    pub(crate) fee_recipient: Cow<'a, Address>,
-    pub(crate) state_root: Cow<'a, B256>,
-    pub(crate) receipts_root: Cow<'a, B256>,
-    pub(crate) logs_bloom: Cow<'a, Bloom>,
-    pub(crate) prev_randao: Cow<'a, B256>,
+struct BeaconExecutionPayloadV1<'a> {
+    parent_hash: Cow<'a, B256>,
+    fee_recipient: Cow<'a, Address>,
+    state_root: Cow<'a, B256>,
+    receipts_root: Cow<'a, B256>,
+    logs_bloom: Cow<'a, Bloom>,
+    prev_randao: Cow<'a, B256>,
     #[serde_as(as = "DisplayFromStr")]
-    pub(crate) block_number: u64,
+    block_number: u64,
     #[serde_as(as = "DisplayFromStr")]
-    pub(crate) gas_limit: u64,
+    gas_limit: u64,
     #[serde_as(as = "DisplayFromStr")]
-    pub(crate) gas_used: u64,
+    gas_used: u64,
     #[serde_as(as = "DisplayFromStr")]
-    pub(crate) timestamp: u64,
-    pub(crate) extra_data: Cow<'a, Bytes>,
-    pub(crate) base_fee_per_gas: Cow<'a, U256>,
-    pub(crate) block_hash: Cow<'a, B256>,
-    pub(crate) transactions: Cow<'a, Vec<Bytes>>,
+    timestamp: u64,
+    extra_data: Cow<'a, Bytes>,
+    #[serde_as(as = "DisplayFromStr")]
+    base_fee_per_gas: U256,
+    block_hash: Cow<'a, B256>,
+    transactions: Cow<'a, Vec<Bytes>>,
 }
 
 impl<'a> From<BeaconExecutionPayloadV1<'a>> for ExecutionPayloadV1 {
@@ -131,7 +131,7 @@ impl<'a> From<BeaconExecutionPayloadV1<'a>> for ExecutionPayloadV1 {
             gas_used: U64::from(gas_used),
             timestamp: U64::from(timestamp),
             extra_data: extra_data.into_owned(),
-            base_fee_per_gas: base_fee_per_gas.into_owned(),
+            base_fee_per_gas,
             block_hash: block_hash.into_owned(),
             transactions: transactions.into_owned(),
         }
@@ -169,7 +169,7 @@ impl<'a> From<&'a ExecutionPayloadV1> for BeaconExecutionPayloadV1<'a> {
             gas_used: gas_used.to(),
             timestamp: timestamp.to(),
             extra_data: Cow::Borrowed(extra_data),
-            base_fee_per_gas: Cow::Borrowed(base_fee_per_gas),
+            base_fee_per_gas: *base_fee_per_gas,
             block_hash: Cow::Borrowed(block_hash),
             transactions: Cow::Borrowed(transactions),
         }
@@ -204,14 +204,14 @@ pub mod beacon_payload_v1 {
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct BeaconExecutionPayloadV2<'a> {
+struct BeaconExecutionPayloadV2<'a> {
     /// Inner V1 payload
     #[serde(flatten)]
-    pub(crate) payload_inner: BeaconExecutionPayloadV1<'a>,
+    payload_inner: BeaconExecutionPayloadV1<'a>,
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     #[serde_as(as = "Vec<BeaconWithdrawal>")]
-    pub(crate) withdrawals: Vec<Withdrawal>,
+    withdrawals: Vec<Withdrawal>,
 }
 
 impl<'a> From<BeaconExecutionPayloadV2<'a>> for ExecutionPayloadV2 {
@@ -259,18 +259,18 @@ pub mod beacon_payload_v2 {
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct BeaconExecutionPayloadV3<'a> {
+struct BeaconExecutionPayloadV3<'a> {
     /// Inner V1 payload
     #[serde(flatten)]
-    pub(crate) payload_inner: BeaconExecutionPayloadV2<'a>,
+    payload_inner: BeaconExecutionPayloadV2<'a>,
     /// Array of [`U64`] representing blob gas used, enabled with V3
     /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
     #[serde_as(as = "DisplayFromStr")]
-    pub(crate) blob_gas_used: u64,
+    blob_gas_used: u64,
     /// Array of [`U64`] representing excess blob gas, enabled with V3
     /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
     #[serde_as(as = "DisplayFromStr")]
-    pub(crate) excess_blob_gas: u64,
+    excess_blob_gas: u64,
 }
 
 impl<'a> From<BeaconExecutionPayloadV3<'a>> for ExecutionPayloadV3 {
@@ -324,7 +324,7 @@ pub mod beacon_payload_v3 {
 /// Represents all possible payload versions.
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
-pub enum BeaconExecutionPayload<'a> {
+enum BeaconExecutionPayload<'a> {
     /// V1 payload
     V1(BeaconExecutionPayloadV1<'a>),
     /// V2 payload

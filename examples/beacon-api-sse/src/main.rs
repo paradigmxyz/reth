@@ -23,7 +23,7 @@ use reth::{
         ext::{RethCliExt, RethNodeCommandConfig},
         Cli,
     },
-    rpc::types::engine::beacon_api::events::PayloadAttributesEvent,
+    rpc::types::beacon::events::PayloadAttributesEvent,
     tasks::TaskSpawner,
 };
 use std::net::{IpAddr, Ipv4Addr};
