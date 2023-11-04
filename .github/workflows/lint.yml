@@ -66,6 +66,7 @@ jobs:
           cmd: jq empty etc/grafana/dashboards/overview.json
 
   lint-success:
+    name: lint success
     runs-on: ubuntu-latest
     if: always()
     needs: [clippy, docs, fmt, grafana]
