@@ -73,23 +73,23 @@ pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
 pub const MGAS_TO_GAS: u64 = 1_000_000u64;
 
 /// The Ethereum mainnet genesis hash.
-pub const MAINNET_GENESIS: B256 =
+pub const MAINNET_GENESIS_HASH: B256 =
     b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 
 /// Goerli genesis hash.
-pub const GOERLI_GENESIS: B256 =
+pub const GOERLI_GENESIS_HASH: B256 =
     b256!("bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a");
 
 /// Sepolia genesis hash.
-pub const SEPOLIA_GENESIS: B256 =
+pub const SEPOLIA_GENESIS_HASH: B256 =
     b256!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9");
 
 /// Holesky genesis hash.
-pub const HOLESKY_GENESIS: B256 =
+pub const HOLESKY_GENESIS_HASH: B256 =
     b256!("ff9006519a8ce843ac9c28549d24211420b546e12ce2d170c77a8cca7964f23d");
 
 /// Testnet genesis hash.
-pub const DEV_GENESIS: B256 =
+pub const DEV_GENESIS_HASH: B256 =
     b256!("2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c");
 
 /// Keccak256 over empty array.
@@ -97,21 +97,21 @@ pub const KECCAK_EMPTY: B256 =
     b256!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
 
 /// Ommer root of empty list.
-pub const EMPTY_OMMER_ROOT: B256 =
+pub const EMPTY_OMMER_ROOT_HASH: B256 =
     b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347");
 
-/// hash of an empty set `keccak256(rlp([]))`
-const EMPTY_SET_HASH: B256 =
+/// Root hash of an empty trie.
+pub const EMPTY_ROOT_HASH: B256 =
     b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
 
 /// Transactions root of empty receipts set.
-pub const EMPTY_RECEIPTS: B256 = EMPTY_SET_HASH;
+pub const EMPTY_RECEIPTS: B256 = EMPTY_ROOT_HASH;
 
 /// Transactions root of empty transactions set.
-pub const EMPTY_TRANSACTIONS: B256 = EMPTY_SET_HASH;
+pub const EMPTY_TRANSACTIONS: B256 = EMPTY_ROOT_HASH;
 
 /// Withdrawals root of empty withdrawals set.
-pub const EMPTY_WITHDRAWALS: B256 = EMPTY_SET_HASH;
+pub const EMPTY_WITHDRAWALS: B256 = EMPTY_ROOT_HASH;
 
 /// The number of blocks to unwind during a reorg that already became a part of canonical chain.
 ///

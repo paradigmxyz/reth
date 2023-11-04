@@ -228,7 +228,7 @@ mod tests {
     };
     use reth_primitives::{
         Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
-        GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
+        GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
     use std::collections::HashMap;
 
@@ -249,7 +249,7 @@ mod tests {
         let genesis_hash = init_genesis(db, MAINNET.clone()).unwrap();
 
         // actual, expected
-        assert_eq!(genesis_hash, MAINNET_GENESIS);
+        assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
     }
 
     #[test]
@@ -258,7 +258,7 @@ mod tests {
         let genesis_hash = init_genesis(db, GOERLI.clone()).unwrap();
 
         // actual, expected
-        assert_eq!(genesis_hash, GOERLI_GENESIS);
+        assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
     }
 
     #[test]
@@ -267,7 +267,7 @@ mod tests {
         let genesis_hash = init_genesis(db, SEPOLIA.clone()).unwrap();
 
         // actual, expected
-        assert_eq!(genesis_hash, SEPOLIA_GENESIS);
+        assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
     }
 
     #[test]
@@ -281,8 +281,8 @@ mod tests {
         assert_eq!(
             genesis_hash.unwrap_err(),
             InitDatabaseError::GenesisHashMismatch {
-                chainspec_hash: MAINNET_GENESIS,
-                database_hash: SEPOLIA_GENESIS
+                chainspec_hash: MAINNET_GENESIS_HASH,
+                database_hash: SEPOLIA_GENESIS_HASH
             }
         )
     }
