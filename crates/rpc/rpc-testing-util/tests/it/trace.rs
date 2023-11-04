@@ -26,12 +26,10 @@ async fn trace_many_blocks() {
 /// Tests the replaying of transactions on a local Ethereum node.
 
 #[tokio::test(flavor = "multi_thread")]
-async fn replay_transactions_() {
-    let url = parse_env_url("RETH_RPC_TEST_NODE_URL");
-    if url.is_err() {
-        return
-    }
-    let client = HttpClientBuilder::default().build(url.unwrap()).unwrap();
+#[ignore]
+async fn replay_transactions() {
+    let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
+    let client = HttpClientBuilder::default().build(url).unwrap();
 
     let tx_hashes = vec![
         "0x4e08fe36db723a338e852f89f613e606b0c9a17e649b18b01251f86236a2cef3".parse().unwrap(),
