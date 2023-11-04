@@ -4,7 +4,7 @@
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[cfg(feature = "optimism")]
-compile_error!("run --bin op-reth for Optimism");
+compile_error!("Cannot build the `reth` binary with the `optimism` feature flag enabled. Did you mean to build `op-reth`?");
 
 #[cfg(not(feature = "optimism"))]
 fn main() {

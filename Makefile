@@ -42,21 +42,24 @@ help: ## Display this help.
 
 .PHONY: install
 install: ## Build and install the reth binary under `~/.cargo/bin`.
-	cargo install --path bin/reth-ethereum --bin reth --force --locked \
+	cargo install --path bin/reth --bin reth --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
 .PHONY: install-op
-install: ## Build and install the op-reth binary under `~/.cargo/bin`.
-	cargo install --path bin/reth-optimism --bin op-reth --force --locked \
-		--features "$(FEATURES)" \
+install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
+	cargo install --path bin/reth --bin op-reth --force --locked \
+		--features "optimism,$(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
 # Builds the reth binary natively.
 build-native-%:
 	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+
+op-build-native-%:
+	cargo build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -76,6 +79,10 @@ build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(F
 build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
  		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+
+op-build-%:
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+ 		cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
