@@ -721,7 +721,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
 }
 
 // Default implementation of [PayloadBuilder] for unit type
-impl<Pool, Client> PayloadBuilder<Pool, Client> for ()
+impl<Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
