@@ -1071,12 +1071,12 @@ impl Display for DisplayFork {
 
 /// A container for pretty-printing a list of hardforks.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// # use reth_primitives::MAINNET;
 /// # use reth_primitives::DisplayHardforks;
-/// println!("{}", DisplayHardforks::from(MAINNET.hardforks().clone()));
+/// println!("{}", DisplayHardforks::new(MAINNET.hardforks()));
 /// ```
 ///
 /// An example of the output:
