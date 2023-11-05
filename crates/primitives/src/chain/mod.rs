@@ -17,6 +17,9 @@ pub use spec::{
     ForkTimestamps, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
 
+#[cfg(feature = "optimism")]
+pub use spec::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
+
 // The chain info module.
 mod info;
 pub use info::ChainInfo;
@@ -57,6 +60,9 @@ pub enum NamedChain {
     Optimism = 10,
     OptimismKovan = 69,
     OptimismGoerli = 420,
+
+    Base = 8453,
+    BaseGoerli = 84531,
 
     Arbitrum = 42161,
     ArbitrumTestnet = 421611,
@@ -116,9 +122,51 @@ impl Chain {
         Chain::Named(NamedChain::Holesky)
     }
 
+    /// Returns the optimism goerli chain.
+    pub const fn optimism_goerli() -> Self {
+        Chain::Named(NamedChain::OptimismGoerli)
+    }
+
+    /// Returns the optimism mainnet chain.
+    pub const fn optimism_mainnet() -> Self {
+        Chain::Named(NamedChain::Optimism)
+    }
+
+    /// Returns the base goerli chain.
+    pub const fn base_goerli() -> Self {
+        Chain::Named(NamedChain::BaseGoerli)
+    }
+
+    /// Returns the base mainnet chain.
+    pub const fn base_mainnet() -> Self {
+        Chain::Named(NamedChain::Base)
+    }
+
     /// Returns the dev chain.
     pub const fn dev() -> Self {
         Chain::Named(NamedChain::Dev)
+    }
+
+    /// Returns true if the chain contains Optimism configuration.
+    pub fn is_optimism(self) -> bool {
+        self.named().map_or(false, |c| {
+            matches!(
+                c,
+                NamedChain::Optimism |
+                    NamedChain::OptimismGoerli |
+                    NamedChain::OptimismKovan |
+                    NamedChain::Base |
+                    NamedChain::BaseGoerli
+            )
+        })
+    }
+
+    /// Attempts to convert the chain into a named chain.
+    pub fn named(&self) -> Option<NamedChain> {
+        match self {
+            Chain::Named(chain) => Some(*chain),
+            Chain::Id(id) => NamedChain::try_from(*id).ok(),
+        }
     }
 
     /// The id of the chain

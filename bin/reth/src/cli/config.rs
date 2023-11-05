@@ -97,4 +97,8 @@ pub trait PayloadBuilderConfig {
 
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
+
+    /// Returns whether or not to construct the pending block.
+    #[cfg(feature = "optimism")]
+    fn compute_pending_block(&self) -> bool;
 }

@@ -18,12 +18,13 @@ concurrency:
 
 jobs:
   test:
-    name: tests (${{ matrix.partition }}/${{ strategy.job-total }})
+    name: tests (${{ matrix.network }} | ${{ matrix.partition }}/${{ strategy.job-total }})
     runs-on:
       group: Reth
     strategy:
       matrix:
         partition: [1, 2]
+        network: ["ethereum", "optimism"]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -32,10 +33,20 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@nextest
+      - name: Set binary value
+        id: binary
+        run: |
+          if [[ "${{ matrix.network }}" == "ethereum" ]]; then
+            echo "binary=reth" >> $GITHUB_OUTPUT
+          else
+            echo "binary=op-reth" >> $GITHUB_OUTPUT
+          fi
       - name: Run tests
         run: |
           cargo nextest run \
-            --locked --all-features --workspace --exclude examples --exclude ef-tests  \
+            --locked --features "${{ matrix.network }}" \
+            --bin ${{ steps.binary.outputs.binary }} \
+            --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E "kind(lib) | kind(bin) | kind(proc-macro)"
 
@@ -63,17 +74,21 @@ jobs:
       - run: cargo nextest run --release -p ef-tests --features ef-tests
 
   doc:
-    name: doc tests
+    name: doc tests (${{ matrix.network }})
     runs-on:
       group: Reth
     timeout-minutes: 30
+    strategy:
+      matrix:
+        network: ["ethereum", "optimism"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo test --doc --workspace --all-features
+      - name: Run doctests
+        run: cargo test --doc --workspace --features "${{ matrix.network }}"
 
   unit-success:
     name: unit success

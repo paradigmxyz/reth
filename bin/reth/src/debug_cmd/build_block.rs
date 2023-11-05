@@ -245,12 +245,17 @@ impl Command {
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: reth_rpc_types::engine::OptimismPayloadAttributes::default(
+            ),
         };
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            PayloadBuilderAttributes::new(best_block.hash, payload_attrs),
+            PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
             self.chain.clone(),
+            #[cfg(feature = "optimism")]
+            true,
         );
         let args = BuildArguments::new(
             blockchain_db.clone(),

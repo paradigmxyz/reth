@@ -42,6 +42,7 @@ jsonrpsee.workspace = true
 http = "0.2.8"
 http-body = "0.4.5"
 hyper = "0.14.24"
+reqwest = { version = "0.11.20", optional = true }
 jsonwebtoken = "8"
 
 # async
@@ -75,3 +76,6 @@ jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+
+[features]
+optimism = ["dep:reqwest", "reth-primitives/optimism", "reth-rpc-types-compat/optimism", "reth-network-api/optimism"]
