@@ -119,9 +119,9 @@ pub enum BlockExecutionError {
     )]
     AppendChainDoesntConnect {
         /// The tip of the current chain
-        chain_tip: BlockNumHash,
+        chain_tip: Box<BlockNumHash>,
         /// The fork on the other chain
-        other_chain_fork: BlockNumHash,
+        other_chain_fork: Box<BlockNumHash>,
     },
     /// Only used for TestExecutor
     ///

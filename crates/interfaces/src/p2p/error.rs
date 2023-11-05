@@ -1,5 +1,5 @@
 use super::headers::client::HeadersRequest;
-use crate::{consensus, db};
+use crate::{consensus::ConsensusError, db};
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, Header, WithPeerId, B256};
 use std::ops::RangeInclusive;
@@ -125,10 +125,10 @@ pub enum DownloadError {
         hash: B256,
         /// The details of validation failure
         #[source]
-        error: consensus::ConsensusError,
+        error: Box<ConsensusError>,
     },
     /// Received an invalid tip
-    #[error("received invalid tip: {received}. Expected {expected}")]
+    #[error("received invalid tip: got {received}, expected {expected}")]
     InvalidTip {
         /// The hash of the received tip
         received: B256,
@@ -167,7 +167,7 @@ pub enum DownloadError {
         hash: B256,
         /// The details of validation failure
         #[source]
-        error: consensus::ConsensusError,
+        error: Box<ConsensusError>,
     },
     /// Received more bodies than requested.
     #[error("received more bodies than requested. Expected: {expected}. Received: {received}")]

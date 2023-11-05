@@ -25,7 +25,7 @@ pub enum StageError {
     #[error("stage encountered an error in block #{number}: {error}", number = block.number)]
     Block {
         /// The block that caused the error.
-        block: SealedHeader,
+        block: Box<SealedHeader>,
         /// The specific error type, either consensus or execution error.
         #[source]
         error: BlockErrorKind,
@@ -43,9 +43,9 @@ pub enum StageError {
     )]
     DetachedHead {
         /// The local head we attempted to attach to.
-        local_head: SealedHeader,
+        local_head: Box<SealedHeader>,
         /// The header we attempted to attach.
-        header: SealedHeader,
+        header: Box<SealedHeader>,
         /// The error that occurred when attempting to attach the header.
         #[source]
         error: Box<consensus::ConsensusError>,

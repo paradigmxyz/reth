@@ -84,7 +84,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
             self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
                 StageError::Block {
-                    block: header.seal_slow(),
+                    block: Box::new(header.seal_slow()),
                     error: BlockErrorKind::Validation(error),
                 }
             })?;

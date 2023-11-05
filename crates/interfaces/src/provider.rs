@@ -88,25 +88,25 @@ pub enum ProviderError {
     #[error("merkle trie root mismatch at #{block_number} ({block_hash}): got {got}, expected {expected}")]
     StateRootMismatch {
         /// The expected root.
-        expected: B256,
+        expected: Box<B256>,
         /// The calculated root.
-        got: B256,
+        got: Box<B256>,
         /// The block number.
         block_number: BlockNumber,
         /// The block hash.
-        block_hash: BlockHash,
+        block_hash: Box<BlockHash>,
     },
     /// Root mismatch during unwind
     #[error("unwind merkle trie root mismatch at #{block_number} ({block_hash}): got {got}, expected {expected}")]
     UnwindStateRootMismatch {
         /// Expected root
-        expected: B256,
+        expected: Box<B256>,
         /// Calculated root
-        got: B256,
+        got: Box<B256>,
         /// Target block number
         block_number: BlockNumber,
         /// Block hash
-        block_hash: BlockHash,
+        block_hash: Box<BlockHash>,
     },
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{0} is pruned")]

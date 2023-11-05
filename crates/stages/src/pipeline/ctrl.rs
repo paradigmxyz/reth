@@ -10,7 +10,7 @@ pub enum ControlFlow {
         /// The block to unwind to.
         target: BlockNumber,
         /// The block that caused the unwind.
-        bad_block: SealedHeader,
+        bad_block: Box<SealedHeader>,
     },
     /// The pipeline made progress.
     Continue {

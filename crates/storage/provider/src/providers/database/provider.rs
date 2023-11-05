@@ -1650,10 +1650,10 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                 .map_err(Into::<reth_db::DatabaseError>::into)?;
             if state_root != expected_state_root {
                 return Err(ProviderError::StateRootMismatch {
-                    got: state_root,
-                    expected: expected_state_root,
+                    got: Box::new(state_root),
+                    expected: Box::new(expected_state_root),
                     block_number: *range.end(),
-                    block_hash: end_block_hash,
+                    block_hash: Box::new(end_block_hash),
                 }
                 .into())
             }
@@ -2034,10 +2034,10 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     .block_hash(parent_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
                 return Err(ProviderError::UnwindStateRootMismatch {
-                    got: new_state_root,
-                    expected: parent_state_root,
+                    got: Box::new(new_state_root),
+                    expected: Box::new(parent_state_root),
                     block_number: parent_number,
-                    block_hash: parent_hash,
+                    block_hash: Box::new(parent_hash),
                 }
                 .into())
             }

@@ -136,22 +136,26 @@ pub struct SealedBlock {
 
 impl SealedBlock {
     /// Create a new sealed block instance using the sealed header and block body.
+    #[inline]
     pub fn new(header: SealedHeader, body: BlockBody) -> Self {
         let BlockBody { transactions, ommers, withdrawals } = body;
         Self { header, body: transactions, ommers, withdrawals }
     }
 
     /// Header hash.
+    #[inline]
     pub fn hash(&self) -> B256 {
         self.header.hash()
     }
 
     /// Splits the sealed block into underlying components
+    #[inline]
     pub fn split(self) -> (SealedHeader, Vec<TransactionSigned>, Vec<Header>) {
         (self.header, self.body, self.ommers)
     }
 
     /// Splits the [BlockBody] and [SealedHeader] into separate components
+    #[inline]
     pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
         (
             self.header,

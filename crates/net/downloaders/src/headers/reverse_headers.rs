@@ -38,13 +38,18 @@ use tracing::{error, trace};
 const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
 
 /// Wrapper for internal downloader errors.
-#[allow(clippy::large_enum_variant)]
 #[derive(Error, Debug)]
 enum ReverseHeadersDownloaderError {
     #[error(transparent)]
     Downloader(#[from] HeadersDownloaderError),
     #[error(transparent)]
-    Response(#[from] HeadersResponseError),
+    Response(#[from] Box<HeadersResponseError>),
+}
+
+impl From<HeadersResponseError> for ReverseHeadersDownloaderError {
+    fn from(value: HeadersResponseError) -> Self {
+        Self::Response(Box::new(value))
+    }
 }
 
 /// Downloads headers concurrently.
@@ -274,7 +279,10 @@ where
                 return Err(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
-                    error: DownloadError::HeaderValidation { hash: head.hash(), error },
+                    error: DownloadError::HeaderValidation {
+                        hash: head.hash(),
+                        error: Box::new(error),
+                    },
                 }
                 .into())
             }
@@ -285,8 +293,8 @@ where
                 // Replace the last header with a detached variant
                 error!(target: "downloaders::headers", ?error, number = last_header.number, hash = ?last_header.hash, "Header cannot be attached to known canonical chain");
                 return Err(HeadersDownloaderError::DetachedHead {
-                    local_head: head.clone(),
-                    header: last_header.clone(),
+                    local_head: Box::new(head.clone()),
+                    header: Box::new(last_header.clone()),
                     error: Box::new(error),
                 }
                 .into())
@@ -530,8 +538,8 @@ where
     /// Handles the error of a bad response
     ///
     /// This will re-submit the request.
-    fn on_headers_error(&mut self, err: HeadersResponseError) {
-        let HeadersResponseError { request, peer_id, error } = err;
+    fn on_headers_error(&mut self, err: Box<HeadersResponseError>) {
+        let HeadersResponseError { request, peer_id, error } = *err;
 
         self.penalize_peer(peer_id, &error);
 
@@ -955,10 +963,12 @@ impl Ord for OrderedHeadersResponse {
 }
 
 /// Type returned if a bad response was processed
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("error requesting headers from peer {peer_id:?}: {error}; request: {request:?}")]
 struct HeadersResponseError {
     request: HeadersRequest,
     peer_id: Option<PeerId>,
+    #[source]
     error: DownloadError,
 }
 
@@ -971,18 +981,6 @@ impl HeadersResponseError {
         false
     }
 }
-
-impl std::fmt::Display for HeadersResponseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Error requesting headers from peer {:?}. Error: {}. Request: {:?}",
-            self.peer_id, self.error, self.request,
-        )
-    }
-}
-
-impl std::error::Error for HeadersResponseError {}
 
 /// The block to which we want to close the gap: (local head...sync target]
 /// This tracks the sync target block, so this could be either a block number or hash.

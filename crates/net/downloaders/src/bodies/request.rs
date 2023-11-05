@@ -185,7 +185,7 @@ where
                     // Body is invalid, put the header back and return an error
                     let hash = block.hash();
                     self.pending_headers.push_front(block.header);
-                    return Err(DownloadError::BodyValidation { hash, error })
+                    return Err(DownloadError::BodyValidation { hash, error: Box::new(error) })
                 }
 
                 self.buffer.push(BlockResponse::Full(block));

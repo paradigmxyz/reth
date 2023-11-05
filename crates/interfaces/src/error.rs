@@ -1,7 +1,7 @@
-/// Result alias for [`RethError`]
+/// Result alias for [`RethError`].
 pub type RethResult<T> = Result<T, RethError>;
 
-/// Core error variants possible when interacting with the blockchain
+/// Core error variants possible when interacting with the blockchain.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum RethError {
@@ -38,3 +38,10 @@ impl From<reth_nippy_jar::NippyJarError> for RethError {
         RethError::Custom(err.to_string())
     }
 }
+
+// We don't want this error type to be too large because it's used in a lot of places.
+const _SIZE_ASSERTIONS: () = {
+    let _: [(); 72] = [(); std::mem::size_of::<RethError>()];
+    // biggest variant
+    let _: [(); 72] = [(); std::mem::size_of::<crate::consensus::ConsensusError>()];
+};

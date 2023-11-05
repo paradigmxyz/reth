@@ -1138,18 +1138,22 @@ impl Display for DisplayHardforks {
     }
 }
 
-impl<I> From<I> for DisplayHardforks
-where
-    I: IntoIterator<Item = (Hardfork, ForkCondition)>,
-{
-    fn from(iter: I) -> Self {
+impl DisplayHardforks {
+    /// Creates a new [`DisplayHardforks`] from an iterator of hardforks.
+    pub fn new(hardforks: &BTreeMap<Hardfork, ForkCondition>) -> Self {
+        Self::from_iter(hardforks.iter())
+    }
+}
+
+impl<'a, 'b> FromIterator<(&'a Hardfork, &'b ForkCondition)> for DisplayHardforks {
+    fn from_iter<T: IntoIterator<Item = (&'a Hardfork, &'b ForkCondition)>>(iter: T) -> Self {
         let mut pre_merge = Vec::new();
         let mut with_merge = Vec::new();
         let mut post_merge = Vec::new();
 
-        for (fork, condition) in iter.into_iter() {
+        for (fork, condition) in iter {
             let display_fork =
-                DisplayFork { name: fork.to_string(), activated_at: condition, eip: None };
+                DisplayFork { name: fork.to_string(), activated_at: *condition, eip: None };
 
             match condition {
                 ForkCondition::Block(_) => {
@@ -1234,7 +1238,7 @@ mod tests {
     #[test]
     fn test_hardfork_list_display_mainnet() {
         assert_eq!(
-            DisplayHardforks::from(MAINNET.hardforks().clone()).to_string(),
+            DisplayHardforks::new(MAINNET.hardforks()).to_string(),
             "Pre-merge hard forks (block based):
 - Frontier                         @0
 - Homestead                        @1150000
@@ -1268,7 +1272,7 @@ Post-merge hard forks (timestamp based):
             .with_fork(Hardfork::Shanghai, ForkCondition::Never)
             .build();
         assert_eq!(
-            DisplayHardforks::from(spec.hardforks().clone()).to_string(),
+            DisplayHardforks::new(spec.hardforks()).to_string(),
             "Pre-merge hard forks (block based):
 - Frontier                         @0
 "
