@@ -113,26 +113,23 @@ pub use alloy_primitives::{
 pub use revm_primitives::{self, JumpMap};
 
 #[doc(hidden)]
+#[deprecated = "use B64 instead"]
+pub type H64 = B64;
+#[doc(hidden)]
 #[deprecated = "use B128 instead"]
 pub type H128 = B128;
-
+#[doc(hidden)]
+#[deprecated = "use Address instead"]
+pub type H160 = Address;
 #[doc(hidden)]
 #[deprecated = "use B256 instead"]
 pub type H256 = B256;
-
 #[doc(hidden)]
 #[deprecated = "use B512 instead"]
 pub type H512 = B512;
 
-#[doc(hidden)]
-#[deprecated = "use B64 instead"]
-pub type H64 = B64;
-
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;
 
-/// EIP-4844 + KZG helpers
 #[cfg(feature = "c-kzg")]
-pub mod kzg {
-    pub use c_kzg::*;
-}
+pub use c_kzg as kzg;
