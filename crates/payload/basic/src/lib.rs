@@ -57,8 +57,9 @@ use tracing::{debug, trace};
 
 mod metrics;
 
+/// Ethereum payload builder
 #[cfg(not(feature = "optimism"))]
-pub type EthereumPayloadBuilder = ();
+pub struct EthereumPayloadBuilder;
 
 #[cfg(feature = "optimism")]
 mod optimism;
