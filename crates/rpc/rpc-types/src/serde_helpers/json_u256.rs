@@ -64,6 +64,38 @@ impl<'a> Visitor<'a> for JsonU256Visitor {
         Ok(JsonU256(U256::from(value)))
     }
 
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        // The ethereum mainnet TTD is 58750000000000000000000, and geth serializes this
+        // without quotes, because that is how golang `big.Int`s marshal in JSON. Numbers
+        // are arbitrary precision in JSON, so this is valid JSON. This number is also
+        // greater than a `u64`.
+        //
+        // Unfortunately, serde_json only supports parsing up to `u64`, resorting to `f64`
+        // once `u64` overflows:
+        // <https://github.com/serde-rs/json/blob/4bc1eaa03a6160593575bc9bc60c94dba4cab1e3/src/de.rs#L1411-L1415>
+        // <https://github.com/serde-rs/json/blob/4bc1eaa03a6160593575bc9bc60c94dba4cab1e3/src/de.rs#L479-L484>
+        // <https://github.com/serde-rs/json/blob/4bc1eaa03a6160593575bc9bc60c94dba4cab1e3/src/de.rs#L102-L108>
+        //
+        // serde_json does have an arbitrary precision feature, but this breaks untagged
+        // enums in serde:
+        // <https://github.com/serde-rs/serde/issues/2230>
+        // <https://github.com/serde-rs/serde/issues/1183>
+        //
+        // To solve this, we use the captured float and return the TTD as a U256 if it's equal.
+        if value == 5.875e22 {
+            return Ok(JsonU256(U256::from(58750000000000000000000u128)));
+        } else if value.is_sign_negative() {
+            return Err(Error::custom("Negative numbers are not supported for JsonU256"));
+        }
+
+        // We could try to convert to a u128 here but there would probably be loss of
+        // precision, so we just return an error.
+        Err(Error::custom("Float that are not the mainnet TTD are not supported for JsonU256"))
+    }
+
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
     where
         E: Error,
@@ -136,5 +168,18 @@ mod test {
         let serialized = serde_json::to_string(&data).unwrap();
 
         assert_eq!(serialized, r#""0x10""#);
+    }
+
+    #[test]
+    fn jsonu256_deserialize_ttd() {
+        let deserialized: Vec<JsonU256> =
+            serde_json::from_str(r#"["58750000000000000000000",58750000000000000000000]"#).unwrap();
+        assert_eq!(
+            deserialized,
+            vec![
+                JsonU256(U256::from(58750000000000000000000u128)),
+                JsonU256(U256::from(58750000000000000000000u128)),
+            ]
+        );
     }
 }
