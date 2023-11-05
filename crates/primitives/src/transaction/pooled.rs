@@ -47,6 +47,16 @@ pub enum PooledTransactionsElement {
     },
     /// A blob transaction, which includes the transaction, blob data, commitments, and proofs.
     BlobTransaction(BlobTransaction),
+    /// An Optimism deposit transaction
+    #[cfg(feature = "optimism")]
+    Deposit {
+        /// The inner transaction
+        transaction: crate::TxDeposit,
+        /// The signature
+        signature: Signature,
+        /// The hash of the transaction
+        hash: TxHash,
+    },
 }
 
 impl PooledTransactionsElement {
@@ -69,6 +79,8 @@ impl PooledTransactionsElement {
             Self::Eip2930 { transaction, .. } => transaction.signature_hash(),
             Self::Eip1559 { transaction, .. } => transaction.signature_hash(),
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.signature_hash(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit { .. } => B256::ZERO,
         }
     }
 
@@ -79,6 +91,8 @@ impl PooledTransactionsElement {
             PooledTransactionsElement::Eip2930 { hash, .. } => hash,
             PooledTransactionsElement::Eip1559 { hash, .. } => hash,
             PooledTransactionsElement::BlobTransaction(tx) => &tx.hash,
+            #[cfg(feature = "optimism")]
+            PooledTransactionsElement::Deposit { hash, .. } => hash,
         }
     }
 
@@ -89,6 +103,10 @@ impl PooledTransactionsElement {
             Self::Eip2930 { signature, .. } => signature,
             Self::Eip1559 { signature, .. } => signature,
             Self::BlobTransaction(blob_tx) => &blob_tx.signature,
+            #[cfg(feature = "optimism")]
+            Self::Deposit { .. } => {
+                panic!("Deposit transactions do not have a signature! This is a bug.")
+            }
         }
     }
 
@@ -99,6 +117,8 @@ impl PooledTransactionsElement {
             Self::Eip2930 { transaction, .. } => transaction.nonce,
             Self::Eip1559 { transaction, .. } => transaction.nonce,
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.nonce,
+            #[cfg(feature = "optimism")]
+            Self::Deposit { .. } => 0,
         }
     }
 
@@ -204,6 +224,12 @@ impl PooledTransactionsElement {
                         signature: typed_tx.signature,
                         hash: typed_tx.hash,
                     }),
+                    #[cfg(feature = "optimism")]
+                    Transaction::Deposit(tx) => Ok(PooledTransactionsElement::Deposit {
+                        transaction: tx,
+                        signature: typed_tx.signature,
+                        hash: typed_tx.hash,
+                    }),
                 }
             }
         }
@@ -232,6 +258,12 @@ impl PooledTransactionsElement {
                 hash,
             },
             Self::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
+            #[cfg(feature = "optimism")]
+            Self::Deposit { transaction, signature, hash } => TransactionSigned {
+                transaction: Transaction::Deposit(transaction),
+                signature,
+                hash,
+            },
         }
     }
 
@@ -254,6 +286,8 @@ impl PooledTransactionsElement {
                 // the encoding does not use a header, so we set `with_header` to false
                 blob_tx.payload_len_with_type(false)
             }
+            #[cfg(feature = "optimism")]
+            Self::Deposit { transaction, .. } => transaction.payload_len_without_header(),
         }
     }
 }
@@ -279,6 +313,10 @@ impl Encodable for PooledTransactionsElement {
                 // `rlp(tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
                 blob_tx.encode_with_type_inner(out, true);
             }
+            #[cfg(feature = "optimism")]
+            Self::Deposit { transaction, .. } => {
+                transaction.encode(out, true);
+            }
         }
     }
 
@@ -299,6 +337,11 @@ impl Encodable for PooledTransactionsElement {
             Self::BlobTransaction(blob_tx) => {
                 // the encoding uses a header, so we set `with_header` to true
                 blob_tx.payload_len_with_type(true)
+            }
+            #[cfg(feature = "optimism")]
+            Self::Deposit { transaction, .. } => {
+                // method computes the payload len with a RLP header
+                transaction.payload_len()
             }
         }
     }
@@ -401,6 +444,12 @@ impl Decodable for PooledTransactionsElement {
                         signature: typed_tx.signature,
                         hash: typed_tx.hash,
                     }),
+                    #[cfg(feature = "optimism")]
+                    Transaction::Deposit(tx) => Ok(PooledTransactionsElement::Deposit {
+                        transaction: tx,
+                        signature: typed_tx.signature,
+                        hash: typed_tx.hash,
+                    }),
                 }
             }
         }
@@ -431,6 +480,10 @@ impl From<TransactionSigned> for PooledTransactionsElement {
                     // This is empty - just for the conversion!
                     sidecar: Default::default(),
                 })
+            }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(tx) => {
+                PooledTransactionsElement::Deposit { transaction: tx, signature, hash }
             }
         }
     }

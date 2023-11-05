@@ -137,6 +137,8 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
                 topics: vec![B256::with_last_byte(1), B256::with_last_byte(2)],
                 data: Bytes::default(),
             }],
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
         })]]),
         number,
     );
@@ -192,6 +194,8 @@ fn block2(
                 topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 data: Bytes::default(),
             }],
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
         })]]),
         number,
     );

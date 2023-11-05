@@ -12,11 +12,11 @@ use crate::{
     },
     validate::ValidTransaction,
     AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
-    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
-    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
-    TransactionValidator, ValidPoolTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PooledTransactionsElement,
+    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
+    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash};
+use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -235,6 +235,14 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        #[cfg(feature = "optimism")]
+        if transaction.is_deposit() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                reth_primitives::InvalidTransactionError::TxTypeNotSupported.into(),
+            )
+        }
+
         TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,

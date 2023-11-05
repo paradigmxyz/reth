@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-// suppress warning for UIntTryTo, which is required only when value-256 feature is disabled
+// suppress warning for UIntTryTo, which is required only when optimism feature is disabled
 use crate::{
     ruint::{ToUintError, UintTryFrom, UintTryTo},
     U256,
@@ -88,11 +88,11 @@ impl Compact for TxValue {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        #[cfg(feature = "value-256")]
+        #[cfg(feature = "optimism")]
         {
             self.0.to_compact(buf)
         }
-        #[cfg(not(feature = "value-256"))]
+        #[cfg(not(feature = "optimism"))]
         {
             // SAFETY: For ethereum mainnet this is safe as the max value is
             // 120000000000000000000000000 wei
@@ -103,12 +103,12 @@ impl Compact for TxValue {
 
     #[allow(unreachable_code)]
     fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
-        #[cfg(feature = "value-256")]
+        #[cfg(feature = "optimism")]
         {
             let (i, buf) = U256::from_compact(buf, identifier);
             (TxValue(i), buf)
         }
-        #[cfg(not(feature = "value-256"))]
+        #[cfg(not(feature = "optimism"))]
         {
             let (i, buf) = u128::from_compact(buf, identifier);
             (TxValue::from(i), buf)
@@ -119,12 +119,12 @@ impl Compact for TxValue {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TxValue {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        #[cfg(feature = "value-256")]
+        #[cfg(feature = "optimism")]
         {
             Ok(Self(U256::arbitrary(u)?))
         }
 
-        #[cfg(not(feature = "value-256"))]
+        #[cfg(not(feature = "optimism"))]
         {
             Ok(Self::try_from(u128::arbitrary(u)?).expect("to fit"))
         }
@@ -135,12 +135,12 @@ impl<'a> arbitrary::Arbitrary<'a> for TxValue {
 impl proptest::arbitrary::Arbitrary for TxValue {
     type Parameters = ParamsFor<()>;
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        #[cfg(feature = "value-256")]
+        #[cfg(feature = "optimism")]
         {
             proptest::prelude::any::<U256>().prop_map(Self).boxed()
         }
 
-        #[cfg(not(feature = "value-256"))]
+        #[cfg(not(feature = "optimism"))]
         {
             proptest::prelude::any::<u128>()
                 .prop_map(|num| Self::try_from(num).expect("to fit"))

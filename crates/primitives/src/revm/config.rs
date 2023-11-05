@@ -8,6 +8,15 @@ pub fn revm_spec_by_timestamp_after_merge(
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> revm_primitives::SpecId {
+    #[cfg(feature = "optimism")]
+    if chain_spec.is_optimism() {
+        if chain_spec.fork(Hardfork::Regolith).active_at_timestamp(timestamp) {
+            return revm_primitives::REGOLITH
+        } else {
+            return revm_primitives::BEDROCK
+        }
+    }
+
     if chain_spec.is_cancun_active_at_timestamp(timestamp) {
         revm_primitives::CANCUN
     } else if chain_spec.is_shanghai_active_at_timestamp(timestamp) {
@@ -19,6 +28,15 @@ pub fn revm_spec_by_timestamp_after_merge(
 
 /// return revm_spec from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId {
+    #[cfg(feature = "optimism")]
+    if chain_spec.is_optimism() {
+        if chain_spec.fork(Hardfork::Regolith).active_at_head(&block) {
+            return revm_primitives::REGOLITH
+        } else if chain_spec.fork(Hardfork::Bedrock).active_at_head(&block) {
+            return revm_primitives::BEDROCK
+        }
+    }
+
     if chain_spec.fork(Hardfork::Cancun).active_at_head(&block) {
         revm_primitives::CANCUN
     } else if chain_spec.fork(Hardfork::Shanghai).active_at_head(&block) {
@@ -112,6 +130,23 @@ mod tests {
             revm_spec(&ChainSpecBuilder::mainnet().frontier_activated().build(), Head::default()),
             revm_primitives::FRONTIER
         );
+        #[cfg(feature = "optimism")]
+        {
+            #[inline(always)]
+            fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
+                let cs = ChainSpecBuilder::mainnet().chain(crate::Chain::Id(10));
+                f(cs).build()
+            }
+
+            assert_eq!(
+                revm_spec(&op_cs(|cs| cs.bedrock_activated()), Head::default()),
+                revm_primitives::BEDROCK
+            );
+            assert_eq!(
+                revm_spec(&op_cs(|cs| cs.regolith_activated()), Head::default()),
+                revm_primitives::REGOLITH
+            );
+        }
     }
 
     #[test]

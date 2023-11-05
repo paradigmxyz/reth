@@ -378,6 +378,31 @@ pub struct PayloadAttributes {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
+    /// Optimism Payload Attributes
+    #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    pub optimism_payload_attributes: OptimismPayloadAttributes,
+}
+
+/// Optimism Payload Attributes
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(feature = "optimism")]
+pub struct OptimismPayloadAttributes {
+    /// Transactions is a field for rollups: the transactions list is forced into the block
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transactions: Option<Vec<Bytes>>,
+    /// If true, the no transactions are taken out of the tx-pool, only transactions from the above
+    /// Transactions list will be included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_tx_pool: Option<bool>,
+    /// If set, this sets the exact gas limit the block produced with.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::serde_helpers::u64_hex::u64_hex_opt::deserialize"
+    )]
+    pub gas_limit: Option<u64>,
 }
 
 #[serde_as]
@@ -392,7 +417,11 @@ struct BeaconAPIPayloadAttributes {
     withdrawals: Option<Vec<Withdrawal>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_beacon_block_root: Option<B256>,
+    #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    optimism_payload_attributes: OptimismPayloadAttributes,
 }
+
 /// A helper module for serializing and deserializing the payload attributes for the beacon API.
 ///
 /// The beacon API encoded object has equivalent fields to the [PayloadAttributes] with two
@@ -417,6 +446,8 @@ pub mod beacon_api_payload_attributes {
             suggested_fee_recipient: payload_attributes.suggested_fee_recipient,
             withdrawals: payload_attributes.withdrawals.clone(),
             parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: payload_attributes.optimism_payload_attributes.clone(),
         };
         beacon_api_payload_attributes.serialize(serializer)
     }
@@ -433,6 +464,8 @@ pub mod beacon_api_payload_attributes {
             suggested_fee_recipient: beacon_api_payload_attributes.suggested_fee_recipient,
             withdrawals: beacon_api_payload_attributes.withdrawals,
             parent_beacon_block_root: beacon_api_payload_attributes.parent_beacon_block_root,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: beacon_api_payload_attributes.optimism_payload_attributes,
         })
     }
 }
