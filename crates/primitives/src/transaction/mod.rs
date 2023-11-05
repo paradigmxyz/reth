@@ -396,12 +396,12 @@ impl Transaction {
     }
 
     /// Returns the source hash of the transaction, which uniquely identifies its source.
-    /// If the transaction is not a deposit transaction, this will always return `B256::zero()`.
+    /// If not a deposit transaction, this will always return `None`.
     #[cfg(feature = "optimism")]
-    pub fn source_hash(&self) -> B256 {
+    pub fn source_hash(&self) -> Option<B256> {
         match self {
-            Transaction::Deposit(TxDeposit { source_hash, .. }) => *source_hash,
-            _ => B256::ZERO,
+            Transaction::Deposit(TxDeposit { source_hash, .. }) => Some(*source_hash),
+            _ => None,
         }
     }
 
@@ -616,8 +616,8 @@ impl Compact for Transaction {
                 tx.to_compact(buf);
             }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit) => {
-                deposit.to_compact(buf);
+            Transaction::Deposit(tx) => {
+                tx.to_compact(buf);
             }
         }
         identifier

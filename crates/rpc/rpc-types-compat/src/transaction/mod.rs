@@ -139,7 +139,7 @@ fn fill(
         // Optimism fields
         #[cfg(feature = "optimism")]
         optimism: reth_rpc_types::OptimismTransactionFields {
-            source_hash: signed_tx.is_deposit().then_some(signed_tx.source_hash()),
+            source_hash: signed_tx.source_hash(),
             mint: signed_tx.mint().map(U128::from),
             is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
         },
