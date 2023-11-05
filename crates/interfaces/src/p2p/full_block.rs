@@ -9,7 +9,7 @@ use crate::{
 };
 use futures::Stream;
 use reth_primitives::{
-    BlockBody, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, B256,
+    BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, B256,
 };
 use std::{
     cmp::Reverse,
@@ -309,27 +309,24 @@ fn ensure_valid_body_response(
     let body_roots = block.calculate_roots();
 
     if header.ommers_hash != body_roots.ommers_hash {
-        return Err(ConsensusError::BodyOmmersHashDiff {
-            got: body_roots.ommers_hash,
-            expected: header.ommers_hash,
-        })
+        return Err(ConsensusError::BodyOmmersHashDiff(
+            GotExpected { got: body_roots.ommers_hash, expected: header.ommers_hash }.into(),
+        ))
     }
 
     if header.transactions_root != body_roots.tx_root {
-        return Err(ConsensusError::BodyTransactionRootDiff {
-            got: body_roots.tx_root,
-            expected: header.transactions_root,
-        })
+        return Err(ConsensusError::BodyTransactionRootDiff(
+            GotExpected { got: body_roots.tx_root, expected: header.transactions_root }.into(),
+        ))
     }
 
     let withdrawals = block.withdrawals.as_deref().unwrap_or(&[]);
     if let Some(header_withdrawals_root) = header.withdrawals_root {
         let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
         if withdrawals_root != header_withdrawals_root {
-            return Err(ConsensusError::BodyWithdrawalsRootDiff {
-                got: withdrawals_root,
-                expected: header_withdrawals_root,
-            })
+            return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+            ))
         }
         return Ok(())
     }

@@ -10,7 +10,7 @@ use reth_primitives::{
     hex,
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
-    BlockNumber, SealedHeader, B256,
+    BlockNumber, GotExpected, SealedHeader, B256,
 };
 use reth_provider::{
     DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
@@ -326,10 +326,9 @@ fn validate_state_root(
     } else {
         warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root");
         Err(StageError::Block {
-            error: BlockErrorKind::Validation(consensus::ConsensusError::BodyStateRootDiff {
-                got,
-                expected: expected.state_root,
-            }),
+            error: BlockErrorKind::Validation(consensus::ConsensusError::BodyStateRootDiff(
+                GotExpected { got, expected: expected.state_root }.into(),
+            )),
             block: Box::new(expected),
         })
     }

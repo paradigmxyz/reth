@@ -14,7 +14,7 @@ use reth_interfaces::{
     RethResult,
 };
 use reth_primitives::{
-    BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
+    BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
     providers::BundleStateProvider, BundleStateDataProvider, BundleStateWithReceipts, Chain,
@@ -221,10 +221,9 @@ impl AppendableChain {
             // check state root
             let state_root = provider.state_root(&bundle_state)?;
             if block.state_root != state_root {
-                return Err(ConsensusError::BodyStateRootDiff {
-                    got: state_root,
-                    expected: block.state_root,
-                }
+                return Err(ConsensusError::BodyStateRootDiff(
+                    GotExpected { got: state_root, expected: block.state_root }.into(),
+                )
                 .into())
             }
         }
