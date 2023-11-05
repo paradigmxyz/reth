@@ -1,6 +1,6 @@
 //! Session handles.
 
-use super::active::NetworkConnection;
+use super::active::PeerConnection;
 use crate::{
     message::PeerMessage,
     session::{Direction, SessionId},
@@ -173,7 +173,7 @@ pub enum PendingSessionEvent {
         status: Arc<Status>,
         /// The actual connection stream which can be used to send and receive `eth` protocol
         /// messages
-        conn: NetworkConnection,
+        conn: PeerConnection,
         /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
         /// The remote node's user agent, usually containing the client name and version
