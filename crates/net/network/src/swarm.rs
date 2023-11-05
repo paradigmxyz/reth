@@ -394,7 +394,7 @@ pub(crate) enum SwarmEvent {
     SessionEstablished {
         peer_id: PeerId,
         remote_addr: SocketAddr,
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,

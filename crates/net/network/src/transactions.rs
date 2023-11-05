@@ -1043,7 +1043,7 @@ struct Peer {
     version: EthVersion,
     /// The peer's client version.
     #[allow(unused)]
-    client_version: Arc<String>,
+    client_version: Arc<str>,
 }
 
 /// The type responsible for fetching missing transactions from peers.

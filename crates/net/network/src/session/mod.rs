@@ -465,7 +465,7 @@ impl SessionManager {
 
                 self.spawn(session);
 
-                let client_version = Arc::new(client_id);
+                let client_version = client_id.into();
                 let handle = ActiveSessionHandle {
                     status: status.clone(),
                     direction,
@@ -595,7 +595,7 @@ pub enum SessionEvent {
         /// The remote node's socket address
         remote_addr: SocketAddr,
         /// The user agent of the remote node, usually containing the client name and version
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         /// The capabilities the remote node has announced
         capabilities: Arc<Capabilities>,
         /// negotiated eth version

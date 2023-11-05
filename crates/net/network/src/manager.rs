@@ -914,7 +914,7 @@ pub enum NetworkEvent {
         /// The remote addr of the peer to which a session was established.
         remote_addr: SocketAddr,
         /// The client version of the peer to which a session was established.
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.

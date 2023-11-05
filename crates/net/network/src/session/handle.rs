@@ -68,7 +68,7 @@ pub struct ActiveSessionHandle {
     /// Sender half of the command channel used send commands _to_ the spawned session
     pub(crate) commands_to_session: mpsc::Sender<SessionCommand>,
     /// The client's name and version
-    pub(crate) client_version: Arc<String>,
+    pub(crate) client_version: Arc<str>,
     /// The address we're connected to
     pub(crate) remote_addr: SocketAddr,
     /// The local address of the connection.
@@ -126,7 +126,7 @@ impl ActiveSessionHandle {
     }
 
     /// Returns the client's name and version.
-    pub fn client_version(&self) -> Arc<String> {
+    pub fn client_version(&self) -> Arc<str> {
         self.client_version.clone()
     }
 
