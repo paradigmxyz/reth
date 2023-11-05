@@ -137,3 +137,12 @@ ethereum = []
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
+
+[[bin]]
+name = "reth"
+path = "src/main.rs"
+
+[[bin]]
+name = "op-reth"
+path = "src/optimism.rs"
+required-features = ["optimism"]
