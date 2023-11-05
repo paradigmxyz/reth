@@ -162,9 +162,9 @@ impl BundleStateWithReceipts {
     /// # Example
     ///
     /// ```
-    /// use reth_primitives::{Account, U256, Receipts};
+    /// use reth_db::{database::Database, test_utils::create_test_rw_db};
+    /// use reth_primitives::{Account, Receipts, U256};
     /// use reth_provider::BundleStateWithReceipts;
-    /// use reth_db::{test_utils::create_test_rw_db, database::Database};
     /// use std::collections::HashMap;
     ///
     /// // Initialize the database
@@ -173,7 +173,7 @@ impl BundleStateWithReceipts {
     /// // Initialize the bundle state
     /// let bundle = BundleStateWithReceipts::new_init(
     ///     HashMap::from([(
-    ///         [0x11;20].into(),
+    ///         [0x11; 20].into(),
     ///         (
     ///             None,
     ///             Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),

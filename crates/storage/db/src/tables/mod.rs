@@ -59,7 +59,7 @@ pub const NUM_TABLES: usize = 26;
 /// # Example
 ///
 /// ```
-/// use reth_db::{ table::Table, TableViewer, Tables };
+/// use reth_db::{table::Table, TableViewer, Tables};
 /// use std::str::FromStr;
 ///
 /// let headers = Tables::from_str("Headers").unwrap();

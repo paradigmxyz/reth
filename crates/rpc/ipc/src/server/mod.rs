@@ -530,7 +530,6 @@ impl<B, L> Builder<B, L> {
     /// # Examples
     ///
     /// ```rust
-    /// 
     /// #[tokio::main]
     /// async fn main() {
     ///     let builder = tower::ServiceBuilder::new();
