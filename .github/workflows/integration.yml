@@ -39,9 +39,9 @@ jobs:
         id: binary
         run: |
           if [[ "${{ matrix.network }}" == "ethereum" ]]; then
-            echo "binary=reth" >> $GITHUB_STATE
+            echo "binary=reth" >> $GITHUB_OUTPUT
           else
-            echo "binary=op-reth" >> $GITHUB_STATE
+            echo "binary=op-reth" >> $GITHUB_OUTPUT
           fi
       - name: Run tests
         run: |
