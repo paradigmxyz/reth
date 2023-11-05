@@ -58,7 +58,8 @@ use tracing::{debug, trace};
 mod metrics;
 
 /// Ethereum payload builder
-#[cfg(not(feature = "optimism"))]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct EthereumPayloadBuilder;
 
 #[cfg(feature = "optimism")]
@@ -68,7 +69,7 @@ pub use optimism::OptimismPayloadBuilder;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
-pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
+pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = EthereumPayloadBuilder> {
     /// The client that can interact with the chain.
     client: Client,
     /// txpool
