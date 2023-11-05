@@ -111,3 +111,34 @@ impl Compact for TxType {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_txtype_from_compact() {
+        let cases = vec![
+            (TxType::Legacy, 0, vec![]),
+            (TxType::EIP2930, 1, vec![]),
+            (TxType::EIP1559, 2, vec![]),
+            (TxType::EIP4844, 3, vec![EIP4844_TX_TYPE_ID]),
+            #[cfg(feature = "optimism")]
+            (TxType::DEPOSIT, 3, vec![DEPOSIT_TX_TYPE_ID]),
+        ];
+
+        for (expected_type, identifier, buf) in cases {
+            let (actual_type, remaining_buf) = TxType::from_compact(&buf, identifier);
+            assert_eq!(
+                actual_type, expected_type,
+                "Unexpected TxType for identifier {}",
+                identifier
+            );
+            assert!(
+                remaining_buf.is_empty(),
+                "Buffer not fully consumed for identifier {}",
+                identifier
+            );
+        }
+    }
+}
