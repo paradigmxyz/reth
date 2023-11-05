@@ -238,7 +238,7 @@ impl<'a> EVMProcessor<'a> {
         }
         // increment balances
         self.db_mut()
-            .increment_balances(balance_increments.into_iter().map(|(k, v)| (k, v)))
+            .increment_balances(balance_increments)
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
         Ok(())
