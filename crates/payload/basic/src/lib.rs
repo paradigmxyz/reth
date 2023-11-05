@@ -99,7 +99,14 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         config: BasicPayloadJobGeneratorConfig,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
-        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, EthereumPayloadBuilder)
+        BasicPayloadJobGenerator::with_builder(
+            client,
+            pool,
+            executor,
+            config,
+            chain_spec,
+            EthereumPayloadBuilder,
+        )
     }
 }
 
