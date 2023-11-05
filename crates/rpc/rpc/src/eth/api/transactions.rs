@@ -982,9 +982,8 @@ where
                 EthApiError::InternalEthError
             })?;
 
-            let client = reqwest::Client::new();
-
-            client
+            self.inner
+                .http_client
                 .post(endpoint)
                 .header(http::header::CONTENT_TYPE, "application/json")
                 .body(body)
