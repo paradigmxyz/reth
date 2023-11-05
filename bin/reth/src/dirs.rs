@@ -94,7 +94,7 @@ pub trait XdgPath {
 /// # Example
 ///
 /// ```
-/// use reth::dirs::{PlatformPath, DataDirPath};
+/// use reth::dirs::{DataDirPath, PlatformPath};
 /// use std::str::FromStr;
 ///
 /// // Resolves to the platform-specific database path

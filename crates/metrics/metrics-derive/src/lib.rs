@@ -28,8 +28,8 @@ mod with_attrs;
 ///
 /// Sample usage:
 /// ```
-/// use reth_metrics_derive::Metrics;
 /// use metrics::{Counter, Gauge, Histogram};
+/// use reth_metrics_derive::Metrics;
 ///
 /// #[derive(Metrics)]
 /// #[metrics(scope = "metrics_custom")]
@@ -43,7 +43,7 @@ mod with_attrs;
 ///     counter: Counter,
 ///     /// A renamed histogram.
 ///     #[metric(rename = "histogram")]
-///     histo: Histogram
+///     histo: Histogram,
 /// }
 /// ```
 ///
@@ -56,7 +56,7 @@ mod with_attrs;
 ///     /// Some doc comment
 ///     counter: metrics::Counter,
 ///     /// A renamed histogram.
-///     histo: metrics::Histogram
+///     histo: metrics::Histogram,
 /// }
 ///
 /// impl Default for CustomMetrics {
@@ -73,9 +73,18 @@ mod with_attrs;
 /// impl CustomMetrics {
 ///     /// Describe all exposed metrics
 ///     pub fn describe() {
-///         metrics::describe_gauge!("metrics_custom_gauge", "A gauge with doc comment description.");
-///         metrics::describe_gauge!("metrics_custom_second_gauge", "A gauge with metric attribute description.");
-///         metrics::describe_counter!("metrics_custom_counter", "Metric attribute description will be preferred over doc comment.");
+///         metrics::describe_gauge!(
+///             "metrics_custom_gauge",
+///             "A gauge with doc comment description."
+///         );
+///         metrics::describe_gauge!(
+///             "metrics_custom_second_gauge",
+///             "A gauge with metric attribute description."
+///         );
+///         metrics::describe_counter!(
+///             "metrics_custom_counter",
+///             "Metric attribute description will be preferred over doc comment."
+///         );
 ///         metrics::describe_histogram!("metrics_custom_histogram", "A renamed histogram.");
 ///     }
 /// }
@@ -110,13 +119,14 @@ mod with_attrs;
 ///
 /// impl DynamicScopeMetrics {
 ///     pub fn new(scope: &str) -> Self {
-///         Self {
-///             gauge: metrics::register_gauge!(format!("{}{}{}", scope, "_", "gauge"))
-///         }
+///         Self { gauge: metrics::register_gauge!(format!("{}{}{}", scope, "_", "gauge")) }
 ///     }
 ///
 ///     pub fn describe(scope: &str) {
-///         metrics::describe_gauge!(format!("{}{}{}", scope, "_", "gauge"), "A gauge with doc comment description.");
+///         metrics::describe_gauge!(
+///             format!("{}{}{}", scope, "_", "gauge"),
+///             "A gauge with doc comment description."
+///         );
 ///     }
 /// }
 ///
