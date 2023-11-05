@@ -778,18 +778,17 @@ where
 
         this.update_request_metrics();
 
-        let fetch_event = this.transaction_fetcher.poll(cx);
-        match fetch_event {
-            Poll::Ready(FetchEvent::TransactionsFetched { peer_id, transactions }) => {
-                if let Some(txns) = transactions {
-                    this.import_transactions(peer_id, txns, TransactionSource::Response);
+        // drain fetching transaction events
+        while let Poll::Ready(fetch_event) = this.transaction_fetcher.poll(cx) {
+            match fetch_event {
+                FetchEvent::TransactionsFetched { peer_id, transactions } => {
+                    if let Some(txns) = transactions {
+                        this.import_transactions(peer_id, txns, TransactionSource::Response);
+                    }
                 }
-            }
-            Poll::Ready(FetchEvent::FetchError { peer_id, error }) => {
-                this.on_request_error(peer_id, error);
-            }
-            Poll::Pending => {
-                // No event ready at the moment, nothing to do here.
+                FetchEvent::FetchError { peer_id, error } => {
+                    this.on_request_error(peer_id, error);
+                }
             }
         }
 
