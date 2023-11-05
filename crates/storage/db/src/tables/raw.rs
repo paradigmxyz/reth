@@ -129,6 +129,12 @@ impl<V: Value> RawValue<V> {
     }
 }
 
+impl<V: Value> From<V> for RawValue<V> {
+    fn from(value: V) -> Self {
+        RawValue::new(value)
+    }
+}
+
 impl AsRef<[u8]> for RawValue<Vec<u8>> {
     fn as_ref(&self) -> &[u8] {
         &self.value

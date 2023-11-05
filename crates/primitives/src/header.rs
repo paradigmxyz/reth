@@ -1,10 +1,9 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
+    constants::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH},
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
-    keccak256,
-    proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    Address, BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes,
-    B256, B64, U256,
+    keccak256, Address, BaseFeeParams, BlockBodyRoots, BlockHash, BlockNumHash, BlockNumber, Bloom,
+    Bytes, B256, B64, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
 use bytes::{Buf, BufMut, BytesMut};
@@ -116,11 +115,11 @@ impl Default for Header {
     fn default() -> Self {
         Header {
             parent_hash: Default::default(),
-            ommers_hash: EMPTY_LIST_HASH,
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: Default::default(),
-            state_root: EMPTY_ROOT,
-            transactions_root: EMPTY_ROOT,
-            receipts_root: EMPTY_ROOT,
+            state_root: EMPTY_ROOT_HASH,
+            transactions_root: EMPTY_ROOT_HASH,
+            receipts_root: EMPTY_ROOT_HASH,
             logs_bloom: Default::default(),
             difficulty: Default::default(),
             number: 0,
@@ -157,7 +156,7 @@ impl Header {
     pub fn is_empty(&self) -> bool {
         let txs_and_ommers_empty = self.transaction_root_is_empty() && self.ommers_hash_is_empty();
         if let Some(withdrawals_root) = self.withdrawals_root {
-            txs_and_ommers_empty && withdrawals_root == EMPTY_ROOT
+            txs_and_ommers_empty && withdrawals_root == EMPTY_ROOT_HASH
         } else {
             txs_and_ommers_empty
         }
@@ -165,12 +164,12 @@ impl Header {
 
     /// Check if the ommers hash equals to empty hash list.
     pub fn ommers_hash_is_empty(&self) -> bool {
-        self.ommers_hash == EMPTY_LIST_HASH
+        self.ommers_hash == EMPTY_OMMER_ROOT_HASH
     }
 
     /// Check if the transaction root equals to empty root.
     pub fn transaction_root_is_empty(&self) -> bool {
-        self.transactions_root == EMPTY_ROOT
+        self.transactions_root == EMPTY_ROOT_HASH
     }
 
     /// Converts all roots in the header to a [BlockBodyRoots] struct.

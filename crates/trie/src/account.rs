@@ -1,5 +1,5 @@
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_primitives::{proofs::EMPTY_ROOT, Account, B256, KECCAK_EMPTY, U256};
+use reth_primitives::{constants::EMPTY_ROOT_HASH, Account, B256, KECCAK_EMPTY, U256};
 
 /// An Ethereum account as represented in the trie.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
@@ -19,7 +19,7 @@ impl From<Account> for EthAccount {
         EthAccount {
             nonce: acc.nonce,
             balance: acc.balance,
-            storage_root: EMPTY_ROOT,
+            storage_root: EMPTY_ROOT_HASH,
             code_hash: acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
         }
     }

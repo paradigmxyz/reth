@@ -11,19 +11,19 @@ description = "Commonly used types in reth."
 [dependencies]
 # reth
 reth-codecs = { path = "../storage/codecs" }
+reth-rpc-types.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-sol-types.workspace = true
 ethers-core = { workspace = true, default-features = false, optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 
 # for eip-4844
-c-kzg = { workspace = true, features = ["serde"] }
+c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # used for forkid
 crc = "3"
@@ -77,9 +77,6 @@ triehash = "0.8"
 
 plain_hasher = "0.2"
 hash-db = "~0.15"
-# value-256 is needed for the main_codec proptests to pass
-reth-primitives = { path = ".", features = ["value-256"] }
-
 
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
@@ -88,13 +85,12 @@ criterion = "0.5"
 pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
-default = []
-arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+default = ["c-kzg"]
+arbitrary = ["revm-primitives/arbitrary", "reth-rpc-types/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+c-kzg = ["revm-primitives/c-kzg", "dep:c-kzg"]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
-# value-256 controls whether transaction Value fields are DB-encoded as 256 bits instead of the
-# default of 128 bits.
-value-256 = ["reth-codecs/value-256"]
 clap = ["dep:clap"]
+optimism = ["reth-codecs/optimism"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

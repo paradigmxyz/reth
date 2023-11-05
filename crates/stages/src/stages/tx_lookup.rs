@@ -1,23 +1,20 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use itertools::Itertools;
 use rayon::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
 };
 use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
-    keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PruneCheckpoint, PruneMode, PruneSegment, TransactionSignedNoHash, TxNumber, B256,
+    PruneCheckpoint, PruneMode, PruneSegment,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
+    TransactionsProviderExt,
 };
-use tokio::sync::mpsc;
 use tracing::*;
 
 /// The transaction lookup stage.
@@ -93,49 +90,15 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let (tx_range, block_range, is_final_range) =
             input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
         let end_block = *block_range.end();
-        let tx_range_size = tx_range.clone().count();
 
         debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
 
-        let tx = provider.tx_ref();
-        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-        let tx_walker = tx_cursor.walk_range(tx_range)?;
-
-        let chunk_size = (tx_range_size / rayon::current_num_threads()).max(1);
-        let mut channels = Vec::with_capacity(chunk_size);
-        let mut transaction_count = 0;
-
-        for chunk in &tx_walker.chunks(chunk_size) {
-            let (tx, rx) = mpsc::unbounded_channel();
-            channels.push(rx);
-
-            // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
-            let chunk: Vec<_> = chunk.collect();
-            transaction_count += chunk.len();
-
-            // Spawn the task onto the global rayon pool
-            // This task will send the results through the channel after it has calculated the hash.
-            rayon::spawn(move || {
-                let mut rlp_buf = Vec::with_capacity(128);
-                for entry in chunk {
-                    rlp_buf.clear();
-                    let _ = tx.send(calculate_hash(entry, &mut rlp_buf));
-                }
-            });
-        }
-        let mut tx_list = Vec::with_capacity(transaction_count);
-
-        // Iterate over channels and append the tx hashes to be sorted out later
-        for mut channel in channels {
-            while let Some(tx) = channel.recv().await {
-                let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
-                tx_list.push((tx_hash, tx_id));
-            }
-        }
+        let mut tx_list = provider.transaction_hashes_by_range(tx_range)?;
 
         // Sort before inserting the reverse lookup for hash -> tx_id.
         tx_list.par_sort_unstable_by(|txa, txb| txa.0.cmp(&txb.0));
 
+        let tx = provider.tx_ref();
         let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
 
         // If the last inserted element in the database is equal or bigger than the first
@@ -199,17 +162,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
-}
-
-/// Calculates the hash of the given transaction
-#[inline]
-fn calculate_hash(
-    entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
-    rlp_buf: &mut Vec<u8>,
-) -> Result<(B256, TxNumber), Box<StageError>> {
-    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
-    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-    Ok((keccak256(rlp_buf), tx_id))
 }
 
 fn stage_checkpoint<DB: Database>(

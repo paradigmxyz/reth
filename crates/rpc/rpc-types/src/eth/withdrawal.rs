@@ -1,9 +1,20 @@
+//! Withdrawal type and serde helpers.
+
+use std::mem;
+
+use crate::serde_helpers::u64_hex;
 use alloy_primitives::{Address, U256};
-use alloy_rlp::RlpEncodable;
-use reth_primitives::{constants::GWEI_TO_WEI, serde_helper::u64_hex};
-use serde::{Deserialize, Serialize};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_with::{serde_as, DeserializeAs, DisplayFromStr, SerializeAs};
+
+/// Multiplier for converting gwei to wei.
+pub const GWEI_TO_WEI: u64 = 1_000_000_000;
+
 /// Withdrawal represents a validator withdrawal from the consensus layer.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+)]
 pub struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
     #[serde(with = "u64_hex")]
@@ -22,6 +33,79 @@ impl Withdrawal {
     /// Return the withdrawal amount in wei.
     pub fn amount_wei(&self) -> U256 {
         U256::from(self.amount) * U256::from(GWEI_TO_WEI)
+    }
+
+    /// Calculate a heuristic for the in-memory size of the [Withdrawal].
+    #[inline]
+    pub fn size(&self) -> usize {
+        mem::size_of::<Self>()
+    }
+}
+
+/// Same as [Withdrawal] but respects the Beacon API format which uses snake-case and quoted
+/// decimals.
+#[serde_as]
+#[derive(Serialize, Deserialize)]
+pub(crate) struct BeaconAPIWithdrawal {
+    #[serde_as(as = "DisplayFromStr")]
+    index: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    validator_index: u64,
+    address: Address,
+    #[serde_as(as = "DisplayFromStr")]
+    amount: u64,
+}
+
+impl SerializeAs<Withdrawal> for BeaconAPIWithdrawal {
+    fn serialize_as<S>(source: &Withdrawal, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        beacon_api_withdrawals::serialize(source, serializer)
+    }
+}
+
+impl<'de> DeserializeAs<'de, Withdrawal> for BeaconAPIWithdrawal {
+    fn deserialize_as<D>(deserializer: D) -> Result<Withdrawal, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        beacon_api_withdrawals::deserialize(deserializer)
+    }
+}
+
+/// A helper serde module to convert from/to the Beacon API which uses quoted decimals rather than
+/// big-endian hex.
+pub mod beacon_api_withdrawals {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Serialize the payload attributes for the beacon API.
+    pub fn serialize<S>(payload_attributes: &Withdrawal, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let withdrawal = BeaconAPIWithdrawal {
+            index: payload_attributes.index,
+            validator_index: payload_attributes.validator_index,
+            address: payload_attributes.address,
+            amount: payload_attributes.amount,
+        };
+        withdrawal.serialize(serializer)
+    }
+
+    /// Deserialize the payload attributes for the beacon API.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Withdrawal, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let withdrawal = BeaconAPIWithdrawal::deserialize(deserializer)?;
+        Ok(Withdrawal {
+            index: withdrawal.index,
+            validator_index: withdrawal.validator_index,
+            address: withdrawal.address,
+            amount: withdrawal.amount,
+        })
     }
 }
 

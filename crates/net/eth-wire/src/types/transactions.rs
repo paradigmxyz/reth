@@ -39,6 +39,13 @@ pub struct PooledTransactions(
     pub Vec<PooledTransactionsElement>,
 );
 
+impl PooledTransactions {
+    /// Returns an iterator over the transaction hashes in this response.
+    pub fn hashes(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.0.iter().map(|tx| tx.hash())
+    }
+}
+
 impl From<Vec<TransactionSigned>> for PooledTransactions {
     fn from(txs: Vec<TransactionSigned>) -> Self {
         PooledTransactions(txs.into_iter().map(Into::into).collect())

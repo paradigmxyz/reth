@@ -70,7 +70,7 @@ pub enum P2PHandshakeError {
     NoResponse,
     #[error("handshake timed out")]
     Timeout,
-    #[error("Disconnected by peer: {0}")]
+    #[error("disconnected by peer: {0}")]
     Disconnected(DisconnectReason),
     #[error("error decoding a message during handshake: {0}")]
     DecodeError(#[from] alloy_rlp::Error),

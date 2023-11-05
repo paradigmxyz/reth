@@ -25,11 +25,16 @@ tokio-stream = { workspace = true, features = ["sync"] }
 # tracing
 tracing.workspace = true
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 # misc
 auto_impl = "1.0"
 itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
+dashmap = { version = "5.5", features = ["inline"] }
 
 # test-utils
 alloy-rlp = { workspace = true, optional = true }
@@ -51,3 +56,7 @@ rand.workspace = true
 
 [features]
 test-utils = ["alloy-rlp"]
+optimism = [
+  "reth-primitives/optimism",
+  "reth-interfaces/optimism"
+]

@@ -1,10 +1,9 @@
+use crate::eth::{transaction::BlobTransactionSidecar, withdrawal::BeaconAPIWithdrawal};
 pub use crate::Withdrawal;
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
-use reth_primitives::{
-    kzg::{Blob, Bytes48},
-    BlobTransactionSidecar, SealedBlock,
-};
+use c_kzg::{Blob, Bytes48};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde_with::{serde_as, DisplayFromStr};
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
@@ -136,36 +135,6 @@ pub struct ExecutionPayloadV1 {
     pub base_fee_per_gas: U256,
     pub block_hash: B256,
     pub transactions: Vec<Bytes>,
-}
-
-impl From<SealedBlock> for ExecutionPayloadV1 {
-    fn from(value: SealedBlock) -> Self {
-        let transactions = value
-            .body
-            .iter()
-            .map(|tx| {
-                let mut encoded = Vec::new();
-                tx.encode_enveloped(&mut encoded);
-                encoded.into()
-            })
-            .collect();
-        ExecutionPayloadV1 {
-            parent_hash: value.parent_hash,
-            fee_recipient: value.beneficiary,
-            state_root: value.state_root,
-            receipts_root: value.receipts_root,
-            logs_bloom: value.logs_bloom,
-            prev_randao: value.mix_hash,
-            block_number: U64::from(value.number),
-            gas_limit: U64::from(value.gas_limit),
-            gas_used: U64::from(value.gas_used),
-            timestamp: U64::from(value.timestamp),
-            extra_data: value.extra_data.clone(),
-            base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-            block_hash: value.hash(),
-            transactions,
-        }
-    }
 }
 
 /// This structure maps on the ExecutionPayloadV2 structure of the beacon chain spec.
@@ -339,22 +308,22 @@ impl From<ExecutionPayloadV3> for ExecutionPayload {
 #[derive(thiserror::Error, Debug)]
 pub enum PayloadError {
     /// Invalid payload extra data.
-    #[error("Invalid payload extra data: {0}")]
+    #[error("invalid payload extra data: {0}")]
     ExtraData(Bytes),
     /// Invalid payload base fee.
-    #[error("Invalid payload base fee: {0}")]
+    #[error("invalid payload base fee: {0}")]
     BaseFee(U256),
     /// Invalid payload blob gas used.
-    #[error("Invalid payload blob gas used: {0}")]
+    #[error("invalid payload blob gas used: {0}")]
     BlobGasUsed(U256),
     /// Invalid payload excess blob gas.
-    #[error("Invalid payload excess blob gas: {0}")]
+    #[error("invalid payload excess blob gas: {0}")]
     ExcessBlobGas(U256),
     /// Pre-cancun Payload has blob transactions.
-    #[error("Invalid payload, pre-Cancun payload has blob transactions")]
+    #[error("pre-Cancun payload has blob transactions")]
     PreCancunBlockWithBlobTransactions,
     /// Invalid payload block hash.
-    #[error("blockhash mismatch, want {consensus}, got {execution}")]
+    #[error("block hash mismatch: want {consensus}, got {execution}")]
     BlockHash {
         /// The block hash computed from the payload.
         execution: B256,
@@ -362,7 +331,7 @@ pub enum PayloadError {
         consensus: B256,
     },
     /// Expected blob versioned hashes do not match the given transactions.
-    #[error("Expected blob versioned hashes do not match the given transactions")]
+    #[error("expected blob versioned hashes do not match the given transactions")]
     InvalidVersionedHashes,
     /// Encountered decoding error.
     #[error(transparent)]
@@ -409,6 +378,96 @@ pub struct PayloadAttributes {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
+    /// Optimism Payload Attributes
+    #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    pub optimism_payload_attributes: OptimismPayloadAttributes,
+}
+
+/// Optimism Payload Attributes
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(feature = "optimism")]
+pub struct OptimismPayloadAttributes {
+    /// Transactions is a field for rollups: the transactions list is forced into the block
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transactions: Option<Vec<Bytes>>,
+    /// If true, the no transactions are taken out of the tx-pool, only transactions from the above
+    /// Transactions list will be included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_tx_pool: Option<bool>,
+    /// If set, this sets the exact gas limit the block produced with.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::serde_helpers::u64_hex::u64_hex_opt::deserialize"
+    )]
+    pub gas_limit: Option<u64>,
+}
+
+#[serde_as]
+#[derive(Serialize, Deserialize)]
+struct BeaconAPIPayloadAttributes {
+    #[serde_as(as = "DisplayFromStr")]
+    timestamp: u64,
+    prev_randao: B256,
+    suggested_fee_recipient: Address,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<Vec<BeaconAPIWithdrawal>>")]
+    withdrawals: Option<Vec<Withdrawal>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_beacon_block_root: Option<B256>,
+    #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    optimism_payload_attributes: OptimismPayloadAttributes,
+}
+
+/// A helper module for serializing and deserializing the payload attributes for the beacon API.
+///
+/// The beacon API encoded object has equivalent fields to the [PayloadAttributes] with two
+/// differences:
+/// 1) `snake_case` identifiers must be used rather than `camelCase`;
+/// 2) integers must be encoded as quoted decimals rather than big-endian hex.
+pub mod beacon_api_payload_attributes {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Serialize the payload attributes for the beacon API.
+    pub fn serialize<S>(
+        payload_attributes: &PayloadAttributes,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let beacon_api_payload_attributes = BeaconAPIPayloadAttributes {
+            timestamp: payload_attributes.timestamp.to(),
+            prev_randao: payload_attributes.prev_randao,
+            suggested_fee_recipient: payload_attributes.suggested_fee_recipient,
+            withdrawals: payload_attributes.withdrawals.clone(),
+            parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: payload_attributes.optimism_payload_attributes.clone(),
+        };
+        beacon_api_payload_attributes.serialize(serializer)
+    }
+
+    /// Deserialize the payload attributes for the beacon API.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<PayloadAttributes, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let beacon_api_payload_attributes = BeaconAPIPayloadAttributes::deserialize(deserializer)?;
+        Ok(PayloadAttributes {
+            timestamp: U64::from(beacon_api_payload_attributes.timestamp),
+            prev_randao: beacon_api_payload_attributes.prev_randao,
+            suggested_fee_recipient: beacon_api_payload_attributes.suggested_fee_recipient,
+            withdrawals: beacon_api_payload_attributes.withdrawals,
+            parent_beacon_block_root: beacon_api_payload_attributes.parent_beacon_block_root,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: beacon_api_payload_attributes.optimism_payload_attributes,
+        })
+    }
 }
 
 /// This structure contains the result of processing a payload or fork choice update.
@@ -861,5 +920,22 @@ mod tests {
         let payload_res: Result<ExecutionPayloadInputV2, serde_json::Error> =
             serde_json::from_str(input);
         assert!(payload_res.is_err());
+    }
+
+    #[test]
+    fn beacon_api_payload_serde() {
+        #[derive(Serialize, Deserialize)]
+        #[serde(transparent)]
+        struct Event {
+            #[serde(with = "beacon_api_payload_attributes")]
+            payload: PayloadAttributes,
+        }
+
+        let s = r#"{"timestamp":"1697981664","prev_randao":"0x739947d9f0aed15e32ed05a978e53b55cdcfe3db4a26165890fa45a80a06c996","suggested_fee_recipient":"0x0000000000000000000000000000000000000001","withdrawals":[{"index":"2460700","validator_index":"852657","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5268915"},{"index":"2460701","validator_index":"852658","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5253066"},{"index":"2460702","validator_index":"852659","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5266666"},{"index":"2460703","validator_index":"852660","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5239026"},{"index":"2460704","validator_index":"852661","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5273516"},{"index":"2460705","validator_index":"852662","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5260842"},{"index":"2460706","validator_index":"852663","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5238925"},{"index":"2460707","validator_index":"852664","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5253956"},{"index":"2460708","validator_index":"852665","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5284374"},{"index":"2460709","validator_index":"852666","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5276798"},{"index":"2460710","validator_index":"852667","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5239682"},{"index":"2460711","validator_index":"852668","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5261544"},{"index":"2460712","validator_index":"852669","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5247034"},{"index":"2460713","validator_index":"852670","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5256750"},{"index":"2460714","validator_index":"852671","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5261929"},{"index":"2460715","validator_index":"852672","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5243188"}]}"#;
+
+        let event: Event = serde_json::from_str(s).unwrap();
+        let input = serde_json::from_str::<serde_json::Value>(s).unwrap();
+        let json = serde_json::to_value(event).unwrap();
+        assert_eq!(input, json);
     }
 }

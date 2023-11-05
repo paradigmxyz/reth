@@ -33,7 +33,6 @@ mod integer_list;
 mod log;
 mod net;
 mod peer;
-mod precaution;
 pub mod proofs;
 mod prune;
 mod receipt;
@@ -51,7 +50,7 @@ mod withdrawal;
 pub use account::{Account, Bytecode};
 pub use block::{
     Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
-    BlockWithSenders, ForkBlock, SealedBlock, SealedBlockWithSenders,
+    BlockWithSenders, ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
 pub use bytes::{Buf, BufMut, BytesMut};
 pub use chain::{
@@ -59,14 +58,17 @@ pub use chain::{
     DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, GOERLI, HOLESKY, MAINNET,
     SEPOLIA,
 };
+#[cfg(feature = "optimism")]
+pub use chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
 pub use compression::*;
 pub use constants::{
-    DEV_GENESIS, EMPTY_OMMER_ROOT, GOERLI_GENESIS, HOLESKY_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS,
-    SEPOLIA_GENESIS,
+    DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
+    KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
+#[cfg(feature = "c-kzg")]
 pub use eip4844::{calculate_excess_blob_gas, kzg_to_versioned_hash};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
-pub use genesis::{Genesis, GenesisAccount};
+pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
 pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
@@ -84,16 +86,24 @@ pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use serde_helper::JsonU256;
 pub use snapshot::SnapshotSegment;
 pub use storage::StorageEntry;
+
+#[cfg(feature = "c-kzg")]
+pub use transaction::{
+    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError,
+    FromRecoveredPooledTransaction, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered,
+};
+
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer, sign_message},
-    AccessList, AccessListItem, BlobTransaction, BlobTransactionSidecar,
-    BlobTransactionValidationError, FromRecoveredPooledTransaction, FromRecoveredTransaction,
-    IntoRecoveredTransaction, InvalidTransactionError, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionKind, TransactionMeta,
+    AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction,
+    InvalidTransactionError, Signature, Transaction, TransactionKind, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
-    TxEip4844, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    TxEip4844, TxHashOrNumber, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
+#[cfg(feature = "optimism")]
+pub use transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
 pub use withdrawal::Withdrawal;
 
 // Re-exports
@@ -125,6 +135,7 @@ pub type H64 = B64;
 pub use arbitrary;
 
 /// EIP-4844 + KZG helpers
+#[cfg(feature = "c-kzg")]
 pub mod kzg {
     pub use c_kzg::*;
 }

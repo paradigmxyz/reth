@@ -55,9 +55,8 @@ where
 
         let transactions =
             txs.into_iter().map(recover_raw_transaction).collect::<Result<Vec<_>, _>>()?;
-
-        let (cfg, mut block_env, at) =
-            self.inner.eth_api.evm_env_at(state_block_number.into()).await?;
+        let block_id: reth_rpc_types::BlockId = state_block_number.into();
+        let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
@@ -97,7 +96,7 @@ where
                     let tx = tx.into_ecrecovered_transaction();
                     hash_bytes.extend_from_slice(tx.hash().as_slice());
                     let gas_price = tx
-                        .effective_gas_tip(basefee)
+                        .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)?;
                     tx.try_fill_tx_env(&mut evm.env.tx)?;
                     let ResultAndState { result, state } = evm.transact()?;

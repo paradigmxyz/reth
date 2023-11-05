@@ -264,7 +264,7 @@ impl ChangeSetReader for NoopProvider {
 
 impl StateRootProvider for NoopProvider {
     fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<B256> {
-        todo!()
+        Ok(B256::default())
     }
 }
 

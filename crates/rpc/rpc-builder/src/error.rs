@@ -35,7 +35,7 @@ pub enum RpcError {
     #[error(transparent)]
     RpcError(#[from] JsonRpseeError),
     /// Address already in use.
-    #[error("Address {kind} is already in use (os error 98)")]
+    #[error("address {kind} is already in use (os error 98)")]
     AddressAlreadyInUse {
         /// Server kind.
         kind: ServerKind,
@@ -74,7 +74,10 @@ impl RpcError {
 #[derive(Debug, thiserror::Error)]
 pub enum WsHttpSamePortError {
     /// Ws and http server configured on same port but with different cors domains.
-    #[error("CORS domains for http and ws are different, but they are on the same port: http: {http_cors_domains:?}, ws: {ws_cors_domains:?}")]
+    #[error(
+        "CORS domains for HTTP and WS are different, but they are on the same port: \
+         HTTP: {http_cors_domains:?}, WS: {ws_cors_domains:?}"
+    )]
     ConflictingCorsDomains {
         /// Http cors domains.
         http_cors_domains: Option<String>,
@@ -82,7 +85,10 @@ pub enum WsHttpSamePortError {
         ws_cors_domains: Option<String>,
     },
     /// Ws and http server configured on same port but with different modules.
-    #[error("Different api modules for http and ws on the same port is currently not supported: http: {http_modules:?}, ws: {ws_modules:?}")]
+    #[error(
+        "different API modules for HTTP and WS on the same port is currently not supported: \
+         HTTP: {http_modules:?}, WS: {ws_modules:?}"
+    )]
     ConflictingModules {
         /// Http modules.
         http_modules: Vec<RethRpcModule>,

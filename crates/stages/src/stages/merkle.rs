@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_codecs::Compact;
 use reth_db::{
     database::Database,
@@ -88,12 +88,12 @@ impl MerkleStage {
             Ok(())
         } else {
             warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root");
-            Err(StageError::Validation {
+            Err(StageError::Block {
                 block: expected.clone(),
-                error: consensus::ConsensusError::BodyStateRootDiff {
+                error: BlockErrorKind::Validation(consensus::ConsensusError::BodyStateRootDiff {
                     got,
                     expected: expected.state_root,
-                },
+                }),
             })
         }
     }

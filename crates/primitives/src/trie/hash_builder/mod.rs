@@ -2,7 +2,7 @@ use super::{
     nodes::{rlp_hash, BranchNode, ExtensionNode, LeafNode},
     BranchNodeCompact, Nibbles, TrieMask,
 };
-use crate::{keccak256, proofs::EMPTY_ROOT, Bytes, B256};
+use crate::{constants::EMPTY_ROOT_HASH, keccak256, Bytes, B256};
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
@@ -186,7 +186,7 @@ impl HashBuilder {
                 keccak256(node_ref)
             }
         } else {
-            EMPTY_ROOT
+            EMPTY_ROOT_HASH
         }
     }
 
@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn empty() {
-        assert_eq!(HashBuilder::default().root(), EMPTY_ROOT);
+        assert_eq!(HashBuilder::default().root(), EMPTY_ROOT_HASH);
     }
 
     #[test]

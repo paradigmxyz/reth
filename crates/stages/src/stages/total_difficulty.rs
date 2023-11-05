@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -72,7 +72,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let last_header_number = input.checkpoint().block_number;
         let last_entry = cursor_td
             .seek_exact(last_header_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound { number: last_header_number })?;
+            .ok_or(ProviderError::TotalDifficultyNotFound { block_number: last_header_number })?;
 
         let mut td: U256 = last_entry.1.into();
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
@@ -82,9 +82,12 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             let (block_number, header) = entry?;
             td += header.difficulty;
 
-            self.consensus
-                .validate_header_with_total_difficulty(&header, td)
-                .map_err(|error| StageError::Validation { block: header.seal_slow(), error })?;
+            self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
+                StageError::Block {
+                    block: header.seal_slow(),
+                    error: BlockErrorKind::Validation(error),
+                }
+            })?;
             cursor_td.append(block_number, td.into())?;
         }
 

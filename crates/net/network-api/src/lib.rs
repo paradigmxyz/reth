@@ -50,6 +50,10 @@ pub trait NetworkInfo: Send + Sync {
 
     /// Returns `true` when the node is undergoing the very first Pipeline sync.
     fn is_initially_syncing(&self) -> bool;
+
+    /// Returns the sequencer HTTP endpoint, if set.
+    #[cfg(feature = "optimism")]
+    fn sequencer_endpoint(&self) -> Option<&str>;
 }
 
 /// Provides general purpose information about Peers in the network.

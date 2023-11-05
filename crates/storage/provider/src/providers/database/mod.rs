@@ -21,7 +21,9 @@ use std::{
 };
 use tracing::trace;
 
+mod metrics;
 mod provider;
+
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
 /// A common provider that fetches data from a database.

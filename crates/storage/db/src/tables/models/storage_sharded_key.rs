@@ -63,7 +63,7 @@ impl Decode for StorageShardedKey {
         let tx_num_index = value.len() - 8;
 
         let highest_tx_number = u64::from_be_bytes(
-            value[tx_num_index..].try_into().map_err(|_| DatabaseError::DecodeError)?,
+            value[tx_num_index..].try_into().map_err(|_| DatabaseError::Decode)?,
         );
         let address = Address::decode(&value[..20])?;
         let storage_key = B256::decode(&value[20..52])?;
