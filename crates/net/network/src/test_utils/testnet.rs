@@ -12,7 +12,9 @@ use pin_project::pin_project;
 use reth_eth_wire::{capability::Capability, DisconnectReason, HelloBuilder};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{PeerId, MAINNET};
-use reth_provider::{test_utils::NoopProvider, BlockReader, HeaderProvider, StateProviderFactory};
+use reth_provider::{
+    test_utils::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
+};
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
@@ -156,7 +158,7 @@ where
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: StateProviderFactory + BlockReader + HeaderProvider + Clone + 'static,
+    C: StateProviderFactory + BlockReaderIdExt + HeaderProvider + Clone + 'static,
     Pool: TransactionPool,
 {
     /// Installs an eth pool on each peer

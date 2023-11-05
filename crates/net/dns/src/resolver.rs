@@ -40,8 +40,8 @@ impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
 ///
 /// ```
 /// # fn t() {
-///  use reth_dns_discovery::resolver::DnsResolver;
-///  let resolver = DnsResolver::from_system_conf().unwrap();
+/// use reth_dns_discovery::resolver::DnsResolver;
+/// let resolver = DnsResolver::from_system_conf().unwrap();
 /// # }
 /// ```
 ///

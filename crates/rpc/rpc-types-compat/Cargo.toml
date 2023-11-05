@@ -13,5 +13,7 @@ Compatibility layer for reth-primitives and ethereum RPC types
 [dependencies]
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
-
 alloy-rlp.workspace = true
+
+[features]
+optimism = ["reth-primitives/optimism", "reth-rpc-types/optimism"]

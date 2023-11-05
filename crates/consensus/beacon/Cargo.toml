@@ -35,6 +35,7 @@ metrics.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 schnellru = "0.2"
+cfg-if = "1.0.0"
 
 [dev-dependencies]
 # reth
@@ -49,3 +50,12 @@ reth-revm = { path = "../../revm" }
 reth-downloaders = { path = "../../net/downloaders" }
 
 assert_matches.workspace = true
+
+[features]
+optimism = [
+  "reth-consensus-common/optimism",
+  "reth-primitives/optimism",
+  "reth-interfaces/optimism",
+  "reth-provider/optimism",
+  "reth-rpc-types/optimism",
+]

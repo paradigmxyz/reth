@@ -46,6 +46,8 @@ impl NetworkHandle {
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
+        tx_gossip_disabled: bool,
+        #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -58,6 +60,9 @@ impl NetworkHandle {
             is_syncing: Arc::new(AtomicBool::new(false)),
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -171,6 +176,11 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::Shutdown(tx));
         rx.await
     }
+
+    /// Whether tx gossip is disabled
+    pub fn tx_gossip_disabled(&self) -> bool {
+        self.inner.tx_gossip_disabled
+    }
 }
 
 // === API Implementations ===
@@ -264,6 +274,11 @@ impl NetworkInfo for NetworkHandle {
     fn is_initially_syncing(&self) -> bool {
         SyncStateProvider::is_initially_syncing(self)
     }
+
+    #[cfg(feature = "optimism")]
+    fn sequencer_endpoint(&self) -> Option<&str> {
+        self.inner.sequencer_endpoint.as_deref()
+    }
 }
 
 impl SyncStateProvider for NetworkHandle {
@@ -317,6 +332,11 @@ struct NetworkInner {
     initial_sync_done: Arc<AtomicBool>,
     /// The chain id
     chain_id: Arc<AtomicU64>,
+    /// Whether to disable transaction gossip
+    tx_gossip_disabled: bool,
+    /// The sequencer HTTP Endpoint
+    #[cfg(feature = "optimism")]
+    sequencer_endpoint: Option<String>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).

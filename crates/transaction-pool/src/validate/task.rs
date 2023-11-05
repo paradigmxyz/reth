@@ -8,6 +8,7 @@ use crate::{
 };
 use futures_util::{lock::Mutex, StreamExt};
 use reth_primitives::{ChainSpec, SealedBlock};
+use reth_provider::BlockReaderIdExt;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -91,7 +92,10 @@ impl TransactionValidationTaskExecutor<()> {
     }
 }
 
-impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>> {
+impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
+where
+    Client: BlockReaderIdExt,
+{
     /// Creates a new instance for the given [ChainSpec]
     ///
     /// This will spawn a single validation tasks that performs the actual validation.

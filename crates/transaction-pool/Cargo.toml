@@ -24,6 +24,7 @@ reth-interfaces.workspace = true
 reth-tasks.workspace = true
 revm.workspace = true
 alloy-rlp.workspace = true
+reth-revm = { path = "../revm", optional = true }
 
 # async/futures
 async-trait.workspace = true
@@ -64,6 +65,13 @@ default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
 arbitrary = ["proptest", "reth-primitives/arbitrary"]
+optimism = [
+    "dep:reth-revm",
+    "reth-primitives/optimism",
+    "reth-provider/test-utils",
+    "reth-provider/optimism",
+    "revm/optimism"
+]
 
 [[bench]]
 name = "reorder"

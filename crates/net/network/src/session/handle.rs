@@ -190,7 +190,7 @@ pub enum PendingSessionEvent {
         /// The error that caused the disconnect
         error: Option<EthStreamError>,
     },
-    /// Thrown when unable to establish a [`TcpStream`].
+    /// Thrown when unable to establish a [`TcpStream`](tokio::net::TcpStream).
     OutgoingConnectionError {
         /// The remote node's socket address
         remote_addr: SocketAddr,

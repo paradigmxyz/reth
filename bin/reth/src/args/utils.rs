@@ -12,6 +12,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "optimism")]
+use reth_primitives::{BASE_GOERLI, BASE_MAINNET};
+
 /// Helper to parse a [Duration] from seconds
 pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;
@@ -27,6 +30,10 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         "sepolia" => SEPOLIA.clone(),
         "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
+        #[cfg(feature = "optimism")]
+        "base-goerli" => BASE_GOERLI.clone(),
+        #[cfg(feature = "optimism")]
+        "base" => BASE_MAINNET.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?
@@ -46,6 +53,10 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "sepolia" => SEPOLIA.clone(),
         "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
+        #[cfg(feature = "optimism")]
+        "base-goerli" => BASE_GOERLI.clone(),
+        #[cfg(feature = "optimism")]
+        "base" => BASE_MAINNET.clone(),
         _ => {
             // try to read json from path first
             let mut raw =
@@ -155,6 +166,15 @@ mod tests {
     };
     use secp256k1::rand::thread_rng;
     use std::collections::HashMap;
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn parse_optimism_chain_spec() {
+        for chain in ["base-goerli", "base"] {
+            chain_spec_value_parser(chain).unwrap();
+            genesis_value_parser(chain).unwrap();
+        }
+    }
 
     #[test]
     fn parse_known_chain_spec() {

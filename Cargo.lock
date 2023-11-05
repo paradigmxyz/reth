@@ -5705,6 +5705,7 @@ name = "reth-beacon-consensus"
 version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
+ "cfg-if",
  "futures",
  "metrics",
  "reth-blockchain-tree",
@@ -5789,6 +5790,7 @@ name = "reth-consensus-common"
 version = "0.1.0-alpha.10"
 dependencies = [
  "assert_matches",
+ "cfg-if",
  "mockall",
  "reth-interfaces",
  "reth-primitives",
@@ -6232,7 +6234,6 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-codecs",
- "reth-primitives",
  "reth-rpc-types",
  "revm",
  "revm-primitives",
@@ -6354,6 +6355,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "rayon",
+ "reqwest",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-metrics",
@@ -6609,6 +6611,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-tasks",
  "revm",
  "serde",

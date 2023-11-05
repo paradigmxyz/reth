@@ -33,3 +33,12 @@ metrics.workspace = true
 
 ## misc
 tracing.workspace = true
+
+[features]
+optimism = [
+  "reth-primitives/optimism",
+  "reth-revm/optimism",
+  "reth-transaction-pool/optimism",
+  "reth-provider/optimism",
+  "reth-payload-builder/optimism"
+]

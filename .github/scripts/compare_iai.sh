@@ -6,6 +6,6 @@
 
 set -eo pipefail
 
-cargo bench --package reth-db --bench iai --manifest-path pr/Cargo.toml \
+cargo bench -p reth-db --bench iai -F test-utils \
   | tee /dev/tty \
   | awk '/((L1)|(Ins)|(RAM)|(Est))+.*\(\+[1-9]+[0-9]*\..*%\)/{f=1} END{exit f}'

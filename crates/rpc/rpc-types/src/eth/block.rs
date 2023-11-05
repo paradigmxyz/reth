@@ -334,7 +334,7 @@ impl FromStr for BlockNumberOrTag {
                     let number = u64::from_str_radix(hex_val, 16);
                     BlockNumberOrTag::Number(number?)
                 } else {
-                    return Err(HexStringMissingPrefixError::default().into());
+                    return Err(HexStringMissingPrefixError::default().into())
                 }
             }
         };
@@ -486,25 +486,25 @@ impl<'de> Deserialize<'de> for BlockId {
                     match key.as_str() {
                         "blockNumber" => {
                             if number.is_some() || block_hash.is_some() {
-                                return Err(serde::de::Error::duplicate_field("blockNumber"));
+                                return Err(serde::de::Error::duplicate_field("blockNumber"))
                             }
                             if require_canonical.is_some() {
                                 return Err(serde::de::Error::custom(
                                     "Non-valid require_canonical field",
-                                ));
+                                ))
                             }
                             number = Some(map.next_value::<BlockNumberOrTag>()?)
                         }
                         "blockHash" => {
                             if number.is_some() || block_hash.is_some() {
-                                return Err(serde::de::Error::duplicate_field("blockHash"));
+                                return Err(serde::de::Error::duplicate_field("blockHash"))
                             }
 
                             block_hash = Some(map.next_value::<B256>()?);
                         }
                         "requireCanonical" => {
                             if number.is_some() || require_canonical.is_some() {
-                                return Err(serde::de::Error::duplicate_field("requireCanonical"));
+                                return Err(serde::de::Error::duplicate_field("requireCanonical"))
                             }
 
                             require_canonical = Some(map.next_value::<bool>()?)

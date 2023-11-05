@@ -171,6 +171,8 @@ impl PendingBlockEnv {
                 success: result.is_success(),
                 cumulative_gas_used,
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
             }));
 
             // append transaction to the list of executed transactions
