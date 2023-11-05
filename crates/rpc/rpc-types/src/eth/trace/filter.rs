@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// Trace filter.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceFilter {
@@ -38,20 +38,6 @@ impl TraceFilter {
         let from_addresses = self.from_address.iter().cloned().collect();
         let to_addresses = self.to_address.iter().cloned().collect();
         TraceFilterMatcher { mode: self.mode, from_addresses, to_addresses }
-    }
-}
-
-impl Default for TraceFilter {
-    fn default() -> Self {
-        TraceFilter {
-            from_block: None,
-            to_block: None,
-            from_address: Vec::new(),
-            to_address: Vec::new(),
-            mode: TraceFilterMode::Union,
-            after: None,
-            count: None,
-        }
     }
 }
 
