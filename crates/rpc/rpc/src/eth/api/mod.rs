@@ -139,6 +139,8 @@ where
             task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
+            #[cfg(feature = "optimism")]
+            http_client: reqwest::Client::new(),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -446,4 +448,7 @@ struct EthApiInner<Provider, Pool, Network> {
     pending_block: Mutex<Option<PendingBlock>>,
     /// A pool dedicated to blocking tasks.
     blocking_task_pool: BlockingTaskPool,
+    /// An http client for communicating with sequencers.
+    #[cfg(feature = "optimism")]
+    http_client: reqwest::Client,
 }
