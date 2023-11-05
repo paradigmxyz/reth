@@ -24,6 +24,7 @@ mod chain;
 mod compression;
 pub mod constants;
 pub mod eip4844;
+mod error;
 mod forkid;
 pub mod fs;
 mod genesis;
@@ -64,8 +65,7 @@ pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-#[cfg(feature = "c-kzg")]
-pub use eip4844::{calculate_excess_blob_gas, kzg_to_versioned_hash};
+pub use error::{GotExpected, GotExpectedBoxed};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
