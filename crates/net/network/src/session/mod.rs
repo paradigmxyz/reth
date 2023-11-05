@@ -467,7 +467,7 @@ impl SessionManager {
 
                 let client_version = Arc::new(client_id);
                 let handle = ActiveSessionHandle {
-                    status,
+                    status: status.clone(),
                     direction,
                     session_id,
                     remote_id: peer_id,
@@ -601,7 +601,7 @@ pub enum SessionEvent {
         /// negotiated eth version
         version: EthVersion,
         /// The Status message the peer sent during the `eth` handshake
-        status: Status,
+        status: Arc<Status>,
         /// The channel for sending messages to the peer with the session
         messages: PeerRequestSender,
         /// The direction of the session, either `Inbound` or `Outgoing`
@@ -917,8 +917,8 @@ async fn authenticate_stream(
         local_addr,
         peer_id: their_hello.id,
         capabilities: Arc::new(Capabilities::from(their_hello.capabilities)),
-        status: their_status,
-        conn: eth_stream,
+        status: Arc::new(their_status),
+        conn: Box::new(eth_stream),
         direction,
         client_id: their_hello.client_version,
     }

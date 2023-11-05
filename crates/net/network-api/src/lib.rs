@@ -126,7 +126,7 @@ pub struct PeerInfo {
     /// The negotiated eth version.
     pub eth_version: EthVersion,
     /// The Status message the peer sent for the `eth` handshake
-    pub status: Status,
+    pub status: Arc<Status>,
 }
 
 /// The direction of the connection.

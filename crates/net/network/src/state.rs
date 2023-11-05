@@ -130,7 +130,7 @@ where
         &mut self,
         peer: PeerId,
         capabilities: Arc<Capabilities>,
-        status: Status,
+        status: Arc<Status>,
         request_tx: PeerRequestSender,
         timeout: Arc<AtomicU64>,
     ) {
@@ -527,7 +527,7 @@ mod tests {
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
-        BlockBodies, EthVersion, Status,
+        BlockBodies, EthVersion,
     };
     use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_primitives::{BlockBody, Header, PeerId, B256};
@@ -572,7 +572,7 @@ mod tests {
         state.on_session_activated(
             peer_id,
             capabilities(),
-            Status::default(),
+            Arc::default(),
             peer_tx,
             Arc::new(AtomicU64::new(1)),
         );

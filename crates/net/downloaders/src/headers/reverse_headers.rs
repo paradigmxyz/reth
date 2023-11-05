@@ -18,7 +18,8 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, B256,
+    BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, PeerId, SealedHeader,
+    B256,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -215,17 +216,19 @@ where
                 Err(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
-                    error: DownloadError::InvalidTip { received: header.hash(), expected: hash },
+                    error: DownloadError::InvalidTip(
+                        GotExpected { got: header.hash(), expected: hash }.into(),
+                    ),
                 })
             }
             SyncTargetBlock::Number(number) if header.number != number => {
                 Err(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
-                    error: DownloadError::InvalidTipNumber {
-                        received: header.number,
+                    error: DownloadError::InvalidTipNumber(GotExpected {
+                        got: header.number,
                         expected: number,
-                    },
+                    }),
                 })
             }
             _ => Ok(()),
@@ -382,10 +385,9 @@ where
                             return Err(HeadersResponseError {
                                 request,
                                 peer_id: Some(peer_id),
-                                error: DownloadError::InvalidTip {
-                                    received: target.hash(),
-                                    expected: hash,
-                                },
+                                error: DownloadError::InvalidTip(
+                                    GotExpected { got: target.hash(), expected: hash }.into(),
+                                ),
                             }
                             .into())
                         }
@@ -395,10 +397,10 @@ where
                             return Err(HeadersResponseError {
                                 request,
                                 peer_id: Some(peer_id),
-                                error: DownloadError::InvalidTipNumber {
-                                    received: target.number,
+                                error: DownloadError::InvalidTipNumber(GotExpected {
+                                    got: target.number,
                                     expected: number,
-                                },
+                                }),
                             }
                             .into())
                         }
@@ -408,10 +410,9 @@ where
                             return Err(HeadersResponseError {
                                 request,
                                 peer_id: Some(peer_id),
-                                error: DownloadError::InvalidTip {
-                                    received: target.hash(),
-                                    expected: hash,
-                                },
+                                error: DownloadError::InvalidTip(
+                                    GotExpected { got: target.hash(), expected: hash }.into(),
+                                ),
                             }
                             .into())
                         }
@@ -469,10 +470,10 @@ where
                 if (headers.len() as u64) != request.limit {
                     return Err(HeadersResponseError {
                         peer_id: Some(peer_id),
-                        error: DownloadError::HeadersResponseTooShort {
-                            received: headers.len() as u64,
+                        error: DownloadError::HeadersResponseTooShort(GotExpected {
+                            got: headers.len() as u64,
                             expected: request.limit,
-                        },
+                        }),
                         request,
                     }
                     .into())
@@ -490,10 +491,10 @@ where
                     return Err(HeadersResponseError {
                         request,
                         peer_id: Some(peer_id),
-                        error: DownloadError::HeadersResponseStartBlockMismatch {
-                            received: highest.number,
+                        error: DownloadError::HeadersResponseStartBlockMismatch(GotExpected {
+                            got: highest.number,
                             expected: requested_block_number,
-                        },
+                        }),
                     }
                     .into())
                 }

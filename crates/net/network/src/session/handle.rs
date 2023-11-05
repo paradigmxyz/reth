@@ -1,24 +1,22 @@
-//! Session handles
+//! Session handles.
+
+use super::active::NetworkConnection;
 use crate::{
     message::PeerMessage,
     session::{Direction, SessionId},
 };
-use reth_ecies::{stream::ECIESStream, ECIESError};
+use reth_ecies::ECIESError;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthStream, EthVersion, P2PStream, Status,
+    DisconnectReason, EthVersion, Status,
 };
-use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_network_api::PeerInfo;
 use reth_primitives::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
-use tokio::{
-    net::TcpStream,
-    sync::{
-        mpsc::{self, error::SendError},
-        oneshot,
-    },
+use tokio::sync::{
+    mpsc::{self, error::SendError},
+    oneshot,
 };
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
@@ -76,7 +74,7 @@ pub struct ActiveSessionHandle {
     /// The local address of the connection.
     pub(crate) local_addr: Option<SocketAddr>,
     /// The Status message the peer sent for the `eth` handshake
-    pub(crate) status: Status,
+    pub(crate) status: Arc<Status>,
 }
 
 // === impl ActiveSessionHandle ===
@@ -147,7 +145,7 @@ impl ActiveSessionHandle {
             capabilities: self.capabilities.clone(),
             client_version: self.client_version.clone(),
             eth_version: self.version,
-            status: self.status,
+            status: self.status.clone(),
         }
     }
 }
@@ -172,10 +170,10 @@ pub enum PendingSessionEvent {
         /// All capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// The Status message the peer sent for the `eth` handshake
-        status: Status,
+        status: Arc<Status>,
         /// The actual connection stream which can be used to send and receive `eth` protocol
         /// messages
-        conn: EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>,
+        conn: NetworkConnection,
         /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
         /// The remote node's user agent, usually containing the client name and version
@@ -192,7 +190,6 @@ pub enum PendingSessionEvent {
         /// The error that caused the disconnect
         error: Option<EthStreamError>,
     },
-
     /// Thrown when unable to establish a [`TcpStream`].
     OutgoingConnectionError {
         /// The remote node's socket address

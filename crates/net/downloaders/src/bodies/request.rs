@@ -8,7 +8,9 @@ use reth_interfaces::{
         priority::Priority,
     },
 };
-use reth_primitives::{BlockBody, PeerId, SealedBlock, SealedHeader, WithPeerId, B256};
+use reth_primitives::{
+    BlockBody, GotExpected, PeerId, SealedBlock, SealedHeader, WithPeerId, B256,
+};
 use std::{
     collections::VecDeque,
     mem,
@@ -133,10 +135,10 @@ where
         }
 
         if response_len > request_len {
-            return Err(DownloadError::TooManyBodies {
+            return Err(DownloadError::TooManyBodies(GotExpected {
+                got: response_len,
                 expected: request_len,
-                received: response_len,
-            })
+            }))
         }
 
         // Buffer block responses

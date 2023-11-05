@@ -1,9 +1,11 @@
-//! Error handling for [`P2PStream`](crate::P2PStream)
-use std::io;
+//! Error handling for [`P2PStream`](crate::P2PStream).
 
 use crate::{
     capability::SharedCapabilityError, disconnect::UnknownDisconnectReason, DisconnectReason,
+    ProtocolVersion,
 };
+use reth_primitives::GotExpected;
+use std::io;
 
 /// Errors when sending/receiving p2p messages. These should result in kicking the peer.
 #[derive(thiserror::Error, Debug)]
@@ -29,8 +31,8 @@ pub enum P2PStreamError {
     PingTimeout,
     #[error(transparent)]
     ParseVersionError(#[from] SharedCapabilityError),
-    #[error("mismatched protocol version in Hello message. expected: {expected:?}, got: {got:?}")]
-    MismatchedProtocolVersion { expected: u8, got: u8 },
+    #[error("mismatched protocol version in Hello message: {0}")]
+    MismatchedProtocolVersion(GotExpected<ProtocolVersion>),
     #[error("started ping task before the handshake completed")]
     PingBeforeHandshake,
     #[error("too many messages buffered before sending")]

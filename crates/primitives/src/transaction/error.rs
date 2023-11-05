@@ -1,4 +1,4 @@
-use crate::U256;
+use crate::{GotExpectedBoxed, U256};
 
 /// Represents error variants that can happen when trying to validate a
 /// [Transaction](crate::Transaction)
@@ -6,14 +6,9 @@ use crate::U256;
 pub enum InvalidTransactionError {
     /// The sender does not have enough funds to cover the transaction fees
     #[error(
-        "sender does not have enough funds ({available_funds}) to cover transaction fees: {cost}"
+        "sender does not have enough funds ({}) to cover transaction fees: {}", _0.got, _0.expected
     )]
-    InsufficientFunds {
-        /// The cost of the transaction.
-        cost: U256,
-        /// The available funds of the sender.
-        available_funds: U256,
-    },
+    InsufficientFunds(GotExpectedBoxed<U256>),
     /// The nonce is lower than the account's nonce, or there is a nonce gap present.
     ///
     /// This is a consensus error.

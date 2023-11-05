@@ -13,11 +13,11 @@ use reth_codecs::derive_arbitrary;
 use reth_metrics::metrics::counter;
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    hex,
+    hex, GotExpected,
 };
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
-    io,
+    fmt, io,
     pin::Pin,
     task::{ready, Context, Poll},
     time::Duration,
@@ -151,10 +151,10 @@ where
         if (hello.protocol_version as u8) != their_hello.protocol_version as u8 {
             // send a disconnect message notifying the peer of the protocol version mismatch
             self.send_disconnect(DisconnectReason::IncompatibleP2PProtocolVersion).await?;
-            return Err(P2PStreamError::MismatchedProtocolVersion {
-                expected: hello.protocol_version as u8,
-                got: their_hello.protocol_version as u8,
-            })
+            return Err(P2PStreamError::MismatchedProtocolVersion(GotExpected {
+                got: their_hello.protocol_version,
+                expected: hello.protocol_version,
+            }))
         }
 
         // determine shared capabilities (currently returns only one capability)
@@ -823,6 +823,12 @@ pub enum ProtocolVersion {
     V5 = 5,
 }
 
+impl fmt::Display for ProtocolVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "v{}", *self as u8)
+    }
+}
+
 impl Encodable for ProtocolVersion {
     fn encode(&self, out: &mut dyn BufMut) {
         (*self as u8).encode(out)
@@ -970,9 +976,9 @@ mod tests {
                 Ok((_, hello)) => {
                     panic!("expected handshake to fail, instead got a successful Hello: {hello:?}")
                 }
-                Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
-                    assert_eq!(expected, server_hello.protocol_version as u8);
+                Err(P2PStreamError::MismatchedProtocolVersion(GotExpected { got, expected })) => {
                     assert_ne!(expected, got);
+                    assert_eq!(expected, server_hello.protocol_version);
                 }
                 Err(other_err) => {
                     panic!("expected mismatched protocol version error, got {other_err:?}")
@@ -993,9 +999,9 @@ mod tests {
             Ok((_, hello)) => {
                 panic!("expected handshake to fail, instead got a successful Hello: {hello:?}")
             }
-            Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
-                assert_eq!(expected, client_hello.protocol_version as u8);
+            Err(P2PStreamError::MismatchedProtocolVersion(GotExpected { got, expected })) => {
                 assert_ne!(expected, got);
+                assert_eq!(expected, client_hello.protocol_version);
             }
             Err(other_err) => {
                 panic!("expected mismatched protocol version error, got {other_err:?}")

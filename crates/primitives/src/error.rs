@@ -38,6 +38,8 @@ impl<T> GotExpected<T> {
 /// A pair of values, one of which is expected and one of which is actual.
 ///
 /// Same as [`GotExpected`], but [`Box`]ed for smaller size.
+///
+/// Prefer instantiating using [`GotExpected`], and then using `.into()` to convert to this type.
 #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GotExpectedBoxed<T>(pub Box<GotExpected<T>>);
 

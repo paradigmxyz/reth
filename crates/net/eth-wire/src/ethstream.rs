@@ -9,7 +9,7 @@ use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    ForkFilter,
+    ForkFilter, GotExpected,
 };
 use std::{
     pin::Pin,
@@ -102,28 +102,27 @@ where
                 );
                 if status.genesis != resp.genesis {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-                    return Err(EthHandshakeError::MismatchedGenesis {
-                        expected: status.genesis,
-                        got: resp.genesis,
-                    }
+                    return Err(EthHandshakeError::MismatchedGenesis(
+                        GotExpected { expected: status.genesis, got: resp.genesis }.into(),
+                    )
                     .into())
                 }
 
                 if status.version != resp.version {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-                    return Err(EthHandshakeError::MismatchedProtocolVersion {
-                        expected: status.version,
+                    return Err(EthHandshakeError::MismatchedProtocolVersion(GotExpected {
                         got: resp.version,
-                    }
+                        expected: status.version,
+                    })
                     .into())
                 }
 
                 if status.chain != resp.chain {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-                    return Err(EthHandshakeError::MismatchedChain {
-                        expected: status.chain,
+                    return Err(EthHandshakeError::MismatchedChain(GotExpected {
                         got: resp.chain,
-                    }
+                        expected: status.chain,
+                    })
                     .into())
                 }
 
@@ -132,8 +131,8 @@ where
                 if status.total_difficulty.bit_len() > 100 {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
                     return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
-                        maximum: 100,
                         got: status.total_difficulty.bit_len(),
+                        maximum: 100,
                     }
                     .into())
                 }
@@ -455,7 +454,7 @@ mod tests {
             assert!(matches!(
                 handshake_res,
                 Err(EthStreamError::EthHandshakeError(
-                    EthHandshakeError::TotalDifficultyBitLenTooLarge { maximum: 100, got: 101 }
+                    EthHandshakeError::TotalDifficultyBitLenTooLarge { got: 101, maximum: 100 }
                 ))
             ));
         });
@@ -470,7 +469,7 @@ mod tests {
         assert!(matches!(
             handshake_res,
             Err(EthStreamError::EthHandshakeError(
-                EthHandshakeError::TotalDifficultyBitLenTooLarge { maximum: 100, got: 101 }
+                EthHandshakeError::TotalDifficultyBitLenTooLarge { got: 101, maximum: 100 }
             ))
         ));
 
