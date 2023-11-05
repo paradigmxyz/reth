@@ -59,7 +59,6 @@ mod metrics;
 
 /// Ethereum payload builder
 #[derive(Debug, Clone, Default)]
-#[non_exhaustive]
 pub struct EthereumPayloadBuilder;
 
 #[cfg(feature = "optimism")]
