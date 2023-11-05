@@ -72,7 +72,15 @@ impl Compact for TxType {
             TxType::Legacy => 0,
             TxType::EIP2930 => 1,
             TxType::EIP1559 => 2,
-            _ => {
+            TxType::EIP4844 => {
+                // Write the full transaction type to the buffer when encoding > 3.
+                // This allows compat decoding the [TyType] from a single byte as
+                // opposed to 2 bits for the backwards-compatible encoding.
+                buf.put_u8(self as u8);
+                3
+            }
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => {
                 buf.put_u8(self as u8);
                 3
             }
