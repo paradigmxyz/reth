@@ -56,7 +56,6 @@ macro_rules! set_value {
             #[cfg(feature = "optimism")]
             MockTransaction::Deposit(TxDeposit { ref mut $field, .. }) => {
                 *field = new_value;
-                //panic!("not implemented")
             }
         }
     };
@@ -72,7 +71,6 @@ macro_rules! get_value {
             MockTransaction::Eip2930 { $field, .. } => $field,
             #[cfg(feature = "optimism")]
             MockTransaction::Deposit(TxDeposit { $field, .. }) => $field,
-            //panic!("not implemented")
         }
     };
 }
