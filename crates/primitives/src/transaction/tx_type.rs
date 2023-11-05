@@ -96,14 +96,16 @@ impl Compact for TxType {
                 0 => TxType::Legacy,
                 1 => TxType::EIP2930,
                 2 => TxType::EIP1559,
-                _ => {
-                    let identifier = buf.get_u8() as usize;
-                    match identifier {
+                3 => {
+                    let extended_identifier = buf.get_u8();
+                    match extended_identifier {
+                        EIP4844_TX_TYPE_ID => TxType::EIP4844,
                         #[cfg(feature = "optimism")]
-                        126 => TxType::DEPOSIT,
-                        _ => TxType::EIP4844,
+                        DEPOSIT_TX_TYPE_ID => TxType::DEPOSIT,
+                        _ => panic!("Unsupported TxType identifier: {}", extended_identifier),
                     }
                 }
+                _ => panic!("Unknown identifier for TxType: {}", identifier),
             },
             buf,
         )
