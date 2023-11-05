@@ -33,19 +33,10 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@nextest
-      - name: Set binary value
-        id: binary
-        run: |
-          if [[ "${{ matrix.network }}" == "ethereum" ]]; then
-            echo "binary=reth" >> $GITHUB_OUTPUT
-          else
-            echo "binary=op-reth" >> $GITHUB_OUTPUT
-          fi
       - name: Run tests
         run: |
           cargo nextest run \
             --locked --features "${{ matrix.network }}" \
-            --bin ${{ steps.binary.outputs.binary }} \
             --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/2 \
             -E "kind(lib) | kind(bin) | kind(proc-macro)"
