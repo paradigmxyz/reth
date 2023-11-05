@@ -596,7 +596,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip4844 { input, .. } => input,
             MockTransaction::Eip2930 { input, .. } => input,
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit { input, .. } => input,
+            MockTransaction::Deposit { .. } => &[],
         }
     }
 
