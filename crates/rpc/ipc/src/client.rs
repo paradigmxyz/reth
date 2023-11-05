@@ -90,12 +90,11 @@ impl IpcTransportClientBuilder {
     /// Try to establish the connection.
     ///
     /// ```
-    /// use jsonrpsee::rpc_params;
+    /// use jsonrpsee::{core::client::ClientT, rpc_params};
     /// use reth_ipc::client::IpcClientBuilder;
-    /// use jsonrpsee::core::client::ClientT;
     /// # async fn run_client() -> Result<(), Box<dyn std::error::Error +  Send + Sync>> {
-    ///     let client = IpcClientBuilder::default().build("/tmp/my-uds").await?;
-    ///     let response: String = client.request("say_hello", rpc_params![]).await?;
+    /// let client = IpcClientBuilder::default().build("/tmp/my-uds").await?;
+    /// let response: String = client.request("say_hello", rpc_params![]).await?;
     /// #   Ok(())
     /// # }
     /// ```

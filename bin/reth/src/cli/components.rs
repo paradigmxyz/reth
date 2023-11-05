@@ -153,11 +153,10 @@ where
 /// # Example
 ///
 /// ```rust
-/// use reth::cli::components::RethRpcServerHandles;
-/// use reth::rpc::api::EthApiClient;
+/// use reth::{cli::components::RethRpcServerHandles, rpc::api::EthApiClient};
 /// # async fn t(handles: RethRpcServerHandles) {
-///    let client = handles.rpc.http_client().expect("http server not started");
-///    let block_number = client.block_number().await.unwrap();
+/// let client = handles.rpc.http_client().expect("http server not started");
+/// let block_number = client.block_number().await.unwrap();
 /// # }
 /// ```
 #[derive(Debug, Clone)]
