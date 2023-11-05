@@ -831,8 +831,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 self.network.port + self.instance - 1,
             )));
 
-        // Expose an http sequencer endpoint if configured and disables tx gossip.
-        // This prevents tx gossip from leaking into the network.
+        // When `sequencer_endpoint` is configured, the node will forward all transactions to a
+        // Sequencer node for execution and inclusion on L1, and disable its own txpool
+        // gossip to prevent other parties in the network from learning about them.
         #[cfg(feature = "optimism")]
         let cfg_builder = cfg_builder
             .sequencer_endpoint(self.rollup.sequencer_http.clone())

@@ -60,6 +60,26 @@ pub const EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
 /// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
 pub const EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 2;
 
+/// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
+/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
+#[cfg(feature = "optimism")]
+pub const OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 50;
+
+/// Baes fee max change denominator for Optimism Mainnet as defined in the Optimism
+/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
+#[cfg(feature = "optimism")]
+pub const OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 6;
+
+/// Base fee max change denominator for Optimism Goerli as defined in the Optimism
+/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
+#[cfg(feature = "optimism")]
+pub const OP_GOERLI_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 50;
+
+/// Baes fee max change denominator for Optimism Goerli as defined in the Optimism
+/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
+#[cfg(feature = "optimism")]
+pub const OP_GOERLI_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 10;
+
 /// Multiplier for converting gwei to wei.
 pub const GWEI_TO_WEI: u64 = 1_000_000_000;
 
