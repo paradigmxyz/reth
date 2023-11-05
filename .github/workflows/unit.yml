@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   test:
-    name: tests (${{ matrix.network }} | ${{ matrix.partition }}/${{ strategy.job-total }})
+    name: test / ${{ matrix.network }} (${{ matrix.partition }}/2)
     runs-on:
       group: Reth
     strategy:
@@ -47,7 +47,7 @@ jobs:
             --locked --features "${{ matrix.network }}" \
             --bin ${{ steps.binary.outputs.binary }} \
             --workspace --exclude examples --exclude ef-tests \
-            --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
+            --partition hash:${{ matrix.partition }}/2 \
             -E "kind(lib) | kind(bin) | kind(proc-macro)"
 
   state:
