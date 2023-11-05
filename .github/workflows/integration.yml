@@ -39,14 +39,14 @@ jobs:
         id: binary
         run: |
           if [[ "${{ matrix.network }}" == "ethereum" ]]; then
-            echo "::set-output name=binary::reth"
+            echo "binary=reth" >> $GITHUB_STATE
           else
-            echo "::set-output name=binary::op-reth"
+            echo "binary=op-reth" >> $GITHUB_STATE
           fi
       - name: Run tests
         run: |
           cargo nextest run \
-            --locked --features "jemalloc-prof,${{ matrix.network }}" \
+            --locked --features "${{ matrix.network }}" \
             --bin ${{ steps.binary.outputs.binary }} \
             --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
