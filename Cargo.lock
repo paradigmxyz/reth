@@ -7833,25 +7833,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "testing"
-version = "0.1.0-alpha.10"
-dependencies = [
- "reth-basic-payload-builder",
- "reth-beacon-consensus",
- "reth-blockchain-tree",
- "reth-db",
- "reth-interfaces",
- "reth-payload-builder",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "reth-rpc-types",
- "reth-transaction-pool",
- "revm",
- "tokio",
-]
-
-[[package]]
 name = "thin-vec"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

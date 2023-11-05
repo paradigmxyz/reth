@@ -48,7 +48,6 @@ members = [
     "crates/tokio-util",
     "examples",
     "examples/additional-rpc-namespace-in-cli",
-    "crates/testing",
     "examples/cli-extension-event-hooks",
     "examples/rpc-db",
     "examples/manual-p2p",
@@ -105,7 +104,6 @@ reth-transaction-pool = { path = "./crates/transaction-pool" }
 reth-tasks = { path = "./crates/tasks" }
 reth-network = { path = "./crates/net/network" }
 reth-network-api = { path = "./crates/net/network-api" }
-testing  =  {path  = "./crates/testing"}
 reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
 reth-discv4 = { path = "./crates/net/discv4" }
 reth-eth-wire = { path = "./crates/net/eth-wire" }

@@ -1,5 +1,5 @@
 [package]
-name = "testing"
+name = "reth-rpc-builder-test-utils"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
