@@ -54,8 +54,9 @@ macro_rules! set_value {
                 *$field = new_value;
             }
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => {
-                panic!("not implemented")
+            MockTransaction::Deposit(TxDeposit { ref mut $field, .. }) => {
+                *field = new_value;
+                //panic!("not implemented")
             }
         }
     };
@@ -70,9 +71,8 @@ macro_rules! get_value {
             MockTransaction::Eip4844 { $field, .. } => $field,
             MockTransaction::Eip2930 { $field, .. } => $field,
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => {
-                panic!("not implemented")
-            }
+            MockTransaction::Deposit(TxDeposit { $field, .. }) => $field,
+            //panic!("not implemented")
         }
     };
 }
@@ -308,9 +308,7 @@ impl MockTransaction {
             }
             MockTransaction::Eip2930 { gas_price, .. } => *gas_price = val,
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => {
-                panic!("not implemented")
-            }
+            MockTransaction::Deposit(_) => 0u128,
         }
         self
     }
@@ -340,9 +338,7 @@ impl MockTransaction {
                 *gas_price = val;
             }
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => {
-                panic!("not implemented")
-            }
+            MockTransaction::Deposit(_) => 0u128,
         }
         self
     }
@@ -354,7 +350,7 @@ impl MockTransaction {
             MockTransaction::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
             MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => panic!("not implemented"),
+            MockTransaction::Deposit(_) => 0u128,
         }
     }
 
@@ -598,7 +594,7 @@ impl PoolTransaction for MockTransaction {
             MockTransaction::Eip4844 { input, .. } => input,
             MockTransaction::Eip2930 { input, .. } => input,
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit { .. } => &[],
+            MockTransaction::Deposit { input, .. } => input,
         }
     }
 
