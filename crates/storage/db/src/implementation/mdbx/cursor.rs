@@ -267,7 +267,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
                             code: e.into(),
                             operation: DatabaseWriteOperation::CursorUpsert,
                             table_name: T::NAME,
-                            key: key.as_ref().to_vec(),
+                            key: key.into(),
                         }
                         .into()
                     })

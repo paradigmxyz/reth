@@ -232,6 +232,7 @@ impl Header {
     }
 
     /// Calculate a heuristic for the in-memory size of the [Header].
+    #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<B256>() + // parent hash
         mem::size_of::<B256>() + // ommers hash
