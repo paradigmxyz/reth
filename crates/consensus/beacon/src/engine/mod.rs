@@ -666,12 +666,40 @@ where
             Ok(outcome) => {
                 match outcome {
                     CanonicalOutcome::AlreadyCanonical { ref header } => {
-                        debug!(
-                            target: "consensus::engine",
-                            fcu_head_num=?header.number,
-                            current_head_num=?self.blockchain.canonical_tip().number,
-                            "Ignoring beacon update to old head"
-                        );
+                        // On Optimism, the proposers are allowed to reorg their own chain at will.
+                        cfg_if::cfg_if! {
+                            if #[cfg(feature = "optimism")] {
+                                if self.chain_spec().is_optimism() {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        fcu_head_num=?header.number,
+                                        current_head_num=?self.blockchain.canonical_tip().number,
+                                        "[Optimism] Allowing beacon reorg to old head"
+                                    );
+                                    let _ = self.update_head(header.clone());
+                                    self.listeners.notify(
+                                        BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                                            header.clone(),
+                                            elapsed,
+                                        ),
+                                    );
+                                } else {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        fcu_head_num=?header.number,
+                                        current_head_num=?self.blockchain.canonical_tip().number,
+                                        "Ignoring beacon update to old head"
+                                    );
+                                }
+                            } else {
+                                debug!(
+                                    target: "consensus::engine",
+                                    fcu_head_num=?header.number,
+                                    current_head_num=?self.blockchain.canonical_tip().number,
+                                    "Ignoring beacon update to old head"
+                                );
+                            }
+                        }
                     }
                     CanonicalOutcome::Committed { ref head } => {
                         debug!(
@@ -1045,27 +1073,30 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
-        let attributes = PayloadBuilderAttributes::new(state.head_block_hash, attrs);
+        match PayloadBuilderAttributes::try_new(state.head_block_hash, attrs) {
+            Ok(attributes) => {
+                // send the payload to the builder and return the receiver for the pending payload
+                // id, initiating payload job is handled asynchronously
+                let pending_payload_id = self.payload_builder.send_new_payload(attributes);
 
-        // send the payload to the builder and return the receiver for the pending payload id,
-        // initiating payload job is handled asynchronously
-        let pending_payload_id = self.payload_builder.send_new_payload(attributes);
-
-        // Client software MUST respond to this method call in the following way:
-        // {
-        //      payloadStatus: {
-        //          status: VALID,
-        //          latestValidHash: forkchoiceState.headBlockHash,
-        //          validationError: null
-        //      },
-        //      payloadId: buildProcessId
-        // }
-        //
-        // if the payload is deemed VALID and the build process has begun.
-        OnForkChoiceUpdated::updated_with_pending_payload_id(
-            PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
-            pending_payload_id,
-        )
+                // Client software MUST respond to this method call in the following way:
+                // {
+                //      payloadStatus: {
+                //          status: VALID,
+                //          latestValidHash: forkchoiceState.headBlockHash,
+                //          validationError: null
+                //      },
+                //      payloadId: buildProcessId
+                // }
+                //
+                // if the payload is deemed VALID and the build process has begun.
+                OnForkChoiceUpdated::updated_with_pending_payload_id(
+                    PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
+                    pending_payload_id,
+                )
+            }
+            Err(_) => OnForkChoiceUpdated::invalid_payload_attributes(),
+        }
     }
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,

@@ -186,6 +186,11 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[clap(flatten)]
     pub pruning: PruningArgs,
 
+    /// Rollup related arguments
+    #[cfg(feature = "optimism")]
+    #[clap(flatten)]
+    pub rollup: crate::args::RollupArgs,
+
     /// Additional cli arguments
     #[clap(flatten)]
     pub ext: Ext::Node,
@@ -209,6 +214,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            #[cfg(feature = "optimism")]
+            rollup,
             ..
         } = self;
         NodeCommand {
@@ -226,6 +233,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            #[cfg(feature = "optimism")]
+            rollup,
             ext,
         }
     }
@@ -540,6 +549,27 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         self.ext.on_node_started(&components)?;
 
+        // If `enable_genesis_walkback` is set to true, the rollup client will need to
+        // perform the derivation pipeline from genesis, validating the data dir.
+        // When set to false, set the finalized, safe, and unsafe head block hashes
+        // on the rollup client using a fork choice update. This prevents the rollup
+        // client from performing the derivation pipeline from genesis, and instead
+        // starts syncing from the current tip in the DB.
+        #[cfg(feature = "optimism")]
+        if self.chain.is_optimism() && !self.rollup.enable_genesis_walkback {
+            let client = _rpc_server_handles.auth.http_client();
+            reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
+                &client,
+                reth_rpc_types::engine::ForkchoiceState {
+                    head_block_hash: head.hash,
+                    safe_block_hash: head.hash,
+                    finalized_block_hash: head.hash,
+                },
+                None,
+            )
+            .await?;
+        }
+
         rx.await??;
 
         info!(target: "reth::cli", "Consensus engine has exited.");
@@ -785,7 +815,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         secret_key: SecretKey,
         default_peers_path: PathBuf,
     ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
-        self.network
+        let cfg_builder = self
+            .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
@@ -798,8 +829,17 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 self.network.addr,
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
-            )))
-            .build(ProviderFactory::new(db, self.chain.clone()))
+            )));
+
+        // When `sequencer_endpoint` is configured, the node will forward all transactions to a
+        // Sequencer node for execution and inclusion on L1, and disable its own txpool
+        // gossip to prevent other parties in the network from learning about them.
+        #[cfg(feature = "optimism")]
+        let cfg_builder = cfg_builder
+            .sequencer_endpoint(self.rollup.sequencer_http.clone())
+            .disable_tx_gossip(self.rollup.disable_txpool_gossip);
+
+        cfg_builder.build(ProviderFactory::new(db, self.chain.clone()))
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -33,7 +33,6 @@ mod integer_list;
 mod log;
 mod net;
 mod peer;
-mod precaution;
 pub mod proofs;
 mod prune;
 mod receipt;
@@ -59,6 +58,8 @@ pub use chain::{
     DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, GOERLI, HOLESKY, MAINNET,
     SEPOLIA,
 };
+#[cfg(feature = "optimism")]
+pub use chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
@@ -101,6 +102,8 @@ pub use transaction::{
     TxEip4844, TxHashOrNumber, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
+#[cfg(feature = "optimism")]
+pub use transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
 pub use withdrawal::Withdrawal;
 
 // Re-exports

@@ -18,12 +18,13 @@ concurrency:
 
 jobs:
   test:
-    name: test (${{ matrix.partition }}/${{ strategy.job-total }})
+    name: test (${{ matrix.network }} | ${{ matrix.partition }}/${{ strategy.job-total }})
     runs-on:
       group: Reth
     strategy:
       matrix:
         partition: [1, 2]
+        network: ["ethereum", "optimism"]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -34,10 +35,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Set binary value
+        id: binary
+        run: |
+          if [[ "${{ matrix.network }}" == "ethereum" ]]; then
+            echo "binary=reth" >> $GITHUB_OUTPUT
+          else
+            echo "binary=op-reth" >> $GITHUB_OUTPUT
+          fi
       - name: Run tests
         run: |
           cargo nextest run \
-            --locked --all-features --workspace --exclude examples --exclude ef-tests \
+            --locked --features "${{ matrix.network }}" \
+            --bin ${{ steps.binary.outputs.binary }} \
+            --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(test)'
 

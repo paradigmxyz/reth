@@ -56,3 +56,7 @@ rand.workspace = true
 
 [features]
 test-utils = ["alloy-rlp"]
+optimism = [
+  "reth-primitives/optimism",
+  "reth-interfaces/optimism"
+]

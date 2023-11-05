@@ -14,12 +14,15 @@ env:
 jobs:
   unused-dependencies:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        network: ["ethereum", "optimism"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@cargo-udeps
       - name: Check for unused dependencies
-        run: cargo udeps --all-features --all-targets
+        run: cargo udeps --features "jemalloc,${{ matrix.network }}"
       - uses: JasonEtco/create-an-issue@v2
         if: ${{ failure() }}
         env:
