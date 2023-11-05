@@ -260,11 +260,10 @@ where
     /// components of the network
     ///
     /// ```
+    /// use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+    /// use reth_primitives::mainnet_nodes;
     /// use reth_provider::test_utils::NoopProvider;
     /// use reth_transaction_pool::TransactionPool;
-    /// use reth_primitives::mainnet_nodes;
-    /// use reth_network::config::rng_secret_key;
-    /// use reth_network::{NetworkConfig, NetworkManager};
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {
     ///     // This block provider implementation is used for testing purposes.
     ///     let client = NoopProvider::default();

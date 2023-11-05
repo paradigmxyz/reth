@@ -41,9 +41,13 @@
 //! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
-//!     .add_stages(
-//!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, factory)
-//!     )
+//!     .add_stages(DefaultStages::new(
+//!         HeaderSyncMode::Tip(tip_rx),
+//!         consensus,
+//!         headers_downloader,
+//!         bodies_downloader,
+//!         factory,
+//!     ))
 //!     .build(db, MAINNET.clone());
 //! ```
 //!

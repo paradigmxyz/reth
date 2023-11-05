@@ -205,10 +205,8 @@ impl NetworkConfigBuilder {
     /// # use reth_eth_wire::HelloMessage;
     /// # use reth_network::NetworkConfigBuilder;
     /// # fn builder(builder: NetworkConfigBuilder) {
-    ///    let peer_id = builder.get_peer_id();
-    ///     builder.hello_message(
-    ///         HelloMessage::builder(peer_id).build()
-    /// );
+    /// let peer_id = builder.get_peer_id();
+    /// builder.hello_message(HelloMessage::builder(peer_id).build());
     /// # }
     /// ```
     pub fn hello_message(mut self, hello_message: HelloMessage) -> Self {

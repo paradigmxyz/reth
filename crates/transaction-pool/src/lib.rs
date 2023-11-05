@@ -279,18 +279,24 @@ where
     /// # Example
     ///
     /// ```
-    /// use reth_provider::StateProviderFactory;
     /// use reth_primitives::MAINNET;
+    /// use reth_provider::StateProviderFactory;
     /// use reth_tasks::TokioTaskExecutor;
-    /// use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
-    /// use reth_transaction_pool::blobstore::InMemoryBlobStore;
+    /// use reth_transaction_pool::{
+    ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
+    /// };
     /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static {
-    ///     let blob_store = InMemoryBlobStore::default();
-    ///     let pool = Pool::eth_pool(
-    ///         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
-    ///         blob_store,
-    ///         Default::default(),
-    ///     );
+    /// let blob_store = InMemoryBlobStore::default();
+    /// let pool = Pool::eth_pool(
+    ///     TransactionValidationTaskExecutor::eth(
+    ///         client,
+    ///         MAINNET.clone(),
+    ///         blob_store.clone(),
+    ///         TokioTaskExecutor::default(),
+    ///     ),
+    ///     blob_store,
+    ///     Default::default(),
+    /// );
     /// # }
     /// ```
     pub fn eth_pool(

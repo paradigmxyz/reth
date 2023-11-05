@@ -42,18 +42,16 @@ impl TaskDownloader {
     /// # Example
     ///
     /// ```
-    /// use std::sync::Arc;
-    /// use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-    /// use reth_downloaders::bodies::task::TaskDownloader;
-    /// use reth_interfaces::consensus::Consensus;
-    /// use reth_interfaces::p2p::bodies::client::BodiesClient;
     /// use reth_db::database::Database;
-    /// fn t<B: BodiesClient + 'static, DB: Database + 'static>(client: Arc<B>, consensus:Arc<dyn Consensus>, db: Arc<DB>) {
-    ///     let downloader = BodiesDownloaderBuilder::default().build(
-    ///         client,
-    ///         consensus,
-    ///         db
-    ///     );
+    /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
+    /// use reth_interfaces::{consensus::Consensus, p2p::bodies::client::BodiesClient};
+    /// use std::sync::Arc;
+    /// fn t<B: BodiesClient + 'static, DB: Database + 'static>(
+    ///     client: Arc<B>,
+    ///     consensus: Arc<dyn Consensus>,
+    ///     db: Arc<DB>,
+    /// ) {
+    ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, db);
     ///     let downloader = TaskDownloader::spawn(downloader);
     /// }
     /// ```
