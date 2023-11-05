@@ -33,10 +33,19 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@nextest
+      - name: Set binary value
+        id: binary
+        run: |
+          if [[ "${{ matrix.network }}" == "ethereum" ]]; then
+            echo "::set-output name=binary::reth"
+          else
+            echo "::set-output name=binary::op-reth"
+          fi
       - name: Run tests
         run: |
           cargo nextest run \
             --locked --features "jemalloc-prof,${{ matrix.network }}" \
+            --bin ${{ steps.binary.outputs.binary }} \
             --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E "kind(lib) | kind(bin) | kind(proc-macro)"
