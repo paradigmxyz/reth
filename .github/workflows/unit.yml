@@ -18,12 +18,13 @@ concurrency:
 
 jobs:
   test:
-    name: tests (${{ matrix.partition }}/${{ strategy.job-total }})
+    name: tests (${{ matrix.network }} | ${{ matrix.partition }}/${{ strategy.job-total }})
     runs-on:
       group: Reth
     strategy:
       matrix:
         partition: [1, 2]
+        network: ["ethereum", "optimism"]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -64,10 +65,13 @@ jobs:
       - run: cargo nextest run --release -p ef-tests --features ef-tests
 
   doc:
-    name: doc tests
+    name: doc tests (${{ matrix.network }})
     runs-on:
       group: Reth
     timeout-minutes: 30
+    strategy:
+      matrix:
+        network: ["ethereum", "optimism"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
