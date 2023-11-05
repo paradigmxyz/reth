@@ -46,7 +46,7 @@ async fn replay_transactions() {
     }
 }
 
-/// Tests the tracers filters on a local Ethereum node.
+/// Tests the tracers filters on a local Ethereum node
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
