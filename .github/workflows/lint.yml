@@ -1,3 +1,5 @@
+name: lint
+
 on:
   pull_request:
   merge_group:
@@ -7,14 +9,13 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-name: ci
 jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@clippy
         with:
           toolchain: nightly-2023-10-29
@@ -30,10 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-        with:
-          toolchain: nightly-2023-10-29
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -50,29 +49,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2023-10-29
           components: rustfmt
       - run: cargo fmt --all --check
 
-  grafana-lint:
-    name: grafana lint
+  grafana:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Check dashboard JSON with jq
         uses: sergeysova/jq-action@v2
         with:
           cmd: jq empty etc/grafana/dashboards/overview.json
 
   lint-success:
-    if: always()
     name: lint success
     runs-on: ubuntu-latest
-    needs: [clippy, docs, fmt, grafana-lint]
+    if: always()
+    needs: [clippy, docs, fmt, grafana]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
