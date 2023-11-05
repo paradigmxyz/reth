@@ -117,7 +117,7 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         #[allow(clippy::let_unit_value)]
         let payload_builder = ();
 
-        // Optimism's payload builder is impelmented on the OptimismPayloadBuilder type.
+        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
         let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder;
 
