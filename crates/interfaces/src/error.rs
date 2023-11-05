@@ -40,7 +40,6 @@ impl From<reth_nippy_jar::NippyJarError> for RethError {
 }
 
 // We don't want these types to be too large because they're used in a lot of places.
-//
 const _SIZE_ASSERTIONS: () = {
     // Main error.
     let _: [(); 64] = [(); std::mem::size_of::<RethError>()];

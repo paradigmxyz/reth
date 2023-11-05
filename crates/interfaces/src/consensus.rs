@@ -95,7 +95,7 @@ pub enum ConsensusError {
     BodyOmmersHashDiff(GotExpectedBoxed<B256>),
 
     /// Error when the state root in the block is different from the expected state root.
-    #[error("mismatched body state root: {0}")]
+    #[error("mismatched block state root: {0}")]
     BodyStateRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the transaction root in the block is different from the expected transaction
