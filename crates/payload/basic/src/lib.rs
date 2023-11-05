@@ -57,6 +57,9 @@ use tracing::{debug, trace};
 
 mod metrics;
 
+#[cfg(not(feature = "optimism"))]
+pub struct EthereumPayloadBuilder = ();
+
 #[cfg(feature = "optimism")]
 mod optimism;
 #[cfg(feature = "optimism")]
