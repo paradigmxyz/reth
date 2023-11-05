@@ -55,7 +55,7 @@ macro_rules! set_value {
             }
             #[cfg(feature = "optimism")]
             MockTransaction::Deposit(TxDeposit { ref mut $field, .. }) => {
-                *field = new_value;
+                *$field = new_value;
             }
         }
     };
