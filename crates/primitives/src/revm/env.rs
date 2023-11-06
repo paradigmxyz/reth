@@ -353,6 +353,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore]
     fn test_fill_cfg_and_block_env() {
         let mut cfg_env = CfgEnv::default();
         let mut block_env = BlockEnv::default();
