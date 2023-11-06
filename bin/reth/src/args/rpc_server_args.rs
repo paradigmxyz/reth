@@ -458,7 +458,7 @@ impl RethRpcConfig for RpcServerArgs {
     //     }
     // }
     ///
-    fn get_or_create_jwt_secret_from_path(path: &PathBuf) -> Result<JwtSecret, JwtError> {
+    fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtError> {
         if path.exists() {
             debug!(target: "reth::cli", ?path, "Reading JWT auth secret file");
             JwtSecret::from_file(path)
