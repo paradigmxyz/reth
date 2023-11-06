@@ -6226,7 +6226,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.3.0"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#47e867e7ecd2684c8c055242d33cd26002d2d1b8"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#60a0bb49e7cb2b307770eb965eebbe66a0273ff7"
 dependencies = [
  "alloc",
  "auto_impl",
@@ -6239,7 +6239,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.1.2"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#47e867e7ecd2684c8c055242d33cd26002d2d1b8"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#60a0bb49e7cb2b307770eb965eebbe66a0273ff7"
 dependencies = [
  "derive_more",
  "enumn",
@@ -6253,7 +6253,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.3"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#47e867e7ecd2684c8c055242d33cd26002d2d1b8"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#60a0bb49e7cb2b307770eb965eebbe66a0273ff7"
 dependencies = [
  "k256",
  "num",
@@ -6269,7 +6269,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.1.2"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#47e867e7ecd2684c8c055242d33cd26002d2d1b8"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#60a0bb49e7cb2b307770eb965eebbe66a0273ff7"
 dependencies = [
  "arbitrary",
  "auto_impl",
@@ -6284,7 +6284,6 @@ dependencies = [
  "primitive-types",
  "proptest",
  "proptest-derive",
- "revm-utils",
  "rlp",
  "ruint",
  "serde",
@@ -6294,8 +6293,9 @@ dependencies = [
 [[package]]
 name = "revm-utils"
 version = "0.1.0"
-source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#47e867e7ecd2684c8c055242d33cd26002d2d1b8"
+source = "git+https://github.com/megaeth-labs/revm?branch=andy/debug/performance-dashboard#60a0bb49e7cb2b307770eb965eebbe66a0273ff7"
 dependencies = [
+ "minstant",
  "serde",
  "serde_arrays",
  "serde_json",

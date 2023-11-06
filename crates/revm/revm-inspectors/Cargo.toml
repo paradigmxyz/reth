@@ -29,4 +29,4 @@ tokio = { version = "1", features = ["sync"], optional = true }
 [features]
 default = ["js-tracer"]
 js-tracer = ["boa_engine", "boa_gc", "tokio","thiserror", "serde_json"]
-enable_opcode_metrics = ["revm/enable_opcode_metrics"]
+# enable_opcode_metrics = ["revm/enable_opcode_metrics"]

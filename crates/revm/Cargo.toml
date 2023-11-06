@@ -20,6 +20,7 @@ reth-consensus-common = { path = "../consensus/common" }
 # revm
 revm.workspace = true
 revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard", optional = true }
+# revm-utils = { path = "/home/andy/Source/work/revm/crates/utils", optional = true }
 
 # common
 tracing.workspace = true

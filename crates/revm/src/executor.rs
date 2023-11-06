@@ -259,15 +259,11 @@ where
                 .into())
             }
             // Execute transaction.
-            #[cfg(not(feature = "enable_opcode_metrics"))]
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
             #[cfg(feature = "enable_opcode_metrics")]
-            let ResultAndState { result, state, mut revm_metric_record } =
-                self.transact(transaction, sender)?;
-
-            #[cfg(feature = "enable_opcode_metrics")]
             {
+                let mut revm_metric_record = revm_utils::instrument::get_record();
                 if revm_metric_record.not_empty() {
                     self.revm_metric_record.update(&mut revm_metric_record);
                 }

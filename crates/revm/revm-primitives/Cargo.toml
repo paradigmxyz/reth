@@ -15,4 +15,4 @@ reth-primitives.workspace = true
 revm.workspace = true
 
 [features]
-enable_opcode_metrics = ["revm/enable_opcode_metrics",]
+# enable_opcode_metrics = ["revm/enable_opcode_metrics",]

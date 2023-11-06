@@ -712,7 +712,6 @@ where
         let mut evm = revm::EVM::with_env(env);
         evm.database(&mut db);
 
-        #[cfg(not(feature = "enable_opcode_metrics"))]
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
             Err(err) => {
@@ -737,30 +736,6 @@ where
             }
         };
 
-        #[cfg(feature = "enable_opcode_metrics")]
-        let ResultAndState { result, state, .. } = match evm.transact() {
-            Ok(res) => res,
-            Err(err) => {
-                match err {
-                    EVMError::Transaction(err) => {
-                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                            // if the nonce is too low, we can skip this transaction
-                            trace!(?err, ?tx, "skipping nonce too low transaction");
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            trace!(?err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(&pool_tx);
-                        }
-                        continue
-                    }
-                    err => {
-                        // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
-                    }
-                }
-            }
-        };
         let gas_used = result.gas_used();
 
         // commit changes

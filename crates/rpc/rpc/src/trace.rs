@@ -161,11 +161,7 @@ where
                     let config = tracing_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
-                    #[cfg(not(feature = "enable_opcode_metrics"))]
                     let ResultAndState { result, state } = res;
-
-                    #[cfg(feature = "enable_opcode_metrics")]
-                    let ResultAndState { result, state, .. } = res;
 
                     let mut trace_res =
                         inspector.into_parity_builder().into_trace_results(result, &trace_types);
@@ -342,10 +338,7 @@ where
 
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
-                    #[cfg(not(feature = "enable_opcode_metrics"))]
                     let ResultAndState { result, state } = res;
-                    #[cfg(feature = "enable_opcode_metrics")]
-                    let ResultAndState { result, state, .. } = res;
                     results.push(f(tx_info, inspector, result, &state, &db)?);
 
                     // need to apply the state changes of this transaction before executing the

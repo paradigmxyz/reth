@@ -50,8 +50,3 @@ reth-payload-builder = { workspace = true, features = ["test-utils"] }
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true
-
-[features]
-enable_opcode_metrics = [
-    "reth-rpc/enable_opcode_metrics",
-]

@@ -177,11 +177,7 @@ impl ParityTraceBuilder {
     where
         DB: DatabaseRef,
     {
-        #[cfg(not(feature = "enable_opcode_metrics"))]
         let ResultAndState { result, state } = res;
-
-        #[cfg(feature = "enable_opcode_metrics")]
-        let ResultAndState { result, state, .. } = res;
 
         let breadth_first_addresses = if trace_types.contains(&TraceType::VmTrace) {
             CallTraceNodeWalkerBF::new(&self.nodes)

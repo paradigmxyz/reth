@@ -143,9 +143,9 @@ open_performance_dashboard = [
 ]
 enable_opcode_metrics = [
     "reth-revm/enable_opcode_metrics",
-    "reth-revm-inspectors/enable_opcode_metrics",
-    "reth-rpc-builder/enable_opcode_metrics",
-    "reth-basic-payload-builder/enable_opcode_metrics",
+    # "reth-revm-inspectors/enable_opcode_metrics",
+    # "reth-rpc-builder/enable_opcode_metrics",
+    # "reth-basic-payload-builder/enable_opcode_metrics",
     "reth-provider/enable_opcode_metrics",
     "reth-stages/enable_opcode_metrics",
 ]

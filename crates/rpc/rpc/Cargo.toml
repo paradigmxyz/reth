@@ -75,11 +75,11 @@ tempfile = "3.5.0"
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 
 [features]
-enable_opcode_metrics = [
-    "revm/enable_opcode_metrics",
-    "revm-primitives/enable_opcode_metrics",
-    "reth-revm/enable_opcode_metrics",
-]
+# enable_opcode_metrics = [
+#     "revm/enable_opcode_metrics",
+#     "revm-primitives/enable_opcode_metrics",
+#     "reth-revm/enable_opcode_metrics",
+# ]
 
 enable_cache_record = [
     "reth-revm/enable_cache_record",

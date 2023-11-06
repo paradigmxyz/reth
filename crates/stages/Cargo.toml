@@ -49,6 +49,7 @@ num-traits = "0.2.15"
 
 serde_json.workspace = true
 revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard" }
+# revm-utils = { path = "/home/andy/Source/work/revm/crates/utils" }
 
 minstant = { version = "0.1.3", optional = true }
 

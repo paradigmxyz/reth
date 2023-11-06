@@ -85,6 +85,9 @@ incremental = false
 revm = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard" }
 revm-primitives = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard" }
 
+# revm = { path = "/home/andy/Source/work/revm/crates/revm"}
+# revm-primitives = { path = "/home/andy/Source/work/revm/crates/primitives" }
+
 
 [workspace.dependencies]
 ## reth
