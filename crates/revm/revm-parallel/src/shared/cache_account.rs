@@ -356,6 +356,7 @@ impl SharedCacheAccount {
                 None => transition,
             });
 
+            // TODO: check storage
             block_transition.info_diff.update_diff(previous_info, None, transition, true);
             block_transition.selfdestruct_count += 1;
             block_transition.selfdestruct_transition =

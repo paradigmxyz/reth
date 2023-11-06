@@ -332,8 +332,9 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         for batch in queue.batches() {
             self.execute_batch(&batch)?;
 
-            let next_block_pending_validation = self.next_block_pending_validation.unwrap(); // TODO: error
-            'validation: while Some(&next_block_pending_validation) == self.executed.keys().next() {
+            'validation: while self.next_block_pending_validation.as_ref() ==
+                self.executed.keys().next()
+            {
                 let (_, mut executed) = self.executed.pop_first().unwrap();
                 executed.results.sort_unstable_by_key(|(idx, _)| *idx);
 
