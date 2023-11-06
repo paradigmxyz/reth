@@ -361,6 +361,7 @@ mod tests {
     use super::*;
     use jsonrpsee::http_client::HttpClientBuilder;
     use reth_primitives::BlockNumberOrTag;
+    use reth_rpc_types::trace::filter::TraceFilterMode;
     use std::collections::HashSet;
 
     fn assert_is_stream<St: Stream>(_: &St) {}
@@ -447,6 +448,36 @@ mod tests {
         let indices: Vec<Index> = vec![Index::from(0)];
 
         let mut stream = client.trace_get_stream(tx_hash, indices);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(trace) => {
+                    println!("Received trace: {:?}", trace);
+                }
+                Err(e) => {
+                    println!("Error fetching trace: {:?}", e);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn can_create_trace_filter() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+
+        let filter = TraceFilter {
+            from_block: None,
+            to_block: None,
+            from_address: Vec::new(),
+            to_address: Vec::new(),
+            mode: TraceFilterMode::Union,
+            after: None,
+            count: None,
+        };
+
+        let filters = vec![filter];
+        let mut stream = client.trace_filter_stream(filters);
 
         while let Some(result) = stream.next().await {
             match result {
