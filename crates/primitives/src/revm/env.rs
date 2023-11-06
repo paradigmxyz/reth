@@ -348,3 +348,27 @@ fn fill_op_tx_env<T: AsRef<Transaction>>(tx_env: &mut TxEnv, transaction: T, env
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn test_fill_cfg_and_block_env() {
+        let mut cfg_env = CfgEnv::default();
+        let mut block_env = BlockEnv::default();
+        let header = Header::default();
+        let chain_spec = ChainSpec::default();
+        let total_difficulty = U256::ZERO;
+
+        fill_cfg_and_block_env(
+            &mut cfg_env,
+            &mut block_env,
+            &chain_spec,
+            &header,
+            total_difficulty,
+        );
+
+        assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
+    }
+}
