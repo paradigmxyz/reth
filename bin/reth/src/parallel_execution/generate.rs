@@ -154,6 +154,7 @@ impl Command {
                 block_rw_sets.insert(block.number, block_rw_set);
             }
 
+            tracing::debug!(target: "reth::cli", ?range, "Resolving range dependencies");
             let queue = TransitionQueue::resolve(range.clone(), block_rw_sets);
             transition_store.save(queue.clone())?;
 
