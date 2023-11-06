@@ -926,7 +926,7 @@ mod tests {
     #[test]
     fn test_london_hardfork_adjustment_increase() {
         let parent = create_header(1024 * 10);
-        let child = create_header(parent.header.gas_limit * 3); 
+        let child = create_header(parent.header.gas_limit * 3); // Assuming elasticity_multiplier is 2
         let mut chain_spec = ChainSpec::default();
         chain_spec.hardforks.insert(Hardfork::London, ForkCondition::Block(1));
 
@@ -936,7 +936,7 @@ mod tests {
     #[test]
     fn test_london_hardfork_adjustment_decrease() {
         let parent = create_header(1024 * 10);
-        let child = create_header(parent.header.gas_limit / 3); 
+        let child = create_header(parent.header.gas_limit / 3); // Assuming elasticity_multiplier is 2
         let mut chain_spec = ChainSpec::default();
         chain_spec.hardforks.insert(Hardfork::London, ForkCondition::Block(1));
 
