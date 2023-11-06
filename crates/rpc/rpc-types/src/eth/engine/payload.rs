@@ -1,9 +1,8 @@
-use crate::eth::{transaction::BlobTransactionSidecar, withdrawal::BeaconAPIWithdrawal};
+use crate::eth::transaction::BlobTransactionSidecar;
 pub use crate::Withdrawal;
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
 use c_kzg::{Blob, Bytes48};
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
-use serde_with::{serde_as, DisplayFromStr};
+use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
@@ -229,7 +228,8 @@ impl BlobsBundleV1 {
 
 /// An execution payload, which can be either [ExecutionPayloadV1], [ExecutionPayloadV2], or
 /// [ExecutionPayloadV3].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
 pub enum ExecutionPayload {
     /// V1 payload
     V1(ExecutionPayloadV1),
@@ -301,6 +301,27 @@ impl From<ExecutionPayloadV2> for ExecutionPayload {
 impl From<ExecutionPayloadV3> for ExecutionPayload {
     fn from(payload: ExecutionPayloadV3) -> Self {
         Self::V3(payload)
+    }
+}
+
+// Deserializes untagged ExecutionPayload by trying each variant in falling order
+impl<'de> Deserialize<'de> for ExecutionPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ExecutionPayloadDesc {
+            V3(ExecutionPayloadV3),
+            V2(ExecutionPayloadV2),
+            V1(ExecutionPayloadV1),
+        }
+        match ExecutionPayloadDesc::deserialize(deserializer)? {
+            ExecutionPayloadDesc::V3(payload) => Ok(Self::V3(payload)),
+            ExecutionPayloadDesc::V2(payload) => Ok(Self::V2(payload)),
+            ExecutionPayloadDesc::V1(payload) => Ok(Self::V1(payload)),
+        }
     }
 }
 
@@ -403,71 +424,6 @@ pub struct OptimismPayloadAttributes {
         deserialize_with = "crate::serde_helpers::u64_hex::u64_hex_opt::deserialize"
     )]
     pub gas_limit: Option<u64>,
-}
-
-#[serde_as]
-#[derive(Serialize, Deserialize)]
-struct BeaconAPIPayloadAttributes {
-    #[serde_as(as = "DisplayFromStr")]
-    timestamp: u64,
-    prev_randao: B256,
-    suggested_fee_recipient: Address,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde_as(as = "Option<Vec<BeaconAPIWithdrawal>>")]
-    withdrawals: Option<Vec<Withdrawal>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent_beacon_block_root: Option<B256>,
-    #[cfg(feature = "optimism")]
-    #[serde(flatten)]
-    optimism_payload_attributes: OptimismPayloadAttributes,
-}
-
-/// A helper module for serializing and deserializing the payload attributes for the beacon API.
-///
-/// The beacon API encoded object has equivalent fields to the [PayloadAttributes] with two
-/// differences:
-/// 1) `snake_case` identifiers must be used rather than `camelCase`;
-/// 2) integers must be encoded as quoted decimals rather than big-endian hex.
-pub mod beacon_api_payload_attributes {
-    use super::*;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    /// Serialize the payload attributes for the beacon API.
-    pub fn serialize<S>(
-        payload_attributes: &PayloadAttributes,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let beacon_api_payload_attributes = BeaconAPIPayloadAttributes {
-            timestamp: payload_attributes.timestamp.to(),
-            prev_randao: payload_attributes.prev_randao,
-            suggested_fee_recipient: payload_attributes.suggested_fee_recipient,
-            withdrawals: payload_attributes.withdrawals.clone(),
-            parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
-            #[cfg(feature = "optimism")]
-            optimism_payload_attributes: payload_attributes.optimism_payload_attributes.clone(),
-        };
-        beacon_api_payload_attributes.serialize(serializer)
-    }
-
-    /// Deserialize the payload attributes for the beacon API.
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<PayloadAttributes, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let beacon_api_payload_attributes = BeaconAPIPayloadAttributes::deserialize(deserializer)?;
-        Ok(PayloadAttributes {
-            timestamp: U64::from(beacon_api_payload_attributes.timestamp),
-            prev_randao: beacon_api_payload_attributes.prev_randao,
-            suggested_fee_recipient: beacon_api_payload_attributes.suggested_fee_recipient,
-            withdrawals: beacon_api_payload_attributes.withdrawals,
-            parent_beacon_block_root: beacon_api_payload_attributes.parent_beacon_block_root,
-            #[cfg(feature = "optimism")]
-            optimism_payload_attributes: beacon_api_payload_attributes.optimism_payload_attributes,
-        })
-    }
 }
 
 /// This structure contains the result of processing a payload or fork choice update.
@@ -715,6 +671,9 @@ mod tests {
         let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
         let payload: ExecutionPayloadV1 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+
+        let any_payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(any_payload, payload.into());
     }
 
     #[test]
@@ -723,6 +682,9 @@ mod tests {
         let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"],"withdrawals":[],"blobGasUsed":"0xb10b","excessBlobGas":"0xb10b"}"#;
         let payload: ExecutionPayloadV3 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+
+        let any_payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(any_payload, payload.into());
     }
 
     #[test]
@@ -731,6 +693,9 @@ mod tests {
         let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
         let payload: ExecutionPayloadV1 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+
+        let any_payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(any_payload, payload.into());
     }
 
     #[test]
@@ -739,6 +704,9 @@ mod tests {
         let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"],"withdrawals":[],"blobGasUsed":"0xb10b","excessBlobGas":"0xb10b"}"#;
         let payload: ExecutionPayloadV3 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+
+        let any_payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(any_payload, payload.into());
     }
 
     #[test]
@@ -927,7 +895,7 @@ mod tests {
         #[derive(Serialize, Deserialize)]
         #[serde(transparent)]
         struct Event {
-            #[serde(with = "beacon_api_payload_attributes")]
+            #[serde(with = "crate::beacon::payload::beacon_api_payload_attributes")]
             payload: PayloadAttributes,
         }
 
