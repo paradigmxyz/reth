@@ -23,6 +23,12 @@ impl From<U256> for JsonU256 {
     }
 }
 
+impl fmt::Display for JsonU256 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl Serialize for JsonU256 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -41,6 +47,7 @@ impl<'a> Deserialize<'a> for JsonU256 {
     }
 }
 
+/// Visitor pattern for `JsonU256` deserialization.
 struct JsonU256Visitor;
 
 impl<'a> Visitor<'a> for JsonU256Visitor {
@@ -90,4 +97,44 @@ where
 {
     let num = JsonU256::deserialize(deserializer)?;
     Ok(num.into())
+}
+
+/// Supports parsing `U256` numbers as strings via [JsonU256]
+pub fn deserialize_json_u256_opt<'de, D>(deserializer: D) -> Result<Option<U256>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let num = Option::<JsonU256>::deserialize(deserializer)?;
+    Ok(num.map(Into::into))
+}
+
+#[cfg(test)]
+mod test {
+    use super::JsonU256;
+    use alloy_primitives::U256;
+
+    #[test]
+    fn jsonu256_deserialize() {
+        let deserialized: Vec<JsonU256> =
+            serde_json::from_str(r#"["","0", "0x","10",10,"0x10"]"#).unwrap();
+        assert_eq!(
+            deserialized,
+            vec![
+                JsonU256(U256::ZERO),
+                JsonU256(U256::ZERO),
+                JsonU256(U256::ZERO),
+                JsonU256(U256::from(10)),
+                JsonU256(U256::from(10)),
+                JsonU256(U256::from(16)),
+            ]
+        );
+    }
+
+    #[test]
+    fn jsonu256_serialize() {
+        let data = JsonU256(U256::from(16));
+        let serialized = serde_json::to_string(&data).unwrap();
+
+        assert_eq!(serialized, r#""0x10""#);
+    }
 }

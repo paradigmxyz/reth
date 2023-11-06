@@ -182,7 +182,9 @@ where
             status,
             fork_filter,
             dns_discovery_config,
-            ..
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+                optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -240,6 +242,9 @@ where
             network_mode,
             bandwidth_meter,
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint,
         );
 
         Ok(Self {
@@ -260,11 +265,10 @@ where
     /// components of the network
     ///
     /// ```
+    /// use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+    /// use reth_primitives::mainnet_nodes;
     /// use reth_provider::test_utils::NoopProvider;
     /// use reth_transaction_pool::TransactionPool;
-    /// use reth_primitives::mainnet_nodes;
-    /// use reth_network::config::rng_secret_key;
-    /// use reth_network::{NetworkConfig, NetworkManager};
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {
     ///     // This block provider implementation is used for testing purposes.
     ///     let client = NoopProvider::default();
@@ -910,13 +914,13 @@ pub enum NetworkEvent {
         /// The remote addr of the peer to which a session was established.
         remote_addr: SocketAddr,
         /// The client version of the peer to which a session was established.
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.
         messages: PeerRequestSender,
         /// The status of the peer to which a session was established.
-        status: Status,
+        status: Arc<Status>,
         /// negotiated eth version of the session
         version: EthVersion,
     },

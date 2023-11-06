@@ -98,6 +98,11 @@ pub enum EngineApiError {
     /// Fetching the payload failed
     #[error(transparent)]
     GetPayloadError(#[from] PayloadBuilderError),
+    /// If the optimism feature flag is enabled, the payload attributes must have a present
+    /// gas limit for the forkchoice updated method.
+    #[cfg(feature = "optimism")]
+    #[error("Missing gas limit in payload attributes")]
+    MissingGasLimitInPayloadAttributes,
 }
 
 /// Helper type to represent the `error` field in the error response:
@@ -181,6 +186,15 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     )
                 }
             },
+            // Optimism errors
+            #[cfg(feature = "optimism")]
+            EngineApiError::MissingGasLimitInPayloadAttributes => {
+                jsonrpsee_types::error::ErrorObject::owned(
+                    INVALID_PARAMS_CODE,
+                    INVALID_PARAMS_MSG,
+                    Some(ErrorData::new(error)),
+                )
+            }
             // Any other server error
             EngineApiError::TerminalTD { .. } |
             EngineApiError::TerminalBlockHash { .. } |

@@ -646,11 +646,12 @@ where
             return Ok(OnForkChoiceUpdated::syncing())
         }
 
-        if self.hooks.is_hook_with_db_write_running() {
+        if let Some(hook) = self.hooks.active_db_write_hook() {
             // We can only process new forkchoice updates if no hook with db write is running,
             // since it requires exclusive access to the database
             warn!(
                 target: "consensus::engine",
+                hook = %hook.name(),
                 "Hook is in progress, skipping forkchoice update. \
                 This may affect the performance of your node as a validator."
             );
@@ -663,16 +664,44 @@ where
 
         let status = match make_canonical_result {
             Ok(outcome) => {
-                match outcome {
-                    CanonicalOutcome::AlreadyCanonical { ref header } => {
-                        debug!(
-                            target: "consensus::engine",
-                            fcu_head_num=?header.number,
-                            current_head_num=?self.blockchain.canonical_tip().number,
-                            "Ignoring beacon update to old head"
-                        );
+                match &outcome {
+                    CanonicalOutcome::AlreadyCanonical { header } => {
+                        // On Optimism, the proposers are allowed to reorg their own chain at will.
+                        cfg_if::cfg_if! {
+                            if #[cfg(feature = "optimism")] {
+                                if self.chain_spec().is_optimism() {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        fcu_head_num=?header.number,
+                                        current_head_num=?self.blockchain.canonical_tip().number,
+                                        "[Optimism] Allowing beacon reorg to old head"
+                                    );
+                                    let _ = self.update_head(header.clone());
+                                    self.listeners.notify(
+                                        BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                                            Box::new(header.clone()),
+                                            elapsed,
+                                        ),
+                                    );
+                                } else {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        fcu_head_num=?header.number,
+                                        current_head_num=?self.blockchain.canonical_tip().number,
+                                        "Ignoring beacon update to old head"
+                                    );
+                                }
+                            } else {
+                                debug!(
+                                    target: "consensus::engine",
+                                    fcu_head_num=?header.number,
+                                    current_head_num=?self.blockchain.canonical_tip().number,
+                                    "Ignoring beacon update to old head"
+                                );
+                            }
+                        }
                     }
-                    CanonicalOutcome::Committed { ref head } => {
+                    CanonicalOutcome::Committed { head } => {
                         debug!(
                             target: "consensus::engine",
                             hash=?state.head_block_hash,
@@ -683,7 +712,7 @@ where
                         // new VALID update that moved the canonical chain forward
                         let _ = self.update_head(head.clone());
                         self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                            head.clone(),
+                            Box::new(head.clone()),
                             elapsed,
                         ));
                     }
@@ -844,7 +873,6 @@ where
         self.update_head(head)?;
         self.update_finalized_block(update.finalized_block_hash)?;
         self.update_safe_block(update.safe_block_hash)?;
-
         Ok(())
     }
 
@@ -870,9 +898,7 @@ where
 
         head_block.total_difficulty =
             self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
-                RethError::Provider(ProviderError::TotalDifficultyNotFound {
-                    block_number: head_block.number,
-                })
+                RethError::Provider(ProviderError::TotalDifficultyNotFound(head_block.number))
             })?;
         self.sync_state_updater.update_status(head_block);
 
@@ -955,7 +981,9 @@ where
                 })
                 .with_latest_valid_hash(B256::ZERO)
             }
-            RethError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. }) => {
+            RethError::Canonical(CanonicalError::BlockchainTree(
+                BlockchainTreeError::BlockHashNotFoundInChain { .. },
+            )) => {
                 // This just means we couldn't find the block when attempting to make it canonical,
                 // so we should not warn the user, since this will result in us attempting to sync
                 // to a new target and is considered normal operation during sync
@@ -1042,27 +1070,30 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
-        let attributes = PayloadBuilderAttributes::new(state.head_block_hash, attrs);
+        match PayloadBuilderAttributes::try_new(state.head_block_hash, attrs) {
+            Ok(attributes) => {
+                // send the payload to the builder and return the receiver for the pending payload
+                // id, initiating payload job is handled asynchronously
+                let pending_payload_id = self.payload_builder.send_new_payload(attributes);
 
-        // send the payload to the builder and return the receiver for the pending payload id,
-        // initiating payload job is handled asynchronously
-        let pending_payload_id = self.payload_builder.send_new_payload(attributes);
-
-        // Client software MUST respond to this method call in the following way:
-        // {
-        //      payloadStatus: {
-        //          status: VALID,
-        //          latestValidHash: forkchoiceState.headBlockHash,
-        //          validationError: null
-        //      },
-        //      payloadId: buildProcessId
-        // }
-        //
-        // if the payload is deemed VALID and the build process has begun.
-        OnForkChoiceUpdated::updated_with_pending_payload_id(
-            PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
-            pending_payload_id,
-        )
+                // Client software MUST respond to this method call in the following way:
+                // {
+                //      payloadStatus: {
+                //          status: VALID,
+                //          latestValidHash: forkchoiceState.headBlockHash,
+                //          validationError: null
+                //      },
+                //      payloadId: buildProcessId
+                // }
+                //
+                // if the payload is deemed VALID and the build process has begun.
+                OnForkChoiceUpdated::updated_with_pending_payload_id(
+                    PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
+                    pending_payload_id,
+                )
+            }
+            Err(_) => OnForkChoiceUpdated::invalid_payload_attributes(),
+        }
     }
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
@@ -1102,13 +1133,17 @@ where
             return Ok(status)
         }
 
-        let res = if self.sync.is_pipeline_idle() && !self.hooks.is_hook_with_db_write_running() {
+        let res = if self.sync.is_pipeline_idle() && self.hooks.active_db_write_hook().is_none() {
             // we can only insert new payloads if the pipeline and any hook with db write
             // are _not_ running, because they hold exclusive access to the database
             self.try_insert_new_payload(block)
         } else {
-            if self.hooks.is_hook_with_db_write_running() {
-                debug!(target: "consensus::engine", "Hook is in progress, buffering new payload.");
+            if let Some(hook) = self.hooks.active_db_write_hook() {
+                debug!(
+                    target: "consensus::engine",
+                    hook = %hook.name(),
+                    "Hook is in progress, buffering new payload."
+                );
             }
             self.try_buffer_payload(block)
         };
@@ -1524,9 +1559,9 @@ where
             let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
             match make_canonical_result {
                 Ok(outcome) => {
-                    if let CanonicalOutcome::Committed { ref head } = outcome {
+                    if let CanonicalOutcome::Committed { head } = &outcome {
                         self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                            head.clone(),
+                            Box::new(head.clone()),
                             elapsed,
                         ));
                     }
@@ -1623,7 +1658,7 @@ where
                     warn!(target: "consensus::engine", invalid_hash=?bad_block.hash, invalid_number=?bad_block.number, "Bad block detected in unwind");
 
                     // update the `invalid_headers` cache with the new invalid headers
-                    self.invalid_headers.insert(bad_block);
+                    self.invalid_headers.insert(*bad_block);
                     return None
                 }
 
@@ -1804,7 +1839,7 @@ where
             loop {
                 // Poll a running hook with db write access first, as we will not be able to process
                 // any engine messages until it's finished.
-                if let Poll::Ready(result) = this.hooks.poll_running_hook_with_db_write(
+                if let Poll::Ready(result) = this.hooks.poll_active_db_write_hook(
                     cx,
                     EngineContext {
                         tip_block_number: this.blockchain.canonical_tip().number,

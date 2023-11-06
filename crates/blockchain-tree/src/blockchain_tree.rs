@@ -2,7 +2,7 @@
 use crate::{
     canonical_chain::CanonicalChain,
     chain::BlockKind,
-    metrics::TreeMetrics,
+    metrics::{MakeCanonicalAction, MakeCanonicalDurationsRecorder, TreeMetrics},
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
@@ -911,11 +911,16 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     #[track_caller]
     #[instrument(level = "trace", skip(self), target = "blockchain_tree")]
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
+        let mut durations_recorder = MakeCanonicalDurationsRecorder::default();
+
         let old_block_indices = self.block_indices().clone();
         let old_buffered_blocks = self.state.buffered_blocks.parent_to_child.clone();
+        durations_recorder.record_relative(MakeCanonicalAction::CloneOldBlocks);
 
         // If block is already canonical don't return error.
-        if let Some(header) = self.find_canonical_header(block_hash)? {
+        let canonical_header = self.find_canonical_header(block_hash)?;
+        durations_recorder.record_relative(MakeCanonicalAction::FindCanonicalHeader);
+        if let Some(header) = canonical_header {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
             // TODO: this could be fetched from the chainspec first
             let td = self.externals.database().provider()?.header_td(block_hash)?.ok_or(
@@ -945,6 +950,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         // we are splitting chain at the block hash that we want to make canonical
         let canonical = self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash));
+        durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
         let mut block_fork = canonical.fork_block();
         let mut block_fork_number = canonical.fork_block_number();
@@ -959,9 +965,10 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             block_fork_number = canonical.fork_block_number();
             chains_to_promote.push(canonical);
         }
+        durations_recorder.record_relative(MakeCanonicalAction::SplitChainForks);
 
         let old_tip = self.block_indices().canonical_tip();
-        // Merge all chain into one chain.
+        // Merge all chains into one chain.
         let mut new_canon_chain = chains_to_promote.pop().expect("There is at least one block");
         trace!(target: "blockchain_tree", ?new_canon_chain, "Merging chains");
         let mut chain_appended = false;
@@ -970,12 +977,14 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             trace!(target: "blockchain_tree", ?chain, "Appending chain");
             new_canon_chain.append_chain(chain).expect("We have just build the chain.");
         }
+        durations_recorder.record_relative(MakeCanonicalAction::MergeAllChains);
 
         if chain_appended {
-            trace!(target: "blockchain_tree", ?new_canon_chain, "Canonical appended chain");
+            trace!(target: "blockchain_tree", ?new_canon_chain, "Canonical chain appended");
         }
         // update canonical index
         self.block_indices_mut().canonicalize_blocks(new_canon_chain.blocks());
+        durations_recorder.record_relative(MakeCanonicalAction::UpdateCanonicalIndex);
 
         // event about new canonical chain.
         let chain_notification;
@@ -989,7 +998,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             chain_notification =
                 CanonStateNotification::Commit { new: Arc::new(new_canon_chain.clone()) };
             // append to database
-            self.commit_canonical(new_canon_chain)?;
+            self.commit_canonical_to_database(new_canon_chain)?;
+            durations_recorder.record_relative(MakeCanonicalAction::CommitCanonicalChainToDatabase);
         } else {
             // it forks to canonical block that is not the tip.
 
@@ -1005,7 +1015,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 unreachable!("all chains should point to canonical chain.");
             }
 
-            let old_canon_chain = self.revert_canonical(canon_fork.number);
+            let old_canon_chain = self.revert_canonical_from_database(canon_fork.number);
+            durations_recorder
+                .record_relative(MakeCanonicalAction::RevertCanonicalChainFromDatabase);
 
             let old_canon_chain = match old_canon_chain {
                 val @ Err(_) => {
@@ -1022,7 +1034,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 Ok(val) => val,
             };
             // commit new canonical chain.
-            self.commit_canonical(new_canon_chain.clone())?;
+            self.commit_canonical_to_database(new_canon_chain.clone())?;
+            durations_recorder.record_relative(MakeCanonicalAction::CommitCanonicalChainToDatabase);
 
             if let Some(old_canon_chain) = old_canon_chain {
                 // state action
@@ -1034,6 +1047,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
                 // insert old canon chain
                 self.insert_chain(AppendableChain::new(old_canon_chain));
+                durations_recorder.record_relative(MakeCanonicalAction::InsertOldCanonicalChain);
 
                 self.update_reorg_metrics(reorg_depth as f64);
             } else {
@@ -1045,11 +1059,16 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             }
         }
 
-        //
         let head = chain_notification.tip().header.clone();
 
         // send notification about new canonical chain.
         let _ = self.canon_state_notification_sender.send(chain_notification);
+
+        debug!(
+            target: "blockchain_tree",
+            actions = ?durations_recorder.actions,
+            "Canonicalization finished"
+        );
 
         Ok(CanonicalOutcome::Committed { head })
     }
@@ -1066,8 +1085,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         self.canon_state_notification_sender.clone()
     }
 
-    /// Canonicalize the given chain and commit it to the database.
-    fn commit_canonical(&self, chain: Chain) -> RethResult<()> {
+    /// Write the given chain to the database as canonical.
+    fn commit_canonical_to_database(&self, chain: Chain) -> RethResult<()> {
         let provider = DatabaseProvider::new_rw(
             self.externals.db.tx_mut()?,
             self.externals.chain_spec.clone(),
@@ -1095,7 +1114,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             return Ok(())
         }
         // revert `N` blocks from current canonical chain and put them inside BlockchanTree
-        let old_canon_chain = self.revert_canonical(unwind_to)?;
+        let old_canon_chain = self.revert_canonical_from_database(unwind_to)?;
 
         // check if there is block in chain
         if let Some(old_canon_chain) = old_canon_chain {
@@ -1110,7 +1129,10 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// Revert canonical blocks from the database and return them.
     ///
     /// The block, `revert_until`, is non-inclusive, i.e. `revert_until` stays in the database.
-    fn revert_canonical(&mut self, revert_until: BlockNumber) -> RethResult<Option<Chain>> {
+    fn revert_canonical_from_database(
+        &mut self,
+        revert_until: BlockNumber,
+    ) -> RethResult<Option<Chain>> {
         // read data that is needed for new sidechain
 
         let provider = DatabaseProvider::new_rw(

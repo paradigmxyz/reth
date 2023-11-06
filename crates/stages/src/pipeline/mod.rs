@@ -392,6 +392,7 @@ where
                             target: "sync::pipeline",
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
+                            ?target,
                             %progress,
                             %done,
                             "Stage committed progress"
@@ -401,6 +402,7 @@ where
                             target: "sync::pipeline",
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
+                            ?target,
                             %done,
                             "Stage committed progress"
                         );
@@ -836,7 +838,11 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Err(StageError::Block {
-                        block: random_header(&mut generators::rng(), 5, Default::default()),
+                        block: Box::new(random_header(
+                            &mut generators::rng(),
+                            5,
+                            Default::default(),
+                        )),
                         error: BlockErrorKind::Validation(
                             consensus::ConsensusError::BaseFeeMissing,
                         ),

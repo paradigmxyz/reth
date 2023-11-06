@@ -7,6 +7,9 @@ pub const DEFAULT_WS_RPC_PORT: u16 = 8546;
 /// The default port for the auth server.
 pub const DEFAULT_AUTH_PORT: u16 = 8551;
 
+/// The default maximum block range allowed to filter
+pub const DEFAULT_MAX_BLOCKS_PER_FILTER: u64 = 100_000;
+
 /// The default maximum of logs in a single response.
 pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
