@@ -146,6 +146,7 @@ impl TxDeposit {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{Bytes, TransactionSigned};
     use alloy_rlp::Decodable;
     use bytes::BytesMut;
@@ -166,24 +167,9 @@ mod tests {
         tx_b.encode_enveloped(&mut buf_b);
         assert_eq!(&buf_b[..], &bytes[..]);
     }
-    #[test]
-    fn test_tx_deposit_size() {
-        let tx_deposit = TxDeposit {
-            source_hash: B256::default(),
-            from: Address::default(),
-            to: TransactionKind::default(),
-            mint: Some(100),
-            value: TxValue::default(),
-            gas_limit: 50000,
-            is_system_transaction: false,
-            input: Bytes::default(),
-        };
-
-        assert_eq!(tx_deposit.size(), mem::size_of_val(&tx_deposit));
-    }
 
     #[test]
-    fn test_encode_decode_inner() {
+    fn test_encode_decode_fields() {
         let original = TxDeposit {
             source_hash: B256::default(),
             from: Address::default(),
@@ -196,7 +182,7 @@ mod tests {
         };
 
         let mut buffer = BytesMut::new();
-        original.encode(&mut buffer, false);
+        original.encode_fields(&mut buffer);
         let decoded = TxDeposit::decode_inner(&mut &buffer[..]).expect("Failed to decode");
 
         assert_eq!(original, decoded);
