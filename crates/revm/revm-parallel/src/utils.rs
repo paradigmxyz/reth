@@ -21,6 +21,10 @@ pub fn resolve_block_dependencies<'a>(
     senders: &[Address],
     td: U256,
 ) -> RethResult<BlockRWSet> {
+    if block.number == 0 {
+        return Ok(BlockRWSet::default())
+    }
+
     let mut block_rw_set = BlockRWSet::with_capacity(block.body.len());
 
     let mut evm = EVM::new();
