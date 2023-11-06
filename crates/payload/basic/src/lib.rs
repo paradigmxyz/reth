@@ -57,14 +57,15 @@ use tracing::{debug, trace};
 
 mod metrics;
 
-/// Ethereum payload builder
-#[derive(Debug, Clone, Default)]
-pub struct EthereumPayloadBuilder;
-
 #[cfg(feature = "optimism")]
 mod optimism;
 #[cfg(feature = "optimism")]
 pub use optimism::OptimismPayloadBuilder;
+
+/// Ethereum payload builder
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
+pub struct EthereumPayloadBuilder;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
