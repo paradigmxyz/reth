@@ -1,6 +1,6 @@
 use crate::eth::transaction::BlobTransactionSidecar;
 pub use crate::Withdrawal;
-use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256, U64};
+use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
 use c_kzg::{Blob, Bytes48};
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -126,10 +126,14 @@ pub struct ExecutionPayloadV1 {
     pub receipts_root: B256,
     pub logs_bloom: Bloom,
     pub prev_randao: B256,
-    pub block_number: U64,
-    pub gas_limit: U64,
-    pub gas_used: U64,
-    pub timestamp: U64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub block_number: u64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub gas_limit: u64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub gas_used: u64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub timestamp: u64,
     pub extra_data: Bytes,
     pub base_fee_per_gas: U256,
     pub block_hash: B256,
@@ -154,7 +158,7 @@ pub struct ExecutionPayloadV2 {
 impl ExecutionPayloadV2 {
     /// Returns the timestamp for the execution payload.
     pub fn timestamp(&self) -> u64 {
-        self.payload_inner.timestamp.to()
+        self.payload_inner.timestamp
     }
 }
 
@@ -168,12 +172,14 @@ pub struct ExecutionPayloadV3 {
     #[serde(flatten)]
     pub payload_inner: ExecutionPayloadV2,
 
-    /// Array of [`U64`] representing blob gas used, enabled with V3
+    /// Array of hex [`u64`] representing blob gas used, enabled with V3
     /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
-    pub blob_gas_used: U64,
-    /// Array of [`U64`] representing excess blob gas, enabled with V3
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub blob_gas_used: u64,
+    /// Array of hex[`u64`] representing excess blob gas, enabled with V3
     /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
-    pub excess_blob_gas: U64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub excess_blob_gas: u64,
 }
 
 impl ExecutionPayloadV3 {
@@ -184,7 +190,7 @@ impl ExecutionPayloadV3 {
 
     /// Returns the timestamp for the payload.
     pub fn timestamp(&self) -> u64 {
-        self.payload_inner.payload_inner.timestamp.to()
+        self.payload_inner.payload_inner.timestamp
     }
 }
 
@@ -252,7 +258,7 @@ impl ExecutionPayload {
     /// Returns the timestamp for the payload.
     pub fn timestamp(&self) -> u64 {
         match self {
-            ExecutionPayload::V1(payload) => payload.timestamp.to(),
+            ExecutionPayload::V1(payload) => payload.timestamp,
             ExecutionPayload::V2(payload) => payload.timestamp(),
             ExecutionPayload::V3(payload) => payload.timestamp(),
         }
@@ -279,9 +285,9 @@ impl ExecutionPayload {
     /// Returns the block number for this payload.
     pub fn block_number(&self) -> u64 {
         match self {
-            ExecutionPayload::V1(payload) => payload.block_number.to(),
-            ExecutionPayload::V2(payload) => payload.payload_inner.block_number.to(),
-            ExecutionPayload::V3(payload) => payload.payload_inner.payload_inner.block_number.to(),
+            ExecutionPayload::V1(payload) => payload.block_number,
+            ExecutionPayload::V2(payload) => payload.payload_inner.block_number,
+            ExecutionPayload::V3(payload) => payload.payload_inner.payload_inner.block_number,
         }
     }
 }
@@ -385,7 +391,8 @@ pub struct ExecutionPayloadBodyV1 {
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributes {
     /// Value for the `timestamp` field of the new payload
-    pub timestamp: U64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub timestamp: u64,
     /// Value for the `prevRandao` field of the new payload
     pub prev_randao: B256,
     /// Suggested value for the `feeRecipient` field of the new payload
