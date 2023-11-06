@@ -214,6 +214,73 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
     }
 }
 
+// When the pool eventually reaches saturation, some old transactions - that may never execute -
+// will need to be evicted in favor of newer ones. The eviction strategy is quite complex:
+//
+//   - Exceeding capacity evicts the highest-nonce of the account with the lowest paying blob
+//   transaction anywhere in the pooled nonce-sequence, as that tx would be executed the furthest
+//   in the future and is thus blocking anything after it. The smallest is deliberately not evicted
+//   to avoid a nonce-gap.
+//
+//   - Analogously, if the pool is full, the consideration price of a new tx for evicting an old
+//   one is the smallest price in the entire nonce-sequence of the account. This avoids malicious
+//   users DoSing the pool with seemingly high paying transactions hidden behind a low-paying
+//   blocked one.
+//
+//   - Since blob transactions have 3 price parameters: execution tip, execution fee cap and data
+//   fee cap, there's no singular parameter to create a total price ordering on. What's more, since
+//   the base fee and blob fee can move independently of one another, there's no pre-defined way to
+//   combine them into a stable order either. This leads to a multi-dimensional problem to solve
+//   after every block.
+//
+//   - The first observation is that comparing 1559 base fees or 4844 blob fees needs to happen in
+//   the context of their dynamism. Since these fees jump up or down in ~1.125 multipliers (at max)
+//   across blocks, comparing fees in two transactions should be based on log1.125(fee) to
+//   eliminate noise.
+//
+//   - The second observation is that the basefee and blobfee move independently, so there's no way
+//   to split mixed txs on their own (A has higher base fee, B has higher blob fee). Rather than
+//   look at the absolute fees, the useful metric is the max time it can take to exceed the
+//   transaction's fee caps. Specifically, we're interested in the number of jumps needed to go
+//   from the current fee to the transaction's cap:
+//
+//     jumps = log1.125(txfee) - log1.125(basefee)
+//
+//   - The third observation is that the base fee tends to hover around rather than swing wildly.
+//   The number of jumps needed from the current fee starts to get less relevant the higher it is.
+//   To remove the noise here too, the pool will use log(jumps) as the delta for comparing
+//   transactions.
+//
+//     delta = sign(jumps) * log(abs(jumps))
+//
+//   - To establish a total order, we need to reduce the dimensionality of the two base fees (log
+//   jumps) to a single value. The interesting aspect from the pool's perspective is how fast will
+//   a tx get executable (fees going down, crossing the smaller negative jump counter) or
+//   non-executable (fees going up, crossing the smaller positive jump counter). As such, the pool
+//   cares only about the min of the two delta values for eviction priority.
+//
+//     priority = min(delta-basefee, delta-blobfee)
+//
+//   - The above very aggressive dimensionality and noise reduction should result in transaction
+//   being grouped into a small number of buckets, the further the fees the larger the buckets.
+//   This is good because it allows us to use the miner tip meaningfully as a splitter.
+//
+//   - For the scenario where the pool does not contain non-executable blob txs anymore, it does
+//   not make sense to grant a later eviction priority to txs with high fee caps since it could
+//   enable pool wars. As such, any positive priority will be grouped together.
+//
+//     priority = min(delta-basefee, delta-blobfee, 0)
+//
+// Optimisation tradeoffs:
+//
+//   - Eviction relies on 3 fee minimums per account (exec tip, exec cap and blob cap). Maintaining
+//   these values across all transactions from the account is problematic as each transaction
+//   replacement or inclusion would require a rescan of all other transactions to recalculate the
+//   minimum. Instead, the pool maintains a rolling minimum across the nonce range. Updating all
+//   the minimums will need to be done only starting at the swapped in/out nonce and leading up to
+//   the first no-change.
+
+
 #[derive(Debug, Clone)]
 struct BlobOrd {
     /// Identifier that tags when transaction was submitted in the pool.
