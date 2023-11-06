@@ -139,7 +139,7 @@ where
 
     let num = if let Some(val) = val.as_u64() {
         U256::from(val)
-    } else {
+    } else if let Some(value) = val.as_f64() {
         // The ethereum mainnet TTD is 58750000000000000000000, and geth serializes this
         // without quotes, because that is how golang `big.Int`s marshal in JSON. Numbers
         // are arbitrary precision in JSON, so this is valid JSON. This number is also
@@ -156,9 +156,17 @@ where
         // <https://github.com/serde-rs/serde/issues/2230>
         // <https://github.com/serde-rs/serde/issues/1183>
         //
-        // To solve this, we instead deserialize as string if it is not captured as a `u64`.
-        U256::from_str_radix(val.as_str(), 10)
-            .map_err(|e| Error::custom(format!("Parsing TTD as decimal failed {val}: {e:?}")))?
+        // To solve this, we use the captured float and return the TTD as a U256 if it's equal.
+        if value == 5.875e22 {
+            U256::from(58750000000000000000000u128)
+        } else {
+            // We could try to convert to a u128 here but there would probably be loss of
+            // precision, so we just return an error.
+            return Err(Error::custom("Deserializing a large non-mainnet TTD is not supported"));
+        }
+    } else {
+        // must be i64 - negative numbers are not supported
+        return Err(Error::custom("Negative TTD values are invalid and will not be deserialized"));
     };
 
     Ok(num)
