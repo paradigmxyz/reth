@@ -7,7 +7,11 @@ use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
     ServerBuilder, TransportRpcModuleConfig,
 };
-use std::{borrow::Cow, path::PathBuf, time::Duration};
+use std::{
+    borrow::Cow,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 /// A trait that provides configured RPC server.
 ///
@@ -68,7 +72,8 @@ pub trait RethRpcConfig {
     // If the file doesn't exist at the path, it will create a new JWT secret.
 
     ///
-    fn get_or_create_jwt_secret_from_path(path: &PathBuf) -> Result<JwtSecret, JwtError>;
+    fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtError>;
+
     ///
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<Option<JwtSecret>, JwtError>;
     ///
