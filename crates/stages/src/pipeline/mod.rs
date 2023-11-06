@@ -838,7 +838,11 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Err(StageError::Block {
-                        block: random_header(&mut generators::rng(), 5, Default::default()),
+                        block: Box::new(random_header(
+                            &mut generators::rng(),
+                            5,
+                            Default::default(),
+                        )),
                         error: BlockErrorKind::Validation(
                             consensus::ConsensusError::BaseFeeMissing,
                         ),

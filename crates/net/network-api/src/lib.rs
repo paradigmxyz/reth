@@ -120,7 +120,7 @@ pub struct PeerInfo {
     /// The identifier of the remote peer
     pub remote_id: PeerId,
     /// The client's name and version
-    pub client_version: Arc<String>,
+    pub client_version: Arc<str>,
     /// The peer's address we're connected to
     pub remote_addr: SocketAddr,
     /// The local address of the connection
@@ -130,7 +130,7 @@ pub struct PeerInfo {
     /// The negotiated eth version.
     pub eth_version: EthVersion,
     /// The Status message the peer sent for the `eth` handshake
-    pub status: Status,
+    pub status: Arc<Status>,
 }
 
 /// The direction of the connection.
