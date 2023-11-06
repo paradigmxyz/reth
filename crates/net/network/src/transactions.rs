@@ -74,6 +74,32 @@ impl TransactionsHandle {
         let _ = self.manager_tx.send(cmd);
     }
 
+    /// Fetch the [`PeerRequestSender`] for the given peer.
+    async fn peer_handle(&self, peer_id: PeerId) -> Result<Option<PeerRequestSender>, RecvError> {
+        let (tx, rx) = oneshot::channel();
+        self.send(TransactionsCommand::GetPeerSender { peer_id, peer_request_sender: tx });
+        rx.await
+    }
+
+    /// Requests the transactions directly from the given peer.
+    ///
+    /// Returns `None` if the peer is not connected.
+    ///
+    /// **Note**: this returns the response from the peer as received.
+    pub async fn get_pooled_transactions_from(
+        &self,
+        peer_id: PeerId,
+        hashes: Vec<B256>,
+    ) -> Result<Option<Vec<PooledTransactionsElement>>, RequestError> {
+        let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
+
+        let (tx, rx) = oneshot::channel();
+        let request = PeerRequest::GetPooledTransactions { request: hashes.into(), response: tx };
+        peer.try_send(request).ok();
+
+        rx.await?.map(|res| Some(res.0))
+    }
+
     /// Manually propagate the transaction that belongs to the hash.
     pub fn propagate(&self, hash: TxHash) {
         self.send(TransactionsCommand::PropagateHash(hash))
@@ -602,6 +628,10 @@ where
                     res.insert(peer_id, hashes);
                 }
                 tx.send(res).ok();
+            }
+            TransactionsCommand::GetPeerSender { peer_id, peer_request_sender } => {
+                let sender = self.peers.get(&peer_id).map(|peer| peer.request_tx.clone());
+                peer_request_sender.send(sender).ok();
             }
         }
     }
@@ -1221,6 +1251,11 @@ enum TransactionsCommand {
     GetTransactionHashes {
         peers: Vec<PeerId>,
         tx: oneshot::Sender<HashMap<PeerId, HashSet<TxHash>>>,
+    },
+    /// Requests a clone of the sender sender channel to the peer.
+    GetPeerSender {
+        peer_id: PeerId,
+        peer_request_sender: oneshot::Sender<Option<PeerRequestSender>>,
     },
 }
 
