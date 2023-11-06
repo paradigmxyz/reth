@@ -185,6 +185,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         let state_transition = match self.loaded.get(&block_number) {
             Some(block) => block.get_state_transition(transition_id.1, &self.data.chain_spec),
             None => {
+                tracing::trace!(target: "evm::parallel", block_number, "Loading block");
                 let td = self
                     .provider
                     .header_td_by_number(block_number)
@@ -216,6 +217,8 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         for transition_id in batch.iter() {
             transitions.push(self.get_state_transition(*transition_id)?);
         }
+
+        tracing::trace!(target: "evm::parallel", ?batch, "Executing block batch");
 
         let transition_results = transitions
             .into_par_iter()
@@ -296,8 +299,10 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
             };
 
             if block.get().is_executed() {
-                let block = block.remove();
-                self.executed.insert(block.block.number, block);
+                let executed = block.remove();
+                let block_number = executed.block.number;
+                tracing::trace!(target: "evm::parallel", block_number, "Block has been fully executed");
+                self.executed.insert(block_number, executed);
             }
         }
         self.state.write().commit(states);
@@ -327,15 +332,18 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
 
             let next_block_pending_validation = self.next_block_pending_validation.unwrap(); // TODO: error
             'validation: while Some(&next_block_pending_validation) == self.executed.keys().next() {
-                let (_, mut loaded) = self.executed.pop_first().unwrap();
-                loaded.results.sort_unstable_by_key(|(idx, _)| *idx);
+                let (_, mut executed) = self.executed.pop_first().unwrap();
+                executed.results.sort_unstable_by_key(|(idx, _)| *idx);
 
-                let retention = self.data.retention_for_block(loaded.block.number);
-                self.state.write().merge_transitions(loaded.block.number, retention);
+                let block_number = executed.block.number;
+                tracing::trace!(target: "evm::parallel", block_number, "Validating executed block");
+
+                let retention = self.data.retention_for_block(executed.block.number);
+                self.state.write().merge_transitions(executed.block.number, retention);
 
                 let mut cumulative_gas_used = 0;
-                let mut receipts = Vec::with_capacity(loaded.block.body.len());
-                for (transaction, (_, result)) in loaded.block.body.iter().zip(loaded.results) {
+                let mut receipts = Vec::with_capacity(executed.block.body.len());
+                for (transaction, (_, result)) in executed.block.body.iter().zip(executed.results) {
                     cumulative_gas_used += result.gas_used();
                     receipts.push(Receipt {
                         tx_type: transaction.tx_type(),
@@ -349,11 +357,11 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
                 }
 
                 // Check if gas used matches the value set in header.
-                if loaded.block.gas_used != cumulative_gas_used {
+                if executed.block.gas_used != cumulative_gas_used {
                     let receipts = Receipts::from_block_receipt(receipts);
                     return Err(BlockValidationError::BlockGasUsed {
                         got: cumulative_gas_used,
-                        expected: loaded.block.gas_used,
+                        expected: executed.block.gas_used,
                         gas_spent_by_tx: receipts.gas_spent_by_tx()?,
                     }
                     .into())
@@ -367,11 +375,11 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
                     self.data
                         .chain_spec
                         .fork(Hardfork::Byzantium)
-                        .active_at_block(loaded.block.number)
+                        .active_at_block(executed.block.number)
                 {
                     if let Err(error) = verify_receipt(
-                        loaded.block.receipts_root,
-                        loaded.block.logs_bloom,
+                        executed.block.receipts_root,
+                        executed.block.logs_bloom,
                         receipts.iter(),
                     ) {
                         tracing::debug!(target: "evm::parallel", ?error, ?receipts, "receipts verification failed");
@@ -381,12 +389,12 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
 
                 self.save_receipts(receipts)?;
 
-                if loaded.block.number == *range.end() {
+                if executed.block.number == *range.end() {
                     self.next_block_pending_validation = None;
                     break 'validation
                 }
 
-                self.next_block_pending_validation = Some(loaded.block.number + 1);
+                self.next_block_pending_validation = Some(executed.block.number + 1);
             }
         }
 
