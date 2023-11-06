@@ -26,6 +26,7 @@ use reth_db::{
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
+    provider::RootMismatch,
     RethError, RethResult,
 };
 use reth_primitives::{
@@ -37,10 +38,10 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PruneSegment,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, B256, U256,
+    ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
+    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
+    TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
@@ -1649,12 +1650,11 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                 .root_with_updates()
                 .map_err(Into::<reth_db::DatabaseError>::into)?;
             if state_root != expected_state_root {
-                return Err(ProviderError::StateRootMismatch {
-                    got: state_root,
-                    expected: expected_state_root,
+                return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
+                    root: GotExpected { got: state_root, expected: expected_state_root },
                     block_number: *range.end(),
                     block_hash: end_block_hash,
-                }
+                }))
                 .into())
             }
             trie_updates.flush(&self.tx)?;
@@ -2033,12 +2033,11 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                 let parent_hash = self
                     .block_hash(parent_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
-                return Err(ProviderError::UnwindStateRootMismatch {
-                    got: new_state_root,
-                    expected: parent_state_root,
+                return Err(ProviderError::UnwindStateRootMismatch(Box::new(RootMismatch {
+                    root: GotExpected { got: new_state_root, expected: parent_state_root },
                     block_number: parent_number,
                     block_hash: parent_hash,
-                }
+                }))
                 .into())
             }
             trie_updates.flush(&self.tx)?;

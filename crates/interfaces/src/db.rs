@@ -1,5 +1,7 @@
+use thiserror::Error;
+
 /// Database error type.
-#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum DatabaseError {
     /// Failed to open the database.
     #[error("failed to open the database ({0})")]
@@ -8,20 +10,8 @@ pub enum DatabaseError {
     #[error("failed to create a table ({0})")]
     CreateTable(i32),
     /// Failed to write a value into a table.
-    #[error(
-        "write operation {operation:?} failed for key \"{key}\" in table {table_name:?} ({code})",
-        key = reth_primitives::hex::encode(key),
-    )]
-    Write {
-        /// Database error code
-        code: i32,
-        /// Database write operation type
-        operation: DatabaseWriteOperation,
-        /// Table name
-        table_name: &'static str,
-        /// Write key
-        key: Box<[u8]>,
-    },
+    #[error(transparent)]
+    Write(#[from] Box<DatabaseWriteError>),
     /// Failed to read a value from a table.
     #[error("failed to read a value from a database table ({0})")]
     Read(i32),
@@ -48,14 +38,42 @@ pub enum DatabaseError {
     LogLevelUnavailable(LogLevel),
 }
 
+impl From<DatabaseWriteError> for DatabaseError {
+    #[inline]
+    fn from(value: DatabaseWriteError) -> Self {
+        Self::Write(Box::new(value))
+    }
+}
+
+/// Database write error.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[error(
+    "write operation {operation:?} failed for key \"{key}\" in table {table_name:?} ({code})",
+    key = reth_primitives::hex::encode(key),
+)]
+pub struct DatabaseWriteError {
+    /// The error code.
+    pub code: i32,
+    /// The write operation type.
+    pub operation: DatabaseWriteOperation,
+    /// The table name.
+    pub table_name: &'static str,
+    /// The write key.
+    pub key: Vec<u8>,
+}
+
 /// Database write operation type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(missing_docs)]
 pub enum DatabaseWriteOperation {
+    /// Append cursor.
     CursorAppend,
+    /// Upsert cursor.
     CursorUpsert,
+    /// Insert cursor.
     CursorInsert,
+    /// Append duplicate cursor.
     CursorAppendDup,
+    /// Put.
     Put,
 }
 

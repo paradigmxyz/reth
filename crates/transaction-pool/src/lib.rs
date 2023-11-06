@@ -80,11 +80,11 @@
 //!
 //! ```
 //! use reth_primitives::MAINNET;
-//! use reth_provider::{ChainSpecProvider, StateProviderFactory};
+//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//!  async fn t<C>(client: C)  where C: StateProviderFactory + ChainSpecProvider + Clone + 'static{
+//! async fn t<C>(client: C)  where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static{
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
 //!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
@@ -270,7 +270,7 @@ where
 
 impl<Client, S> EthTransactionPool<Client, S>
 where
-    Client: StateProviderFactory + Clone + 'static,
+    Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
     S: BlobStore,
 {
     /// Returns a new [Pool] that uses the default [TransactionValidationTaskExecutor] when
@@ -279,18 +279,24 @@ where
     /// # Example
     ///
     /// ```
-    /// use reth_provider::StateProviderFactory;
     /// use reth_primitives::MAINNET;
+    /// use reth_provider::{BlockReaderIdExt, StateProviderFactory};
     /// use reth_tasks::TokioTaskExecutor;
-    /// use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
-    /// use reth_transaction_pool::blobstore::InMemoryBlobStore;
-    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static {
-    ///     let blob_store = InMemoryBlobStore::default();
-    ///     let pool = Pool::eth_pool(
-    ///         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
-    ///         blob_store,
-    ///         Default::default(),
-    ///     );
+    /// use reth_transaction_pool::{
+    ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
+    /// };
+    /// # fn t<C>(client: C)  where C: StateProviderFactory + BlockReaderIdExt + Clone + 'static {
+    /// let blob_store = InMemoryBlobStore::default();
+    /// let pool = Pool::eth_pool(
+    ///     TransactionValidationTaskExecutor::eth(
+    ///         client,
+    ///         MAINNET.clone(),
+    ///         blob_store.clone(),
+    ///         TokioTaskExecutor::default(),
+    ///     ),
+    ///     blob_store,
+    ///     Default::default(),
+    /// );
     /// # }
     /// ```
     pub fn eth_pool(

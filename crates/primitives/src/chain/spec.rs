@@ -153,6 +153,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             1273020,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
+
         base_fee_params: BaseFeeParams::ethereum(),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
@@ -241,6 +242,129 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
+/// The Optimism Goerli spec
+#[cfg(feature = "optimism")]
+pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::optimism_goerli(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op.json"))
+            .expect("Can't deserialize Optimism Goerli genesis json"),
+        genesis_hash: Some(b256!(
+            "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
+        )),
+        fork_timestamps: ForkTimestamps::default(),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Bedrock, ForkCondition::Block(4061224)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
+        ]),
+        base_fee_params: BaseFeeParams::optimism(),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
+        ..Default::default()
+    }
+    .into()
+});
+
+/// The Base Goerli spec
+#[cfg(feature = "optimism")]
+pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::base_goerli(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_base.json"))
+            .expect("Can't deserialize Base Goerli genesis json"),
+        genesis_hash: Some(b256!(
+            "a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76"
+        )),
+        fork_timestamps: ForkTimestamps::default(),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Bedrock, ForkCondition::Block(0)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(1683219600)),
+        ]),
+        base_fee_params: BaseFeeParams::optimism_goerli(),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
+        ..Default::default()
+    }
+    .into()
+});
+
+/// The Base mainnet spec
+#[cfg(feature = "optimism")]
+pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::base_mainnet(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/base.json"))
+            .expect("Can't deserialize Base genesis json"),
+        genesis_hash: Some(b256!(
+            "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
+        )),
+        fork_timestamps: ForkTimestamps::default(),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Bedrock, ForkCondition::Block(0)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
+        ]),
+        base_fee_params: BaseFeeParams::optimism(),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
+        ..Default::default()
+    }
+    .into()
+});
+
 /// BaseFeeParams contains the config parameters that control block base fee computation
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct BaseFeeParams {
@@ -256,6 +380,28 @@ impl BaseFeeParams {
         BaseFeeParams {
             max_change_denominator: EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
             elasticity_multiplier: EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
+
+    /// Get the base fee parameters for optimism goerli
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_goerli() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator:
+                crate::constants::OP_GOERLI_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+            elasticity_multiplier:
+                crate::constants::OP_GOERLI_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
+
+    /// Get the base fee parameters for optimism mainnet
+    #[cfg(feature = "optimism")]
+    pub const fn optimism() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator:
+                crate::constants::OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+            elasticity_multiplier:
+                crate::constants::OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         }
     }
 }
@@ -333,6 +479,11 @@ impl ChainSpec {
     /// Get information about the chain itself
     pub fn chain(&self) -> Chain {
         self.chain
+    }
+
+    /// Returns `true` if this chain contains Optimism configuration.
+    pub fn is_optimism(&self) -> bool {
+        self.chain.is_optimism()
     }
 
     /// Get the genesis block specification.
@@ -873,6 +1024,24 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Bedrock at genesis
+    #[cfg(feature = "optimism")]
+    pub fn bedrock_activated(mut self) -> Self {
+        self = self.paris_activated();
+        self.hardforks.insert(Hardfork::Bedrock, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Regolith at the timestamp of activation.
+    /// For post-bedrock op-stack chains, this will be at genesis.
+    /// For pre-bedrock op-stack chains, this will be at the timestamp of regolith activation.
+    #[cfg(feature = "optimism")]
+    pub fn regolith_activated(mut self) -> Self {
+        self = self.bedrock_activated();
+        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics
@@ -1071,12 +1240,12 @@ impl Display for DisplayFork {
 
 /// A container for pretty-printing a list of hardforks.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// # use reth_primitives::MAINNET;
 /// # use reth_primitives::DisplayHardforks;
-/// println!("{}", DisplayHardforks::from(MAINNET.hardforks().clone()));
+/// println!("{}", DisplayHardforks::new(MAINNET.hardforks()));
 /// ```
 ///
 /// An example of the output:
@@ -1138,18 +1307,22 @@ impl Display for DisplayHardforks {
     }
 }
 
-impl<I> From<I> for DisplayHardforks
-where
-    I: IntoIterator<Item = (Hardfork, ForkCondition)>,
-{
-    fn from(iter: I) -> Self {
+impl DisplayHardforks {
+    /// Creates a new [`DisplayHardforks`] from an iterator of hardforks.
+    pub fn new(hardforks: &BTreeMap<Hardfork, ForkCondition>) -> Self {
+        Self::from_iter(hardforks.iter())
+    }
+}
+
+impl<'a, 'b> FromIterator<(&'a Hardfork, &'b ForkCondition)> for DisplayHardforks {
+    fn from_iter<T: IntoIterator<Item = (&'a Hardfork, &'b ForkCondition)>>(iter: T) -> Self {
         let mut pre_merge = Vec::new();
         let mut with_merge = Vec::new();
         let mut post_merge = Vec::new();
 
-        for (fork, condition) in iter.into_iter() {
+        for (fork, condition) in iter {
             let display_fork =
-                DisplayFork { name: fork.to_string(), activated_at: condition, eip: None };
+                DisplayFork { name: fork.to_string(), activated_at: *condition, eip: None };
 
             match condition {
                 ForkCondition::Block(_) => {
@@ -1197,6 +1370,9 @@ mod tests {
     use bytes::BytesMut;
     use std::{collections::HashMap, str::FromStr};
 
+    #[cfg(feature = "optimism")]
+    use crate::OP_GOERLI;
+
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -1234,7 +1410,7 @@ mod tests {
     #[test]
     fn test_hardfork_list_display_mainnet() {
         assert_eq!(
-            DisplayHardforks::from(MAINNET.hardforks().clone()).to_string(),
+            DisplayHardforks::new(MAINNET.hardforks()).to_string(),
             "Pre-merge hard forks (block based):
 - Frontier                         @0
 - Homestead                        @1150000
@@ -1268,7 +1444,7 @@ Post-merge hard forks (timestamp based):
             .with_fork(Hardfork::Shanghai, ForkCondition::Never)
             .build();
         assert_eq!(
-            DisplayHardforks::from(spec.hardforks().clone()).to_string(),
+            DisplayHardforks::new(spec.hardforks()).to_string(),
             "Pre-merge hard forks (block based):
 - Frontier                         @0
 "
@@ -1796,6 +1972,28 @@ Post-merge hard forks (timestamp based):
                 ForkId { hash: ForkHash([0x45, 0xb8, 0x36, 0x12]), next: 0 },
             )],
         )
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn optimism_goerli_forkids() {
+        test_fork_ids(
+            &OP_GOERLI,
+            &[
+                (
+                    Head { number: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x6d, 0x63, 0x76, 0xbe]), next: 4061224 },
+                ),
+                (
+                    Head { number: 4061224, timestamp: 1679079599, ..Default::default() },
+                    ForkId { hash: ForkHash([0x03, 0x47, 0x85, 0x69]), next: 1679079600 },
+                ),
+                (
+                    Head { number: 4061224, timestamp: 1679079600, ..Default::default() },
+                    ForkId { hash: ForkHash([0x6d, 0x43, 0x1d, 0x6c]), next: 0 },
+                ),
+            ],
+        );
     }
 
     /// Checks that time-based forks work

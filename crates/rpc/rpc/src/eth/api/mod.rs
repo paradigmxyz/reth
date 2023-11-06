@@ -38,6 +38,8 @@ use tokio::sync::{oneshot, Mutex};
 mod block;
 mod call;
 mod fees;
+#[cfg(feature = "optimism")]
+mod optimism;
 mod pending_block;
 mod server;
 mod sign;
@@ -147,6 +149,8 @@ where
             pending_block: Default::default(),
             blocking_task_pool,
             fee_history_cache,
+            #[cfg(feature = "optimism")]
+            http_client: reqwest::Client::new(),
         };
 
         Self { inner: Arc::new(inner) }
@@ -278,6 +282,12 @@ where
         };
 
         let mut cfg = CfgEnv::default();
+
+        #[cfg(feature = "optimism")]
+        {
+            cfg.optimism = self.provider().chain_spec().is_optimism();
+        }
+
         let mut block_env = BlockEnv::default();
         // Note: for the PENDING block we assume it is past the known merge block and thus this will
         // not fail when looking up the total difficulty value for the blockenv.
@@ -456,6 +466,9 @@ struct EthApiInner<Provider, Pool, Network> {
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
     fee_history_cache: FeeHistoryCache,
+    /// An http client for communicating with sequencers.
+    #[cfg(feature = "optimism")]
+    http_client: reqwest::Client,
 }
 
 /// Settings for the [EthStateCache](crate::eth::cache::EthStateCache).

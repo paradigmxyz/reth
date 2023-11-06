@@ -24,6 +24,7 @@ mod chain;
 mod compression;
 pub mod constants;
 pub mod eip4844;
+mod error;
 mod forkid;
 pub mod fs;
 mod genesis;
@@ -33,7 +34,6 @@ mod integer_list;
 mod log;
 mod net;
 mod peer;
-mod precaution;
 pub mod proofs;
 mod prune;
 mod receipt;
@@ -59,13 +59,14 @@ pub use chain::{
     DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, GOERLI, HOLESKY, MAINNET,
     SEPOLIA,
 };
+#[cfg(feature = "optimism")]
+pub use chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-#[cfg(feature = "c-kzg")]
-pub use eip4844::{calculate_excess_blob_gas, kzg_to_versioned_hash};
+pub use error::{GotExpected, GotExpectedBoxed};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
@@ -101,6 +102,8 @@ pub use transaction::{
     TxEip4844, TxHashOrNumber, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
+#[cfg(feature = "optimism")]
+pub use transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
 pub use withdrawal::Withdrawal;
 
 // Re-exports
@@ -113,26 +116,23 @@ pub use alloy_primitives::{
 pub use revm_primitives::{self, JumpMap};
 
 #[doc(hidden)]
+#[deprecated = "use B64 instead"]
+pub type H64 = B64;
+#[doc(hidden)]
 #[deprecated = "use B128 instead"]
 pub type H128 = B128;
-
+#[doc(hidden)]
+#[deprecated = "use Address instead"]
+pub type H160 = Address;
 #[doc(hidden)]
 #[deprecated = "use B256 instead"]
 pub type H256 = B256;
-
 #[doc(hidden)]
 #[deprecated = "use B512 instead"]
 pub type H512 = B512;
 
-#[doc(hidden)]
-#[deprecated = "use B64 instead"]
-pub type H64 = B64;
-
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;
 
-/// EIP-4844 + KZG helpers
 #[cfg(feature = "c-kzg")]
-pub mod kzg {
-    pub use c_kzg::*;
-}
+pub use c_kzg as kzg;

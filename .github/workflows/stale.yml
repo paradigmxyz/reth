@@ -1,4 +1,7 @@
+# Marks issues as stale.
+
 name: stale issues
+
 on:
   workflow_dispatch: {}
   schedule:

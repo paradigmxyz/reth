@@ -243,6 +243,8 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::CanonicalCommit { .. } |
                     BlockExecutionError::AppendChainDoesntConnect { .. } |
                     BlockExecutionError::UnavailableForTest => false,
+                    #[cfg(feature = "optimism")]
+                    BlockExecutionError::OptimismBlockExecution(_) => false,
                 }
             }
             InsertBlockErrorKind::Tree(err) => {

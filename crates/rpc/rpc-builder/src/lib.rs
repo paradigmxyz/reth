@@ -18,16 +18,33 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
-//! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
+//! use reth_provider::{
+//!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+//!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
+//! };
+//! use reth_rpc_builder::{
+//!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
+//! };
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
-//! pub async fn launch<Provider, Pool, Network, Events>(provider: Provider, pool: Pool, network: Network, events: Events)
-//! where
-//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//! pub async fn launch<Provider, Pool, Network, Events>(
+//!     provider: Provider,
+//!     pool: Pool,
+//!     network: Network,
+//!     events: Events,
+//! ) where
+//!     Provider: AccountReader
+//!         + BlockReaderIdExt
+//!         + ChainSpecProvider
+//!         + ChangeSetReader
+//!         + StateProviderFactory
+//!         + EvmEnvProvider
+//!         + Clone
+//!         + Unpin
+//!         + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events: CanonStateSubscriptions +  Clone + 'static,
+//!     Events: CanonStateSubscriptions + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -36,7 +53,9 @@
 //!         RethRpcModule::Eth,
 //!         RethRpcModule::Web3,
 //!     ]);
-//!     let transport_modules = RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events).build(transports);
+//!     let transport_modules =
+//!         RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events)
+//!             .build(transports);
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(transport_modules)
@@ -49,22 +68,40 @@
 //!
 //!
 //! ```
-//! use tokio::try_join;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
+//! use reth_provider::{
+//!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+//!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
+//! };
 //! use reth_rpc::JwtSecret;
-//! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
+//! use reth_rpc_api::EngineApiServer;
+//! use reth_rpc_builder::{
+//!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
+//!     TransportRpcModuleConfig,
+//! };
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
-//! use reth_rpc_api::EngineApiServer;
-//! use reth_rpc_builder::auth::AuthServerConfig;
-//! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(provider: Provider, pool: Pool, network: Network, events: Events, engine_api: EngineApi)
-//! where
-//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//! use tokio::try_join;
+//! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(
+//!     provider: Provider,
+//!     pool: Pool,
+//!     network: Network,
+//!     events: Events,
+//!     engine_api: EngineApi,
+//! ) where
+//!     Provider: AccountReader
+//!         + BlockReaderIdExt
+//!         + ChainSpecProvider
+//!         + ChangeSetReader
+//!         + StateProviderFactory
+//!         + EvmEnvProvider
+//!         + Clone
+//!         + Unpin
+//!         + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events: CanonStateSubscriptions +  Clone + 'static,
-//!     EngineApi: EngineApiServer
+//!     Events: CanonStateSubscriptions + Clone + 'static,
+//!     EngineApi: EngineApiServer,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -73,20 +110,20 @@
 //!         RethRpcModule::Eth,
 //!         RethRpcModule::Web3,
 //!     ]);
-//!     let builder = RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
+//!     let builder =
+//!         RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
 //!
-//!   // configure the server modules
-//!    let (modules, auth_module, _registry) = builder.build_with_auth_server(transports, engine_api);
+//!     // configure the server modules
+//!     let (modules, auth_module, _registry) =
+//!         builder.build_with_auth_server(transports, engine_api);
 //!
-//!   // start the servers
-//!   let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
-//!   let config = RpcServerConfig::default();
+//!     // start the servers
+//!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
+//!     let config = RpcServerConfig::default();
 //!
-//!   let (_rpc_handle, _auth_handle) = try_join!(
-//!         modules.start_server(config),
-//!         auth_module.start_server(auth_config),
-//!  ).unwrap();
-//!
+//!     let (_rpc_handle, _auth_handle) =
+//!         try_join!(modules.start_server(config), auth_module.start_server(auth_config),)
+//!             .unwrap();
 //! }
 //! ```
 
@@ -517,19 +554,25 @@ impl RpcModuleSelection {
     /// Create a selection from the [RethRpcModule] string identifiers
     ///
     /// ```
-    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// assert_eq!(
+    ///     config,
+    ///     RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
+    /// );
     /// ```
     ///
     /// Create a unique selection from the [RethRpcModule] string identifiers
     ///
     /// ```
-    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin", "eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// assert_eq!(
+    ///     config,
+    ///     RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
+    /// );
     /// ```
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
@@ -1449,8 +1492,8 @@ impl RpcServerConfig {
 ///
 /// ```
 /// use reth_rpc_builder::{RethRpcModule, TransportRpcModuleConfig};
-///  let config = TransportRpcModuleConfig::default()
-///       .with_http([RethRpcModule::Eth, RethRpcModule::Admin]);
+/// let config =
+///     TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth, RethRpcModule::Admin]);
 /// ```
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct TransportRpcModuleConfig {

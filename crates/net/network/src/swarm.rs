@@ -137,7 +137,7 @@ where
                 self.state.on_session_activated(
                     peer_id,
                     capabilities.clone(),
-                    status,
+                    status.clone(),
                     messages.clone(),
                     timeout,
                 );
@@ -394,12 +394,12 @@ pub(crate) enum SwarmEvent {
     SessionEstablished {
         peer_id: PeerId,
         remote_addr: SocketAddr,
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,
         messages: PeerRequestSender,
-        status: Status,
+        status: Arc<Status>,
         direction: Direction,
     },
     SessionClosed {

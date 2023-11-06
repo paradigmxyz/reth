@@ -24,7 +24,6 @@ use reth_primitives::{
     stage::StageId,
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
     SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
-    U64,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
@@ -241,16 +240,21 @@ impl Command {
         let payload_attrs = PayloadAttributes {
             parent_beacon_block_root: self.parent_beacon_block_root,
             prev_randao: self.prev_randao,
-            timestamp: U64::from(self.timestamp),
+            timestamp: self.timestamp,
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: reth_rpc_types::engine::OptimismPayloadAttributes::default(
+            ),
         };
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            PayloadBuilderAttributes::new(best_block.hash, payload_attrs),
+            PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
             self.chain.clone(),
+            #[cfg(feature = "optimism")]
+            true,
         );
         let args = BuildArguments::new(
             blockchain_db.clone(),

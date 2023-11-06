@@ -36,6 +36,7 @@ proptest-derive = { workspace = true, optional = true }
 [features]
 default = ["jsonrpsee-types"]
 arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary"]
+optimism = []
 
 [dev-dependencies]
 # misc
