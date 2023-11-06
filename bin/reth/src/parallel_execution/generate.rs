@@ -140,6 +140,7 @@ impl Command {
 
                 let block_rw_set =
                     resolve_block_dependencies(&mut state, &self.chain, &block, &senders, td)?;
+                state.merge_transitions(BundleRetention::Reverts);
 
                 for (tx_idx, rw_set) in block_rw_set.transactions.iter().enumerate() {
                     let hash = block.body.get(tx_idx).expect("exists").hash;
@@ -158,7 +159,6 @@ impl Command {
 
             if self.validate {
                 tracing::debug!(target: "reth::cli", ?range, ?queue, "Validating parallel execution");
-                state.merge_transitions(BundleRetention::Reverts);
                 account_status_mismatches +=
                     self.validate(&provider, sp_database, range.clone(), state)?;
                 tracing::debug!(target: "reth::cli", ?range, ?queue, "Successfully validated parallel execution");
@@ -239,7 +239,7 @@ impl Command {
             if self.skip_account_status_validation {
                 if parallel_account_status != expected_account_status {
                     // Account status mismatch is a soft error.
-                    // Most importantly the transitions should match.
+                    // Most importantly, the transitions must match.
                     account_status_mismatches += 1;
                     tracing::warn!(
                         target: "reth::cli",
@@ -253,13 +253,13 @@ impl Command {
                 pretty_assertions::assert_eq!(
                     parallel_account.map(|acc| acc.account),
                     expected_account.map(|acc| acc.account),
-                    "Cache account mismatch"
+                    "Cache account mismatch {expected_address:?}"
                 );
             } else {
                 pretty_assertions::assert_eq!(
                     parallel_account,
                     expected_account,
-                    "Cache account mismatch"
+                    "Cache account mismatch {expected_address:?}"
                 );
             }
         }

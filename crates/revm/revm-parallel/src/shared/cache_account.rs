@@ -1,5 +1,7 @@
 use derive_more::Deref;
-use reth_primitives::{alloy_primitives::I256, BlockNumber, TransitionId, B256, KECCAK_EMPTY};
+use reth_primitives::{
+    alloy_primitives::I256, BlockNumber, TransitionId, TransitionType, B256, KECCAK_EMPTY,
+};
 use revm::{
     db::{
         states::{plain_account::PlainStorage, CacheAccount as RevmCacheAccount},
@@ -29,7 +31,7 @@ impl<T> RevisedData<T> {
         self
     }
 
-    fn update_revision(&mut self, data: T, revision: TransitionId) {
+    fn update_with_revision(&mut self, data: T, revision: TransitionId) {
         if Some(revision) > self.revision {
             self.data = data;
             self.revision = Some(revision);
@@ -82,6 +84,7 @@ impl AccountInfoDiff {
         old: &Option<AccountInfo>,
         new: Option<AccountInfo>,
         revision: TransitionId,
+        update_code: bool,
     ) {
         self.update_balance_delta(
             old.as_ref().map(|info| info.balance).unwrap_or_default(),
@@ -91,7 +94,9 @@ impl AccountInfoDiff {
             old.as_ref().map(|info| info.nonce).unwrap_or_default(),
             new.as_ref().map(|info| info.nonce).unwrap_or_default(),
         );
-        self.update_code(new.map(|info| AccountCode::new(info.code_hash, info.code)), revision);
+        if update_code {
+            self.update_code(new.map(|info| AccountCode::new(info.code_hash, info.code)), revision);
+        }
     }
 
     /// Updates the current nonce delta.
@@ -114,7 +119,7 @@ impl AccountInfoDiff {
 
     /// Update code hash if it has a more recent revision.
     fn update_code(&mut self, code: Option<AccountCode>, revision: TransitionId) {
-        self.code.update_revision(code, revision);
+        self.code.update_with_revision(code, revision);
     }
 }
 
@@ -344,14 +349,14 @@ impl SharedCacheAccount {
         // If it is marked as selfdestructed inside revm we need to change destroy the state
         // unless later revisions have already been applied.
         if account.is_selfdestructed() {
-            self.info_diff.update_diff(previous_info, None, transition);
+            self.info_diff.update_diff(previous_info, None, transition, true);
             self.storage.retain(|_slot, value| value.revision > Some(transition));
             self.selfdestruct_transition = Some(match self.selfdestruct_transition {
                 Some(prev) => prev.max(transition),
                 None => transition,
             });
 
-            block_transition.info_diff.update_diff(previous_info, None, transition);
+            block_transition.info_diff.update_diff(previous_info, None, transition, true);
             block_transition.selfdestruct_count += 1;
             block_transition.selfdestruct_transition =
                 Some(match block_transition.selfdestruct_transition {
@@ -361,8 +366,19 @@ impl SharedCacheAccount {
             return
         }
 
-        self.info_diff.update_diff(previous_info, Some(account.info.clone()), transition);
-        block_transition.info_diff.update_diff(previous_info, Some(account.info), transition);
+        let is_created = account.is_created();
+        self.info_diff.update_diff(
+            previous_info,
+            Some(account.info.clone()),
+            transition,
+            is_created,
+        );
+        block_transition.info_diff.update_diff(
+            previous_info,
+            Some(account.info),
+            transition,
+            is_created,
+        );
 
         let is_destroyed =
             self.selfdestruct_transition.map_or(false, |revision| transition < revision);
@@ -385,7 +401,7 @@ impl SharedCacheAccount {
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     let existing = entry.get_mut();
-                    existing.update_revision(
+                    existing.update_with_revision(
                         StorageSlot::new_changed(existing.original_value(), current_value),
                         transition,
                     );
@@ -403,7 +419,7 @@ impl SharedCacheAccount {
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     let existing = entry.get_mut();
-                    existing.update_revision(
+                    existing.update_with_revision(
                         StorageSlot::new_changed(existing.original_value(), block_value),
                         transition,
                     );
@@ -463,7 +479,24 @@ impl SharedCacheAccount {
                 value.present_value;
         }
 
-        let info = self.account_info(&transition.info_diff);
+        let mut info = self.account_info(&transition.info_diff);
+
+        // The account code might have been read before update.
+        // Since the code might have been written in any adjacent transition,
+        // preserve it if it was not modified at this transition.
+        if let Some(previous_info) = self
+            .previous_info
+            .as_ref()
+            .filter(|info| info.code_hash != KECCAK_EMPTY && transition.info_diff.code.is_none())
+        {
+            info = Some(AccountInfo {
+                balance: info.as_ref().map(|info| info.balance).unwrap_or_default(),
+                nonce: info.as_ref().map(|info| info.nonce).unwrap_or_default(),
+                code_hash: previous_info.code_hash,
+                code: previous_info.code.clone(),
+            })
+        }
+
         let next_status = self.next_status(
             &info,
             &transition,

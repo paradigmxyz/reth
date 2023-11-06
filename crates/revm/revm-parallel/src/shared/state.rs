@@ -174,9 +174,11 @@ impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let account = if let Some(account) = self.cache.accounts.read().get(&address) {
+        let accounts = self.cache.accounts.read();
+        let account = if let Some(account) = accounts.get(&address) {
             account.latest_account_info()
         } else {
+            drop(accounts);
             let account = self.load_account_from_database(address)?;
             self.cache.accounts.write().insert(address, account.clone());
             account.latest_account_info()
@@ -205,13 +207,15 @@ impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
         let value = if let Some(value) = account.storage_slot(index) {
             value
         } else {
+            let is_storage_known = account.previous_status().is_storage_known();
+            drop(accounts);
+
             // If account was destroyed or created, we return zero without loading.
-            let value = if account.previous_status().is_storage_known() {
+            let value = if is_storage_known {
                 U256::ZERO
             } else {
                 self.database.storage_ref(address, index)?
             };
-            drop(accounts);
 
             self.cache
                 .accounts

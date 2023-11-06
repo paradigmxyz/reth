@@ -305,6 +305,8 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
                 self.executed.insert(block_number, executed);
             }
         }
+
+        tracing::trace!(target: "evm::parallel", "Committing transition batch");
         self.state.write().commit(states);
 
         Ok(())
