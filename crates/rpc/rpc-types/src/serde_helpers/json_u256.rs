@@ -134,7 +134,7 @@ where
     let val = match val {
         Value::Number(num) => num,
         Value::String(raw) => return u256_from_str(&raw),
-        _ => return Err(Error::custom("TTD must be a number")),
+        _ => return Err(Error::custom("TTD must be a number or string")),
     };
 
     let num = if let Some(val) = val.as_u64() {
