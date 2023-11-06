@@ -1,14 +1,14 @@
-//use crate::access_list::AccessList;
 use crate::{AccessList, BlockId, BlockOverrides};
 use alloy_primitives::{Address, Bytes, B256, U256, U64, U8};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 /// Bundle of transactions
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Bundle {
-    /// Transactions
+    /// All transactions to execute
     pub transactions: Vec<CallRequest>,
-    /// Block overides
+    /// Block overrides to apply
     pub block_override: Option<BlockOverrides>,
 }
 
@@ -26,12 +26,22 @@ pub struct StateContext {
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct EthCallResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
     /// eth_call output (if no error)
-    pub output: Option<Bytes>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<Bytes>,
     /// eth_call output (if error)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+impl EthCallResponse {
+    /// Returns the output if present, otherwise returns the error.
+    pub fn ensure_output(self) -> Result<Bytes, String> {
+        match self.output {
+            Some(output) => Ok(output),
+            None => Err(self.error.unwrap_or_else(|| "Unknown error".to_string())),
+        }
+    }
 }
 
 /// Represents a transaction index where -1 means all transactions
