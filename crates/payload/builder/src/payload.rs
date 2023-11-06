@@ -194,7 +194,7 @@ impl PayloadBuilderAttributes {
         Ok(Self {
             id,
             parent,
-            timestamp: attributes.timestamp.to(),
+            timestamp: attributes.timestamp,
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
             withdrawals: withdraw.unwrap_or_default(),
@@ -281,7 +281,7 @@ pub(crate) fn payload_id(
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());
-    hasher.update(&attributes.timestamp.to::<u64>().to_be_bytes()[..]);
+    hasher.update(&attributes.timestamp.to_be_bytes()[..]);
     hasher.update(attributes.prev_randao.as_slice());
     hasher.update(attributes.suggested_fee_recipient.as_slice());
     if let Some(withdrawals) = &attributes.withdrawals {
