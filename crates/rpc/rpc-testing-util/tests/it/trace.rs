@@ -1,7 +1,7 @@
 use futures::StreamExt;
 use jsonrpsee::http_client::HttpClientBuilder;
 use reth_rpc_api_testing_util::{trace::TraceApiExt, utils::parse_env_url};
-use reth_rpc_types::trace::parity::TraceType;
+use reth_rpc_types::trace::{filter::TraceFilter, parity::TraceType};
 use std::{collections::HashSet, time::Instant};
 /// This is intended to be run locally against a running node.
 ///
@@ -43,5 +43,27 @@ async fn replay_transactions() {
     while let Some(replay_txs) = stream.next().await {
         println!("Transaction: {:?}", replay_txs);
         println!("Replayed transactions in {:?}", now.elapsed());
+    }
+}
+
+/// Tests the tracers filters on a local Ethereum node
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn trace_filters() {
+    // Parse the node URL from environment variable and create an HTTP client.
+    let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
+    let client = HttpClientBuilder::default().build(url).unwrap();
+
+    // Set up trace filters.
+    let filter = TraceFilter::default();
+    let filters = vec![filter];
+
+    // Initialize a stream for the trace filters.
+    let mut stream = client.trace_filter_stream(filters);
+    let start_time = Instant::now();
+    while let Some(trace) = stream.next().await {
+        println!("Transaction Trace: {:?}", trace);
+        println!("Duration since test start: {:?}", start_time.elapsed());
     }
 }
