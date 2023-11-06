@@ -115,11 +115,11 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         // The default payload builder is implemented on the unit type.
         #[cfg(not(feature = "optimism"))]
         #[allow(clippy::let_unit_value)]
-        let payload_builder = ();
+        let payload_builder = reth_basic_payload_builder::EthereumPayloadBuilder::default();
 
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder;
+        let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder::default();
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             components.provider(),

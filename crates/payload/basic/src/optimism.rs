@@ -287,7 +287,8 @@ where
 }
 
 /// Optimism's payload builder
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct OptimismPayloadBuilder;
 
 /// Implementation of the [PayloadBuilder] trait for [OptimismPayloadBuilder].
