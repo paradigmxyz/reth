@@ -41,7 +41,7 @@ use reth_transaction_pool::TransactionPool;
 use std::{
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 use tracing::{debug, info};
 
