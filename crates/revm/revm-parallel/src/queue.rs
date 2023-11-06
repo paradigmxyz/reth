@@ -184,10 +184,15 @@ impl TransitionQueueStore {
         let full_file_range = matching
             .first()
             .zip(matching.last())
-            .map(|((first, _), (last, _))| *first.start()..*last.end())
+            .map(|((first, _), (last, _))| *first.start()..=*last.end())
             .unwrap();
         if !full_file_range.contains(range.start()) || !full_file_range.contains(range.end()) {
-            tracing::trace!(target: "evm::parallel::store", ?full_file_range, "Transition queue files do not cover the requested range");
+            tracing::trace!(
+                target: "evm::parallel::store",
+                requested_range = ?range,
+                file_range = ?full_file_range,
+                "Transition queue files do not cover the requested range"
+            );
             return Ok(None)
         }
 
