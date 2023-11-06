@@ -147,10 +147,7 @@ impl JwtSecret {
     /// ```rust
     /// use reth_rpc::{Claims, JwtSecret};
     ///
-    /// let my_claims = Claims {
-    ///     iat: 0,
-    ///     exp: None
-    /// };
+    /// let my_claims = Claims { iat: 0, exp: None };
     /// let secret = JwtSecret::random();
     /// let token = secret.encode(&my_claims).unwrap();
     /// ```

@@ -247,6 +247,10 @@ where
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     ) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            if self.network.tx_gossip_disabled() {
+                let _ = response.send(Ok(PooledTransactions::default()));
+                return
+            }
             let transactions = self
                 .pool
                 .get_pooled_transaction_elements(request.0, GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE);
@@ -276,6 +280,9 @@ where
         if self.network.is_initially_syncing() {
             return
         }
+        if self.network.tx_gossip_disabled() {
+            return
+        }
 
         trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
 
@@ -300,6 +307,9 @@ where
         to_propagate: Vec<PropagateTransaction>,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
+        if self.network.tx_gossip_disabled() {
+            return propagated
+        }
 
         // send full transactions to a fraction fo the connected peers (square root of the total
         // number of connected peers)
@@ -484,6 +494,9 @@ where
         if self.network.is_initially_syncing() {
             return
         }
+        if self.network.tx_gossip_disabled() {
+            return
+        }
 
         let mut num_already_seen = 0;
 
@@ -620,6 +633,9 @@ where
                 // `NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT` transactions in the
                 // pool
                 if !self.network.is_initially_syncing() {
+                    if self.network.tx_gossip_disabled() {
+                        return
+                    }
                     let peer = self.peers.get_mut(&peer_id).expect("is present; qed");
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
@@ -653,6 +669,9 @@ where
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
+            return
+        }
+        if self.network.tx_gossip_disabled() {
             return
         }
 
@@ -778,18 +797,17 @@ where
 
         this.update_request_metrics();
 
-        let fetch_event = this.transaction_fetcher.poll(cx);
-        match fetch_event {
-            Poll::Ready(FetchEvent::TransactionsFetched { peer_id, transactions }) => {
-                if let Some(txns) = transactions {
-                    this.import_transactions(peer_id, txns, TransactionSource::Response);
+        // drain fetching transaction events
+        while let Poll::Ready(fetch_event) = this.transaction_fetcher.poll(cx) {
+            match fetch_event {
+                FetchEvent::TransactionsFetched { peer_id, transactions } => {
+                    if let Some(txns) = transactions {
+                        this.import_transactions(peer_id, txns, TransactionSource::Response);
+                    }
                 }
-            }
-            Poll::Ready(FetchEvent::FetchError { peer_id, error }) => {
-                this.on_request_error(peer_id, error);
-            }
-            Poll::Pending => {
-                // No event ready at the moment, nothing to do here.
+                FetchEvent::FetchError { peer_id, error } => {
+                    this.on_request_error(peer_id, error);
+                }
             }
         }
 

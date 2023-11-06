@@ -1,88 +1,34 @@
 # Runs a series of sanity checks for crate consumers.
-#
-# Currently the only check is that the version constraints in each `Cargo.toml` do not lead to a breaking dependency.
+
+name: sanity
+
 on:
   workflow_dispatch: {}
   # Once per day at 00:00 UTC
   schedule:
-    - cron: '0 0 * * *'
+    - cron: "0 0 * * *"
 
 env:
-  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
-  GETH_BUILD: 1.13.4-3f907d6a
 
-name: sanity
 jobs:
-  dep-version-constraints:
+  unused-dependencies:
     runs-on: ubuntu-latest
-    name: dep version constraints test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
     strategy:
       matrix:
-        partition: [1, 2, 3]
+        network: ["ethereum", "optimism"]
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Install geth
-        run: |
-            mkdir -p "$HOME/bin"
-            wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
-            tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
-            rm geth-linux-amd64-$GETH_BUILD.tar.gz
-            mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
-            chmod u+x "$HOME/bin/geth"
-            export PATH=$HOME/bin:$PATH
-            echo $HOME/bin >> $GITHUB_PATH
-            geth version
-
-      - name: Install latest nextest release
-        uses: taiki-e/install-action@nextest
-
-      - name: Update packages
-        run: cargo update
-
-      - name: Run tests
-        run: |
-          cargo nextest run --locked --workspace --all-features \
-            --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
-            -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
-
-      - uses: JasonEtco/create-an-issue@v2
-        if: ${{ failure() }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        with:
-          update_existing: true
-          filename: .github/SANITY_DEPS_ISSUE_TEMPLATE.md
-
-  unused-deps:
-    runs-on: ubuntu-latest
-    name: unused dependencies
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Install cargo-udeps
-        run: cargo install cargo-udeps --locked
-
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-udeps
       - name: Check for unused dependencies
-        run: cargo +nightly udeps --all-features --all-targets
-
+        run: cargo udeps --features "jemalloc,${{ matrix.network }}"
       - uses: JasonEtco/create-an-issue@v2
         if: ${{ failure() }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_URL:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           update_existing: true
           filename: .github/SANITY_UNUSED_DEPS_ISSUE_TEMPLATE.md
-

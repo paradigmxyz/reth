@@ -399,6 +399,31 @@ pub struct PayloadAttributes {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
+    /// Optimism Payload Attributes
+    #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    pub optimism_payload_attributes: OptimismPayloadAttributes,
+}
+
+/// Optimism Payload Attributes
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(feature = "optimism")]
+pub struct OptimismPayloadAttributes {
+    /// Transactions is a field for rollups: the transactions list is forced into the block
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transactions: Option<Vec<Bytes>>,
+    /// If true, the no transactions are taken out of the tx-pool, only transactions from the above
+    /// Transactions list will be included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_tx_pool: Option<bool>,
+    /// If set, this sets the exact gas limit the block produced with.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::serde_helpers::u64_hex::u64_hex_opt::deserialize"
+    )]
+    pub gas_limit: Option<u64>,
 }
 
 /// This structure contains the result of processing a payload or fork choice update.

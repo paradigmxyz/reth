@@ -30,6 +30,23 @@ struct BeaconPayloadAttributes {
     withdrawals: Option<Vec<Withdrawal>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_beacon_block_root: Option<B256>,
+    #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    optimism_payload_attributes: BeaconOptimismPayloadAttributes,
+}
+
+/// Optimism Payload Attributes
+#[cfg(feature = "optimism")]
+#[serde_as]
+#[derive(Serialize, Deserialize)]
+struct BeaconOptimismPayloadAttributes {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transactions: Option<Vec<Bytes>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    no_tx_pool: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    gas_limit: Option<u64>,
 }
 
 /// A helper module for serializing and deserializing the payload attributes for the beacon API.
@@ -57,6 +74,12 @@ pub mod beacon_api_payload_attributes {
             suggested_fee_recipient: payload_attributes.suggested_fee_recipient,
             withdrawals: payload_attributes.withdrawals.clone(),
             parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: BeaconOptimismPayloadAttributes {
+                transactions: payload_attributes.optimism_payload_attributes.transactions.clone(),
+                no_tx_pool: payload_attributes.optimism_payload_attributes.no_tx_pool,
+                gas_limit: payload_attributes.optimism_payload_attributes.gas_limit,
+            },
         };
         beacon_api_payload_attributes.serialize(serializer)
     }
@@ -73,6 +96,14 @@ pub mod beacon_api_payload_attributes {
             suggested_fee_recipient: beacon_api_payload_attributes.suggested_fee_recipient,
             withdrawals: beacon_api_payload_attributes.withdrawals,
             parent_beacon_block_root: beacon_api_payload_attributes.parent_beacon_block_root,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: crate::eth::engine::OptimismPayloadAttributes {
+                transactions: beacon_api_payload_attributes
+                    .optimism_payload_attributes
+                    .transactions,
+                no_tx_pool: beacon_api_payload_attributes.optimism_payload_attributes.no_tx_pool,
+                gas_limit: beacon_api_payload_attributes.optimism_payload_attributes.gas_limit,
+            },
         })
     }
 }

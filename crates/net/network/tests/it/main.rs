@@ -5,6 +5,7 @@ mod geth;
 mod requests;
 mod session;
 mod startup;
+#[cfg(not(feature = "optimism"))]
 mod txgossip;
 
 fn main() {}

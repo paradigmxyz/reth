@@ -128,6 +128,23 @@ pub enum BlockExecutionError {
     /// Note: this is not feature gated for convenience.
     #[error("execution unavailable for tests")]
     UnavailableForTest,
+
+    /// Optimism Block Executor Errors
+    #[cfg(feature = "optimism")]
+    #[error(transparent)]
+    OptimismBlockExecution(#[from] OptimismBlockExecutionError),
+}
+
+/// Optimism Block Executor Errors
+#[cfg(feature = "optimism")]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum OptimismBlockExecutionError {
+    /// Error when trying to parse L1 block info
+    #[error("Could not get L1 block info from L2 block: {message:?}")]
+    L1BlockInfoError {
+        /// The inner error message
+        message: String,
+    },
 }
 
 impl BlockExecutionError {

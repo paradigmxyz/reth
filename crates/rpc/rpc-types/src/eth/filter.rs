@@ -366,7 +366,8 @@ impl Filter {
     /// # use alloy_primitives::Address;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
-    /// let filter = Filter::new().address("0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap());
+    /// let filter = Filter::new()
+    ///     .address("0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap());
     /// # }
     /// ```
     ///
@@ -377,7 +378,10 @@ impl Filter {
     /// # use alloy_primitives::Address;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
-    /// let addresses = vec!["0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap(),"0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8".parse::<Address>().unwrap()];
+    /// let addresses = vec![
+    ///     "0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap(),
+    ///     "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8".parse::<Address>().unwrap(),
+    /// ];
     /// let filter = Filter::new().address(addresses);
     /// # }
     /// ```
