@@ -55,7 +55,7 @@ macro_rules! set_value {
             }
             #[cfg(feature = "optimism")]
             MockTransaction::Deposit(TxDeposit { ref mut $field, .. }) => {
-                *$field = new_value;
+                *$field = new_value.into();
             }
         }
     };
@@ -63,14 +63,24 @@ macro_rules! set_value {
 
 /// Gets the value for the field
 macro_rules! get_value {
+    ($this:ident => source_hash) => {
+        match $this {
+            #[cfg(feature = "optimism")]
+            MockTransaction::Deposit(ref tx) => &tx.source_hash,
+            _ => panic!("Only TxDeposit has a source_hash field."),
+        }
+    };
+
     ($this:ident => $field:ident) => {
         match $this {
-            MockTransaction::Legacy { $field, .. } => $field,
-            MockTransaction::Eip1559 { $field, .. } => $field,
-            MockTransaction::Eip4844 { $field, .. } => $field,
-            MockTransaction::Eip2930 { $field, .. } => $field,
+            MockTransaction::Legacy { $field, .. } |
+            MockTransaction::Eip1559 { $field, .. } |
+            MockTransaction::Eip4844 { $field, .. } |
+            MockTransaction::Eip2930 { $field, .. } => &$field,
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(TxDeposit { $field, .. }) => $field,
+            MockTransaction::Deposit(_) => {
+                panic!("Field {} is not available in TxDeposit.", stringify!($field));
+            }
         }
     };
 }
@@ -90,7 +100,8 @@ macro_rules! make_setters_getters {
             }
 
             pub fn [<get_ $name>](&self) -> $t {
-                get_value!(self => $name).clone()
+                (*get_value!(self => $name)).clone()
+
             }
         )*}
     };
