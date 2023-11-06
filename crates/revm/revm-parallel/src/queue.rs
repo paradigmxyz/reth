@@ -216,7 +216,9 @@ impl TransitionQueueStore {
     /// Save a queue to the queue store.
     pub fn save(&self, queue: TransitionQueue) -> eyre::Result<()> {
         let filename = format!("parallel-{}-{}.json", queue.range.start(), queue.range.end());
-        fs::write(self.dir.join(filename), serde_json::to_string(&queue)?)?;
+        let path = self.dir.join(filename);
+        tracing::trace!(target: "evm::parallel::store", range = ?queue.range, path = %path.display(), "Saving transition queue");
+        fs::write(path, serde_json::to_string(&queue)?)?;
         Ok(())
     }
 }

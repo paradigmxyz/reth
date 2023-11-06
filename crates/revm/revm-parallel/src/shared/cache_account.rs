@@ -1,7 +1,5 @@
 use derive_more::Deref;
-use reth_primitives::{
-    alloy_primitives::I256, BlockNumber, TransitionId, TransitionType, B256, KECCAK_EMPTY,
-};
+use reth_primitives::{alloy_primitives::I256, BlockNumber, TransitionId, B256, KECCAK_EMPTY};
 use revm::{
     db::{
         states::{plain_account::PlainStorage, CacheAccount as RevmCacheAccount},
@@ -346,10 +344,21 @@ impl SharedCacheAccount {
 
         let block_transition = self.transitions.entry(transition.0).or_default();
 
+        let is_selfdestructed = account.is_selfdestructed();
+        let should_update_code = is_selfdestructed || account.is_created();
+        let new_info = Some(account.info).filter(|_| !is_selfdestructed);
+
+        self.info_diff.update_diff(previous_info, new_info.clone(), transition, should_update_code);
+        block_transition.info_diff.update_diff(
+            previous_info,
+            new_info,
+            transition,
+            should_update_code,
+        );
+
         // If it is marked as selfdestructed inside revm we need to change destroy the state
         // unless later revisions have already been applied.
-        if account.is_selfdestructed() {
-            self.info_diff.update_diff(previous_info, None, transition, true);
+        if is_selfdestructed {
             self.storage.retain(|_slot, value| value.revision > Some(transition));
             self.selfdestruct_transition = Some(match self.selfdestruct_transition {
                 Some(prev) => prev.max(transition),
@@ -357,7 +366,6 @@ impl SharedCacheAccount {
             });
 
             // TODO: check storage
-            block_transition.info_diff.update_diff(previous_info, None, transition, true);
             block_transition.selfdestruct_count += 1;
             block_transition.selfdestruct_transition =
                 Some(match block_transition.selfdestruct_transition {
@@ -367,29 +375,16 @@ impl SharedCacheAccount {
             return
         }
 
-        let is_created = account.is_created();
-        self.info_diff.update_diff(
-            previous_info,
-            Some(account.info.clone()),
-            transition,
-            is_created,
-        );
-        block_transition.info_diff.update_diff(
-            previous_info,
-            Some(account.info),
-            transition,
-            is_created,
-        );
-
-        let is_destroyed =
+        let will_be_destroyed =
             self.selfdestruct_transition.map_or(false, |revision| transition < revision);
-        let is_destroyed_at_block = block_transition
+        let will_be_destroyed_at_block = block_transition
             .selfdestruct_transition
             .map_or(false, |revision| transition < revision);
         for (slot, value) in account.storage {
             // The value might have been destroyed in the further revision.
-            let current_value = if is_destroyed { U256::ZERO } else { value.present_value };
-            let block_value = if is_destroyed_at_block { U256::ZERO } else { value.present_value };
+            let current_value = if will_be_destroyed { U256::ZERO } else { value.present_value };
+            let block_value =
+                if will_be_destroyed_at_block { U256::ZERO } else { value.present_value };
             match self.storage.entry(slot) {
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(
@@ -476,6 +471,7 @@ impl SharedCacheAccount {
             if value.is_changed() {
                 transition_storage.insert(*slot, value.data.clone());
             }
+
             self.storage.get_mut(slot).unwrap().data.previous_or_original_value =
                 value.present_value;
         }
