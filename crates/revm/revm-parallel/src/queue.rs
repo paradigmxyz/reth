@@ -50,6 +50,7 @@ impl TransitionQueue {
 
         for (block_number, block_rw_set) in sets.iter().sorted_unstable_by_key(|(block, _)| *block)
         {
+            tracing::trace!(target: "evm::parallel::resolve", block_number, "Resolving dependencies");
             for (id, rw_set) in block_rw_set.transitions(*block_number) {
                 let mut depth = this
                     .find_highest_dependency(&rw_set, &sets, max_batch_size)
