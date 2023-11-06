@@ -26,7 +26,12 @@ use reth_revm::{
     },
 };
 use reth_stages::PipelineError;
-use std::{collections::BTreeMap, ops::RangeInclusive, path::PathBuf, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::RangeInclusive,
+    path::PathBuf,
+    sync::Arc,
+};
 use tracing::*;
 
 /// `reth parallel-execution generate` command
@@ -120,7 +125,7 @@ impl Command {
         while start_block <= self.to {
             let end_block = self.to.min(start_block + self.interval);
             let range = start_block..=end_block;
-            let mut block_rw_sets = BTreeMap::default();
+            let mut block_rw_sets = HashMap::default();
 
             let provider = factory.provider().map_err(PipelineError::Interface)?;
             let sp = HistoricalStateProviderRef::new(provider.tx_ref(), start_block);

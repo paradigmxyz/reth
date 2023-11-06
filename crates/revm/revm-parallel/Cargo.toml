@@ -29,3 +29,4 @@ dashmap = { version = "5", features = ["rayon", "raw-api"] }
 tracing.workspace = true
 async-trait.workspace = true
 parking_lot.workspace = true
+itertools.workspace = true

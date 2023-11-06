@@ -6389,6 +6389,7 @@ dependencies = [
  "dashmap",
  "derive_more",
  "eyre",
+ "itertools 0.11.0",
  "parking_lot 0.12.1",
  "rayon",
  "reth-interfaces",

@@ -2,9 +2,10 @@
 
 use crate::rw_set::{BlockRWSet, TransitionRWSet};
 use derive_more::{Deref, DerefMut};
+use itertools::Itertools;
 use reth_primitives::{BlockNumber, TransitionId, TransitionType};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     ffi::OsStr,
     fs,
     ops::{IndexMut, RangeInclusive},
@@ -42,12 +43,13 @@ impl TransitionQueue {
     /// Resolve transition queue from an ordered list of block transition rw sets.
     pub fn resolve(
         range: RangeInclusive<BlockNumber>,
-        sets: BTreeMap<BlockNumber, BlockRWSet>,
+        sets: HashMap<BlockNumber, BlockRWSet>,
         max_batch_size: usize,
     ) -> Self {
         let mut this = Self::new(range);
 
-        for (block_number, block_rw_set) in &sets {
+        for (block_number, block_rw_set) in sets.iter().sorted_unstable_by_key(|(block, _)| *block)
+        {
             for (id, rw_set) in block_rw_set.transitions(*block_number) {
                 let mut depth = this
                     .find_highest_dependency(&rw_set, &sets, max_batch_size)
@@ -88,7 +90,7 @@ impl TransitionQueue {
     pub fn find_highest_dependency(
         &self,
         target: &TransitionRWSet,
-        sets: &BTreeMap<BlockNumber, BlockRWSet>,
+        sets: &HashMap<BlockNumber, BlockRWSet>,
         max_batch_size: usize,
     ) -> Option<usize> {
         // Iterate over the list in reverse to find dependency with the highest index.
