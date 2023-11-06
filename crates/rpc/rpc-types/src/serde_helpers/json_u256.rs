@@ -137,13 +137,9 @@ where
         _ => return Err(Error::custom("TTD must be a number")),
     };
 
-    let num = if val.is_u64() {
-        // SAFETY: is_u64 is true - as_u64 should succeed
-        U256::from(val.as_u64().unwrap())
-    } else if val.is_f64() {
-        // SAFETY: is_f64 is true - as_f64 should succeed
-        let value = val.as_f64().unwrap();
-
+    let num = if let Some(val) = val.as_u64() {
+        U256::from(val)
+    } else {
         // The ethereum mainnet TTD is 58750000000000000000000, and geth serializes this
         // without quotes, because that is how golang `big.Int`s marshal in JSON. Numbers
         // are arbitrary precision in JSON, so this is valid JSON. This number is also
@@ -160,17 +156,9 @@ where
         // <https://github.com/serde-rs/serde/issues/2230>
         // <https://github.com/serde-rs/serde/issues/1183>
         //
-        // To solve this, we use the captured float and return the TTD as a U256 if it's equal.
-        if value == 5.875e22 {
-            U256::from(58750000000000000000000u128)
-        } else {
-            // We could try to convert to a u128 here but there would probably be loss of
-            // precision, so we just return an error.
-            return Err(Error::custom("Deserializing a large non-mainnet TTD is not supported"));
-        }
-    } else {
-        // must be i64 - negative numbers are not supported
-        return Err(Error::custom("Negative TTD values are invalid and will not be deserialized"));
+        // To solve this, we instead deserialize as string if it is not captured as a `u64`.
+        U256::from_str_radix(val.as_str(), 10)
+            .map_err(|e| Error::custom(format!("Parsing TTD as decimal failed {val}: {e:?}")))?
     };
 
     Ok(num)
@@ -212,11 +200,17 @@ mod test {
         #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
         struct Ttd(#[serde(deserialize_with = "super::deserialize_json_ttd_opt")] Option<U256>);
 
-        let deserialized: Vec<Ttd> =
-            serde_json::from_str(r#"["58750000000000000000000",58750000000000000000000]"#).unwrap();
+        let deserialized: Vec<Ttd> = serde_json::from_str(
+            r#"["",0,"0","0x0","58750000000000000000000",58750000000000000000000]"#,
+        )
+        .unwrap();
         assert_eq!(
             deserialized,
             vec![
+                Ttd(Some(U256::ZERO)),
+                Ttd(Some(U256::ZERO)),
+                Ttd(Some(U256::ZERO)),
+                Ttd(Some(U256::ZERO)),
                 Ttd(Some(U256::from(58750000000000000000000u128))),
                 Ttd(Some(U256::from(58750000000000000000000u128))),
             ]
