@@ -158,6 +158,13 @@ impl TransitionQueueStore {
         for path in fs::read_dir(&self.dir)? {
             let path = path?;
             if !path.metadata()?.is_dir() {
+                let parsed = parse_block_range(&path.file_name());
+                tracing::trace!(
+                    target: "evm::parallel::store",
+                    path = ?path.file_name(),
+                    ?parsed,
+                    "Parsing transition file"
+                );
                 if let Some(file_range) = parse_block_range(&path.file_name()) {
                     if range.contains(file_range.start()) || range.contains(file_range.end()) {
                         matching.push((file_range, path.path()));
@@ -167,6 +174,7 @@ impl TransitionQueueStore {
         }
 
         if matching.is_empty() {
+            tracing::trace!(target: "evm::parallel::store", dir = %self.dir.display(), "No transition queue files found");
             return Ok(None)
         }
 
@@ -179,6 +187,7 @@ impl TransitionQueueStore {
             .map(|((first, _), (last, _))| *first.start()..*last.end())
             .unwrap();
         if !full_file_range.contains(range.start()) || !full_file_range.contains(range.end()) {
+            tracing::trace!(target: "evm::parallel::store", ?full_file_range, "Transition queue files do not cover the requested range");
             return Ok(None)
         }
 
