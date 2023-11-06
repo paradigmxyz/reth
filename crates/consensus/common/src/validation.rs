@@ -489,8 +489,8 @@ mod tests {
     };
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
-        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
-        TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
+        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, ForkCondition, Header,
+        Signature, TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -847,5 +847,99 @@ mod tests {
                 expected: expected_blob_gas_used
             }))
         );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_increase() {
+        let parent = SealedHeader {
+            header: Header { gas_limit: 1024 * 10, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit + 5, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_london_hardfork_adjustment() {
+        let parent = SealedHeader {
+            header: Header { gas_limit: 1024 * 10, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let mut chain_spec = ChainSpec::default();
+        chain_spec.hardforks.insert(Hardfork::London, ForkCondition::Block(1));
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    fn create_header(gas_limit: u64) -> SealedHeader {
+        SealedHeader { header: Header { gas_limit, ..Default::default() }, ..Default::default() }
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_increase_exceeding_limit() {
+        let parent = create_header(1024 * 10);
+        let child = create_header(parent.header.gas_limit + parent.header.gas_limit / 1024 + 1);
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            check_gas_limit(&parent, &child, &chain_spec),
+            Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
+            })
+        );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_decrease_within_limit() {
+        let parent = create_header(1024 * 20);
+        let child = create_header(parent.header.gas_limit - 5);
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_decrease_exceeding_limit() {
+        let parent = create_header(1024 * 20);
+        let child = create_header(parent.header.gas_limit - parent.header.gas_limit / 1024 - 1);
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            check_gas_limit(&parent, &child, &chain_spec),
+            Err(ConsensusError::GasLimitInvalidDecrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
+            })
+        );
+    }
+
+    #[test]
+    fn test_london_hardfork_adjustment_increase() {
+        let parent = create_header(1024 * 10);
+        let child = create_header(parent.header.gas_limit * 3); // Assuming elasticity_multiplier is 2
+        let mut chain_spec = ChainSpec::default();
+        chain_spec.hardforks.insert(Hardfork::London, ForkCondition::Block(1));
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_london_hardfork_adjustment_decrease() {
+        let parent = create_header(1024 * 10);
+        let child = create_header(parent.header.gas_limit / 3); // Assuming elasticity_multiplier is 2
+        let mut chain_spec = ChainSpec::default();
+        chain_spec.hardforks.insert(Hardfork::London, ForkCondition::Block(1));
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
     }
 }
