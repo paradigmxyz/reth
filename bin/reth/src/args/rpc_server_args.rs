@@ -440,24 +440,43 @@ impl RethRpcConfig for RpcServerArgs {
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
     }
 
-    fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
-        match self.auth_jwtsecret.as_ref() {
-            Some(fpath) => {
-                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
-                JwtSecret::from_file(fpath)
-            }
-            None => {
-                if default_jwt_path.exists() {
-                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
-                    JwtSecret::from_file(&default_jwt_path)
-                } else {
-                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
-                    JwtSecret::try_create(&default_jwt_path)
-                }
-            }
+    // fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
+    //     match self.auth_jwtsecret.as_ref() {
+    //         Some(fpath) => {
+    //             debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+    //             JwtSecret::from_file(fpath)
+    //         }
+    //         None => {
+    //             if default_jwt_path.exists() {
+    //                 debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret
+    // file");                 JwtSecret::from_file(&default_jwt_path)
+    //             } else {
+    //                 info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret
+    // file");                 JwtSecret::try_create(&default_jwt_path)
+    //             }
+    //         }
+    //     }
+    // }
+    ///
+    fn get_or_create_jwt_secret_from_path(path: &PathBuf) -> Result<JwtSecret, JwtError> {
+        if path.exists() {
+            debug!(target: "reth::cli", ?path, "Reading JWT auth secret file");
+            JwtSecret::from_file(path)
+        } else {
+            info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
+            JwtSecret::try_create(path)
         }
     }
 
+    fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<Option<JwtSecret>, JwtError> {
+        match self.auth_jwtsecret.as_ref() {
+            Some(fpath) => {
+                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+                JwtSecret::from_file(fpath).map(Some)
+            }
+            None => Self::get_or_create_jwt_secret_from_path(&default_jwt_path).map(Some),
+        }
+    }
     fn rpc_secret_key(&self) -> Option<JwtSecret> {
         self.rpc_jwtsecret.clone()
     }
