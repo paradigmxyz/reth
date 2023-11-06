@@ -40,7 +40,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
 
-/// Constants for timeout updating
+// Constants for timeout updating.
 
 /// Minimum timeout value
 const MINIMUM_TIMEOUT: Duration = Duration::from_secs(2);
@@ -50,6 +50,11 @@ const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
 const SAMPLE_IMPACT: f64 = 0.1;
 /// Amount of RTTs before timeout
 const TIMEOUT_SCALING: u32 = 3;
+
+/// The type of the underlying peer network connection.
+// This type is boxed because the underlying stream is ~6KB,
+// mostly coming from `P2PStream`'s `snap::Encoder` (2072), and `ECIESStream` (3600).
+pub type PeerConnection = Box<EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>>;
 
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the
@@ -65,7 +70,7 @@ pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.
-    pub(crate) conn: EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>,
+    pub(crate) conn: PeerConnection,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -760,8 +765,6 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 }
 #[cfg(test)]
 mod tests {
-    #![allow(dead_code)]
-
     use super::*;
     use crate::session::{
         config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
@@ -784,7 +787,7 @@ mod tests {
     }
 
     struct SessionBuilder {
-        remote_capabilities: Arc<Capabilities>,
+        _remote_capabilities: Arc<Capabilities>,
         active_session_tx: mpsc::Sender<ActiveSessionMessage>,
         active_session_rx: ReceiverStream<ActiveSessionMessage>,
         to_sessions: Vec<mpsc::Sender<SessionCommand>>,
@@ -914,7 +917,7 @@ mod tests {
 
             Self {
                 next_id: 0,
-                remote_capabilities: Arc::new(Capabilities::from(vec![])),
+                _remote_capabilities: Arc::new(Capabilities::from(vec![])),
                 active_session_tx,
                 active_session_rx: ReceiverStream::new(active_session_rx),
                 to_sessions: vec![],

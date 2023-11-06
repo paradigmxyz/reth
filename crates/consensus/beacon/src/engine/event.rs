@@ -11,7 +11,7 @@ pub enum BeaconConsensusEngineEvent {
     /// A block was added to the canonical chain.
     CanonicalBlockAdded(Arc<SealedBlock>),
     /// A canonical chain was committed.
-    CanonicalChainCommitted(SealedHeader, Duration),
+    CanonicalChainCommitted(Box<SealedHeader>, Duration),
     /// A block was added to the fork chain.
     ForkBlockAdded(Arc<SealedBlock>),
 }

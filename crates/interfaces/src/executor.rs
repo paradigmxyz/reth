@@ -1,5 +1,7 @@
 use crate::RethError;
-use reth_primitives::{BlockNumHash, Bloom, PruneSegmentError, B256};
+use reth_primitives::{
+    BlockNumHash, Bloom, GotExpected, GotExpectedBoxed, PruneSegmentError, B256,
+};
 use revm_primitives::EVMError;
 use thiserror::Error;
 
@@ -22,21 +24,11 @@ pub enum BlockValidationError {
     #[error("incrementing balance in post execution failed")]
     IncrementBalanceFailed,
     /// Error when receipt root doesn't match expected value
-    #[error("receipt root {got} is different than expected {expected}")]
-    ReceiptRootDiff {
-        /// The actual receipt root
-        got: Box<B256>,
-        /// The expected receipt root
-        expected: Box<B256>,
-    },
+    #[error("receipt root mismatch: {0}")]
+    ReceiptRootDiff(GotExpectedBoxed<B256>),
     /// Error when header bloom filter doesn't match expected value
-    #[error("header bloom filter {got} is different than expected {expected}")]
-    BloomLogDiff {
-        /// The actual bloom filter
-        got: Box<Bloom>,
-        /// The expected bloom filter
-        expected: Box<Bloom>,
-    },
+    #[error("header bloom filter mismatch: {0}")]
+    BloomLogDiff(GotExpectedBoxed<Bloom>),
     /// Error when transaction gas limit exceeds available block gas
     #[error("transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}")]
     TransactionGasLimitMoreThanAvailableBlockGas {
@@ -46,15 +38,10 @@ pub enum BlockValidationError {
         block_available_gas: u64,
     },
     /// Error when block gas used doesn't match expected value
-    #[error(
-        "block gas used {got} is different from expected gas used {expected}.\n\
-         Gas spent by each transaction: {gas_spent_by_tx:?}"
-    )]
+    #[error("block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}")]
     BlockGasUsed {
-        /// The actual gas used
-        got: u64,
-        /// The expected gas used
-        expected: u64,
+        /// The gas diff.
+        gas: GotExpected<u64>,
         /// Gas spent by each transaction
         gas_spent_by_tx: Vec<(u64, u64)>,
     },
@@ -119,9 +106,9 @@ pub enum BlockExecutionError {
     )]
     AppendChainDoesntConnect {
         /// The tip of the current chain
-        chain_tip: BlockNumHash,
+        chain_tip: Box<BlockNumHash>,
         /// The fork on the other chain
-        other_chain_fork: BlockNumHash,
+        other_chain_fork: Box<BlockNumHash>,
     },
     /// Only used for TestExecutor
     ///

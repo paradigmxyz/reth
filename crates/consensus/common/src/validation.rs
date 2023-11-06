@@ -6,8 +6,9 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     },
     eip4844::calculate_excess_blob_gas,
-    BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock, SealedHeader,
-    Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
+    BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
+    SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
+    TxLegacy,
 };
 use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
 use std::collections::{hash_map::Entry, HashMap};
@@ -203,20 +204,18 @@ pub fn validate_block_standalone(
     // Check ommers hash
     let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
     if block.header.ommers_hash != ommers_hash {
-        return Err(ConsensusError::BodyOmmersHashDiff {
-            got: ommers_hash,
-            expected: block.header.ommers_hash,
-        })
+        return Err(ConsensusError::BodyOmmersHashDiff(
+            GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
+        ))
     }
 
     // Check transaction root
     // TODO(onbjerg): This should probably be accessible directly on [Block]
     let transaction_root = reth_primitives::proofs::calculate_transaction_root(&block.body);
     if block.header.transactions_root != transaction_root {
-        return Err(ConsensusError::BodyTransactionRootDiff {
-            got: transaction_root,
-            expected: block.header.transactions_root,
-        })
+        return Err(ConsensusError::BodyTransactionRootDiff(
+            GotExpected { got: transaction_root, expected: block.header.transactions_root }.into(),
+        ))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -227,10 +226,9 @@ pub fn validate_block_standalone(
         let header_withdrawals_root =
             block.withdrawals_root.as_ref().ok_or(ConsensusError::WithdrawalsRootMissing)?;
         if withdrawals_root != *header_withdrawals_root {
-            return Err(ConsensusError::BodyWithdrawalsRootDiff {
-                got: withdrawals_root,
-                expected: *header_withdrawals_root,
-            })
+            return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                GotExpected { got: withdrawals_root, expected: *header_withdrawals_root }.into(),
+            ))
         }
     }
 
@@ -241,10 +239,10 @@ pub fn validate_block_standalone(
         let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
         let total_blob_gas = block.blob_gas_used();
         if total_blob_gas != header_blob_gas_used {
-            return Err(ConsensusError::BlobGasUsedDiff {
-                header_blob_gas_used,
-                expected_blob_gas_used: total_blob_gas,
-            })
+            return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
+                got: header_blob_gas_used,
+                expected: total_blob_gas,
+            }))
         }
     }
 
@@ -300,10 +298,9 @@ pub fn validate_header_regarding_parent(
     }
 
     if parent.hash != child.parent_hash {
-        return Err(ConsensusError::ParentHashMismatch {
-            expected_parent_hash: parent.hash,
-            got_parent_hash: child.parent_hash,
-        })
+        return Err(ConsensusError::ParentHashMismatch(
+            GotExpected { got: child.parent_hash, expected: parent.hash }.into(),
+        ))
     }
 
     // timestamp in past check
@@ -343,7 +340,10 @@ pub fn validate_header_regarding_parent(
                     .ok_or(ConsensusError::BaseFeeMissing)?
             };
         if expected_base_fee != base_fee {
-            return Err(ConsensusError::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
+            return Err(ConsensusError::BaseFeeDiff(GotExpected {
+                expected: expected_base_fee,
+                got: base_fee,
+            }))
         }
     }
 
@@ -435,8 +435,7 @@ pub fn validate_4844_header_with_parent(
         calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
-            expected: expected_excess_blob_gas,
-            got: excess_blob_gas,
+            diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
             parent_excess_blob_gas,
             parent_blob_gas_used,
         })
@@ -843,10 +842,10 @@ mod tests {
         // validate blob, it should fail blob gas used validation
         assert_eq!(
             validate_block_standalone(&block, &chain_spec),
-            Err(ConsensusError::BlobGasUsedDiff {
-                header_blob_gas_used: 1,
-                expected_blob_gas_used
-            })
+            Err(ConsensusError::BlobGasUsedDiff(GotExpected {
+                got: 1,
+                expected: expected_blob_gas_used
+            }))
         );
     }
 }
