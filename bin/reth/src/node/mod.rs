@@ -269,7 +269,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
+        info!(target: "reth::cli", "{}", DisplayHardforks::new(self.chain.hardforks()));
 
         let consensus = self.consensus();
 

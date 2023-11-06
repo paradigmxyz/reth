@@ -664,8 +664,8 @@ where
 
         let status = match make_canonical_result {
             Ok(outcome) => {
-                match outcome {
-                    CanonicalOutcome::AlreadyCanonical { ref header } => {
+                match &outcome {
+                    CanonicalOutcome::AlreadyCanonical { header } => {
                         // On Optimism, the proposers are allowed to reorg their own chain at will.
                         cfg_if::cfg_if! {
                             if #[cfg(feature = "optimism")] {
@@ -679,7 +679,7 @@ where
                                     let _ = self.update_head(header.clone());
                                     self.listeners.notify(
                                         BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                                            header.clone(),
+                                            Box::new(header.clone()),
                                             elapsed,
                                         ),
                                     );
@@ -701,7 +701,7 @@ where
                             }
                         }
                     }
-                    CanonicalOutcome::Committed { ref head } => {
+                    CanonicalOutcome::Committed { head } => {
                         debug!(
                             target: "consensus::engine",
                             hash=?state.head_block_hash,
@@ -712,7 +712,7 @@ where
                         // new VALID update that moved the canonical chain forward
                         let _ = self.update_head(head.clone());
                         self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                            head.clone(),
+                            Box::new(head.clone()),
                             elapsed,
                         ));
                     }
@@ -873,7 +873,6 @@ where
         self.update_head(head)?;
         self.update_finalized_block(update.finalized_block_hash)?;
         self.update_safe_block(update.safe_block_hash)?;
-
         Ok(())
     }
 
@@ -899,9 +898,7 @@ where
 
         head_block.total_difficulty =
             self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
-                RethError::Provider(ProviderError::TotalDifficultyNotFound {
-                    block_number: head_block.number,
-                })
+                RethError::Provider(ProviderError::TotalDifficultyNotFound(head_block.number))
             })?;
         self.sync_state_updater.update_status(head_block);
 
@@ -1562,9 +1559,9 @@ where
             let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
             match make_canonical_result {
                 Ok(outcome) => {
-                    if let CanonicalOutcome::Committed { ref head } = outcome {
+                    if let CanonicalOutcome::Committed { head } = &outcome {
                         self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                            head.clone(),
+                            Box::new(head.clone()),
                             elapsed,
                         ));
                     }
@@ -1661,7 +1658,7 @@ where
                     warn!(target: "consensus::engine", invalid_hash=?bad_block.hash, invalid_number=?bad_block.number, "Bad block detected in unwind");
 
                     // update the `invalid_headers` cache with the new invalid headers
-                    self.invalid_headers.insert(bad_block);
+                    self.invalid_headers.insert(*bad_block);
                     return None
                 }
 

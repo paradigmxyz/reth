@@ -15,8 +15,8 @@ use reth_primitives::{
     },
     kzg::KzgSettings,
     revm::compat::calculate_intrinsic_gas_after_merge,
-    ChainSpec, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    ChainSpec, GotExpected, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -420,10 +420,9 @@ where
         if cost > account.balance {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidTransactionError::InsufficientFunds {
-                    cost,
-                    available_funds: account.balance,
-                }
+                InvalidTransactionError::InsufficientFunds(
+                    GotExpected { got: account.balance, expected: cost }.into(),
+                )
                 .into(),
             )
         }

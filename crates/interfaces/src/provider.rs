@@ -1,22 +1,23 @@
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, TxHashOrNumber, TxNumber, B256,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, TxHashOrNumber, TxNumber, B256,
 };
+use thiserror::Error;
 
 /// Bundled errors variants thrown by various providers.
-#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] crate::db::DatabaseError),
     /// The header number was not found for the given block hash.
-    #[error("block hash {0:?} does not exist in Headers table")]
+    #[error("block hash {0} does not exist in Headers table")]
     BlockHashNotFound(BlockHash),
     /// A block body is missing.
     #[error("block meta not found for block #{0}")]
     BlockBodyIndicesNotFound(BlockNumber),
     /// The transition id was found for the given address and storage key, but the changeset was
     /// not found.
-    #[error("storage ChangeSet address: ({address:?} key: {storage_key:?}) for block:#{block_number} does not exist")]
+    #[error("storage ChangeSet address: ({address} key: {storage_key:?}) for block #{block_number} does not exist")]
     StorageChangesetNotFound {
         /// The block number found for the address and storage key.
         block_number: BlockNumber,
@@ -26,7 +27,7 @@ pub enum ProviderError {
         storage_key: B256,
     },
     /// The block number was found for the given address, but the changeset was not found.
-    #[error("account {address:?} ChangeSet for block #{block_number} does not exist")]
+    #[error("account {address} ChangeSet for block #{block_number} does not exist")]
     AccountChangesetNotFound {
         /// Block number found for the address.
         block_number: BlockNumber,
@@ -34,11 +35,8 @@ pub enum ProviderError {
         address: Address,
     },
     /// The total difficulty for a block is missing.
-    #[error("total difficulty not found for block #{block_number}")]
-    TotalDifficultyNotFound {
-        /// The block number.
-        block_number: BlockNumber,
-    },
+    #[error("total difficulty not found for block #{0}")]
+    TotalDifficultyNotFound(BlockNumber),
     /// when required header related data was not found but was required.
     #[error("no header found for {0:?}")]
     HeaderNotFound(BlockHashOrNumber),
@@ -85,33 +83,27 @@ pub enum ProviderError {
     #[error("unable to find the block number for a given transaction index")]
     BlockNumberForTransactionIndexNotFound,
     /// Root mismatch.
-    #[error("merkle trie root mismatch at #{block_number} ({block_hash}): got {got}, expected {expected}")]
-    StateRootMismatch {
-        /// The expected root.
-        expected: B256,
-        /// The calculated root.
-        got: B256,
-        /// The block number.
-        block_number: BlockNumber,
-        /// The block hash.
-        block_hash: BlockHash,
-    },
+    #[error("merkle trie {0}")]
+    StateRootMismatch(Box<RootMismatch>),
     /// Root mismatch during unwind
-    #[error("unwind merkle trie root mismatch at #{block_number} ({block_hash}): got {got}, expected {expected}")]
-    UnwindStateRootMismatch {
-        /// Expected root
-        expected: B256,
-        /// Calculated root
-        got: B256,
-        /// Target block number
-        block_number: BlockNumber,
-        /// Block hash
-        block_hash: BlockHash,
-    },
+    #[error("unwind merkle trie {0}")]
+    UnwindStateRootMismatch(Box<RootMismatch>),
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{0} is pruned")]
     StateAtBlockPruned(BlockNumber),
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
+}
+
+/// A root mismatch error at a given block height.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[error("root mismatch at #{block_number} ({block_hash}): {root}")]
+pub struct RootMismatch {
+    /// The target block root diff.
+    pub root: GotExpected<B256>,
+    /// The target block number.
+    pub block_number: BlockNumber,
+    /// The target block hash.
+    pub block_hash: BlockHash,
 }
