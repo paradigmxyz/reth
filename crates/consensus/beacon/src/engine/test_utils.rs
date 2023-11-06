@@ -25,9 +25,9 @@ use reth_interfaces::{
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneModes, B256, U256};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::TestExecutorFactory, AsyncExecutorFactory,
-    BlockExecutor, BundleStateWithReceipts, ExecutorFactory, ProviderFactory,
-    PrunableAsyncBlockExecutor, PrunableBlockExecutor,
+    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
+    BundleStateWithReceipts, ExecutorFactory, ProviderFactory, PrunableBlockExecutor,
+    PrunableBlockRangeExecutor, RangeExecutorFactory,
 };
 use reth_prune::Pruner;
 use reth_revm::EVMProcessorFactory;
@@ -276,10 +276,10 @@ where
     }
 }
 
-impl<A, B> AsyncExecutorFactory for EitherExecutorFactory<A, B>
+impl<A, B> RangeExecutorFactory for EitherExecutorFactory<A, B>
 where
-    A: AsyncExecutorFactory,
-    B: AsyncExecutorFactory,
+    A: RangeExecutorFactory,
+    B: RangeExecutorFactory,
 {
     fn chain_spec(&self) -> &ChainSpec {
         match self {
@@ -288,13 +288,13 @@ where
         }
     }
 
-    fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
+    fn with_provider_and_state<'a, SP: reth_provider::StateProvider + 'a>(
         &'a self,
         sp: SP,
-    ) -> Box<dyn PrunableAsyncBlockExecutor + 'a> {
+    ) -> Box<dyn PrunableBlockRangeExecutor + 'a> {
         match self {
-            EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
-            EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
+            EitherExecutorFactory::Left(a) => a.with_provider_and_state::<'a, SP>(sp),
+            EitherExecutorFactory::Right(b) => b.with_provider_and_state::<'a, SP>(sp),
         }
     }
 }

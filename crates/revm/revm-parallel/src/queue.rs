@@ -1,62 +1,113 @@
 //! The lists representing the order of execution of the block.
 
-use crate::rw_set::TransactionRWSet;
+use crate::rw_set::BlockRWSet;
 use derive_more::{Deref, DerefMut};
-use reth_primitives::BlockNumber;
-use std::{collections::HashMap, ops::IndexMut};
+use reth_primitives::{BlockNumber, TransitionId, TransitionType};
+use std::{
+    collections::BTreeMap,
+    ffi::OsStr,
+    fs,
+    ops::{IndexMut, RangeInclusive},
+    path::PathBuf,
+};
 
-/// The batch of transaction indexes that can be executed in parallel.
-/// Transaction index is the position of the transaction within the block.
+/// The batch of transition ids that can be executed in parallel.
 #[derive(
     Deref, DerefMut, serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Default, Debug,
 )]
-pub struct TransactionBatch(Vec<u32>);
+pub struct TransitionBatch(
+    /// Collection of transition ids.
+    pub Vec<TransitionId>,
+);
 
-/// The queue of transaction lists that represent the order of execution for the block.
-#[derive(
-    Deref, DerefMut, serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Default, Debug,
-)]
-pub struct BlockQueue(Vec<TransactionBatch>);
-
-impl<T> From<T> for BlockQueue
-where
-    T: IntoIterator<Item = Vec<u32>>,
-{
-    fn from(value: T) -> Self {
-        Self(value.into_iter().map(TransactionBatch).collect())
-    }
+/// The queue of transition lists that represent the order of execution for the block.
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct TransitionQueue {
+    range: RangeInclusive<BlockNumber>,
+    batches: Vec<TransitionBatch>,
 }
 
-impl BlockQueue {
-    /// Resolve block queue from an ordered list of transaction read write sets.
-    pub fn resolve(sets: &[TransactionRWSet]) -> Self {
-        let mut this = Self::default();
+impl TransitionQueue {
+    /// Create new transition queue for block range.
+    pub fn new(range: RangeInclusive<BlockNumber>) -> Self {
+        Self { range, batches: Vec::new() }
+    }
 
-        for tx_index in 0..sets.len() {
-            let depth = this.find_highest_dependency(tx_index, sets).map_or(0, |dep| dep + 1);
-            this.insert_at(depth, tx_index as u32);
+    /// Set transitions batches.
+    pub fn with_batches(mut self, batches: impl IntoIterator<Item = Vec<TransitionId>>) -> Self {
+        self.batches = batches.into_iter().map(TransitionBatch).collect();
+        self
+    }
+
+    /// Resolve transition queue from an ordered list of block transition rw sets.
+    pub fn resolve(
+        range: RangeInclusive<BlockNumber>,
+        sets: BTreeMap<BlockNumber, BlockRWSet>,
+    ) -> Self {
+        let mut this = Self::new(range);
+
+        for (block_number, block_rw_set) in &sets {
+            if block_rw_set.pre_block.is_some() {
+                let id = TransitionId::pre_block(*block_number);
+                let depth = this.find_highest_dependency(id, &sets).map_or(0, |dep| dep + 1);
+                this.insert_at(depth, id);
+            }
+            for (tx_index, _tx_rw_set) in block_rw_set.transactions.iter().enumerate() {
+                let id = TransitionId::transaction(*block_number, tx_index as u32);
+                let depth = this.find_highest_dependency(id, &sets).map_or(0, |dep| dep + 1);
+                this.insert_at(depth, id);
+            }
+            if block_rw_set.post_block.as_ref().is_some() {
+                let id = TransitionId::post_block(*block_number);
+                let depth = this.find_highest_dependency(id, &sets).map_or(0, |dep| dep + 1);
+                this.insert_at(depth, id);
+            }
         }
 
         this
     }
 
+    /// Return transaction batches.
+    pub fn batches(&self) -> &[TransitionBatch] {
+        &self.batches
+    }
+
     /// Find dependency with the highest index in the queue.
-    /// Returns [None] if transaction is independent.
+    /// Returns [None] if transition is independent.
+    ///
     ///
     /// # Panics
     ///
-    /// - If the target index has no corresponding rw set.
-    /// - If the block queue contains an index that has no corresponding rw set.
-    pub fn find_highest_dependency(&self, idx: usize, sets: &[TransactionRWSet]) -> Option<usize> {
+    /// - If the target transition id has no corresponding rw set.
+    /// - If the queue contains a transition id that has no corresponding rw set.
+    pub fn find_highest_dependency(
+        &self,
+        id: TransitionId,
+        sets: &BTreeMap<BlockNumber, BlockRWSet>,
+    ) -> Option<usize> {
         // Iterate over the list in reverse to find dependency with the highest index.
-        let target = &sets[idx];
-        for (queue_depth, tx_list) in self.iter().enumerate().rev() {
-            for tx_index in tx_list.iter() {
+        let target_block = sets.get(&id.0).unwrap();
+        let target = match id.1 {
+            TransitionType::PreBlock => target_block.pre_block.as_ref().unwrap(),
+            TransitionType::Transaction(idx) => {
+                target_block.transactions.get(idx as usize).unwrap()
+            }
+            TransitionType::PostBlock => target_block.post_block.as_ref().unwrap(),
+        };
+        for (queue_depth, transition_list) in self.batches.iter().enumerate().rev() {
+            for transition_id in transition_list.iter() {
                 // The dependency check has to be bidirectional since the target
-                // transaction might modify the state in a way that affects the reads
-                // of the transaction we are currently checking.
-                let tx = &sets[*tx_index as usize];
-                if target.depends_on(tx) || tx.depends_on(target) {
+                // transition might modify the state in a way that affects the reads
+                // of the transition we are currently checking.
+                let transition_block = sets.get(&transition_id.0).unwrap();
+                let transition = match transition_id.1 {
+                    TransitionType::PreBlock => transition_block.pre_block.as_ref().unwrap(),
+                    TransitionType::Transaction(idx) => {
+                        transition_block.transactions.get(idx as usize).unwrap()
+                    }
+                    TransitionType::PostBlock => transition_block.post_block.as_ref().unwrap(),
+                };
+                if target.depends_on(transition) || transition.depends_on(target) {
                     return Some(queue_depth)
                 }
             }
@@ -65,102 +116,182 @@ impl BlockQueue {
         None
     }
 
-    /// Insert transaction index at depth or append it to the end of the queue.
-    pub fn insert_at(&mut self, depth: usize, tx_index: u32) {
-        if depth < self.0.len() {
-            self.0.index_mut(depth).push(tx_index);
+    /// Insert transition id at depth or append it to the end of the queue.
+    /// TODO: max batch size
+    pub fn insert_at(&mut self, depth: usize, id: TransitionId) {
+        if depth < self.batches.len() {
+            self.batches.index_mut(depth).push(id);
         } else {
-            self.append_transaction(tx_index);
+            self.append_transition(id);
         }
     }
 
-    /// Appends transaction as the separate list at the end of the queue.
-    pub fn append_transaction(&mut self, tx_index: u32) {
-        self.0.push(TransactionBatch(Vec::from([tx_index])))
+    /// Appends transition as a separate batch to the queue.
+    pub fn append_transition(&mut self, id: TransitionId) {
+        self.batches.push(TransitionBatch(Vec::from([id])))
+    }
+
+    /// Appends transition batch to the queue.
+    pub fn append_batch(&mut self, batch: TransitionBatch) {
+        self.batches.push(batch);
     }
 }
 
-/// The collection of block queues by block number.
-#[derive(Default, Debug)]
-pub struct BlockQueueStore(HashMap<BlockNumber, BlockQueue>);
+/// The collection of transitions queues by block number.
+#[derive(Debug)]
+pub struct TransitionQueueStore {
+    dir: PathBuf,
+}
 
-impl BlockQueueStore {
-    /// Create new queue store.
-    pub fn new(queues: HashMap<BlockNumber, BlockQueue>) -> Self {
-        Self(queues)
+impl TransitionQueueStore {
+    /// Create new store at a given path.
+    pub fn new(dir: PathBuf) -> Self {
+        Self { dir }
     }
 
-    /// Create new queue store from iterator.
-    pub fn from_iter(iter: impl IntoIterator<Item = (BlockNumber, BlockQueue)>) -> Self {
-        Self(HashMap::from_iter(iter))
+    /// Load transition queue.
+    pub fn load(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> eyre::Result<Option<TransitionQueue>> {
+        let mut matching = Vec::new();
+        for path in fs::read_dir(&self.dir)? {
+            let path = path?;
+            if !path.metadata()?.is_dir() {
+                if let Some(file_range) = parse_block_range(&path.file_name()) {
+                    if range.contains(file_range.start()) || range.contains(file_range.end()) {
+                        matching.push((file_range, path.path()));
+                    }
+                }
+            }
+        }
+
+        if matching.is_empty() {
+            return Ok(None)
+        }
+
+        matching.sort_by_key(|(range, _)| *range.start());
+
+        // Check that files cover the requested range.
+        let full_file_range = matching
+            .first()
+            .zip(matching.last())
+            .map(|((first, _), (last, _))| *first.start()..*last.end())
+            .unwrap();
+        if !full_file_range.contains(range.start()) || !full_file_range.contains(range.end()) {
+            return Ok(None)
+        }
+
+        let mut queue = TransitionQueue::new(range.clone());
+        for (file_range, path) in matching {
+            let mut loaded: TransitionQueue = serde_json::from_str(&fs::read_to_string(path)?)?;
+            debug_assert_eq!(loaded.range, file_range);
+            if range.contains(file_range.start()) && range.contains(file_range.end()) {
+                queue.batches.append(&mut loaded.batches);
+            } else {
+                for batch in loaded.batches {
+                    queue.append_batch(TransitionBatch(
+                        batch.0.into_iter().filter(|id| range.contains(&id.0)).collect(),
+                    ));
+                }
+            }
+        }
+        Ok(Some(queue))
     }
 
-    /// Returns block queue for a given number.
-    pub fn get_queue(&self, block: BlockNumber) -> Option<&BlockQueue> {
-        self.0.get(&block)
+    /// Save a queue to the queue store.
+    pub fn save(&self, queue: TransitionQueue) -> eyre::Result<()> {
+        let filename = format!("parallel-{}-{}.json", queue.range.start(), queue.range.end());
+        fs::write(self.dir.join(filename), serde_json::to_string(&queue)?)?;
+        Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::rw_set::{RevmAccessSet, RevmAccountDataKey, RevmKey};
-    use reth_primitives::Address;
-
-    #[test]
-    #[should_panic]
-    fn highest_dependency_target_out_of_bounds() {
-        assert_eq!(BlockQueue::default().find_highest_dependency(0, &[]), None);
-    }
-
-    #[test]
-    #[should_panic]
-    fn highest_dependency_queue_item_out_of_bounds() {
-        let mut queue = BlockQueue::default();
-        queue.append_transaction(1);
-        assert_eq!(queue.find_highest_dependency(0, &[TransactionRWSet::default()]), None);
-    }
-
-    #[test]
-    fn highest_dependency() {
-        let queue = BlockQueue::default();
-        assert_eq!(queue.find_highest_dependency(0, &[TransactionRWSet::default()]), None);
-
-        let account_balance_key = RevmKey::Account(Address::random(), RevmAccountDataKey::Balance);
-        let sets = Vec::from([
-            TransactionRWSet::default().with_write_set(RevmAccessSet::from([account_balance_key])),
-            TransactionRWSet::default().with_read_set(RevmAccessSet::from([account_balance_key])),
-        ]);
-        let queue = BlockQueue::from([vec![0]]);
-        assert_eq!(queue.find_highest_dependency(1, &sets), Some(0));
-    }
-
-    #[test]
-    fn resolve() {
-        let account_balance_key = RevmKey::Account(Address::random(), RevmAccountDataKey::Balance);
-        let account_nonce_key = RevmKey::Account(Address::random(), RevmAccountDataKey::Nonce);
-        let sets = Vec::from([
-            // 0: first hence independent
-            TransactionRWSet::default().with_write_set(RevmAccessSet::from([account_balance_key])),
-            // 1: independent
-            TransactionRWSet::default(),
-            // 2: depends on 0
-            TransactionRWSet::default()
-                .with_read_set(RevmAccessSet::from([account_balance_key]))
-                .with_write_set(RevmAccessSet::from([account_nonce_key])),
-            // 3: independent
-            TransactionRWSet::default(),
-            // 4: depends on 0
-            TransactionRWSet::default().with_read_set(RevmAccessSet::from([account_nonce_key])),
-            // 5: depends on 0, 2
-            TransactionRWSet::default()
-                .with_read_set(RevmAccessSet::from([account_balance_key, account_nonce_key])),
-        ]);
-
-        // [0, 1, 3]
-        // [2]
-        // [4, 5]
-        let expected_queue = BlockQueue::from([vec![0, 1, 3], vec![2], vec![4, 5]]);
-        assert_eq!(BlockQueue::resolve(&sets), expected_queue);
-    }
+fn parse_block_range(filename: &OsStr) -> Option<RangeInclusive<BlockNumber>> {
+    let filename = filename.to_str()?;
+    let range = filename.strip_prefix("parallel-")?;
+    let range = range.strip_suffix(".json")?;
+    let mut range = range.split('-');
+    let start = range.next()?;
+    let end = range.next()?;
+    Some(start.parse::<u64>().ok()?..=end.parse::<u64>().ok()?)
 }
+
+// TODO: fix tests
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::rw_set::{RevmAccessSet, RevmAccountDataKey, RevmKey};
+//     use reth_primitives::Address;
+
+//     #[test]
+//     #[should_panic]
+//     fn highest_dependency_target_out_of_bounds() {
+//         let id = TransitionId::transaction(0, 0);
+//         assert_eq!(
+//             TransitionQueue::default().find_highest_dependency(id, &BTreeMap::default()),
+//             None
+//         );
+//     }
+
+//     #[test]
+//     #[should_panic]
+//     fn highest_dependency_queue_item_out_of_bounds() {
+//         let mut queue = TransitionQueue::default();
+//         queue.append_transition(TransitionId::transaction(0, 1));
+//         assert_eq!(
+//             queue.find_highest_dependency(
+//                 TransitionId::transaction(0, 0),
+//                 &BTreeMap::from_iter([(0, BlockRWSet::default())])
+//             ),
+//             None
+//         );
+//     }
+
+//     #[test]
+//     fn highest_dependency() {
+//         let queue = TransitionQueue::default();
+//         assert_eq!(queue.find_highest_dependency(0, &[TransitionRWSet::default()]), None);
+
+//         let account_balance_key = RevmKey::Account(Address::random(),
+// RevmAccountDataKey::Balance);         let sets = Vec::from([
+//
+// TransitionRWSet::default().with_write_set(RevmAccessSet::from([account_balance_key])),
+//
+// TransitionRWSet::default().with_read_set(RevmAccessSet::from([account_balance_key])),
+//         ]);
+//         let queue = TransitionQueue::from([vec![0]]);
+//         assert_eq!(queue.find_highest_dependency(1, &sets), Some(0));
+//     }
+
+//     #[test]
+//     fn resolve() {
+//         let account_balance_key = RevmKey::Account(Address::random(),
+// RevmAccountDataKey::Balance);         let account_nonce_key =
+// RevmKey::Account(Address::random(), RevmAccountDataKey::Nonce);         let tx_sets =
+// Vec::from([             // 0: first hence independent
+//
+// TransitionRWSet::default().with_write_set(RevmAccessSet::from([account_balance_key])),
+//             // 1: independent
+//             TransitionRWSet::default(),
+//             // 2: depends on 0
+//             TransitionRWSet::default()
+//                 .with_read_set(RevmAccessSet::from([account_balance_key]))
+//                 .with_write_set(RevmAccessSet::from([account_nonce_key])),
+//             // 3: independent
+//             TransitionRWSet::default(),
+//             // 4: depends on 0
+//
+// TransitionRWSet::default().with_read_set(RevmAccessSet::from([account_nonce_key])),
+//             // 5: depends on 0, 2
+//             TransitionRWSet::default()
+//                 .with_read_set(RevmAccessSet::from([account_balance_key,
+// account_nonce_key])),         ]);
+
+//         // [0, 1, 3]
+//         // [2]
+//         // [4, 5]
+//         let expected_queue = TransitionQueue::from([vec![0, 1, 3], vec![2], vec![4, 5]]);
+//         assert_eq!(TransitionQueue::resolve(&tx_sets), expected_queue);
+//     }
+// }

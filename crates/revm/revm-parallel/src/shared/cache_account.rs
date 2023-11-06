@@ -1,5 +1,5 @@
 use derive_more::Deref;
-use reth_primitives::{alloy_primitives::I256, B256, KECCAK_EMPTY};
+use reth_primitives::{alloy_primitives::I256, BlockNumber, TransitionId, B256, KECCAK_EMPTY};
 use revm::{
     db::{
         states::{plain_account::PlainStorage, CacheAccount as RevmCacheAccount},
@@ -14,8 +14,8 @@ struct RevisedData<T> {
     /// Some data.
     #[deref]
     data: T,
-    /// The index of the latest revision of this data.
-    revision: Option<usize>,
+    /// The transition id of the latest revision of this data.
+    revision: Option<TransitionId>,
 }
 
 impl<T> RevisedData<T> {
@@ -24,12 +24,12 @@ impl<T> RevisedData<T> {
         Self { data, revision: None }
     }
 
-    fn with_revision(mut self, revision: usize) -> Self {
+    fn with_revision(mut self, revision: TransitionId) -> Self {
         self.revision = Some(revision);
         self
     }
 
-    fn update_revision(&mut self, data: T, revision: usize) {
+    fn update_revision(&mut self, data: T, revision: TransitionId) {
         if Some(revision) > self.revision {
             self.data = data;
             self.revision = Some(revision);
@@ -56,7 +56,7 @@ impl AccountCode {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct AccountInfoDiff {
+pub struct AccountInfoDiff {
     /// Nonce delta.
     nonce_delta: i64,
     /// Balance delta.
@@ -81,7 +81,7 @@ impl AccountInfoDiff {
         &mut self,
         old: &Option<AccountInfo>,
         new: Option<AccountInfo>,
-        revision: usize,
+        revision: TransitionId,
     ) {
         self.update_balance_delta(
             old.as_ref().map(|info| info.balance).unwrap_or_default(),
@@ -113,9 +113,21 @@ impl AccountInfoDiff {
     }
 
     /// Update code hash if it has a more recent revision.
-    fn update_code(&mut self, code: Option<AccountCode>, revision: usize) {
+    fn update_code(&mut self, code: Option<AccountCode>, revision: TransitionId) {
         self.code.update_revision(code, revision);
     }
+}
+
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
+pub struct SharedAccountTransition {
+    /// The account differences between original and changed.
+    info_diff: AccountInfoDiff,
+    /// Account storage.
+    storage: HashMap<U256, RevisedData<StorageSlot>>,
+    /// The index of the revision where the latest selfdestruct occurred.
+    selfdestruct_transition: Option<TransitionId>,
+    /// The number of times the account was selfdestructed.
+    selfdestruct_count: u32,
 }
 
 /// Cache account contains plain state that gets updated
@@ -126,16 +138,14 @@ pub struct SharedCacheAccount {
     previous_info: Option<AccountInfo>,
     /// Previous account status.
     previous_status: AccountStatus,
-    /// Flag indicating whether the account was touched.
-    touched: bool,
     /// The account differences between original and changed.
     info_diff: AccountInfoDiff,
-    /// Account storage.
+    /// The latest account storage.
     storage: HashMap<U256, RevisedData<StorageSlot>>,
-    /// The index of the revision where the latest selfdestruct occurred.
-    selfdestruct_index: Option<usize>,
-    /// The number of times the account was selfdestructed.
-    selfdestruct_count: u32,
+    /// The latest transition id at which the account was destroyed.
+    selfdestruct_transition: Option<TransitionId>,
+    /// Account transitions by block number.
+    transitions: HashMap<BlockNumber, SharedAccountTransition>,
 }
 
 impl From<SharedCacheAccount> for RevmCacheAccount {
@@ -146,7 +156,7 @@ impl From<SharedCacheAccount> for RevmCacheAccount {
                 storage: value
                     .storage
                     .into_iter()
-                    .map(|(slot, value)| (slot, value.data.present_value))
+                    .map(|(slot, value)| (slot, value.present_value))
                     .collect(),
             }),
             status: value.previous_status,
@@ -170,9 +180,8 @@ impl From<BundleAccount> for SharedCacheAccount {
             previous_status: account.status,
             info_diff,
             storage,
-            touched: false,
-            selfdestruct_count: 0,
-            selfdestruct_index: None,
+            selfdestruct_transition: None,
+            transitions: HashMap::default(),
         }
     }
 }
@@ -184,10 +193,9 @@ impl SharedCacheAccount {
             previous_info: None,
             previous_status: original_status,
             info_diff: AccountInfoDiff::default(),
-            touched: false,
             storage: HashMap::default(),
-            selfdestruct_count: 0,
-            selfdestruct_index: None,
+            selfdestruct_transition: None,
+            transitions: HashMap::default(),
         }
     }
 
@@ -240,67 +248,52 @@ impl SharedCacheAccount {
         Self::new(AccountStatus::Changed).with_info(info).with_storage(storage)
     }
 
-    /// Return storage slot value.
-    pub fn storage_slot(&self, slot: U256) -> Option<U256> {
-        self.storage.get(&slot).map(|value| value.present_value)
-    }
-
-    /// Get or load and insert storage slot.
-    pub fn get_or_insert_storage_slot<Error>(
-        &mut self,
-        slot: U256,
-        load: impl FnOnce() -> Result<U256, Error>,
-    ) -> Result<U256, Error> {
-        match self.storage.entry(slot) {
-            hash_map::Entry::Occupied(entry) => Ok(entry.get().present_value()),
-            hash_map::Entry::Vacant(entry) => {
-                // If account was destroyed or created, we return zero without loading.
-                let value = if self.selfdestruct_index.is_some() ||
-                    self.previous_status.is_storage_known()
-                {
-                    U256::ZERO
-                } else {
-                    load()?
-                };
-                entry.insert(RevisedData::new(StorageSlot::new(value)));
-                Ok(value)
-            }
-        }
-    }
-
     /// Return the status of account as it was loaded or after last transition applied
     pub fn previous_status(&self) -> AccountStatus {
         self.previous_status
     }
 
+    /// Return storage slot value.
+    pub fn storage_slot(&self, slot: U256) -> Option<U256> {
+        self.storage.get(&slot).map(|value| value.present_value)
+    }
+
+    /// Insert storage slot.
+    pub fn insert_storage_slot(&mut self, slot: U256, value: U256) {
+        self.storage.insert(slot, RevisedData::new(StorageSlot::new(value)));
+    }
+
     /// Returns current balance as it should be reported to EVM.
-    pub fn account_balance(&self) -> U256 {
+    pub fn account_balance(&self, delta: I256) -> U256 {
         let original = self.previous_info.as_ref().map(|info| info.balance).unwrap_or_default();
-        let balance_delta = self.info_diff.balance_delta;
-        if balance_delta.is_negative() {
-            original.checked_sub(U256::try_from(balance_delta.abs()).unwrap()).unwrap()
+        if delta.is_negative() {
+            original.checked_sub(U256::try_from(delta.abs()).unwrap()).unwrap()
         } else {
-            original.checked_add(U256::try_from(balance_delta).unwrap()).unwrap()
+            original.checked_add(U256::try_from(delta).unwrap()).unwrap()
         }
     }
 
     /// Return current account nonce.
-    pub fn account_nonce(&self) -> u64 {
+    pub fn account_nonce(&self, delta: i64) -> u64 {
         let original = self.previous_info.as_ref().map(|info| info.nonce).unwrap_or_default();
-        let nonce_delta = self.info_diff.nonce_delta;
-        if nonce_delta.is_negative() {
-            original.checked_sub(u64::try_from(nonce_delta.abs()).unwrap()).unwrap()
+        if delta.is_negative() {
+            original.checked_sub(u64::try_from(delta.abs()).unwrap()).unwrap()
         } else {
-            original.checked_add(u64::try_from(nonce_delta).unwrap()).unwrap()
+            original.checked_add(u64::try_from(delta).unwrap()).unwrap()
         }
     }
 
+    /// Return latest account info.
+    pub fn latest_account_info(&self) -> Option<AccountInfo> {
+        self.account_info(&self.info_diff)
+    }
+
     /// Fetch account info if it exist.
-    pub fn account_info(&self) -> Option<AccountInfo> {
-        let code = self.info_diff.code.data.clone().unwrap_or_default();
+    pub fn account_info(&self, diff: &AccountInfoDiff) -> Option<AccountInfo> {
+        let code = diff.code.data.clone().unwrap_or_default();
         let info = AccountInfo {
-            balance: self.account_balance(),
-            nonce: self.account_nonce(),
+            balance: self.account_balance(diff.balance_delta),
+            nonce: self.account_nonce(diff.nonce_delta),
             code_hash: code.code_hash,
             code: code.code,
         };
@@ -316,69 +309,103 @@ impl SharedCacheAccount {
     /// overflow or be zero.
     ///
     /// Note: only if balance is zero we would return None as no transition would be made.
-    pub fn increment_balance(&mut self, increment: u128) {
+    pub fn increment_balance(&mut self, block_number: BlockNumber, increment: u128) {
         if increment != 0 {
-            self.account_balance_change(|balance| balance.saturating_add(U256::from(increment)));
+            let increment = I256::try_from(increment).unwrap();
+            self.info_diff.balance_delta += increment;
+            self.transitions.entry(block_number).or_default().info_diff.balance_delta += increment;
         }
     }
 
     /// Drain balance from account and return drained amount and transition.
     ///
     /// Used for DAO hardfork transition.
-    pub fn drain_balance(&mut self) -> u128 {
-        self.account_balance_change(|_balance| U256::ZERO).try_into().unwrap()
-    }
-
-    fn account_balance_change<F: FnOnce(U256) -> U256>(&mut self, compute_balance: F) -> U256 {
-        self.touched |= true;
-        let current_balance = self.account_balance();
-        let new_balance = compute_balance(current_balance);
-        self.info_diff.update_balance_delta(current_balance, new_balance);
-        new_balance
+    pub fn drain_balance(&mut self, block_number: BlockNumber) -> u128 {
+        let drained = I256::try_from(self.account_balance(self.info_diff.balance_delta)).unwrap();
+        self.info_diff.balance_delta -= drained;
+        self.transitions.entry(block_number).or_default().info_diff.balance_delta -= drained;
+        drained.try_into().unwrap()
     }
 
     /// Apply single account revision. Revisions are expected to come out of order.
-    pub fn apply_account_revision(
+    pub fn apply_account_transition(
         &mut self,
         previous_info: &Option<AccountInfo>,
         account: Account,
-        revision: usize,
+        transition: TransitionId,
     ) {
         // Untouched account is never changed.
         if !account.is_touched() {
             return
         }
 
-        self.touched |= true;
+        let block_transition = self.transitions.entry(transition.0).or_default();
 
         // If it is marked as selfdestructed inside revm we need to change destroy the state
         // unless later revisions have already been applied.
         if account.is_selfdestructed() {
-            self.info_diff.update_diff(previous_info, None, revision);
-            self.storage.retain(|_slot, value| value.revision > Some(revision));
-            self.selfdestruct_count += 1;
-            self.selfdestruct_index = Some(revision);
+            self.info_diff.update_diff(previous_info, None, transition);
+            self.storage.retain(|_slot, value| value.revision > Some(transition));
+            self.selfdestruct_transition = Some(match self.selfdestruct_transition {
+                Some(prev) => prev.max(transition),
+                None => transition,
+            });
+
+            block_transition.info_diff.update_diff(previous_info, None, transition);
+            block_transition.selfdestruct_count += 1;
+            block_transition.selfdestruct_transition =
+                Some(match block_transition.selfdestruct_transition {
+                    Some(prev) => prev.max(transition),
+                    None => transition,
+                });
             return
         }
 
-        self.info_diff.update_diff(previous_info, Some(account.info), revision);
+        self.info_diff.update_diff(previous_info, Some(account.info.clone()), transition);
+        block_transition.info_diff.update_diff(previous_info, Some(account.info), transition);
 
-        let is_destroyed = self.selfdestruct_index.map_or(false, |index| revision < index);
+        let is_destroyed =
+            self.selfdestruct_transition.map_or(false, |revision| transition < revision);
+        let is_destroyed_at_block = block_transition
+            .selfdestruct_transition
+            .map_or(false, |revision| transition < revision);
         for (slot, value) in account.storage {
             // The value might have been destroyed in the further revision.
-            let current = if is_destroyed { U256::ZERO } else { value.present_value };
+            let current_value = if is_destroyed { U256::ZERO } else { value.present_value };
+            let block_value = if is_destroyed_at_block { U256::ZERO } else { value.present_value };
             match self.storage.entry(slot) {
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(
-                        RevisedData::new(StorageSlot::new_changed(value.original_value(), current))
-                            .with_revision(revision),
+                        RevisedData::new(StorageSlot::new_changed(
+                            value.original_value(),
+                            current_value,
+                        ))
+                        .with_revision(transition),
                     );
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     let existing = entry.get_mut();
                     existing.update_revision(
-                        StorageSlot::new_changed(existing.original_value(), current),
-                        revision,
+                        StorageSlot::new_changed(existing.original_value(), current_value),
+                        transition,
+                    );
+                }
+            };
+            match block_transition.storage.entry(slot) {
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(
+                        RevisedData::new(StorageSlot::new_changed(
+                            value.original_value(),
+                            block_value,
+                        ))
+                        .with_revision(transition),
+                    );
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    let existing = entry.get_mut();
+                    existing.update_revision(
+                        StorageSlot::new_changed(existing.original_value(), block_value),
+                        transition,
                     );
                 }
             };
@@ -390,6 +417,7 @@ impl SharedCacheAccount {
     pub fn next_status(
         &self,
         current_info: &Option<AccountInfo>,
+        transition: &SharedAccountTransition,
         storage_changed: bool,
         _state_clear_enabled: bool,
     ) -> AccountStatus {
@@ -403,10 +431,10 @@ impl SharedCacheAccount {
             } else {
                 AccountStatus::LoadedNotExisting
             }
-        } else if self.selfdestruct_index.is_some() {
+        } else if transition.selfdestruct_transition.is_some() {
             if current_info.is_some() {
                 AccountStatus::DestroyedChanged
-            } else if self.previous_status.was_destroyed() || self.selfdestruct_count > 1 {
+            } else if self.previous_status.was_destroyed() || transition.selfdestruct_count > 1 {
                 AccountStatus::DestroyedAgain
             } else {
                 AccountStatus::Destroyed
@@ -419,25 +447,31 @@ impl SharedCacheAccount {
     }
 
     /// Finalize account state change and return the transition if any occurred.
-    pub fn finalize_transition(&mut self, state_clear_enabled: bool) -> Option<TransitionAccount> {
-        // Untouched accounts do not have transitions.
-        if !self.touched {
-            return None
-        }
+    pub fn finalize_transition(
+        &mut self,
+        block_number: BlockNumber,
+        state_clear_enabled: bool,
+    ) -> Option<TransitionAccount> {
+        let transition = self.transitions.remove(&block_number)?;
 
         let mut transition_storage = HashMap::<U256, StorageSlot>::default();
-        for (slot, value) in self.storage.iter_mut() {
+        for (slot, value) in &transition.storage {
             if value.is_changed() {
                 transition_storage.insert(*slot, value.data.clone());
             }
-            *value = RevisedData::new(StorageSlot::new(value.present_value));
+            self.storage.get_mut(slot).unwrap().data.previous_or_original_value =
+                value.present_value;
         }
 
-        let info = self.account_info();
-        let next_status =
-            self.next_status(&info, !transition_storage.is_empty(), state_clear_enabled);
+        let info = self.account_info(&transition.info_diff);
+        let next_status = self.next_status(
+            &info,
+            &transition,
+            !transition_storage.is_empty(),
+            state_clear_enabled,
+        );
 
-        let transition = if next_status != self.previous_status ||
+        let transition_account = if next_status != self.previous_status ||
             info != self.previous_info ||
             !transition_storage.is_empty()
         {
@@ -447,21 +481,24 @@ impl SharedCacheAccount {
                 previous_info: self.previous_info.clone(),
                 previous_status: self.previous_status,
                 storage: transition_storage,
-                storage_was_destroyed: self.selfdestruct_index.is_some(),
+                storage_was_destroyed: transition.selfdestruct_transition.is_some(),
             })
         } else {
             None
         };
 
-        self.info_diff = AccountInfoDiff::default().with_code(
-            info.as_ref().map(|info| AccountCode::new(info.code_hash, info.code.clone())),
-        );
         self.previous_info = info;
         self.previous_status = next_status;
-        self.touched = false;
-        self.selfdestruct_count = 0;
-        self.selfdestruct_index = None;
+        self.info_diff.balance_delta -= transition.info_diff.balance_delta;
+        self.info_diff.nonce_delta -= transition.info_diff.nonce_delta;
+        if self
+            .selfdestruct_transition
+            .map(|transition| transition.0 <= block_number)
+            .unwrap_or_default()
+        {
+            self.selfdestruct_transition = None;
+        }
 
-        transition
+        transition_account
     }
 }

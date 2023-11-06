@@ -15,14 +15,14 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneModes, U256,
+    BlockNumber, Header, PruneModes, SealedHeader, U256,
 };
 use reth_provider::{
-    AsyncExecutorFactory, BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, TransactionVariant,
+    BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, RangeExecutorFactory, TransactionVariant,
 };
 use std::{
-    ops::RangeInclusive,
+    ops::{Deref, RangeInclusive},
     time::{Duration, Instant},
 };
 use tracing::*;
@@ -57,7 +57,7 @@ use tracing::*;
 /// to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<EF: AsyncExecutorFactory> {
+pub struct ExecutionStage<EF: RangeExecutorFactory> {
     metrics_tx: Option<MetricEventsSender>,
     /// The stage's internal executor
     executor_factory: EF,
@@ -74,7 +74,7 @@ pub struct ExecutionStage<EF: AsyncExecutorFactory> {
     prune_modes: PruneModes,
 }
 
-impl<EF: AsyncExecutorFactory> ExecutionStage<EF> {
+impl<EF: RangeExecutorFactory> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
     pub fn new(
         executor_factory: EF,
@@ -225,7 +225,7 @@ fn calculate_gas_used_from_headers<DB: Database>(
 }
 
 #[async_trait::async_trait]
-impl<EF: AsyncExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
+impl<EF: RangeExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Execution
@@ -246,8 +246,8 @@ impl<EF: AsyncExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
 
         // Build executor
-        let mut executor =
-            self.executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
+        let latest = LatestStateProviderRef::new(provider.tx_ref());
+        let mut executor = self.executor_factory.with_provider_and_state(provider.deref(), latest);
         executor.set_prune_modes(prune_modes);
         executor.set_tip(max_block);
 
@@ -256,63 +256,72 @@ impl<EF: AsyncExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let mut stage_checkpoint =
             execution_checkpoint(provider, start_block, max_block, input.checkpoint())?;
 
-        let mut fetch_block_duration = Duration::default();
-        let mut execution_duration = Duration::default();
+        // let mut fetch_block_duration = Duration::default();
+        // let mut execution_duration = Duration::default();
         debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
+
         // Execute block range
-
-        let mut cumulative_gas = 0;
-
-        for block_number in start_block..=max_block {
-            let time = Instant::now();
-            let td = provider
-                .header_td_by_number(block_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-
-            // we need the block's transactions but we don't need the transaction hashes
-            let block = provider
-                .block_with_senders(block_number, TransactionVariant::NoHash)?
-                .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
-
-            fetch_block_duration += time.elapsed();
-
-            cumulative_gas += block.gas_used;
-
-            // Configure the executor to use the current state.
-            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
-
-            let time = Instant::now();
-            // Execute the block
-            let (block, senders) = block.into_components();
-            executor.execute_and_verify_receipt(&block, td, Some(senders)).await.map_err(
-                |error| StageError::Block {
-                    block: block.header.clone().seal_slow(),
-                    error: BlockErrorKind::Execution(error),
-                },
-            )?;
-
-            execution_duration += time.elapsed();
-
-            // Gas metrics
-            if let Some(metrics_tx) = &mut self.metrics_tx {
-                let _ =
-                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
+        executor.execute_range(start_block..=max_block, true).map_err(|error| {
+            StageError::Block {
+                block: SealedHeader::default(), // TODO:
+                error: BlockErrorKind::Execution(error),
             }
+        })?;
+        stage_progress = max_block;
 
-            stage_progress = block_number;
+        // TODO:
+        // let mut cumulative_gas = 0;
+        // for block_number in start_block..=max_block {
+        //     let time = Instant::now();
+        //     let td = provider
+        //         .header_td_by_number(block_number)?
+        //         .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
-            stage_checkpoint.progress.processed += block.gas_used;
+        //     // we need the block's transactions but we don't need the transaction hashes
+        //     let block = provider
+        //         .block_with_senders(block_number, TransactionVariant::NoHash)?
+        //         .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
-            // Check if we should commit now
-            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
-            if self.thresholds.is_end_of_batch(
-                block_number - start_block,
-                bundle_size_hint,
-                cumulative_gas,
-            ) {
-                break
-            }
-        }
+        //     fetch_block_duration += time.elapsed();
+
+        //     cumulative_gas += block.gas_used;
+
+        //     // Configure the executor to use the current state.
+        //     trace!(target: "sync::stages::execution", number = block_number, txs =
+        // block.body.len(), "Executing block");
+
+        //     let time = Instant::now();
+        //     // Execute the block
+        //     let (block, senders) = block.into_components();
+        //     executor.execute_and_verify_receipt(&block, td, Some(senders)).await.map_err(
+        //         |error| StageError::Block {
+        //             block: block.header.clone().seal_slow(),
+        //             error: BlockErrorKind::Execution(error),
+        //         },
+        //     )?;
+
+        //     execution_duration += time.elapsed();
+
+        //     // Gas metrics
+        //     if let Some(metrics_tx) = &mut self.metrics_tx {
+        //         let _ =
+        //             metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used
+        // });     }
+
+        //     stage_progress = block_number;
+
+        //     stage_checkpoint.progress.processed += block.gas_used;
+
+        //     // Check if we should commit now
+        //     let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
+        //     if self.thresholds.is_end_of_batch(
+        //         block_number - start_block,
+        //         bundle_size_hint,
+        //         cumulative_gas,
+        //     ) { break
+        //     }
+        // }
+
         let time = Instant::now();
         let state = executor.take_output_state();
         let write_preparation_duration = time.elapsed();
@@ -323,8 +332,8 @@ impl<EF: AsyncExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let db_write_duration = time.elapsed();
         debug!(
             target: "sync::stages::execution",
-            block_fetch = ?fetch_block_duration,
-            execution = ?execution_duration,
+            // block_fetch = ?fetch_block_duration,
+            // execution = ?execution_duration,
             write_preperation = ?write_preparation_duration,
             write = ?db_write_duration,
             "Execution time"

@@ -29,7 +29,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
-    StateProviderFactory,
+    ProviderError, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
@@ -352,7 +352,8 @@ impl StorageInner {
         // calculate the state root
         let state_root = client
             .latest()
-            .map_err(|_| BlockExecutionError::ProviderError)?
+            // TODO:
+            .map_err(|_| ProviderError::StateForHashNotFound(header.parent_hash))?
             .state_root(bundle_state)
             .unwrap();
         header.state_root = state_root;

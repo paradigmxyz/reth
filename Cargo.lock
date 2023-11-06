@@ -6388,6 +6388,7 @@ dependencies = [
  "async-trait",
  "dashmap",
  "derive_more",
+ "eyre",
  "parking_lot 0.12.1",
  "rayon",
  "reth-interfaces",
@@ -6397,6 +6398,7 @@ dependencies = [
  "reth-revm-executor",
  "revm",
  "serde",
+ "serde_json",
  "tracing",
 ]
 

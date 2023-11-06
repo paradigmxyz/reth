@@ -3,9 +3,9 @@
 use clap::Args;
 use eyre::Context;
 use reth_primitives::ChainSpec;
-use reth_provider::{AsyncExecutorFactory, PrunableAsyncBlockExecutor};
+use reth_provider::{BlockReader, PrunableBlockRangeExecutor, RangeExecutorFactory};
 use reth_revm::{
-    parallel::{factory::ParallelExecutorFactory, queue::BlockQueueStore},
+    parallel::{factory::ParallelExecutorFactory, queue::TransitionQueueStore},
     EVMProcessorFactory,
 };
 use std::{path::PathBuf, sync::Arc};
@@ -37,7 +37,7 @@ impl ExecutionArgs {
                 .wrap_err("failed to deserialize queue store")?;
             EitherExecutorFactory::Right(ParallelExecutorFactory::new(
                 chain_spec,
-                Arc::new(BlockQueueStore::new(queues)),
+                Arc::new(TransitionQueueStore::new(queues)),
             ))
         } else {
             EitherExecutorFactory::Left(EVMProcessorFactory::new(chain_spec))
@@ -55,10 +55,10 @@ pub enum EitherExecutorFactory<A, B> {
     Right(B),
 }
 
-impl<A, B> AsyncExecutorFactory for EitherExecutorFactory<A, B>
+impl<A, B> RangeExecutorFactory for EitherExecutorFactory<A, B>
 where
-    A: AsyncExecutorFactory,
-    B: AsyncExecutorFactory,
+    A: RangeExecutorFactory,
+    B: RangeExecutorFactory,
 {
     fn chain_spec(&self) -> &ChainSpec {
         match self {
@@ -67,13 +67,18 @@ where
         }
     }
 
-    fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
+    fn with_provider_and_state<'a, Provider, SP>(
         &'a self,
+        provider: Provider,
         sp: SP,
-    ) -> Box<dyn PrunableAsyncBlockExecutor + 'a> {
+    ) -> Box<dyn PrunableBlockRangeExecutor + 'a>
+    where
+        Provider: BlockReader + 'a,
+        SP: reth_provider::StateProvider + 'a,
+    {
         match self {
-            EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
-            EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
+            EitherExecutorFactory::Left(a) => a.with_provider_and_state(provider, sp),
+            EitherExecutorFactory::Right(b) => b.with_provider_and_state(provider, sp),
         }
     }
 }

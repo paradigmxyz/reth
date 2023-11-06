@@ -22,6 +22,8 @@ revm.workspace = true
 # misc
 derive_more = "0.99"
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+eyre.workspace = true # TODO:
 rayon.workspace = true
 dashmap = { version = "5", features = ["rayon", "raw-api"] }
 tracing.workspace = true

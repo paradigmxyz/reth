@@ -1,6 +1,6 @@
 use crate::{
-    bundle_state::BundleStateWithReceipts, AsyncExecutorFactory, BlockExecutor, BlockExecutorStats,
-    ExecutorFactory, PrunableAsyncBlockExecutor, PrunableBlockExecutor, StateProvider,
+    bundle_state::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, ExecutorFactory,
+    PrunableBlockExecutor, StateProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;
@@ -78,20 +78,6 @@ impl ExecutorFactory for TestExecutorFactory {
         &'a self,
         _sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a> {
-        let exec_res = self.exec_results.lock().pop();
-        Box::new(TestExecutor(exec_res))
-    }
-
-    fn chain_spec(&self) -> &ChainSpec {
-        self.chain_spec.as_ref()
-    }
-}
-
-impl AsyncExecutorFactory for TestExecutorFactory {
-    fn with_state<'a, SP: StateProvider + 'a>(
-        &'a self,
-        _sp: SP,
-    ) -> Box<dyn PrunableAsyncBlockExecutor + 'a> {
         let exec_res = self.exec_results.lock().pop();
         Box::new(TestExecutor(exec_res))
     }

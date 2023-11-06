@@ -9,11 +9,11 @@ use eyre::Context;
 use reth_db::init_db;
 use reth_primitives::{fs, stage::StageId, ChainSpec};
 use reth_provider::{
-    AsyncExecutorFactory, BlockReader, HeaderProvider, HistoricalStateProviderRef, ProviderError,
-    ProviderFactory, StageCheckpointReader, TransactionVariant,
+    BlockReader, HeaderProvider, HistoricalStateProviderRef, ProviderError, ProviderFactory,
+    RangeExecutorFactory, StageCheckpointReader, TransactionVariant,
 };
 use reth_revm::{
-    parallel::{factory::ParallelExecutorFactory, queue::BlockQueueStore},
+    parallel::{factory::ParallelExecutorFactory, queue::TransitionQueueStore},
     EVMProcessorFactory,
 };
 use reth_stages::PipelineError;
@@ -92,16 +92,16 @@ impl Command {
         let state_provider = HistoricalStateProviderRef::new(&tx, self.from);
 
         let executor_factory = EVMProcessorFactory::new(self.chain.clone());
-        let mut regular_executor = executor_factory.with_state(&state_provider);
+        let mut regular_executor = executor_factory.with_provider_and_state(&state_provider);
 
         let queue_store_content = std::fs::read_to_string(&self.queue_store)
             .wrap_err("failed to read parallel queue store")?;
         let queues = serde_json::from_str(&queue_store_content)
             .wrap_err("failed to deserialize queue store")?;
-        let queue_store = Arc::new(BlockQueueStore::new(queues));
+        let queue_store = Arc::new(TransitionQueueStore::new(queues));
         let parallel_factory =
             ParallelExecutorFactory::new(self.chain.clone(), queue_store.clone());
-        let mut parallel_executor = parallel_factory.with_state(&state_provider);
+        let mut parallel_executor = parallel_factory.with_provider_and_state(&state_provider);
 
         let provider = factory.provider().map_err(PipelineError::Interface)?;
 

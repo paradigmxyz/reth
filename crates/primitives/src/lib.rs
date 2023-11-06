@@ -45,6 +45,7 @@ pub mod stage;
 mod storage;
 /// Helpers for working with transactions
 pub mod transaction;
+mod transition;
 pub mod trie;
 mod withdrawal;
 
@@ -94,6 +95,7 @@ pub use transaction::{
     TxEip4844, TxHashOrNumber, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
+pub use transition::{TransitionId, TransitionType};
 pub use withdrawal::Withdrawal;
 
 // Re-exports

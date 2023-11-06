@@ -1,9 +1,6 @@
 use crate::processor::EVMProcessor;
 use reth_primitives::ChainSpec;
-use reth_provider::{
-    AsyncExecutorFactory, ExecutorFactory, PrunableAsyncBlockExecutor, PrunableBlockExecutor,
-    StateProvider,
-};
+use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
 use reth_revm_database::StateProviderDatabase;
 use reth_revm_inspectors::stack::{InspectorStack, InspectorStackConfig};
 use std::sync::Arc;
@@ -49,19 +46,6 @@ impl ExecutorFactory for EVMProcessorFactory {
         &'a self,
         sp: SP,
     ) -> Box<dyn PrunableBlockExecutor + 'a> {
-        Box::new(self.executor_with_state(sp))
-    }
-
-    fn chain_spec(&self) -> &ChainSpec {
-        self.chain_spec.as_ref()
-    }
-}
-
-impl AsyncExecutorFactory for EVMProcessorFactory {
-    fn with_state<'a, SP: StateProvider + 'a>(
-        &'a self,
-        sp: SP,
-    ) -> Box<dyn PrunableAsyncBlockExecutor + 'a> {
         Box::new(self.executor_with_state(sp))
     }
 

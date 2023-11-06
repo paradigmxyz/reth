@@ -3,9 +3,9 @@ use clap::{Parser, Subcommand};
 
 use crate::runner::CliContext;
 
-mod compare;
 mod generate;
-mod trace_diff;
+// mod compare;
+// mod trace_diff;
 
 /// `reth parallel-execution` command
 #[derive(Debug, Parser)]
@@ -19,10 +19,10 @@ pub struct Command {
 pub enum Subcommands {
     /// The command for generating historical execution DAGs.
     Generate(generate::Command),
-    /// The command for comparing traces between normal and parallel execution.
-    TraceDiff(trace_diff::Command),
-    /// The command for comparing the regular and parallel execution.
-    Compare(compare::Command),
+    // /// The command for comparing traces between normal and parallel execution.
+    // TraceDiff(trace_diff::Command),
+    // /// The command for comparing the regular and parallel execution.
+    // Compare(compare::Command),
 }
 
 impl Command {
@@ -30,8 +30,8 @@ impl Command {
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         match self.command {
             Subcommands::Generate(command) => command.execute(ctx).await,
-            Subcommands::TraceDiff(command) => command.execute(ctx).await,
-            Subcommands::Compare(command) => command.execute(ctx).await,
+            // Subcommands::TraceDiff(command) => command.execute(ctx).await,
+            // Subcommands::Compare(command) => command.execute(ctx).await,
         }
     }
 }

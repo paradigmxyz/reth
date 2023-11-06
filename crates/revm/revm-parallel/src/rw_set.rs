@@ -72,16 +72,16 @@ impl RevmAccessSet {
     }
 }
 
-/// The transaction read write set.
+/// The transition read write set.
 #[derive(Default, Debug)]
-pub struct TransactionRWSet {
-    /// The collection of EVM keys read by the transaction.
+pub struct TransitionRWSet {
+    /// The collection of EVM keys read by the transition.
     pub read_set: RevmAccessSet,
-    /// The collection of EVM keys written by the transaction.
+    /// The collection of EVM keys written by the transition.
     pub write_set: RevmAccessSet,
 }
 
-impl TransactionRWSet {
+impl TransitionRWSet {
     /// Set the read set.
     pub fn with_read_set(mut self, read_set: RevmAccessSet) -> Self {
         self.read_set = read_set;
@@ -146,6 +146,46 @@ impl TransactionRWSet {
     }
 }
 
+/// Block read and write set.
+#[derive(Default, Debug)]
+pub struct BlockRWSet {
+    /// Pre block RW set.
+    pub pre_block: Option<TransitionRWSet>,
+    /// The ordered list of transaction RW sets.
+    pub transactions: Vec<TransitionRWSet>,
+    /// Post block RW set.
+    pub post_block: Option<TransitionRWSet>,
+}
+
+impl BlockRWSet {
+    /// Create new block rw set from transaction sets.
+    pub fn new(transactions: Vec<TransitionRWSet>) -> Self {
+        Self { transactions, pre_block: None, post_block: None }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::new(Vec::with_capacity(capacity))
+    }
+
+    pub fn with_pre_block(mut self, pre_block: TransitionRWSet) -> Self {
+        self.set_pre_block(Some(pre_block));
+        self
+    }
+
+    pub fn with_post_block(mut self, post_block: TransitionRWSet) -> Self {
+        self.set_post_block(Some(post_block));
+        self
+    }
+
+    pub fn set_pre_block(&mut self, pre_block: Option<TransitionRWSet>) {
+        self.pre_block = pre_block;
+    }
+
+    pub fn set_post_block(&mut self, post_block: Option<TransitionRWSet>) {
+        self.post_block = post_block;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,8 +193,8 @@ mod tests {
     #[test]
     fn rw_set_dependencies() {
         let account_key = RevmKey::Account(Address::random(), RevmAccountDataKey::Balance);
-        let set1 = TransactionRWSet::default().with_read_set(RevmAccessSet::from([account_key]));
-        let set2 = TransactionRWSet::default().with_write_set(RevmAccessSet::from([account_key]));
+        let set1 = TransitionRWSet::default().with_read_set(RevmAccessSet::from([account_key]));
+        let set2 = TransitionRWSet::default().with_write_set(RevmAccessSet::from([account_key]));
         assert!(set1.depends_on(&set2));
         assert!(!set2.depends_on(&set1));
         assert!(!set2.depends_on(&set2));
@@ -163,9 +203,9 @@ mod tests {
         let address = Address::random();
         let address_storage_key = RevmKey::Account(address, RevmAccountDataKey::Storage);
         let slot_key = RevmKey::Slot(address, B256::random());
-        let set1 = TransactionRWSet::default().with_read_set(RevmAccessSet::from([slot_key]));
+        let set1 = TransitionRWSet::default().with_read_set(RevmAccessSet::from([slot_key]));
         let set2 =
-            TransactionRWSet::default().with_write_set(RevmAccessSet::from([address_storage_key]));
+            TransitionRWSet::default().with_write_set(RevmAccessSet::from([address_storage_key]));
         assert!(set1.depends_on(&set2));
         assert!(!set2.depends_on(&set1));
         assert!(!set2.depends_on(&set2));

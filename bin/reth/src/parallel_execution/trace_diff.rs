@@ -22,7 +22,7 @@ use reth_revm::{
     db::CacheDB,
     parallel::{
         executor::ParallelExecutor,
-        queue::{BlockQueue, BlockQueueStore},
+        queue::{TransitionQueue, TransitionQueueStore},
         resolve_block_dependencies,
     },
     DatabaseRef, EVM,
@@ -144,12 +144,12 @@ impl Command {
             );
         }
 
-        let mut queue = BlockQueue::resolve(&rw_sets);
+        let mut queue = TransitionQueue::resolve(&rw_sets);
         tracing::trace!(target: "reth::cli", block_number, ?queue, "Generated block queue");
 
         let mut parallel_executor = ParallelExecutor::new(
             self.chain.clone(),
-            Arc::new(BlockQueueStore::default()), /* store is unused */
+            Arc::new(TransitionQueueStore::default()), /* store is unused */
             sp_database,
             None,
         )?;

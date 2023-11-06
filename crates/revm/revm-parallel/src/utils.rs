@@ -1,6 +1,6 @@
 use crate::{
     read_inspector::ReadInspector,
-    rw_set::{RevmAccessSet, TransactionRWSet},
+    rw_set::{BlockRWSet, RevmAccessSet, TransitionRWSet},
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
@@ -10,24 +10,21 @@ use reth_primitives::{
     revm::env::{fill_cfg_and_block_env, fill_tx_env},
     Address, Block, ChainSpec, Hardfork, U256,
 };
+use reth_revm_executor::state_change::post_block_balance_increments;
 use revm::{db::State, DBBox, EVM};
 
 /// Resolve block dependencies by executing it sequentially and recording reads and writes.
 pub fn resolve_block_dependencies<'a>(
+    state: &mut State<DBBox<'a, RethError>>,
     chain_spec: &ChainSpec,
-    database: DBBox<'a, RethError>,
     block: &Block,
     senders: &[Address],
     td: U256,
-) -> RethResult<(Vec<TransactionRWSet>, State<DBBox<'a, RethError>>)> {
+) -> RethResult<BlockRWSet> {
+    let mut block_rw_set = BlockRWSet::with_capacity(block.body.len());
+
     let mut evm = EVM::new();
-    evm.database(
-        State::builder()
-            .with_database_boxed(database)
-            .with_bundle_update()
-            .without_state_clear()
-            .build(),
-    );
+    evm.database(state);
 
     fill_cfg_and_block_env(&mut evm.env.cfg, &mut evm.env.block, &chain_spec, &block.header, td);
 
@@ -37,7 +34,6 @@ pub fn resolve_block_dependencies<'a>(
 
     // TODO: apply beacon root call
 
-    let mut tx_rw_sets = Vec::with_capacity(block.body.len());
     for (transaction, sender) in block.body.iter().zip(senders.iter()) {
         fill_tx_env(&mut evm.env.tx, transaction, *sender);
 
@@ -51,7 +47,7 @@ pub fn resolve_block_dependencies<'a>(
 
         let evm_db = evm.db.as_mut().unwrap();
 
-        let mut rw_set = TransactionRWSet {
+        let mut rw_set = TransitionRWSet {
             read_set: inspector.into_inner(),
             write_set: RevmAccessSet::default(),
         };
@@ -70,8 +66,27 @@ pub fn resolve_block_dependencies<'a>(
         }
         evm_db.apply_transition(transitions);
 
-        tx_rw_sets.push(rw_set);
+        block_rw_set.transactions.push(rw_set);
     }
 
-    Ok((tx_rw_sets, evm.db.unwrap()))
+    let post_block_increments = post_block_balance_increments(
+        chain_spec,
+        block.number,
+        block.difficulty,
+        block.beneficiary,
+        block.timestamp,
+        td,
+        &block.ommers,
+        block.withdrawals.as_deref(),
+    );
+    let mut post_block = TransitionRWSet::default();
+    for (address, increment) in &post_block_increments {
+        if *increment != 0 {
+            post_block.write_set.account_balance(*address);
+        }
+    }
+    block_rw_set.post_block = Some(post_block);
+    evm.db.unwrap().increment_balances(post_block_increments)?;
+
+    Ok(block_rw_set)
 }

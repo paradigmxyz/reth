@@ -10,8 +10,10 @@
 /// These utilities facilitate interoperability and data exchange between Revm and Reth
 /// implementations.
 pub mod compat;
+
 /// Reth block execution/validation configuration and constants
 pub mod config;
+
 /// The `env` module provides essential utilities for managing Ethereum transaction and block
 /// environments.
 ///

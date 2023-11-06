@@ -2,15 +2,14 @@ use super::{SharedCacheAccount, SharedCacheState};
 use dashmap::DashMap;
 use derive_more::Deref;
 use parking_lot::RwLock;
-use reth_primitives::U256;
+use reth_primitives::{BlockNumber, TransitionId, U256};
 use revm::{
     db::{
         states::{bundle_state::BundleRetention, plain_account::PlainStorage},
         BundleState,
     },
     primitives::{
-        hash_map, AccountInfo, Address, Bytecode, HashMap, State as EVMState, B256,
-        BLOCK_HASH_HISTORY,
+        hash_map, Account, AccountInfo, Address, Bytecode, HashMap, B256, BLOCK_HASH_HISTORY,
     },
     DatabaseRef,
 };
@@ -65,16 +64,19 @@ impl<DB: DatabaseRef> SharedState<DB> {
     ///
     /// Update will create transitions for all accounts that are updated.
     pub fn increment_balances(
-        &mut self,
+        &self,
+        block_number: BlockNumber,
         balances: impl IntoIterator<Item = (Address, u128)>,
     ) -> Result<(), DB::Error> {
-        let mut accounts = self.cache.accounts.lock();
+        let mut accounts = self.cache.accounts.write();
         for (address, balance) in balances.into_iter().filter(|(_, incr)| *incr != 0) {
             match accounts.entry(address) {
-                hash_map::Entry::Occupied(mut entry) => entry.get_mut().increment_balance(balance),
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().increment_balance(block_number, balance)
+                }
                 hash_map::Entry::Vacant(entry) => {
                     let account = self.load_account_from_database(address)?;
-                    entry.insert(account).increment_balance(balance)
+                    entry.insert(account).increment_balance(block_number, balance)
                 }
             }
         }
@@ -86,16 +88,17 @@ impl<DB: DatabaseRef> SharedState<DB> {
     /// It is used for DAO hardfork state change to move values from given accounts.
     pub fn drain_balances(
         &mut self,
+        block_number: BlockNumber,
         addresses: impl IntoIterator<Item = Address>,
     ) -> Result<Vec<u128>, DB::Error> {
         let mut balances = Vec::new();
-        let mut accounts = self.cache.accounts.lock();
+        let mut accounts = self.cache.accounts.write();
         for address in addresses {
             let balance = match accounts.entry(address) {
-                hash_map::Entry::Occupied(mut entry) => entry.get_mut().drain_balance(),
+                hash_map::Entry::Occupied(mut entry) => entry.get_mut().drain_balance(block_number),
                 hash_map::Entry::Vacant(entry) => {
                     let account = self.load_account_from_database(address)?;
-                    entry.insert(account).drain_balance()
+                    entry.insert(account).drain_balance(block_number)
                 }
             };
             balances.push(balance);
@@ -133,8 +136,8 @@ impl<DB: DatabaseRef> SharedState<DB> {
     /// This action will create final post state and all reverts so that
     /// we at any time revert state of bundle to the state before transition
     /// is applied.
-    pub fn merge_transitions(&mut self, retention: BundleRetention) {
-        let transitions = self.cache.take_transitions();
+    pub fn merge_transitions(&mut self, block_number: BlockNumber, retention: BundleRetention) {
+        let transitions = self.cache.take_transitions(block_number);
         self.bundle_state.apply_transitions_and_create_reverts(transitions, retention);
     }
 
@@ -156,7 +159,7 @@ impl<DB: DatabaseRef> SharedState<DB> {
     }
 
     /// Commit concurrent evm state results to database.
-    pub fn commit(&mut self, evm_states: Vec<(usize, EVMState)>) {
+    pub fn commit(&mut self, evm_states: HashMap<Address, Vec<(TransitionId, Account)>>) {
         self.cache.apply_evm_states(evm_states);
     }
 
@@ -171,13 +174,12 @@ impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let mut accounts = self.cache.accounts.lock();
-        let account = match accounts.entry(address) {
-            hash_map::Entry::Occupied(entry) => entry.get().account_info(),
-            hash_map::Entry::Vacant(entry) => {
-                let account = self.load_account_from_database(address)?;
-                entry.insert(account).account_info()
-            }
+        let account = if let Some(account) = self.cache.accounts.read().get(&address) {
+            account.latest_account_info()
+        } else {
+            let account = self.load_account_from_database(address)?;
+            self.cache.accounts.write().insert(address, account.clone());
+            account.latest_account_info()
         };
         Ok(account)
     }
@@ -198,13 +200,26 @@ impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
         // Account is guaranteed to be loaded.
         // Note that storage from bundle is already loaded with account.
-        let mut active_accounts = self.cache.accounts.lock();
-        let value = match active_accounts.get_mut(&address) {
-            Some(account) => account
-                .get_or_insert_storage_slot(index, || self.database.storage_ref(address, index))?,
-            None => unreachable!(
-                "For accessing any storage account is guaranteed to be loaded beforehand"
-            ),
+        let accounts = self.cache.accounts.read();
+        let account = accounts.get(&address).expect("account is loaded");
+        let value = if let Some(value) = account.storage_slot(index) {
+            value
+        } else {
+            // If account was destroyed or created, we return zero without loading.
+            let value = if account.previous_status().is_storage_known() {
+                U256::ZERO
+            } else {
+                self.database.storage_ref(address, index)?
+            };
+            drop(accounts);
+
+            self.cache
+                .accounts
+                .write()
+                .entry(address)
+                .and_modify(|account| account.insert_storage_slot(index, value));
+
+            value
         };
         Ok(value)
     }
@@ -222,6 +237,7 @@ impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
                 if self.earliest_block_hash.load(Ordering::Relaxed) == 0 {
                     earliest_block_hash = number_u64;
                 } else {
+                    // TODO: fix this
                     // prune all hashes that are older then BLOCK_HASH_HISTORY
                     let minimum_required_block_hash =
                         number_u64.saturating_sub(BLOCK_HASH_HISTORY as u64);
@@ -241,16 +257,16 @@ impl<DB: DatabaseRef> DatabaseRef for SharedState<DB> {
 
 /// Shared state behind RW lock.
 #[derive(Deref, Debug)]
-pub struct LockedSharedState<DB: DatabaseRef>(RwLock<SharedState<DB>>);
+pub struct SharedStateLock<DB: DatabaseRef>(RwLock<SharedState<DB>>);
 
-impl<DB: DatabaseRef> LockedSharedState<DB> {
+impl<DB: DatabaseRef> SharedStateLock<DB> {
     /// Create new locked shared state.
     pub fn new(state: SharedState<DB>) -> Self {
         Self(RwLock::new(state))
     }
 }
 
-impl<DB: DatabaseRef> DatabaseRef for LockedSharedState<DB> {
+impl<DB: DatabaseRef> DatabaseRef for SharedStateLock<DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {

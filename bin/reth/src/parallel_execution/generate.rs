@@ -8,11 +8,9 @@ use clap::Parser;
 use itertools::Itertools;
 use reth_db::init_db;
 use reth_interfaces::RethError;
-use reth_primitives::{
-    fs, stage::StageId, Address, Block, BlockNumber, ChainSpec, KECCAK_EMPTY, U256,
-};
+use reth_primitives::{fs, stage::StageId, Address, BlockNumber, ChainSpec, KECCAK_EMPTY};
 use reth_provider::{
-    AsyncBlockExecutor, BlockReader, HeaderProvider, HistoricalStateProvider, ProviderError,
+    BlockRangeExecutor, BlockReader, HeaderProvider, HistoricalStateProviderRef, ProviderError,
     ProviderFactory, StageCheckpointReader, TransactionVariant,
 };
 use reth_revm::{
@@ -23,12 +21,12 @@ use reth_revm::{
     },
     parallel::{
         executor::{DatabaseRefBox, ParallelExecutor},
-        queue::{BlockQueue, BlockQueueStore},
+        queue::{TransitionQueue, TransitionQueueStore},
         resolve_block_dependencies,
     },
 };
 use reth_stages::PipelineError;
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth parallel-execution generate` command
@@ -73,10 +71,9 @@ pub struct Command {
     #[arg(long)]
     to: u64,
 
-    // TODO: write files at interval
-    /// The block interval for sync and unwind.
-    /// Defaults to `1000`.
-    #[arg(long, default_value = "1000")]
+    /// The block interval for transitions.
+    /// Defaults to `100 000`.
+    #[arg(long, default_value = "100000")]
     interval: u64,
 
     /// Flag indicating whether results should be validated.
@@ -114,84 +111,88 @@ impl Command {
         }
 
         let mut account_status_mismatches = 0;
-        let mut queues = BTreeMap::<BlockNumber, BlockQueue>::default();
-        for block_number in self.from..=self.to {
-            debug!(target: "reth::cli", block_number, "Executing transactions");
-
-            let td = provider
-                .header_td_by_number(block_number)?
-                .ok_or(ProviderError::TotalDifficultyNotFound { block_number })?;
-            let (block, senders) = provider
-                .block_with_senders(block_number, TransactionVariant::WithHash)?
-                .ok_or(ProviderError::BlockNotFound(block_number.into()))?
-                .into_components();
-
-            if block.body.is_empty() {
-                continue
-            }
+        let mut start_block = self.from;
+        let transition_store = TransitionQueueStore::new(self.out.clone());
+        while start_block <= self.to {
+            let end_block = self.to.min(start_block + self.interval);
+            let range = start_block..=end_block;
+            let mut block_rw_sets = BTreeMap::default();
 
             let provider = factory.provider().map_err(PipelineError::Interface)?;
-            let sp = HistoricalStateProvider::new(provider.into_tx(), block_number);
-            let sp_database = Box::new(StateProviderDatabase(&sp));
+            let sp = HistoricalStateProviderRef::new(provider.tx_ref(), start_block);
+            let sp_database = Box::new(StateProviderDatabase(&sp)); // TODO:
+            let mut state = State::builder()
+                .with_database_boxed(sp_database.clone())
+                .with_bundle_update()
+                .without_state_clear()
+                .build();
 
-            let (rw_sets, mut state) =
-                resolve_block_dependencies(&self.chain, sp_database.clone(), &block, &senders, td)?;
+            for block_number in range.clone() {
+                debug!(target: "reth::cli", block_number, "Executing block");
 
-            for (tx_idx, rw_set) in rw_sets.iter().enumerate() {
-                let hash = block.body.get(tx_idx).expect("exists").hash;
-                tracing::trace!(
-                    target: "reth::cli",
-                    block_number, tx_idx, %hash, ?rw_set,
-                    "Generated transaction rw set"
-                );
+                let td = provider
+                    .header_td_by_number(block_number)?
+                    .ok_or(ProviderError::TotalDifficultyNotFound { block_number })?;
+                let (block, senders) = provider
+                    .block_with_senders(block_number, TransactionVariant::WithHash)?
+                    .ok_or(ProviderError::BlockNotFound(block_number.into()))?
+                    .into_components();
+
+                let block_rw_set =
+                    resolve_block_dependencies(&mut state, &self.chain, &block, &senders, td)?;
+
+                for (tx_idx, rw_set) in block_rw_set.transactions.iter().enumerate() {
+                    let hash = block.body.get(tx_idx).expect("exists").hash;
+                    tracing::trace!(
+                        target: "reth::cli",
+                        block_number, tx_idx, %hash, ?rw_set,
+                        "Generated transaction rw set"
+                    );
+                }
+
+                block_rw_sets.insert(block.number, block_rw_set);
             }
 
-            let queue = BlockQueue::resolve(&rw_sets);
+            let queue = TransitionQueue::resolve(range.clone(), block_rw_sets);
+            transition_store.save(queue.clone())?;
 
             if self.validate {
-                tracing::debug!(target: "reth::cli", block_number = block.number, ?queue, "Validating parallel execution");
+                tracing::debug!(target: "reth::cli", ?range, ?queue, "Validating parallel execution");
                 state.merge_transitions(BundleRetention::Reverts);
                 account_status_mismatches +=
-                    self.validate(sp_database, &block, td, senders, queue.clone(), state).await?;
-                tracing::debug!(target: "reth::cli", block_number = block.number, ?queue, "Successfully validated parallel execution");
+                    self.validate(&provider, sp_database, range.clone(), state)?;
+                tracing::debug!(target: "reth::cli", ?range, ?queue, "Successfully validated parallel execution");
             }
 
-            if queue.len() != block.body.len() {
-                queues.insert(block_number, queue);
-            }
+            start_block = end_block + 1;
         }
 
         if self.validate && account_status_mismatches > 0 {
             tracing::warn!(target: "reth::cli", count = account_status_mismatches, "Account status mismatches were observed");
         }
 
-        let out_path = self.out.join(format!("parallel-{}-{}.json", self.from, self.to));
-        tracing::info!(target: "reth::cli", dest = %out_path.display(), blocks = queues.len(), "Writing execution hints");
-        std::fs::write(out_path, serde_json::to_string_pretty(&queues)?)?;
-
         Ok(())
     }
 
     /// Returns the number of times the account status was mismatched.
-    async fn validate(
+    fn validate<Provider: BlockReader>(
         &self,
+        provider: Provider,
         database: DatabaseRefBox<'_, RethError>,
-        block: &Block,
-        td: U256,
-        senders: Vec<Address>,
-        queue: BlockQueue,
+        range: RangeInclusive<BlockNumber>,
         mut expected: State<Box<dyn reth_revm::Database<Error = RethError> + Send + '_>>,
     ) -> eyre::Result<u64> {
         let mut account_status_mismatches = 0;
 
         let mut parallel_executor = ParallelExecutor::new(
+            provider,
             self.chain.clone(),
-            Arc::new(BlockQueueStore::from_iter([(block.number, queue.clone())])),
+            Arc::new(TransitionQueueStore::new(self.out.clone())),
             database,
             None,
         )?;
-        parallel_executor.execute(&block, td, Some(senders)).await?;
-        tracing::debug!(target: "reth::cli", block_number = block.number, ?queue, "Successfully executed in parallel");
+        parallel_executor.execute_range(range.clone(), true)?;
+        tracing::debug!(target: "reth::cli", ?range, "Successfully executed in parallel");
 
         let parallel_state = parallel_executor.state();
 
@@ -213,7 +214,7 @@ impl Command {
             .read()
             .cache
             .accounts
-            .lock()
+            .read()
             .clone()
             .into_iter()
             .sorted_by_key(|(address, _)| *address)
@@ -241,9 +242,9 @@ impl Command {
                     // Most importantly the transitions should match.
                     account_status_mismatches += 1;
                     tracing::warn!(
-                            target: "reth::cli",
-                            block_number = block.number,
-                            address = ?expected_address,
+                        target: "reth::cli",
+                        ?range,
+                        address = ?expected_address,
                         ?parallel_account_status,
                         ?expected_account_status,
                         "Cache account status mismatch"

@@ -1,5 +1,5 @@
-use crate::RethError;
-use reth_primitives::{BlockNumHash, Bloom, PruneSegmentError, B256};
+use crate::{provider::ProviderError, RethError};
+use reth_primitives::{BlockNumHash, BlockNumber, Bloom, PruneSegmentError, TransitionId, B256};
 use revm_primitives::EVMError;
 use thiserror::Error;
 
@@ -95,12 +95,15 @@ pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
+    /// Parallel error, transparently wrapping `ParallelExecutorError`
+    #[error(transparent)]
+    Parallel(#[from] ParallelExecutionError),
     /// Pruning error, transparently wrapping `PruneSegmentError`
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
     /// Error representing a provider error
-    #[error("provider error")]
-    ProviderError,
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
     /// Transaction error on revert with inner details
     #[error("transaction error on revert: {inner}")]
     CanonicalRevert {
@@ -137,4 +140,27 @@ impl BlockExecutionError {
     pub fn is_fatal(&self) -> bool {
         matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
     }
+}
+
+/// Parallel block executor errors.
+#[derive(Error, Clone, PartialEq, Eq, Debug)]
+pub enum ParallelExecutionError {
+    /// The transition queue was inconsistent.
+    #[error("Transition queue is inconsistent. Could not validate block #{unvalidated_block}")]
+    InconsistentTransitionQueue {
+        /// The block that remained unvalidated.
+        unvalidated_block: BlockNumber,
+    },
+    /// Transition not found
+    #[error("Transition {0:?} not found")]
+    TransitionNotFound(TransitionId),
+    /// EVM error with transaction hash and message
+    #[error("EVM reported invalid transition at {transition:?}: {error}")]
+    EVM {
+        /// The block number
+        transition: TransitionId,
+        /// The EVM error.
+        #[source]
+        error: Box<EVMError<RethError>>,
+    },
 }

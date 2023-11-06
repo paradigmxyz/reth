@@ -7,4 +7,4 @@ mod cache;
 pub use cache::SharedCacheState;
 
 mod state;
-pub use state::{LockedSharedState, SharedState};
+pub use state::{SharedState, SharedStateLock};

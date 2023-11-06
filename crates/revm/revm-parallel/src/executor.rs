@@ -1,12 +1,12 @@
 //! Implementation of parallel executor.
 
 use crate::{
-    queue::{BlockQueue, BlockQueueStore, TransactionBatch},
-    shared::{LockedSharedState, SharedState},
+    queue::{TransitionBatch, TransitionQueueStore},
+    shared::{SharedState, SharedStateLock},
 };
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
+    executor::{BlockExecutionError, BlockValidationError, ParallelExecutionError},
     RethError, RethResult,
 };
 use reth_primitives::{
@@ -14,317 +14,393 @@ use reth_primitives::{
         compat::into_reth_log,
         env::{fill_cfg_and_block_env, fill_tx_env},
     },
-    Address, Block, BlockNumber, ChainSpec, Hardfork, PruneModes, Receipt, Receipts,
-    TransactionSigned, U256,
+    Address, BlockNumber, BlockWithSenders, ChainSpec, Hardfork, PruneModes, PruneSegmentError,
+    Receipt, Receipts, TransitionId, TransitionType, U256,
 };
 use reth_provider::{
-    AsyncBlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableAsyncBlockExecutor,
+    BlockExecutorStats, BlockRangeExecutor, BlockReader, BundleStateWithReceipts, ProviderError,
+    PrunableBlockRangeExecutor, TransactionVariant,
 };
 use reth_revm_executor::{
-    eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    processor::verify_receipt,
-    state_change::{execute_beacon_root_contract_call, post_block_balance_increments},
-    ExecutionData,
+    processor::verify_receipt, state_change::post_block_balance_increments, ExecutionData,
 };
 use revm::{
-    db::WrapDatabaseRef,
-    primitives::{Env, ExecutionResult, ResultAndState},
+    primitives::{
+        Account, AccountStatus, EVMError, Env, ExecutionResult, ResultAndState, State as EVMState,
+    },
     DatabaseRef, EVM,
 };
-use std::sync::Arc;
+use std::{
+    collections::{hash_map, BTreeMap, HashMap},
+    ops::RangeInclusive,
+    sync::Arc,
+};
 
 /// Database boxed with a lifetime and Send.
 pub type DatabaseRefBox<'a, E> = Box<dyn DatabaseRef<Error = E> + Send + Sync + 'a>;
 
-/// TODO: add docs
-#[allow(missing_debug_implementations)]
-pub struct ParallelExecutor<'a> {
-    /// Store for transaction execution order.
-    store: Arc<BlockQueueStore>,
-    /// Execution data.
-    data: ExecutionData,
-    /// EVM state database.
-    state: Arc<LockedSharedState<DatabaseRefBox<'a, RethError>>>,
+pub enum StateTransitionData {
+    PreBlock(BlockNumber), // TODO:
+    Transaction(BlockNumber, u32, Env),
+    PostBlock(BlockNumber, HashMap<Address, u128>),
 }
 
-impl<'a> ParallelExecutor<'a> {
-    /// Create new parallel executor.
-    pub fn new(
-        chain_spec: Arc<ChainSpec>,
-        store: Arc<BlockQueueStore>,
-        database: DatabaseRefBox<'a, RethError>,
-        _num_threads: Option<usize>, // TODO:
-    ) -> RethResult<Self> {
-        Ok(Self {
-            store,
-            data: ExecutionData::new(chain_spec),
-            state: Arc::new(LockedSharedState::new(SharedState::new(database))),
-        })
-    }
+pub enum StateTransition {
+    PreBlock(BlockNumber),
+    Transaction(BlockNumber, u32, Result<ResultAndState, EVMError<RethError>>),
+    PostBlock(BlockNumber, Result<EVMState, EVMError<RethError>>),
+}
 
-    /// Return cloned pointer to the shared state.
-    pub fn state(&self) -> Arc<LockedSharedState<DatabaseRefBox<'a, RethError>>> {
-        Arc::clone(&self.state)
-    }
-
-    /// Execute a batch of transactions in parallel.
-    pub async fn execute_batch(
-        &mut self,
-        env: &Env,
-        batch: &TransactionBatch,
-        transactions: &[TransactionSigned],
-        senders: &[Address],
-    ) -> Result<Vec<(usize, ExecutionResult)>, BlockExecutionError> {
-        let transactions = batch
-            .iter()
-            .map(|tx_idx| {
-                let tx_idx = *tx_idx as usize;
-                let transaction = transactions.get(tx_idx).unwrap(); // TODO:
-                let sender = senders.get(tx_idx).unwrap(); // TODO:
-                let mut env = env.clone();
-                fill_tx_env(&mut env.tx, transaction, *sender);
-                (tx_idx, transaction.hash, env)
-            })
-            .collect::<Vec<_>>();
-
-        let exec_results = transactions
-            .into_par_iter()
-            .map(|(tx_idx, hash, env)| {
-                let mut evm = EVM::with_env(env);
-                evm.database(self.state.clone());
-                (
-                    tx_idx,
-                    evm.transact_ref().map_err(|e| {
-                        BlockExecutionError::Validation(BlockValidationError::EVM {
-                            hash,
-                            error: e.into(),
-                        })
-                    }),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        let mut results = Vec::with_capacity(batch.len());
-        let mut states = Vec::with_capacity(batch.len());
-        for (tx_idx, result) in exec_results {
-            let ResultAndState { state, result } = result?;
-            results.push((tx_idx, result));
-            states.push((tx_idx, state));
-        }
-        self.state.write().commit(states);
-
-        Ok(results)
-    }
-
-    /// Execute transactions in parallel.
-    pub async fn execute_transactions_in_parallel(
-        &mut self,
-        env: Env,
-        block: &Block,
-        senders: Option<Vec<Address>>,
-        block_queue: BlockQueue,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
-        // perf: do not execute empty blocks
-        if block.body.is_empty() {
-            return Ok((Vec::new(), 0))
-        }
-
-        let mut results = Vec::with_capacity(block.body.len());
-        for batch in block_queue.iter() {
-            results.extend(
-                self.execute_batch(
-                    &env,
-                    batch,
-                    &block.body,
-                    senders.as_ref().unwrap(), /* TODO: */
-                )
-                .await?,
-            );
-        }
-        results.sort_unstable_by_key(|(idx, _)| *idx);
-
-        let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
-        for (transaction, (_, result)) in block.body.iter().zip(results) {
-            cumulative_gas_used += result.gas_used();
-            receipts.push(Receipt {
-                tx_type: transaction.tx_type(),
-                // Success flag was added in `EIP-658: Embedding transaction status code in
-                // receipts`.
-                success: result.is_success(),
-                cumulative_gas_used,
-                // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-            });
-        }
-        Ok((receipts, cumulative_gas_used))
-    }
-
-    /// Execute transactions.
-    pub fn execute_transactions(
-        &mut self,
-        env: Env,
-        block: &Block,
-        senders: Option<Vec<Address>>,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
-        // perf: do not execute empty blocks
-        if block.body.is_empty() {
-            return Ok((Vec::new(), 0))
-        }
-
-        let senders = senders.unwrap(); // TODO:
-
-        let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
-        for (idx, (transaction, sender)) in block.body.iter().zip(senders).enumerate() {
-            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
-            // must be no greater than the block’s gasLimit.
-            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
-                }
-                .into())
+impl StateTransition {
+    fn id(&self) -> TransitionId {
+        match self {
+            Self::PreBlock(number) => TransitionId(*number, TransitionType::PreBlock),
+            Self::Transaction(number, tx_idx, _) => {
+                TransitionId(*number, TransitionType::Transaction(*tx_idx))
             }
-            // Execute transaction.
-            let mut evm = EVM::with_env(env.clone());
-            fill_tx_env(&mut evm.env.tx, transaction, sender);
-            evm.database(self.state.clone());
-            let ResultAndState { result, state } = evm.transact_ref().map_err(|e| {
-                BlockExecutionError::Validation(BlockValidationError::EVM {
-                    hash: transaction.hash,
-                    error: e.into(),
-                })
-            })?;
-
-            self.state.write().commit(Vec::from([(idx, state)]));
-
-            // append gas used
-            cumulative_gas_used += result.gas_used();
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(Receipt {
-                tx_type: transaction.tx_type(),
-                // Success flag was added in `EIP-658: Embedding transaction status code in
-                // receipts`.
-                success: result.is_success(),
-                cumulative_gas_used,
-                // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-            });
+            Self::PostBlock(number, _) => TransitionId(*number, TransitionType::PostBlock),
         }
-
-        Ok((receipts, cumulative_gas_used))
     }
 
-    /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
-    /// hardfork state change.
-    pub fn apply_post_execution_state_change(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError> {
-        let mut balance_increments = post_block_balance_increments(
-            &self.data.chain_spec,
-            block.number,
-            block.difficulty,
-            block.beneficiary,
-            block.timestamp,
-            total_difficulty,
-            &block.ommers,
-            block.withdrawals.as_deref(),
-        );
-
-        // Irregular state change at Ethereum DAO hardfork
-        if self.data.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
-            // drain balances from hardcoded addresses.
-            let drained_balance: u128 = self
-                .state
-                .write()
-                .drain_balances(DAO_HARDKFORK_ACCOUNTS)
-                .map_err(|_| BlockValidationError::IncrementBalanceFailed)?
-                .into_iter()
-                .sum();
-
-            // return balance to DAO beneficiary.
-            *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
+    fn block_number(&self) -> BlockNumber {
+        match self {
+            Self::PreBlock(number) |
+            Self::Transaction(number, _, _) |
+            Self::PostBlock(number, _) => *number,
         }
+    }
+}
 
-        // increment balances
-        self.state
-            .write()
-            .increment_balances(balance_increments.into_iter().map(|(k, v)| (k, v)))
-            .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+struct LoadedBlock {
+    block: BlockWithSenders,
+    td: U256,
+    results: Vec<(u32, ExecutionResult)>,
+    post_block_executed: bool,
+}
 
-        Ok(())
+impl LoadedBlock {
+    fn new(block: BlockWithSenders, td: U256) -> Self {
+        let capacity = block.body.len();
+        Self { block, td, results: Vec::with_capacity(capacity), post_block_executed: false }
     }
 
-    /// Inner block execution.
-    pub async fn execute_inner(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<Vec<Receipt>, BlockExecutionError> {
-        // Set state clear flag.
-        let state_clear_enabled = self.data.state_clear_enabled(block.number);
-        self.state.write().set_state_clear_flag(state_clear_enabled);
+    /// Returns `true` if the block was fully executed.
+    fn is_executed(&self) -> bool {
+        self.results.len() == self.block.body.len() && self.post_block_executed
+    }
 
+    fn env(&self, chain_spec: &ChainSpec) -> Env {
         let mut env = Env::default();
         fill_cfg_and_block_env(
             &mut env.cfg,
             &mut env.block,
-            &self.data.chain_spec,
-            &block.header,
-            total_difficulty,
+            chain_spec,
+            &self.block.header,
+            self.td,
         );
+        env
+    }
 
-        // Applies the pre-block call to the EIP-4788 beacon block root contract.
-        let mut evm = EVM::with_env(env.clone());
-        evm.database(WrapDatabaseRef(&self.state));
-        if let Some(state) = execute_beacon_root_contract_call(
-            &self.data.chain_spec,
-            block.timestamp,
-            block.number,
-            block.parent_beacon_block_root,
-            &mut evm,
-        )? {
-            self.state.write().commit(Vec::from([(0, state)]));
-        }
-
-        let (receipts, cumulative_gas_used) = match self.store.get_queue(block.number).cloned() {
-            Some(queue) => {
-                self.execute_transactions_in_parallel(env, &block, senders, queue).await?
+    fn get_state_transition(
+        &self,
+        ty: TransitionType,
+        chain_spec: &ChainSpec,
+    ) -> Option<StateTransitionData> {
+        let transition = match ty {
+            TransitionType::PreBlock => unimplemented!("pre block transition is not implemented"),
+            TransitionType::Transaction(index) => {
+                let transaction = self.block.body.get(index as usize)?;
+                let sender = self.block.senders.get(index as usize)?;
+                let mut env = self.env(chain_spec);
+                fill_tx_env(&mut env.tx, transaction, *sender);
+                StateTransitionData::Transaction(self.block.number, index, env)
             }
-            None => self.execute_transactions(env, block, senders)?,
+            TransitionType::PostBlock => {
+                let increments = post_block_balance_increments(
+                    &chain_spec,
+                    self.block.number,
+                    self.block.difficulty,
+                    self.block.beneficiary,
+                    self.block.timestamp,
+                    self.td,
+                    &self.block.ommers,
+                    self.block.withdrawals.as_deref(),
+                );
+                StateTransitionData::PostBlock(self.block.number, increments)
+            }
         };
+        Some(transition)
+    }
+}
 
-        // Check if gas used matches the value set in header.
-        if block.gas_used != cumulative_gas_used {
-            let receipts = Receipts::from_block_receipt(receipts);
-            return Err(BlockValidationError::BlockGasUsed {
-                got: cumulative_gas_used,
-                expected: block.gas_used,
-                gas_spent_by_tx: receipts.gas_spent_by_tx()?,
+/// TODO: add docs
+#[allow(missing_debug_implementations)]
+pub struct ParallelExecutor<'a, Provider> {
+    /// Database provider for loading blocks.
+    provider: Provider,
+    /// EVM state database.
+    state: Arc<SharedStateLock<DatabaseRefBox<'a, RethError>>>,
+    /// Store for transaction execution order.
+    store: Arc<TransitionQueueStore>,
+    /// Execution data.
+    data: ExecutionData,
+    /// Loaded blocks.
+    loaded: HashMap<BlockNumber, LoadedBlock>,
+    /// Executed blocks pending validation.
+    executed: BTreeMap<BlockNumber, LoadedBlock>,
+    /// The block number of the next block number for va
+    next_block_pending_validation: Option<BlockNumber>,
+}
+
+impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
+    /// Create new parallel executor.
+    pub fn new(
+        provider: Provider,
+        chain_spec: Arc<ChainSpec>,
+        store: Arc<TransitionQueueStore>,
+        database: DatabaseRefBox<'a, RethError>,
+        _num_threads: Option<usize>, // TODO:
+    ) -> RethResult<Self> {
+        Ok(Self {
+            provider,
+            store,
+            data: ExecutionData::new(chain_spec),
+            state: Arc::new(SharedStateLock::new(SharedState::new(database))),
+            loaded: HashMap::default(),
+            executed: BTreeMap::default(),
+            next_block_pending_validation: None,
+        })
+    }
+
+    /// Return cloned pointer to the shared state.
+    pub fn state(&self) -> Arc<SharedStateLock<DatabaseRefBox<'a, RethError>>> {
+        Arc::clone(&self.state)
+    }
+
+    fn get_state_transition(
+        &mut self,
+        transition_id: TransitionId,
+    ) -> Result<StateTransitionData, BlockExecutionError> {
+        let block_number = transition_id.0;
+        let state_transition = match self.loaded.get(&block_number) {
+            Some(block) => block.get_state_transition(transition_id.1, &self.data.chain_spec),
+            None => {
+                let td = self
+                    .provider
+                    .header_td_by_number(block_number)
+                    .unwrap() // TODO:
+                    .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+                // we need the block's transactions but we don't need the transaction hashes
+                let block = self
+                    .provider
+                    .block_with_senders(block_number, TransactionVariant::NoHash)
+                    .unwrap() // TODO:
+                    .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
+
+                let block = LoadedBlock::new(block, td);
+                let state_transition =
+                    block.get_state_transition(transition_id.1, &self.data.chain_spec);
+                self.loaded.insert(block_number, block);
+                state_transition
             }
-            .into())
+        };
+        state_transition.ok_or(BlockExecutionError::Parallel(
+            ParallelExecutionError::TransitionNotFound(transition_id),
+        ))
+    }
+
+    /// Execute a batch of transactions in parallel.
+    pub fn execute_batch(&mut self, batch: &TransitionBatch) -> Result<(), BlockExecutionError> {
+        let mut transitions = Vec::with_capacity(batch.len());
+        for transition_id in batch.iter() {
+            transitions.push(self.get_state_transition(*transition_id)?);
         }
 
-        self.apply_post_execution_state_change(block, total_difficulty)?;
+        let transition_results = transitions
+            .into_par_iter()
+            .map(|transition| {
+                let state = self.state.clone();
+                match transition {
+                    StateTransitionData::PreBlock(_) => {
+                        unimplemented!("pre block transition is not implemented")
+                    }
+                    StateTransitionData::Transaction(block_number, idx, env) => {
+                        let mut evm = EVM::with_env(env);
+                        evm.database(state);
+                        StateTransition::Transaction(block_number, idx, evm.transact_ref())
+                    }
+                    StateTransitionData::PostBlock(block_number, increments) => {
+                        // TODO: simplify
+                        StateTransition::PostBlock(
+                            block_number,
+                            increments
+                                .into_iter()
+                                .map(|(address, increment)| {
+                                    let mut info = state
+                                        .basic_ref(address)
+                                        .map_err(EVMError::Database)?
+                                        .unwrap_or_default();
+                                    info.balance += U256::from(increment);
+                                    Ok((
+                                        address,
+                                        Account {
+                                            info,
+                                            status: AccountStatus::Loaded | AccountStatus::Touched,
+                                            storage: revm::primitives::HashMap::default(),
+                                        },
+                                    ))
+                                })
+                                .collect(),
+                        )
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
 
-        let retention = self.data.retention_for_block(block.number);
-        self.state.write().merge_transitions(retention);
+        let mut states =
+            revm::primitives::HashMap::<Address, Vec<(TransitionId, Account)>>::default();
+        for transition_result in transition_results {
+            let transition_id = transition_result.id();
+            let mut block = match self.loaded.entry(transition_result.block_number()) {
+                hash_map::Entry::Occupied(entry) => entry,
+                hash_map::Entry::Vacant(_) => unreachable!("block is pre-loaded"),
+            };
+
+            match transition_result {
+                StateTransition::PreBlock(_) => {
+                    unimplemented!("pre block transition is not implemented")
+                }
+                StateTransition::Transaction(_, idx, exec_result) => {
+                    let ResultAndState { result, state } =
+                        exec_result.map_err(|error| ParallelExecutionError::EVM {
+                            transition: transition_id,
+                            error: error.into(),
+                        })?;
+                    block.get_mut().results.push((idx, result));
+                    for (address, account) in state {
+                        states.entry(address).or_default().push((transition_id, account));
+                    }
+                }
+                StateTransition::PostBlock(_, increment_result) => {
+                    let increments =
+                        increment_result.map_err(|error| ParallelExecutionError::EVM {
+                            transition: transition_id,
+                            error: error.into(),
+                        })?;
+                    block.get_mut().post_block_executed = true;
+                    for (address, account) in increments {
+                        states.entry(address).or_default().push((transition_id, account));
+                    }
+                }
+            };
+
+            if block.get().is_executed() {
+                let block = block.remove();
+                self.executed.insert(block.block.number, block);
+            }
+        }
+        self.state.write().commit(states);
+
+        Ok(())
+    }
+
+    fn execute_range_inner(
+        &mut self,
+        range: RangeInclusive<BlockNumber>,
+        should_verify_receipts: bool,
+    ) -> Result<(), BlockExecutionError> {
+        let queue = self.store.load(range.clone()).unwrap().unwrap();
 
         if self.data.first_block.is_none() {
-            self.data.first_block = Some(block.number);
+            self.data.first_block = Some(*range.start());
+        }
+        self.next_block_pending_validation = Some(*range.start());
+
+        // TODO:
+        // Set state clear flag.
+        // let state_clear_enabled = self.data.state_clear_enabled(block.number);
+        // self.state.write().set_state_clear_flag(state_clear_enabled);
+
+        for batch in queue.batches() {
+            self.execute_batch(&batch)?;
+
+            let next_block_pending_validation = self.next_block_pending_validation.unwrap(); // TODO: error
+            'validation: while Some(&next_block_pending_validation) == self.executed.keys().next() {
+                let (_, mut loaded) = self.executed.pop_first().unwrap();
+                loaded.results.sort_unstable_by_key(|(idx, _)| *idx);
+
+                let retention = self.data.retention_for_block(loaded.block.number);
+                self.state.write().merge_transitions(loaded.block.number, retention);
+
+                let mut cumulative_gas_used = 0;
+                let mut receipts = Vec::with_capacity(loaded.block.body.len());
+                for (transaction, (_, result)) in loaded.block.body.iter().zip(loaded.results) {
+                    cumulative_gas_used += result.gas_used();
+                    receipts.push(Receipt {
+                        tx_type: transaction.tx_type(),
+                        // Success flag was added in `EIP-658: Embedding transaction status code in
+                        // receipts`.
+                        success: result.is_success(),
+                        cumulative_gas_used,
+                        // convert to reth log
+                        logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                    });
+                }
+
+                // Check if gas used matches the value set in header.
+                if loaded.block.gas_used != cumulative_gas_used {
+                    let receipts = Receipts::from_block_receipt(receipts);
+                    return Err(BlockValidationError::BlockGasUsed {
+                        got: cumulative_gas_used,
+                        expected: loaded.block.gas_used,
+                        gas_spent_by_tx: receipts.gas_spent_by_tx()?,
+                    }
+                    .into())
+                }
+
+                // TODO Before Byzantium, receipts contained state root that would mean that
+                // expensive operation as hashing that is needed for state root got
+                // calculated in every transaction This was replaced with is_success
+                // flag. See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
+                if should_verify_receipts &&
+                    self.data
+                        .chain_spec
+                        .fork(Hardfork::Byzantium)
+                        .active_at_block(loaded.block.number)
+                {
+                    if let Err(error) = verify_receipt(
+                        loaded.block.receipts_root,
+                        loaded.block.logs_bloom,
+                        receipts.iter(),
+                    ) {
+                        tracing::debug!(target: "evm::parallel", ?error, ?receipts, "receipts verification failed");
+                        return Err(error.into())
+                    };
+                }
+
+                self.save_receipts(receipts)?;
+
+                if loaded.block.number == *range.end() {
+                    self.next_block_pending_validation = None;
+                    break 'validation
+                }
+
+                self.next_block_pending_validation = Some(loaded.block.number + 1);
+            }
         }
 
-        Ok(receipts)
+        if let Some(unvalidated_block) = self.next_block_pending_validation {
+            return Err(
+                ParallelExecutionError::InconsistentTransitionQueue { unvalidated_block }.into()
+            )
+        }
+
+        Ok(())
     }
 
     /// Saves receipts to the executor.
-    pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
+    pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), PruneSegmentError> {
         let mut receipts = receipts.into_iter().map(Option::Some).collect();
         // Prune receipts if necessary.
         self.data.prune_receipts(&mut receipts)?;
@@ -334,46 +410,18 @@ impl<'a> ParallelExecutor<'a> {
     }
 }
 
-#[async_trait::async_trait]
-impl AsyncBlockExecutor for ParallelExecutor<'_> {
-    /// Execute block in parallel.
-    async fn execute(
+impl<Provider> BlockRangeExecutor for ParallelExecutor<'_, Provider>
+where
+    Provider: BlockReader,
+{
+    fn execute_range(
         &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
+        range: RangeInclusive<BlockNumber>,
+        should_verify_receipts: bool,
     ) -> Result<(), BlockExecutionError> {
-        let receipts = self.execute_inner(block, total_difficulty, senders).await?;
-        self.save_receipts(receipts)
+        self.execute_range_inner(range, should_verify_receipts)
     }
 
-    /// Execute block in parallel and verify receipts.
-    async fn execute_and_verify_receipt(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<(), BlockExecutionError> {
-        // execute block
-        let receipts = self.execute_inner(block, total_difficulty, senders).await?;
-
-        // TODO Before Byzantium, receipts contained state root that would mean that expensive
-        // operation as hashing that is needed for state root got calculated in every
-        // transaction This was replaced with is_success flag.
-        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-        if self.data.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
-            if let Err(error) =
-                verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
-            {
-                tracing::debug!(target: "evm::parallels", ?error, ?receipts, "receipts verification failed");
-                return Err(error)
-            };
-        }
-
-        self.save_receipts(receipts)
-    }
-
-    /// Return the bundle state.
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         let bundle_state = self.state.write().take_bundle();
         let receipts = std::mem::take(&mut self.data.receipts);
@@ -394,7 +442,10 @@ impl AsyncBlockExecutor for ParallelExecutor<'_> {
     }
 }
 
-impl PrunableAsyncBlockExecutor for ParallelExecutor<'_> {
+impl<Provider> PrunableBlockRangeExecutor for ParallelExecutor<'_, Provider>
+where
+    Provider: BlockReader,
+{
     fn set_tip(&mut self, tip: BlockNumber) {
         self.data.tip = Some(tip);
     }

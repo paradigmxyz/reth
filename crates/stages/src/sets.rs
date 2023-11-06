@@ -49,7 +49,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
 };
-use reth_provider::AsyncExecutorFactory;
+use reth_provider::RangeExecutorFactory;
 use std::sync::Arc;
 
 /// A set containing all stages to run a fully syncing instance of reth.
@@ -92,7 +92,7 @@ impl<H, B, EF> DefaultStages<H, B, EF> {
         executor_factory: EF,
     ) -> Self
     where
-        EF: AsyncExecutorFactory,
+        EF: RangeExecutorFactory,
     {
         Self {
             online: OnlineStages::new(header_mode, consensus, header_downloader, body_downloader),
@@ -103,7 +103,7 @@ impl<H, B, EF> DefaultStages<H, B, EF> {
 
 impl<H, B, EF> DefaultStages<H, B, EF>
 where
-    EF: AsyncExecutorFactory,
+    EF: RangeExecutorFactory,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
     pub fn add_offline_stages<DB: Database>(
@@ -119,7 +119,7 @@ where
     DB: Database,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
-    EF: AsyncExecutorFactory,
+    EF: RangeExecutorFactory,
 {
     fn builder(self) -> StageSetBuilder<DB> {
         Self::add_offline_stages(self.online.builder(), self.executor_factory)
@@ -208,19 +208,19 @@ where
 /// - [`HistoryIndexingStages`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct OfflineStages<EF: AsyncExecutorFactory> {
+pub struct OfflineStages<EF: RangeExecutorFactory> {
     /// Executor factory needs for execution stage
     pub executor_factory: EF,
 }
 
-impl<EF: AsyncExecutorFactory> OfflineStages<EF> {
+impl<EF: RangeExecutorFactory> OfflineStages<EF> {
     /// Create a new set of offline stages with default values.
     pub fn new(executor_factory: EF) -> Self {
         Self { executor_factory }
     }
 }
 
-impl<EF: AsyncExecutorFactory, DB: Database> StageSet<DB> for OfflineStages<EF> {
+impl<EF: RangeExecutorFactory, DB: Database> StageSet<DB> for OfflineStages<EF> {
     fn builder(self) -> StageSetBuilder<DB> {
         ExecutionStages::new(self.executor_factory)
             .builder()
@@ -232,19 +232,19 @@ impl<EF: AsyncExecutorFactory, DB: Database> StageSet<DB> for OfflineStages<EF> 
 /// A set containing all stages that are required to execute pre-existing block data.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct ExecutionStages<EF: AsyncExecutorFactory> {
+pub struct ExecutionStages<EF: RangeExecutorFactory> {
     /// Executor factory that will create executors.
     executor_factory: EF,
 }
 
-impl<EF: AsyncExecutorFactory + 'static> ExecutionStages<EF> {
+impl<EF: RangeExecutorFactory + 'static> ExecutionStages<EF> {
     /// Create a new set of execution stages with default values.
     pub fn new(executor_factory: EF) -> Self {
         Self { executor_factory }
     }
 }
 
-impl<EF: AsyncExecutorFactory, DB: Database> StageSet<DB> for ExecutionStages<EF> {
+impl<EF: RangeExecutorFactory, DB: Database> StageSet<DB> for ExecutionStages<EF> {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::default())

@@ -1,7 +1,7 @@
 //! Factory for parallel EVM executor.
-use crate::{executor::ParallelExecutor, queue::BlockQueueStore};
+use crate::{executor::ParallelExecutor, queue::TransitionQueueStore};
 use reth_primitives::ChainSpec;
-use reth_provider::{AsyncExecutorFactory, PrunableAsyncBlockExecutor, StateProvider};
+use reth_provider::{BlockReader, PrunableBlockRangeExecutor, RangeExecutorFactory, StateProvider};
 use reth_revm_database::StateProviderDatabase;
 use std::sync::Arc;
 
@@ -9,23 +9,29 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct ParallelExecutorFactory {
     chain_spec: Arc<ChainSpec>,
-    queue_store: Arc<BlockQueueStore>,
+    queue_store: Arc<TransitionQueueStore>,
 }
 
 impl ParallelExecutorFactory {
     /// Create new factory
-    pub fn new(chain_spec: Arc<ChainSpec>, queue_store: Arc<BlockQueueStore>) -> Self {
+    pub fn new(chain_spec: Arc<ChainSpec>, queue_store: Arc<TransitionQueueStore>) -> Self {
         Self { chain_spec, queue_store }
     }
 }
 
-impl AsyncExecutorFactory for ParallelExecutorFactory {
-    fn with_state<'a, SP: StateProvider + 'a>(
+impl RangeExecutorFactory for ParallelExecutorFactory {
+    fn with_provider_and_state<'a, Provider, SP>(
         &'a self,
+        provider: Provider,
         sp: SP,
-    ) -> Box<dyn PrunableAsyncBlockExecutor + 'a> {
+    ) -> Box<dyn PrunableBlockRangeExecutor + 'a>
+    where
+        Provider: BlockReader + 'a,
+        SP: StateProvider + 'a,
+    {
         Box::new(
             ParallelExecutor::new(
+                provider,
                 Arc::clone(&self.chain_spec),
                 Arc::clone(&self.queue_store),
                 Box::new(StateProviderDatabase::new(sp)),

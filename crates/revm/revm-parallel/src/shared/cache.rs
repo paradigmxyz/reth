@@ -1,9 +1,10 @@
 use super::SharedCacheAccount;
 use dashmap::DashMap;
-use parking_lot::Mutex;
+use parking_lot::RwLock;
+use reth_primitives::{BlockNumber, TransitionId};
 use revm::{
     db::states::plain_account::PlainStorage,
-    primitives::{Account, AccountInfo, Address, Bytecode, HashMap, State as EVMState, B256},
+    primitives::{Account, AccountInfo, Address, Bytecode, HashMap, B256},
     TransitionState,
 };
 
@@ -16,7 +17,7 @@ use revm::{
 #[derive(Debug)]
 pub struct SharedCacheState {
     /// Block state account with account state
-    pub accounts: Mutex<HashMap<Address, SharedCacheAccount>>,
+    pub accounts: RwLock<HashMap<Address, SharedCacheAccount>>,
     /// Mapping of the code hash of created contracts to the respective bytecode.
     pub contracts: DashMap<B256, Bytecode>,
     /// Has EIP-161 state clear enabled (Spurious Dragon hardfork).
@@ -33,7 +34,7 @@ impl SharedCacheState {
     /// New default state.
     pub fn new(has_state_clear: bool) -> Self {
         Self {
-            accounts: Mutex::new(HashMap::default()),
+            accounts: RwLock::new(HashMap::default()),
             contracts: DashMap::default(),
             has_state_clear,
         }
@@ -46,7 +47,7 @@ impl SharedCacheState {
 
     /// Insert not existing account.
     pub fn insert_not_existing(&self, address: Address) {
-        self.accounts.lock().insert(address, SharedCacheAccount::new_loaded_not_existing());
+        self.accounts.write().insert(address, SharedCacheAccount::new_loaded_not_existing());
     }
 
     /// Insert Loaded (Or LoadedEmptyEip161 if account is empty) account.
@@ -56,7 +57,7 @@ impl SharedCacheState {
         } else {
             SharedCacheAccount::new_loaded_empty_eip161(HashMap::default())
         };
-        self.accounts.lock().insert(address, account);
+        self.accounts.write().insert(address, account);
     }
 
     /// Similar to `insert_account` but with storage.
@@ -71,36 +72,33 @@ impl SharedCacheState {
         } else {
             SharedCacheAccount::new_loaded_empty_eip161(storage)
         };
-        self.accounts.lock().insert(address, account);
+        self.accounts.write().insert(address, account);
     }
 
     /// Apply outputs of EVM execution.
-    pub fn apply_evm_states(&mut self, evm_states: Vec<(usize, EVMState)>) {
-        let mut accounts_states = HashMap::<Address, Vec<(usize, Account)>>::default();
-        for (revision, state) in evm_states {
-            for (address, account) in state {
-                accounts_states.entry(address).or_default().push((revision, account));
-            }
-        }
-
-        let mut accounts = self.accounts.lock();
-        for (address, account_states) in accounts_states {
+    pub fn apply_evm_states(
+        &mut self,
+        account_states: HashMap<Address, Vec<(TransitionId, Account)>>,
+    ) {
+        let mut accounts = self.accounts.write();
+        for (address, account_states) in account_states {
             let this_account = accounts.get_mut(&address).expect("account must be present");
-            let previous_info = this_account.account_info();
+            let previous_info = this_account.latest_account_info();
 
-            for (revision, account) in account_states {
-                this_account.apply_account_revision(&previous_info, account, revision);
+            for (transition_id, account) in account_states {
+                this_account.apply_account_transition(&previous_info, account, transition_id);
             }
         }
     }
 
     /// Take account transitions from shared cache state.
-    /// TODO: safety comment
-    pub fn take_transitions(&mut self) -> TransitionState {
-        let mut accounts = self.accounts.lock();
+    pub fn take_transitions(&self, block_number: BlockNumber) -> TransitionState {
+        let mut accounts = self.accounts.write();
         let mut transitions = HashMap::with_capacity(accounts.len());
         for (address, account) in accounts.iter_mut() {
-            if let Some(transition) = account.finalize_transition(self.has_state_clear) {
+            if let Some(transition) =
+                account.finalize_transition(block_number, self.has_state_clear)
+            {
                 transitions.insert(*address, transition);
             }
         }

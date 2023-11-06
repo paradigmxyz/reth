@@ -388,7 +388,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
-                return Err(error)
+                return Err(error.into())
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -429,7 +429,7 @@ pub fn verify_receipt<'a>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
-) -> Result<(), BlockExecutionError> {
+) -> Result<(), BlockValidationError> {
     // Check receipts root.
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
@@ -437,8 +437,7 @@ pub fn verify_receipt<'a>(
         return Err(BlockValidationError::ReceiptRootDiff {
             got: Box::new(receipts_root),
             expected: Box::new(expected_receipts_root),
-        }
-        .into())
+        })
     }
 
     // Create header log bloom.
@@ -447,8 +446,7 @@ pub fn verify_receipt<'a>(
         return Err(BlockValidationError::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
-        }
-        .into())
+        })
     }
 
     Ok(())

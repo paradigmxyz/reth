@@ -237,7 +237,8 @@ impl InsertBlockErrorKind {
                         true
                     }
                     // these are internal errors, not caused by an invalid block
-                    BlockExecutionError::ProviderError |
+                    BlockExecutionError::Parallel(_) |
+                    BlockExecutionError::Provider(_) |
                     BlockExecutionError::Pruning(_) |
                     BlockExecutionError::CanonicalRevert { .. } |
                     BlockExecutionError::CanonicalCommit { .. } |
