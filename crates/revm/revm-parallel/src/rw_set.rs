@@ -1,7 +1,7 @@
 //! Read and write sets for EVM state.
 
 use derive_more::Deref;
-use reth_primitives::{Address, B256};
+use reth_primitives::{Address, BlockNumber, TransitionId, B256};
 use revm::TransitionAccount;
 use std::collections::HashSet;
 
@@ -183,6 +183,22 @@ impl BlockRWSet {
 
     pub fn set_post_block(&mut self, post_block: Option<TransitionRWSet>) {
         self.post_block = post_block;
+    }
+
+    pub fn transitions(
+        &self,
+        block_number: BlockNumber,
+    ) -> impl Iterator<Item = (TransitionId, &TransitionRWSet)> {
+        self.pre_block
+            .as_ref()
+            .map(|pre| (TransitionId::pre_block(block_number), pre))
+            .into_iter()
+            .chain(self.transactions.iter().enumerate().map(move |(idx, rw_set)| {
+                (TransitionId::transaction(block_number, idx as u32), rw_set)
+            }))
+            .chain(
+                self.post_block.as_ref().map(|post| (TransitionId::post_block(block_number), post)),
+            )
     }
 }
 

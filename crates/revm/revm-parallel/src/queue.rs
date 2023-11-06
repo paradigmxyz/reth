@@ -1,6 +1,6 @@
 //! The lists representing the order of execution of the block.
 
-use crate::rw_set::BlockRWSet;
+use crate::rw_set::{BlockRWSet, TransitionRWSet};
 use derive_more::{Deref, DerefMut};
 use reth_primitives::{BlockNumber, TransitionId, TransitionType};
 use std::{
@@ -43,24 +43,30 @@ impl TransitionQueue {
     pub fn resolve(
         range: RangeInclusive<BlockNumber>,
         sets: BTreeMap<BlockNumber, BlockRWSet>,
+        max_batch_size: usize,
     ) -> Self {
         let mut this = Self::new(range);
 
         for (block_number, block_rw_set) in &sets {
-            if block_rw_set.pre_block.is_some() {
-                let id = TransitionId::pre_block(*block_number);
-                let depth = this.find_highest_dependency(id, &sets).map_or(0, |dep| dep + 1);
-                this.insert_at(depth, id);
-            }
-            for (tx_index, _tx_rw_set) in block_rw_set.transactions.iter().enumerate() {
-                let id = TransitionId::transaction(*block_number, tx_index as u32);
-                let depth = this.find_highest_dependency(id, &sets).map_or(0, |dep| dep + 1);
-                this.insert_at(depth, id);
-            }
-            if block_rw_set.post_block.as_ref().is_some() {
-                let id = TransitionId::post_block(*block_number);
-                let depth = this.find_highest_dependency(id, &sets).map_or(0, |dep| dep + 1);
-                this.insert_at(depth, id);
+            for (id, rw_set) in block_rw_set.transitions(*block_number) {
+                let mut depth = this
+                    .find_highest_dependency(&rw_set, &sets, max_batch_size)
+                    .map_or(0, |dep| dep + 1);
+
+                loop {
+                    if depth >= this.batches.len() {
+                        this.append_transition(id);
+                        break
+                    }
+
+                    let batch = this.batches.index_mut(depth);
+                    if batch.len() < max_batch_size {
+                        batch.push(id);
+                        break
+                    }
+
+                    depth += 1;
+                }
             }
         }
 
@@ -78,23 +84,22 @@ impl TransitionQueue {
     ///
     /// # Panics
     ///
-    /// - If the target transition id has no corresponding rw set.
     /// - If the queue contains a transition id that has no corresponding rw set.
     pub fn find_highest_dependency(
         &self,
-        id: TransitionId,
+        target: &TransitionRWSet,
         sets: &BTreeMap<BlockNumber, BlockRWSet>,
+        max_batch_size: usize,
     ) -> Option<usize> {
         // Iterate over the list in reverse to find dependency with the highest index.
-        let target_block = sets.get(&id.0).unwrap();
-        let target = match id.1 {
-            TransitionType::PreBlock => target_block.pre_block.as_ref().unwrap(),
-            TransitionType::Transaction(idx) => {
-                target_block.transactions.get(idx as usize).unwrap()
-            }
-            TransitionType::PostBlock => target_block.post_block.as_ref().unwrap(),
-        };
         for (queue_depth, transition_list) in self.batches.iter().enumerate().rev() {
+            // If the list already reached the max batch size, return early.
+            // Since there are more dependents than independents, we can assume that the transition
+            // will be pushed higher anyway due to the `max_batch_size`.
+            if transition_list.len() == max_batch_size {
+                return Some(queue_depth)
+            }
+
             for transition_id in transition_list.iter() {
                 // The dependency check has to be bidirectional since the target
                 // transition might modify the state in a way that affects the reads
@@ -117,7 +122,6 @@ impl TransitionQueue {
     }
 
     /// Insert transition id at depth or append it to the end of the queue.
-    /// TODO: max batch size
     pub fn insert_at(&mut self, depth: usize, id: TransitionId) {
         if depth < self.batches.len() {
             self.batches.index_mut(depth).push(id);
