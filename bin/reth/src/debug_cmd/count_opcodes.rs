@@ -2,7 +2,6 @@
 use crate::primitives::Bytes;
 use clap::Parser;
 use comfy_table::{Cell, Row, Table};
-use itertools::Itertools;
 use reth_db::{open_db_read_only, tables};
 use reth_primitives::ChainSpecBuilder;
 use reth_provider::ProviderFactory;
@@ -10,18 +9,19 @@ use reth_revm::interpreter::{opcode, OpCode};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 macro_rules! opcodes_tuples_vec {
-    ($map:expr, $take: ident) => {
-        $map.iter()
+    ($map:expr) => {{
+        let mut vec = $map
+            .iter()
             .map(|(k, v)| {
                 let mut string = String::new();
                 (0..k.len())
                     .for_each(|i| string.push_str(&format!("{} ", &opcode_or_invalid(k[i]))));
                 (string, *v)
             })
-            .sorted_by(|a, b| b.1.cmp(&a.1))
-            .take($take)
-            .collect::<Vec<_>>()
-    };
+            .collect::<Vec<_>>();
+        vec.sort_unstable_by_key(|(_str, occurrecies)| *occurrecies);
+        vec
+    }};
 }
 
 /// `reth count-opcodes` command
@@ -99,33 +99,29 @@ impl OpCodeCounter {
 
     fn count_sequences(&mut self, bytes: &Bytes) {
         for (i, opcode) in bytes.iter().enumerate() {
-            let couple = bytes.get(i..=i + 1);
-            let triple = bytes.get(i..=i + 2);
-            let quadruple = bytes.get(i..=i + 3);
-
             *self.opcodes.entry([*opcode]).or_default() += 1;
-            if let Some(t) = couple {
-                *self.couples_opcodes.entry([t[0], t[1]]).or_default() += 1;
+            if let Some(&[a, b]) = bytes.get(i..=i + 1) {
+                *self.couples_opcodes.entry([a, b]).or_default() += 1;
             }
-            if let Some(t) = triple {
-                *self.triplets_opcodes.entry([t[0], t[1], t[2]]).or_default() += 1;
+            if let Some(&[a, b, c]) = bytes.get(i..=i + 2) {
+                *self.triplets_opcodes.entry([a, b, c]).or_default() += 1;
             }
-            if let Some(t) = quadruple {
-                *self.quadruplets_opcodes.entry([t[0], t[1], t[2], t[3]]).or_default() += 1;
+            if let Some(&[a, b, c, d]) = bytes.get(i..=i + 3) {
+                *self.quadruplets_opcodes.entry([a, b, c, d]).or_default() += 1;
             }
         }
     }
 
     fn print_counts(&self, take: usize) {
-        let opcodes_vec = opcodes_tuples_vec!(&self.opcodes, take);
-        let couples_vec = opcodes_tuples_vec!(&self.couples_opcodes, take);
-        let triplets_vec = opcodes_tuples_vec!(&self.triplets_opcodes, take);
-        let quadruplets_vec = opcodes_tuples_vec!(&self.quadruplets_opcodes, take);
+        let opcodes_vec = opcodes_tuples_vec!(&self.opcodes);
+        let couples_vec = opcodes_tuples_vec!(&self.couples_opcodes);
+        let triplets_vec = opcodes_tuples_vec!(&self.triplets_opcodes);
+        let quadruplets_vec = opcodes_tuples_vec!(&self.quadruplets_opcodes);
 
-        print_opcode_table("Opcodes", &opcodes_vec);
-        print_opcode_table("Opcodes couples", &couples_vec);
-        print_opcode_table("Opcodes triplets", &triplets_vec);
-        print_opcode_table("Opcodes quadruplets", &quadruplets_vec);
+        print_opcode_table("Opcodes", &opcodes_vec[..take]);
+        print_opcode_table("Opcodes couples", &couples_vec[..take]);
+        print_opcode_table("Opcodes triplets", &triplets_vec[..take]);
+        print_opcode_table("Opcodes quadruplets", &quadruplets_vec[..take]);
     }
 }
 
