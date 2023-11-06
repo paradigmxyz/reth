@@ -18,7 +18,8 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
-    /// Target trusted peer enodes
+    /// Comma separated enode URLs of trusted peers for P2P connections.
+    ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
     #[arg(long, value_delimiter = ',')]
     pub trusted_peers: Vec<NodeRecord>,
@@ -27,7 +28,7 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub trusted_only: bool,
 
-    /// Bootnodes to connect to initially.
+    /// Comma separated enode URLs for P2P discovery bootstrap.
     ///
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]

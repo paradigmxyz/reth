@@ -18,7 +18,6 @@ reth-eth-wire = { path = "../net/eth-wire" }
 
 # eth
 revm-primitives.workspace = true
-parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 
 # async
 async-trait.workspace = true
@@ -51,3 +50,4 @@ secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 [features]
 test-utils = ["tokio-stream/sync", "secp256k1", "rand/std_rng"]
 cli = ["clap"]
+optimism = ["reth-eth-wire/optimism"]

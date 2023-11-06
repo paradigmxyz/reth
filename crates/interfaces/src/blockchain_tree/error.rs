@@ -243,6 +243,8 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::CanonicalCommit { .. } |
                     BlockExecutionError::AppendChainDoesntConnect { .. } |
                     BlockExecutionError::UnavailableForTest => false,
+                    #[cfg(feature = "optimism")]
+                    BlockExecutionError::OptimismBlockExecution(_) => false,
                 }
             }
             InsertBlockErrorKind::Tree(err) => {
@@ -330,7 +332,6 @@ impl From<crate::RethError> for InsertBlockErrorKind {
             RethError::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             RethError::Custom(err) => InsertBlockErrorKind::Internal(err.into()),
             RethError::Canonical(err) => InsertBlockErrorKind::Canonical(err),
-            RethError::BlockchainTree(err) => InsertBlockErrorKind::BlockchainTree(err),
         }
     }
 }

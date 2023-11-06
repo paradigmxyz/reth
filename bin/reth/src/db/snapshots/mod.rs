@@ -2,15 +2,11 @@ use clap::Parser;
 use itertools::Itertools;
 use reth_db::{open_db_read_only, DatabaseEnvRO};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::{
-    compression::{DecoderDictionary, Decompressor},
-    NippyJar,
-};
 use reth_primitives::{
-    snapshot::{Compression, InclusionFilter, PerfectHashingFunction, SegmentHeader},
+    snapshot::{Compression, InclusionFilter, PerfectHashingFunction},
     BlockNumber, ChainSpec, SnapshotSegment,
 };
-use reth_provider::{providers::SnapshotProvider, ProviderFactory};
+use reth_provider::ProviderFactory;
 use std::{path::Path, sync::Arc};
 
 mod bench;
@@ -133,23 +129,5 @@ impl Command {
         }
 
         Ok(())
-    }
-
-    /// Returns a [`SnapshotProvider`] of the provided [`NippyJar`], alongside a list of
-    /// [`DecoderDictionary`] and [`Decompressor`] if necessary.
-    fn prepare_jar_provider<'a>(
-        &self,
-        jar: &'a mut NippyJar<SegmentHeader>,
-        dictionaries: &'a mut Option<Vec<DecoderDictionary<'_>>>,
-    ) -> eyre::Result<(SnapshotProvider<'a>, Vec<Decompressor<'a>>)> {
-        let mut decompressors: Vec<Decompressor<'_>> = vec![];
-        if let Some(reth_nippy_jar::compression::Compressors::Zstd(zstd)) = jar.compressor_mut() {
-            if zstd.use_dict {
-                *dictionaries = zstd.generate_decompress_dictionaries();
-                decompressors = zstd.generate_decompressors(dictionaries.as_ref().expect("qed"))?;
-            }
-        }
-
-        Ok((SnapshotProvider { jar: &*jar }, decompressors))
     }
 }

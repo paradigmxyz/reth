@@ -101,17 +101,33 @@ pub trait RethNodeCommandConfig: fmt::Debug {
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
     {
-        let payload_generator = BasicPayloadJobGenerator::new(
+        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+            .interval(conf.interval())
+            .deadline(conf.deadline())
+            .max_payload_tasks(conf.max_payload_tasks())
+            .extradata(conf.extradata_rlp_bytes())
+            .max_gas_limit(conf.max_gas_limit());
+
+        #[cfg(feature = "optimism")]
+        let payload_job_config =
+            payload_job_config.compute_pending_block(conf.compute_pending_block());
+
+        // The default payload builder is implemented on the unit type.
+        #[cfg(not(feature = "optimism"))]
+        #[allow(clippy::let_unit_value)]
+        let payload_builder = reth_basic_payload_builder::EthereumPayloadBuilder::default();
+
+        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
+        #[cfg(feature = "optimism")]
+        let payload_builder = reth_basic_payload_builder::OptimismPayloadBuilder::default();
+
+        let payload_generator = BasicPayloadJobGenerator::with_builder(
             components.provider(),
             components.pool(),
             components.task_executor(),
-            BasicPayloadJobGeneratorConfig::default()
-                .interval(conf.interval())
-                .deadline(conf.deadline())
-                .max_payload_tasks(conf.max_payload_tasks())
-                .extradata(conf.extradata_rlp_bytes())
-                .max_gas_limit(conf.max_gas_limit()),
+            payload_job_config,
             components.chain_spec(),
+            payload_builder,
         );
         let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
 

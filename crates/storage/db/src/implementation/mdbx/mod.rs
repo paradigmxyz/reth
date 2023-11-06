@@ -37,6 +37,8 @@ pub enum EnvKind {
 pub struct Env<E: EnvironmentKind> {
     /// Libmdbx-sys environment.
     pub inner: Environment<E>,
+    /// Whether to record metrics or not.
+    with_metrics: bool,
 }
 
 impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
@@ -46,11 +48,17 @@ impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
 
 impl<E: EnvironmentKind> Database for Env<E> {
     fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
-        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?))
+        Ok(Tx::new_with_metrics(
+            self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
+            self.with_metrics,
+        ))
     }
 
     fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
-        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?))
+        Ok(Tx::new_with_metrics(
+            self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
+            self.with_metrics,
+        ))
     }
 }
 
@@ -116,9 +124,18 @@ impl<E: EnvironmentKind> Env<E> {
             }
         }
 
-        let env = Env { inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))? };
+        let env = Env {
+            inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
+            with_metrics: false,
+        };
 
         Ok(env)
+    }
+
+    /// Enables metrics on the database.
+    pub fn with_metrics(mut self) -> Self {
+        self.with_metrics = true;
+        self
     }
 
     /// Creates all the defined tables, if necessary.
@@ -160,9 +177,9 @@ mod tests {
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
         test_utils::*,
         transaction::{DbTx, DbTxMut},
-        AccountChangeSet, DatabaseError,
+        AccountChangeSet,
     };
-    use reth_interfaces::db::DatabaseWriteOperation;
+    use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
     use std::{path::Path, str::FromStr, sync::Arc};
@@ -524,12 +541,13 @@ mod tests {
         // INSERT (failure)
         assert_eq!(
             cursor.insert(key_to_insert, B256::ZERO),
-            Err(DatabaseError::Write {
+            Err(DatabaseWriteError {
                 code: -30799,
                 operation: DatabaseWriteOperation::CursorInsert,
                 table_name: CanonicalHeaders::NAME,
-                key: Box::from(key_to_insert.encode().as_ref())
-            })
+                key: key_to_insert.encode().into(),
+            }
+            .into())
         );
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, B256::ZERO))));
 
@@ -667,12 +685,13 @@ mod tests {
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
         assert_eq!(
             cursor.append(key_to_append, B256::ZERO),
-            Err(DatabaseError::Write {
+            Err(DatabaseWriteError {
                 code: -30418,
                 operation: DatabaseWriteOperation::CursorAppend,
                 table_name: CanonicalHeaders::NAME,
-                key: Box::from(key_to_append.encode().as_ref())
-            })
+                key: key_to_append.encode().into(),
+            }
+            .into())
         );
         assert_eq!(cursor.current(), Ok(Some((5, B256::ZERO)))); // the end of table
         tx.commit().expect(ERROR_COMMIT);
@@ -748,24 +767,26 @@ mod tests {
                 transition_id,
                 AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
-            Err(DatabaseError::Write {
+            Err(DatabaseWriteError {
                 code: -30418,
                 operation: DatabaseWriteOperation::CursorAppendDup,
                 table_name: AccountChangeSet::NAME,
-                key: Box::from(transition_id.encode().as_ref())
-            })
+                key: transition_id.encode().into(),
+            }
+            .into())
         );
         assert_eq!(
             cursor.append(
                 transition_id - 1,
                 AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
-            Err(DatabaseError::Write {
+            Err(DatabaseWriteError {
                 code: -30418,
                 operation: DatabaseWriteOperation::CursorAppend,
                 table_name: AccountChangeSet::NAME,
-                key: Box::from((transition_id - 1).encode().as_ref())
-            })
+                key: (transition_id - 1).encode().into(),
+            }
+            .into())
         );
         assert_eq!(
             cursor.append(

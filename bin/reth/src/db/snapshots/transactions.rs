@@ -3,21 +3,17 @@ use super::{
     Command, Compression, PerfectHashingFunction,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{database::Database, open_db_read_only, table::Decompress};
+use reth_db::{database::Database, open_db_read_only, snapshot::TransactionMask};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{Filters, InclusionFilter},
     ChainSpec, SnapshotSegment, TransactionSignedNoHash,
 };
 use reth_provider::{
-    DatabaseProviderRO, ProviderError, ProviderFactory, TransactionsProvider,
-    TransactionsProviderExt,
+    providers::SnapshotProvider, DatabaseProviderRO, ProviderError, ProviderFactory,
+    TransactionsProvider, TransactionsProviderExt,
 };
-use reth_snapshot::{
-    segments,
-    segments::{get_snapshot_segment_file_name, Segment},
-};
+use reth_snapshot::{segments, segments::Segment};
 use std::{path::Path, sync::Arc};
 
 impl Command {
@@ -59,26 +55,22 @@ impl Command {
         let block_range = self.from..=(self.from + self.block_interval - 1);
 
         let mut rng = rand::thread_rng();
-        let mut dictionaries = None;
-        let mut jar = NippyJar::load(&get_snapshot_segment_file_name(
-            SnapshotSegment::Transactions,
-            filters,
-            compression,
-            &block_range,
-        ))?;
 
         let tx_range = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
             .provider()?
-            .transaction_range_by_block_range(block_range)?;
+            .transaction_range_by_block_range(block_range.clone())?;
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
-        let (provider, decompressors) = self.prepare_jar_provider(&mut jar, &mut dictionaries)?;
-        let mut cursor = if !decompressors.is_empty() {
-            provider.cursor_with_decompressors(decompressors)
-        } else {
-            provider.cursor()
-        };
+        let path = SnapshotSegment::Transactions.filename_with_configuration(
+            filters,
+            compression,
+            &block_range,
+        );
+        let provider = SnapshotProvider::default();
+        let jar_provider =
+            provider.get_segment_provider(SnapshotSegment::Transactions, self.from, Some(path))?;
+        let mut cursor = jar_provider.cursor()?;
 
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {
             bench(
@@ -89,17 +81,10 @@ impl Command {
                 compression,
                 || {
                     for num in row_indexes.iter() {
-                        TransactionSignedNoHash::decompress(
-                            cursor
-                                .row_by_number_with_cols::<0b1, 1>(
-                                    (num - tx_range.start()) as usize,
-                                )?
-                                .ok_or(ProviderError::TransactionNotFound((*num).into()))?[0],
-                        )?
-                        .with_hash();
-                        // TODO: replace with below when eventually SnapshotProvider re-uses cursor
-                        // provider.transaction_by_id(num as
-                        // u64)?.ok_or(ProviderError::TransactionNotFound((*num).into()))?;
+                        cursor
+                            .get_one::<TransactionMask<TransactionSignedNoHash>>((*num).into())?
+                            .ok_or(ProviderError::TransactionNotFound((*num).into()))?
+                            .with_hash();
                     }
                     Ok(())
                 },
@@ -127,12 +112,10 @@ impl Command {
                 filters,
                 compression,
                 || {
-                    Ok(TransactionSignedNoHash::decompress(
-                        cursor
-                            .row_by_number_with_cols::<0b1, 1>((num - tx_range.start()) as usize)?
-                            .ok_or(ProviderError::TransactionNotFound((num as u64).into()))?[0],
-                    )?
-                    .with_hash())
+                    Ok(cursor
+                        .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
+                        .ok_or(ProviderError::TransactionNotFound(num.into()))?
+                        .with_hash())
                 },
                 |provider| {
                     Ok(provider
@@ -158,14 +141,12 @@ impl Command {
                 filters,
                 compression,
                 || {
-                    let transaction = TransactionSignedNoHash::decompress(
-                        cursor
-                            .row_by_key_with_cols::<0b1, 1>(transaction_hash.as_slice())?
-                            .ok_or(ProviderError::TransactionNotFound(transaction_hash.into()))?[0],
-                    )?;
-
-                    // Might be a false positive, so in the real world we have to validate it
-                    Ok(transaction.with_hash())
+                    Ok(cursor
+                        .get_one::<TransactionMask<TransactionSignedNoHash>>(
+                            (&transaction_hash).into(),
+                        )?
+                        .ok_or(ProviderError::TransactionNotFound(transaction_hash.into()))?
+                        .with_hash())
                 },
                 |provider| {
                     Ok(provider

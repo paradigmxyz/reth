@@ -167,8 +167,8 @@ impl Chain {
         let chain_tip = self.tip();
         if chain_tip.hash != chain.fork_block_hash() {
             return Err(BlockExecutionError::AppendChainDoesntConnect {
-                chain_tip: chain_tip.num_hash(),
-                other_chain_fork: chain.fork_block(),
+                chain_tip: Box::new(chain_tip.num_hash()),
+                other_chain_fork: Box::new(chain.fork_block()),
             }
             .into())
         }

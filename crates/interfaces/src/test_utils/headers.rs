@@ -161,7 +161,7 @@ impl Stream for TestDownload {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
                     hash: empty.hash(),
-                    error,
+                    error: Box::new(error),
                 })))
             }
 

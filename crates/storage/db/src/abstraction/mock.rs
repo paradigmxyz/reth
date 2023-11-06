@@ -63,7 +63,7 @@ impl DbTx for TxMock {
         Ok(true)
     }
 
-    fn drop(self) {}
+    fn abort(self) {}
 
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })

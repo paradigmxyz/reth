@@ -1,0 +1,3 @@
+[profile.default]
+retries = { backoff = "fixed", count = 2, delay = "1s" }
+slow-timeout = "2m"

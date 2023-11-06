@@ -1,13 +1,15 @@
 //! Builder style functions for `trace_call`
 
-use crate::{state::StateOverride, trace::parity::TraceType, BlockOverrides, CallRequest};
-use reth_primitives::BlockId;
+use crate::{
+    eth::block::BlockId, state::StateOverride, trace::parity::TraceType, BlockOverrides,
+    CallRequest,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// Trace Request builder style function implementation
+/// Container type for `trace_call` arguments
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TraceRequest {
+pub struct TraceCallRequest {
     /// call request object
     pub call: CallRequest,
     /// trace types
@@ -20,8 +22,8 @@ pub struct TraceRequest {
     pub block_overrides: Option<Box<BlockOverrides>>,
 }
 
-impl TraceRequest {
-    /// Returns a new [`TraceRequest`] given a [`CallRequest`] and [`HashSet<TraceType>`]
+impl TraceCallRequest {
+    /// Returns a new [`TraceCallRequest`] given a [`CallRequest`] and [`HashSet<TraceType>`]
     pub fn new(call: CallRequest) -> Self {
         Self {
             call,

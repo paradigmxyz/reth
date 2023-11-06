@@ -1,19 +1,42 @@
 //! Helpers for testing trace calls.
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::Error as RpcError;
-use reth_primitives::{BlockId, TxHash};
+use reth_primitives::{BlockId, Bytes, TxHash, B256};
 use reth_rpc_api::clients::TraceApiClient;
-use reth_rpc_types::trace::parity::{LocalizedTransactionTrace, TraceResults, TraceType};
+use reth_rpc_types::{
+    trace::{
+        filter::TraceFilter,
+        parity::{LocalizedTransactionTrace, TraceResults, TraceType},
+    },
+    CallRequest, Index,
+};
 use std::{
     collections::HashSet,
     pin::Pin,
     task::{Context, Poll},
 };
+/// A type alias that represents the result of a raw transaction trace stream.
+type RawTransactionTraceResult<'a> =
+    Pin<Box<dyn Stream<Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>> + 'a>>;
 /// A result type for the `trace_block` method that also captures the requested block.
 pub type TraceBlockResult = Result<(Vec<LocalizedTransactionTrace>, BlockId), (RpcError, BlockId)>;
 /// Type alias representing the result of replaying a transaction.
 
 pub type ReplayTransactionResult = Result<(TraceResults, TxHash), (RpcError, TxHash)>;
+
+/// A type representing the result of calling `trace_call_many` method.
+
+pub type CallManyTraceResult = Result<
+    (Vec<TraceResults>, Vec<(CallRequest, HashSet<TraceType>)>),
+    (RpcError, Vec<(CallRequest, HashSet<TraceType>)>),
+>;
+/// Result type for the `trace_get` method that also captures the requested transaction hash and
+/// index.
+pub type TraceGetResult =
+    Result<(Option<LocalizedTransactionTrace>, B256, Vec<Index>), (RpcError, B256, Vec<Index>)>;
+/// Represents a result type for the `trace_filter` stream extension.
+pub type TraceFilterResult =
+    Result<(Vec<LocalizedTransactionTrace>, TraceFilter), (RpcError, TraceFilter)>;
 
 /// An extension trait for the Trace API.
 #[async_trait::async_trait]
@@ -47,6 +70,118 @@ pub trait TraceApiExt {
     ) -> ReplayTransactionStream<'_>
     where
         I: IntoIterator<Item = TxHash>;
+
+    /// Returns a new stream that traces the provided raw transaction data.
+    fn trace_raw_transaction_stream(
+        &self,
+        data: Bytes,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+    ) -> RawTransactionTraceStream<'_>;
+    /// Creates a stream of results for multiple dependent transaction calls on top of the same
+    /// block.
+
+    fn trace_call_many_stream<I>(
+        &self,
+        calls: I,
+        block_id: Option<BlockId>,
+    ) -> CallManyTraceStream<'_>
+    where
+        I: IntoIterator<Item = (CallRequest, HashSet<TraceType>)>;
+    /// Returns a new stream that yields the traces for the given transaction hash and indices.
+    fn trace_get_stream<I>(&self, hash: B256, indices: I) -> TraceGetStream<'_>
+    where
+        I: IntoIterator<Item = Index>;
+
+    /// Returns a new stream that yields traces for given filters.
+    fn trace_filter_stream<I>(&self, filters: I) -> TraceFilterStream<'_>
+    where
+        I: IntoIterator<Item = TraceFilter>;
+}
+
+/// Represents a stream that asynchronously yields the results of the `trace_filter` method.
+#[must_use = "streams do nothing unless polled"]
+pub struct TraceFilterStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = TraceFilterResult> + 'a>>,
+}
+
+impl<'a> Stream for TraceFilterStream<'a> {
+    type Item = TraceFilterResult;
+
+    /// Attempts to pull out the next value of the stream.
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl<'a> std::fmt::Debug for TraceFilterStream<'a> {
+    /// Provides a debug representation of the `TraceFilterStream`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TraceFilterStream").finish_non_exhaustive()
+    }
+}
+/// A stream that asynchronously yields the results of the `trace_get` method for a given
+/// transaction hash and a series of indices.
+#[must_use = "streams do nothing unless polled"]
+pub struct TraceGetStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = TraceGetResult> + 'a>>,
+}
+impl<'a> Stream for TraceGetStream<'a> {
+    type Item = TraceGetResult;
+    /// Attempts to pull out the next item of the stream
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl<'a> std::fmt::Debug for TraceGetStream<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TraceGetStream").finish_non_exhaustive()
+    }
+}
+
+/// A stream that provides asynchronous iteration over results from the `trace_call_many` function.
+///
+/// The stream yields items of type `CallManyTraceResult`.
+#[must_use = "streams do nothing unless polled"]
+pub struct CallManyTraceStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = CallManyTraceResult> + 'a>>,
+}
+
+impl<'a> Stream for CallManyTraceStream<'a> {
+    type Item = CallManyTraceResult;
+    /// Polls for the next item from the stream.
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl<'a> std::fmt::Debug for CallManyTraceStream<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CallManyTraceStream").finish()
+    }
+}
+
+/// A stream that traces the provided raw transaction data.
+
+#[must_use = "streams do nothing unless polled"]
+pub struct RawTransactionTraceStream<'a> {
+    stream: RawTransactionTraceResult<'a>,
+}
+
+impl<'a> Stream for RawTransactionTraceStream<'a> {
+    type Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl<'a> std::fmt::Debug for RawTransactionTraceStream<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawTransactionTraceStream").finish()
+    }
 }
 
 /// A stream that replays the transactions for the requested hashes.
@@ -125,6 +260,68 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         .buffered(10);
         ReplayTransactionStream { stream: Box::pin(stream) }
     }
+    fn trace_raw_transaction_stream(
+        &self,
+        data: Bytes,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+    ) -> RawTransactionTraceStream<'_> {
+        let stream = futures::stream::once(async move {
+            match self.trace_raw_transaction(data.clone(), trace_types, block_id).await {
+                Ok(result) => Ok((result, data)),
+                Err(err) => Err((err, data)),
+            }
+        });
+        RawTransactionTraceStream { stream: Box::pin(stream) }
+    }
+
+    fn trace_call_many_stream<I>(
+        &self,
+        calls: I,
+        block_id: Option<BlockId>,
+    ) -> CallManyTraceStream<'_>
+    where
+        I: IntoIterator<Item = (CallRequest, HashSet<TraceType>)>,
+    {
+        let call_set = calls.into_iter().collect::<Vec<_>>();
+        let stream = futures::stream::once(async move {
+            match self.trace_call_many(call_set.clone(), block_id).await {
+                Ok(results) => Ok((results, call_set)),
+                Err(err) => Err((err, call_set)),
+            }
+        });
+        CallManyTraceStream { stream: Box::pin(stream) }
+    }
+
+    fn trace_get_stream<I>(&self, hash: B256, indices: I) -> TraceGetStream<'_>
+    where
+        I: IntoIterator<Item = Index>,
+    {
+        let index_list = indices.into_iter().collect::<Vec<_>>();
+        let stream = futures::stream::iter(index_list.into_iter().map(move |index| async move {
+            match self.trace_get(hash, vec![index]).await {
+                Ok(result) => Ok((result, hash, vec![index])),
+                Err(err) => Err((err, hash, vec![index])),
+            }
+        }))
+        .buffered(10);
+        TraceGetStream { stream: Box::pin(stream) }
+    }
+
+    fn trace_filter_stream<I>(&self, filters: I) -> TraceFilterStream<'_>
+    where
+        I: IntoIterator<Item = TraceFilter>,
+    {
+        let filter_list = filters.into_iter().collect::<Vec<_>>();
+        let stream = futures::stream::iter(filter_list.into_iter().map(move |filter| async move {
+            match self.trace_filter(filter.clone()).await {
+                Ok(result) => Ok((result, filter)),
+                Err(err) => Err((err, filter)),
+            }
+        }))
+        .buffered(10);
+        TraceFilterStream { stream: Box::pin(stream) }
+    }
 }
 
 /// A stream that yields the traces for the requested blocks.
@@ -164,6 +361,8 @@ mod tests {
     use super::*;
     use jsonrpsee::http_client::HttpClientBuilder;
     use reth_primitives::BlockNumberOrTag;
+    use reth_rpc_types::trace::filter::TraceFilterMode;
+    use std::collections::HashSet;
 
     fn assert_is_stream<St: Stream>(_: &St) {}
 
@@ -212,5 +411,83 @@ mod tests {
 
         println!("Total successes: {}", successes);
         println!("Total failures: {}", failures);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn can_create_trace_call_many_stream() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+
+        let call_request_1 = CallRequest::default();
+        let call_request_2 = CallRequest::default();
+        let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
+        let calls = vec![(call_request_1, trace_types.clone()), (call_request_2, trace_types)];
+
+        let mut stream = client.trace_call_many_stream(calls, None);
+
+        assert_is_stream(&stream);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(trace_result) => {
+                    println!("Success: {:?}", trace_result);
+                }
+                Err(error) => {
+                    println!("Error: {:?}", error);
+                }
+            }
+        }
+    }
+    #[tokio::test]
+    #[ignore]
+    async fn can_create_trace_get_stream() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+
+        let tx_hash: B256 = "".parse().unwrap();
+
+        let indices: Vec<Index> = vec![Index::from(0)];
+
+        let mut stream = client.trace_get_stream(tx_hash, indices);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(trace) => {
+                    println!("Received trace: {:?}", trace);
+                }
+                Err(e) => {
+                    println!("Error fetching trace: {:?}", e);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn can_create_trace_filter() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+
+        let filter = TraceFilter {
+            from_block: None,
+            to_block: None,
+            from_address: Vec::new(),
+            to_address: Vec::new(),
+            mode: TraceFilterMode::Union,
+            after: None,
+            count: None,
+        };
+
+        let filters = vec![filter];
+        let mut stream = client.trace_filter_stream(filters);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(trace) => {
+                    println!("Received trace: {:?}", trace);
+                }
+                Err(e) => {
+                    println!("Error fetching trace: {:?}", e);
+                }
+            }
+        }
     }
 }

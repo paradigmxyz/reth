@@ -33,11 +33,11 @@ impl HelloMessage {
     /// Starts a new `HelloMessageBuilder`
     ///
     /// ```
-    /// use secp256k1::{SECP256K1, SecretKey};
     /// use reth_ecies::util::pk2id;
     /// use reth_eth_wire::HelloMessage;
+    /// use secp256k1::{SecretKey, SECP256K1};
     /// let secret_key = SecretKey::new(&mut rand::thread_rng());
-    /// let id =  pk2id(&secret_key.public_key(SECP256K1));
+    /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessage::builder(id).build();
     /// ```
     pub fn builder(id: PeerId) -> HelloMessageBuilder {

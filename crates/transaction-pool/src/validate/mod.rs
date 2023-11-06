@@ -275,6 +275,13 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.cost()
     }
 
+    /// Returns the EIP-4844 max blob fee the caller is willing to pay.
+    ///
+    /// For non-EIP-4844 transactions, this returns [None].
+    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.transaction.max_fee_per_blob_gas()
+    }
+
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
     /// For legacy transactions this is `gas_price`.
