@@ -484,11 +484,9 @@ impl SharedCacheAccount {
         // The account code might have been read before update.
         // Since the code might have been written in any adjacent transition,
         // preserve it if it was not modified at this transition.
-        if let Some(previous_info) = self
-            .previous_info
-            .as_ref()
-            .filter(|info| info.code_hash != KECCAK_EMPTY && transition.info_diff.code.is_none())
-        {
+        if let Some(previous_info) = self.previous_info.as_ref().filter(|info| {
+            info.code_hash != KECCAK_EMPTY && transition.info_diff.code.revision.is_none()
+        }) {
             info = Some(AccountInfo {
                 balance: info.as_ref().map(|info| info.balance).unwrap_or_default(),
                 nonce: info.as_ref().map(|info| info.nonce).unwrap_or_default(),
