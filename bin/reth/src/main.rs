@@ -3,7 +3,7 @@
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-#[cfg(feature = "optimism")]
+#[cfg(all(feature = "optimism", not(test)))]
 compile_error!("Cannot build the `reth` binary with the `optimism` feature flag enabled. Did you mean to build `op-reth`?");
 
 #[cfg(not(feature = "optimism"))]
