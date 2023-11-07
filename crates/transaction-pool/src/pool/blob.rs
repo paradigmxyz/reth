@@ -280,6 +280,36 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
 //   the minimums will need to be done only starting at the swapped in/out nonce and leading up to
 //   the first no-change.
 
+/// The blob step function, attempting to compute the delta given the `max_tx_fee`, and
+/// `current_fee`.
+///
+/// The `max_tx_fee` is the maximum fee that the transaction is willing to pay, this
+/// would be the priority fee for the EIP1559 component of transaction fees, and the blob fee cap
+/// for the blob component of transaction fees.
+///
+/// The `current_fee` is the current value of the fee, this would be the base fee for the EIP1559
+/// component, and the blob fee (computed from the current head) for the blob component.
+///
+/// This is suppoed to get the number of fee jumps required to get from the current fee to the
+/// fee cap, or where the transaction would not be executable any more.
+fn fee_delta(max_tx_fee: u128, current_fee: u128) -> f64 {
+    let jumps = (max_tx_fee as f64).log(1.125) - (current_fee as f64).log(1.125);
+    jumps.signum() * jumps.abs().log(2.0)
+}
+
+/// Returns the priority for the transaction, based on the "delta" blob fee and priority fee.
+fn blob_tx_priority(
+    blob_fee_cap: u128,
+    blob_fee: u128,
+    max_priority_fee: u128,
+    base_fee: u128,
+) -> f64 {
+    let delta_blob_fee = fee_delta(blob_fee_cap, blob_fee);
+    let delta_priority_fee = fee_delta(max_priority_fee, base_fee);
+
+    // The priority is the minimum of the two deltas, and zero
+    delta_blob_fee.min(delta_priority_fee).min(0.0)
+}
 
 #[derive(Debug, Clone)]
 struct BlobOrd {
