@@ -1,6 +1,6 @@
 //! CLI definition and entrypoint to executable
 use crate::{
-    args::utils::genesis_value_parser,
+    args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
     chain,
     cli::ext::RethCliExt,
     db, debug_cmd,
@@ -41,17 +41,11 @@ pub struct Cli<Ext: RethCliExt = ()> {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser,
         global = true,
     )]
@@ -330,6 +324,7 @@ impl Display for ColorMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::utils::SUPPORTED_CHAINS;
     use clap::CommandFactory;
 
     #[test]
@@ -365,13 +360,19 @@ mod tests {
         reth.logs.log_file_directory =
             reth.logs.log_file_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_file_directory;
-        assert!(log_dir.as_ref().ends_with("reth/logs/mainnet"), "{:?}", log_dir);
+        let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
+        assert!(log_dir.as_ref().ends_with(end), "{:?}", log_dir);
 
-        let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--chain", "sepolia"]).unwrap();
-        reth.logs.log_file_directory =
-            reth.logs.log_file_directory.join(reth.chain.chain.to_string());
-        let log_dir = reth.logs.log_file_directory;
-        assert!(log_dir.as_ref().ends_with("reth/logs/sepolia"), "{:?}", log_dir);
+        let mut iter = SUPPORTED_CHAINS.into_iter();
+        iter.next();
+        for chain in iter {
+            let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--chain", chain]).unwrap();
+            reth.logs.log_file_directory =
+                reth.logs.log_file_directory.join(reth.chain.chain.to_string());
+            let log_dir = reth.logs.log_file_directory;
+            let end = format!("reth/logs/{}", chain);
+            assert!(log_dir.as_ref().ends_with(end), "{:?}", log_dir);
+        }
     }
 
     #[test]

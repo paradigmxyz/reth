@@ -1,6 +1,9 @@
 //! Database debugging tool
 use crate::{
-    args::{utils::genesis_value_parser, DatabaseArgs},
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
@@ -44,17 +47,11 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser,
         global = true,
     )]
@@ -247,7 +244,8 @@ mod tests {
 
     #[test]
     fn parse_stats_globals() {
-        let cmd = Command::try_parse_from(["reth", "stats", "--datadir", "../mainnet"]).unwrap();
-        assert_eq!(cmd.datadir.as_ref(), Some(Path::new("../mainnet")));
+        let path = format!("../{}", SUPPORTED_CHAINS[0]);
+        let cmd = Command::try_parse_from(["reth", "stats", "--datadir", &path]).unwrap();
+        assert_eq!(cmd.datadir.as_ref(), Some(Path::new(&path)));
     }
 }

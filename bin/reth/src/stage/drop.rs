@@ -1,6 +1,9 @@
 //! Database debugging tool
 use crate::{
-    args::{utils::genesis_value_parser, DatabaseArgs, StageEnum},
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, StageEnum,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     init::{insert_genesis_header, insert_genesis_state},
     utils::DbTool,
@@ -27,17 +30,11 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
