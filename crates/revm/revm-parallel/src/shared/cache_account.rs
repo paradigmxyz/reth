@@ -359,19 +359,19 @@ impl SharedCacheAccount {
         // If it is marked as selfdestructed inside revm we need to change destroy the state
         // unless later revisions have already been applied.
         if is_selfdestructed {
-            self.storage.retain(|_slot, value| value.revision > Some(transition));
             self.selfdestruct_transition = Some(match self.selfdestruct_transition {
                 Some(prev) => prev.max(transition),
                 None => transition,
             });
+            self.storage.retain(|_slot, value| value.revision > Some(transition));
 
-            // TODO: check storage
             block_transition.selfdestruct_count += 1;
             block_transition.selfdestruct_transition =
                 Some(match block_transition.selfdestruct_transition {
                     Some(prev) => prev.max(transition),
                     None => transition,
                 });
+            block_transition.storage.retain(|_slot, value| value.revision > Some(transition));
             return
         }
 
