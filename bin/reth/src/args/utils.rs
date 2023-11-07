@@ -43,9 +43,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
-        "base_goerli" => BASE_GOERLI.clone(),
-        #[cfg(feature = "optimism")]
-        "base-goerli" => BASE_GOERLI.clone(),
+        "base_goerli" | "base-goerli" => BASE_GOERLI.clone(),
         #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
         _ => {
@@ -78,9 +76,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
-        "base_goerli" => BASE_GOERLI.clone(),
-        #[cfg(feature = "optimism")]
-        "base-goerli" => BASE_GOERLI.clone(),
+        "base_goerli" | "base-goerli" => BASE_GOERLI.clone(),
         #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
         _ => {
