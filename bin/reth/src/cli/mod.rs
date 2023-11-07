@@ -23,6 +23,11 @@ pub mod components;
 pub mod config;
 pub mod ext;
 
+/// Default [Directive] for [EnvFilter] which disables high-frequency debug logs from `hyper` and
+/// `trust-dns`
+const DEFAULT_ENV_FILTER_DIRECTIVE: &str =
+    "hyper::proto::h1=off,trust_dns_proto=off,trust_dns_resolver=off";
+
 /// The main reth cli interface.
 ///
 /// This is the entrypoint to the executable.
@@ -235,14 +240,18 @@ impl Logs {
 
         if self.journald {
             layers.push(
-                reth_tracing::journald(EnvFilter::builder().parse(&self.journald_filter)?)
-                    .expect("Could not connect to journald"),
+                reth_tracing::journald(
+                    EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
+                        .add_directive(self.journald_filter.parse()?),
+                )
+                .expect("Could not connect to journald"),
             );
         }
 
         let file_guard = if self.log_file_max_files > 0 {
             let (layer, guard) = reth_tracing::file(
-                EnvFilter::builder().parse(&self.log_file_filter)?,
+                EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
+                    .add_directive(self.log_file_filter.parse()?),
                 &self.log_file_directory,
                 "reth.log",
                 self.log_file_max_size * MB_TO_BYTES,

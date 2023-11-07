@@ -16,6 +16,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio_stream::Stream;
+use tracing::{debug, trace};
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
@@ -55,7 +56,7 @@ where
         status: Status,
         fork_filter: ForkFilter,
     ) -> Result<(EthStream<S>, Status), EthStreamError> {
-        tracing::trace!(
+        trace!(
             %status,
             "sending eth status to peer"
         );
@@ -86,7 +87,7 @@ where
         let msg = match ProtocolMessage::decode_message(version, &mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::debug!("decode error in eth handshake: msg={their_msg:x}");
+                debug!("decode error in eth handshake: msg={their_msg:x}");
                 self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
                 return Err(err)
             }
@@ -96,7 +97,7 @@ where
         // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
         match msg.message {
             EthMessage::Status(resp) => {
-                tracing::trace!(
+                trace!(
                     status=%resp,
                     "validating incoming eth status from peer"
                 );
@@ -241,7 +242,11 @@ where
         let msg = match ProtocolMessage::decode_message(*this.version, &mut bytes.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::debug!("decode error: msg={bytes:x}");
+                debug!(
+                    version=?this.version,
+                    msg=format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..]),
+                    "failed to decode protocol message"
+                );
                 return Poll::Ready(Some(Err(err)))
             }
         };
