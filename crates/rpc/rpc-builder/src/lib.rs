@@ -1467,11 +1467,7 @@ impl RpcServerConfig {
         server.ws_http = self.build_ws_http(modules).await?;
 
         if let Some(builder) = self.ipc_server_config {
-            let metrics = modules
-                .ipc
-                .as_ref()
-                .map(|module| RpcServerMetrics::new(module))
-                .unwrap_or_default();
+            let metrics = modules.ipc.as_ref().map(RpcServerMetrics::new).unwrap_or_default();
             let ipc_path = self
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
