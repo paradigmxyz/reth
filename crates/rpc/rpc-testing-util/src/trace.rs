@@ -4,12 +4,14 @@ use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{BlockId, Bytes, TxHash, B256};
 use reth_rpc_api::clients::TraceApiClient;
 use reth_rpc_types::{
+    state::StateOverride,
     trace::{
         filter::TraceFilter,
         parity::{LocalizedTransactionTrace, TraceResults, TraceType},
     },
-    CallRequest, Index,
+    BlockOverrides, CallRequest, Index,
 };
+
 use std::{
     collections::HashSet,
     pin::Pin,
@@ -37,6 +39,19 @@ pub type TraceGetResult =
 /// Represents a result type for the `trace_filter` stream extension.
 pub type TraceFilterResult =
     Result<(Vec<LocalizedTransactionTrace>, TraceFilter), (RpcError, TraceFilter)>;
+/// Represents the result of a single trace call.
+
+pub type TraceCallResult = Result<
+    TraceResults,
+    (
+        RpcError,
+        CallRequest,
+        HashSet<TraceType>,
+        Option<BlockId>,
+        Option<StateOverride>,
+        Option<Box<BlockOverrides>>,
+    ),
+>;
 
 /// An extension trait for the Trace API.
 #[async_trait::async_trait]
@@ -97,6 +112,36 @@ pub trait TraceApiExt {
     fn trace_filter_stream<I>(&self, filters: I) -> TraceFilterStream<'_>
     where
         I: IntoIterator<Item = TraceFilter>;
+
+    /// Returns a new stream that yields the trace results for the given call requests.
+    fn trace_call_stream(
+        &self,
+        call: CallRequest,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
+    ) -> TraceCallStream<'_>;
+}
+/// `TraceCallStream` provides an asynchronous stream of tracing results.
+
+#[must_use = "streams do nothing unless polled"]
+pub struct TraceCallStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = TraceCallResult> + 'a>>,
+}
+
+impl<'a> Stream for TraceCallStream<'a> {
+    type Item = TraceCallResult;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl<'a> std::fmt::Debug for TraceCallStream<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TraceCallStream").finish()
+    }
 }
 
 /// Represents a stream that asynchronously yields the results of the `trace_filter` method.
@@ -322,6 +367,34 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         .buffered(10);
         TraceFilterStream { stream: Box::pin(stream) }
     }
+
+    fn trace_call_stream(
+        &self,
+        call: CallRequest,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
+    ) -> TraceCallStream<'_> {
+        let stream = futures::stream::once(async move {
+            match self
+                .trace_call(
+                    call.clone(),
+                    trace_types.clone(),
+                    block_id,
+                    state_overrides.clone(),
+                    block_overrides.clone(),
+                )
+                .await
+            {
+                Ok(result) => Ok(result),
+                Err(err) => {
+                    Err((err, call, trace_types, block_id, state_overrides, block_overrides))
+                }
+            }
+        });
+        TraceCallStream { stream: Box::pin(stream) }
+    }
 }
 
 /// A stream that yields the traces for the requested blocks.
@@ -356,75 +429,6 @@ impl<'a> std::fmt::Debug for TraceBlockStream<'a> {
     }
 }
 
-/// A utility to compare RPC responses from two different clients.
-///
-/// The `RpcComparer` is designed to perform comparisons between two RPC clients.
-/// It is useful in scenarios where there's a need to ensure that two different RPC clients
-/// return consistent responses. This can be particularly valuable in testing environments
-/// where one might want to compare a test client's responses against a production client
-/// or compare two different Ethereum client implementations.
-#[derive(Debug)]
-pub struct RpcComparer<C1, C2>
-where
-    C1: TraceApiExt,
-    C2: TraceApiExt,
-{
-    client1: C1,
-    client2: C2,
-}
-impl<C1, C2> RpcComparer<C1, C2>
-where
-    C1: TraceApiExt,
-    C2: TraceApiExt,
-{
-    /// Constructs a new `RpcComparer`.
-    ///
-    /// Initializes the comparer with two clients that will be used for fetching
-    /// and comparison.
-    ///
-    /// # Arguments
-    ///
-    /// * `client1` - The first RPC client.
-    /// * `client2` - The second RPC client.
-    pub fn new(client1: C1, client2: C2) -> Self {
-        RpcComparer { client1, client2 }
-    }
-
-    /// Compares the `trace_block` responses from the two RPC clients.
-    ///
-    /// Fetches the `trace_block` responses for the provided block IDs from both clients
-    /// and compares them. If there are inconsistencies between the two responses, this
-    /// method will panic with a relevant message indicating the difference.
-    pub async fn compare_trace_block_responses(&self, block_ids: Vec<BlockId>) {
-        let stream1 = self.client1.trace_block_buffered(block_ids.clone(), 2);
-        let stream2 = self.client2.trace_block_buffered(block_ids, 2);
-
-        let mut zipped_streams = stream1.zip(stream2);
-
-        while let Some((result1, result2)) = zipped_streams.next().await {
-            match (result1, result2) {
-                (Ok((ref traces1_data, ref block1)), Ok((ref traces2_data, ref block2))) => {
-                    assert_eq!(
-                        traces1_data, traces2_data,
-                        "Mismatch in traces for block: {:?}",
-                        block1
-                    );
-                    assert_eq!(block1, block2, "Mismatch in block ids.");
-                }
-                (Err((ref err1, ref block1)), Err((ref err2, ref block2))) => {
-                    assert_eq!(
-                        format!("{:?}", err1),
-                        format!("{:?}", err2),
-                        "Different errors for block: {:?}",
-                        block1
-                    );
-                    assert_eq!(block1, block2, "Mismatch in block ids.");
-                }
-                _ => panic!("One client returned Ok while the other returned Err."),
-            }
-        }
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
