@@ -4,11 +4,12 @@ use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{BlockId, Bytes, TxHash, B256};
 use reth_rpc_api::clients::TraceApiClient;
 use reth_rpc_types::{
+    state::StateOverride,
     trace::{
         filter::TraceFilter,
         parity::{LocalizedTransactionTrace, TraceResults, TraceType},
     },
-    CallRequest, Index,
+    BlockOverrides, CallRequest, Index,
 };
 use std::{
     collections::HashSet,
@@ -37,6 +38,18 @@ pub type TraceGetResult =
 /// Represents a result type for the `trace_filter` stream extension.
 pub type TraceFilterResult =
     Result<(Vec<LocalizedTransactionTrace>, TraceFilter), (RpcError, TraceFilter)>;
+/// Represents the result of a single trace call.
+pub type TraceCallResult = Result<
+    TraceResults,
+    (
+        RpcError,
+        CallRequest,
+        HashSet<TraceType>,
+        Option<BlockId>,
+        Option<StateOverride>,
+        Option<Box<BlockOverrides>>,
+    ),
+>;
 
 /// An extension trait for the Trace API.
 #[async_trait::async_trait]
@@ -97,6 +110,34 @@ pub trait TraceApiExt {
     fn trace_filter_stream<I>(&self, filters: I) -> TraceFilterStream<'_>
     where
         I: IntoIterator<Item = TraceFilter>;
+    /// Returns a new stream that yields the trace results for the given call requests.
+    fn trace_call_stream(
+        &self,
+        call: CallRequest,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
+    ) -> TraceCallStream<'_>;
+}
+/// `TraceCallStream` provides an asynchronous stream of tracing results.
+
+#[must_use = "streams do nothing unless polled"]
+pub struct TraceCallStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = TraceCallResult> + 'a>>,
+}
+impl<'a> Stream for TraceCallStream<'a> {
+    type Item = TraceCallResult;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl<'a> std::fmt::Debug for TraceCallStream<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TraceCallStream").finish()
+    }
 }
 
 /// Represents a stream that asynchronously yields the results of the `trace_filter` method.
@@ -321,6 +362,34 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         }))
         .buffered(10);
         TraceFilterStream { stream: Box::pin(stream) }
+    }
+
+    fn trace_call_stream(
+        &self,
+        call: CallRequest,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
+    ) -> TraceCallStream<'_> {
+        let stream = futures::stream::once(async move {
+            match self
+                .trace_call(
+                    call.clone(),
+                    trace_types.clone(),
+                    block_id,
+                    state_overrides.clone(),
+                    block_overrides.clone(),
+                )
+                .await
+            {
+                Ok(result) => Ok(result),
+                Err(err) => {
+                    Err((err, call, trace_types, block_id, state_overrides, block_overrides))
+                }
+            }
+        });
+        TraceCallStream { stream: Box::pin(stream) }
     }
 }
 
