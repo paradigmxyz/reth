@@ -7,24 +7,23 @@ use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
 };
-use std::{collections::HashMap, net::SocketAddr, ops::Deref, time::Instant};
+use std::{collections::HashMap, net::SocketAddr, ops::Deref, sync::Arc, time::Instant};
 
 /// Metrics for the RPC server
 #[derive(Default, Clone)]
 pub(crate) struct RpcServerMetrics {
     /// Connection metrics per transport type
     connection_metrics: ConnectionMetrics,
-
     /// Call metrics per RPC method
-    call_metrics: HashMap<&'static str, RpcServerCallMetrics>,
+    call_metrics: Arc<HashMap<&'static str, RpcServerCallMetrics>>,
 }
 
 impl RpcServerMetrics {
     pub(crate) fn with_rpc_module(mut self, module: &RpcModule<()>) -> Self {
-        for method in module.deref().method_names() {
-            self.call_metrics
-                .insert(method, RpcServerCallMetrics::new_with_labels(&[("method", method)]));
-        }
+        self.call_metrics =
+            Arc::new(HashMap::from_iter(module.method_names().map(|method| {
+                (method, RpcServerCallMetrics::new_with_labels(&[("method", method)]))
+            })));
         self
     }
 }
