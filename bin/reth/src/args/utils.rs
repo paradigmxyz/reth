@@ -1,9 +1,6 @@
 //! Clap parser utilities
 
-use reth_primitives::{
-    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, GOERLI, HOLESKY, MAINNET,
-    SEPOLIA,
-};
+use reth_primitives::{fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -14,6 +11,9 @@ use std::{
 
 #[cfg(feature = "optimism")]
 use reth_primitives::{BASE_GOERLI, BASE_MAINNET};
+
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
