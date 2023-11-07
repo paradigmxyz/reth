@@ -867,15 +867,23 @@ mod tests {
     #[test]
     fn test_london_hardfork_adjustment() {
         let parent = SealedHeader {
-            header: Header { gas_limit: 1024 * 10, ..Default::default() },
+            header: Header { number: 0, gas_limit: 1024 * 10, ..Default::default() },
             ..Default::default()
         };
-        let child = SealedHeader {
-            header: Header { gas_limit: parent.header.gas_limit, ..Default::default() },
-            ..Default::default()
-        };
+
         let mut chain_spec = ChainSpec::default();
-        chain_spec.hardforks.insert(Hardfork::London, ForkCondition::Block(1));
+        chain_spec
+            .hardforks
+            .insert(Hardfork::London, ForkCondition::Block(parent.header.number + 1));
+
+        let child = SealedHeader {
+            header: Header {
+                number: parent.header.number + 1,
+                gas_limit: parent.header.gas_limit,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
     }
