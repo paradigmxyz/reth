@@ -12,19 +12,28 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Instant};
 /// Metrics for the RPC server
 #[derive(Default, Clone)]
 pub(crate) struct RpcServerMetrics {
+    inner: Arc<RpcServerMetricsInner>,
+}
+
+/// Metrics for the RPC server
+#[derive(Default, Clone)]
+struct RpcServerMetricsInner {
     /// Connection metrics per transport type
     connection_metrics: ConnectionMetrics,
     /// Call metrics per RPC method
-    call_metrics: Arc<HashMap<&'static str, RpcServerCallMetrics>>,
+    call_metrics: HashMap<&'static str, RpcServerCallMetrics>,
 }
 
 impl RpcServerMetrics {
-    pub(crate) fn with_rpc_module(mut self, module: &RpcModule<()>) -> Self {
-        self.call_metrics =
-            Arc::new(HashMap::from_iter(module.method_names().map(|method| {
-                (method, RpcServerCallMetrics::new_with_labels(&[("method", method)]))
-            })));
-        self
+    pub(crate) fn new(module: &RpcModule<()>) -> Self {
+        Self {
+            inner: Arc::new(RpcServerMetricsInner {
+                connection_metrics: ConnectionMetrics::default(),
+                call_metrics: HashMap::from_iter(module.method_names().map(|method| {
+                    (method, RpcServerCallMetrics::new_with_labels(&[("method", method)]))
+                })),
+            }),
+        }
     }
 }
 
@@ -91,11 +100,11 @@ impl Logger for RpcServerMetrics {
         _request: &HttpRequest,
         transport: TransportProtocol,
     ) {
-        self.connection_metrics.get_metrics(transport).connections_opened.increment(1)
+        self.inner.connection_metrics.get_metrics(transport).connections_opened.increment(1)
     }
 
     fn on_request(&self, transport: TransportProtocol) -> Self::Instant {
-        self.connection_metrics.get_metrics(transport).requests_started.increment(1);
+        self.inner.connection_metrics.get_metrics(transport).requests_started.increment(1);
         Instant::now()
     }
 
@@ -106,7 +115,7 @@ impl Logger for RpcServerMetrics {
         _kind: MethodKind,
         _transport: TransportProtocol,
     ) {
-        let Some(call_metrics) = self.call_metrics.get(method_name) else { return };
+        let Some(call_metrics) = self.inner.call_metrics.get(method_name) else { return };
         call_metrics.calls_started.increment(1);
     }
 
@@ -117,7 +126,7 @@ impl Logger for RpcServerMetrics {
         started_at: Self::Instant,
         _transport: TransportProtocol,
     ) {
-        let Some(call_metrics) = self.call_metrics.get(method_name) else { return };
+        let Some(call_metrics) = self.inner.call_metrics.get(method_name) else { return };
 
         // capture call latency
         call_metrics.call_latency.record(started_at.elapsed().as_millis() as f64);
@@ -129,13 +138,13 @@ impl Logger for RpcServerMetrics {
     }
 
     fn on_response(&self, _result: &str, started_at: Self::Instant, transport: TransportProtocol) {
-        let metrics = self.connection_metrics.get_metrics(transport);
+        let metrics = self.inner.connection_metrics.get_metrics(transport);
         // capture request latency for this request/response pair
         metrics.request_latency.record(started_at.elapsed().as_millis() as f64);
         metrics.requests_finished.increment(1);
     }
 
     fn on_disconnect(&self, _remote_addr: SocketAddr, transport: TransportProtocol) {
-        self.connection_metrics.get_metrics(transport).connections_closed.increment(1)
+        self.inner.connection_metrics.get_metrics(transport).connections_closed.increment(1)
     }
 }

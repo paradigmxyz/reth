@@ -1402,7 +1402,7 @@ impl RpcServerConfig {
                     .http
                     .as_ref()
                     .or(modules.ws.as_ref())
-                    .map(|module| RpcServerMetrics::default().with_rpc_module(module))
+                    .map(RpcServerMetrics::new)
                     .unwrap_or_default(),
             )
             .await?;
@@ -1427,11 +1427,7 @@ impl RpcServerConfig {
                 self.ws_cors_domains.take(),
                 self.jwt_secret.clone(),
                 ServerKind::WS(ws_socket_addr),
-                modules
-                    .ws
-                    .as_ref()
-                    .map(|module| RpcServerMetrics::default().with_rpc_module(module))
-                    .unwrap_or_default(),
+                modules.ws.as_ref().map(RpcServerMetrics::new).unwrap_or_default(),
             )
             .await?;
             ws_local_addr = Some(addr);
@@ -1446,11 +1442,7 @@ impl RpcServerConfig {
                 self.http_cors_domains.take(),
                 self.jwt_secret.clone(),
                 ServerKind::Http(http_socket_addr),
-                modules
-                    .http
-                    .as_ref()
-                    .map(|module| RpcServerMetrics::default().with_rpc_module(module))
-                    .unwrap_or_default(),
+                modules.http.as_ref().map(RpcServerMetrics::new).unwrap_or_default(),
             )
             .await?;
             http_local_addr = Some(addr);
@@ -1478,7 +1470,7 @@ impl RpcServerConfig {
             let metrics = modules
                 .ipc
                 .as_ref()
-                .map(|module| RpcServerMetrics::default().with_rpc_module(module))
+                .map(|module| RpcServerMetrics::new(module))
                 .unwrap_or_default();
             let ipc_path = self
                 .ipc_endpoint
