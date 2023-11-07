@@ -7,7 +7,7 @@ use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
 };
-use std::{collections::HashMap, net::SocketAddr, ops::Deref, sync::Arc, time::Instant};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Instant};
 
 /// Metrics for the RPC server
 #[derive(Default, Clone)]

@@ -2149,12 +2149,13 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
             let start = Instant::now();
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
             let elapsed = start.elapsed();
-            if elapsed > Duration::from_millis(100) {
+            if elapsed > Duration::from_secs(1) {
                 warn!(
                     target: "providers::db",
                     ?block_number,
                     tx_num = %next_tx_num,
                     hash = %hash,
+                    %elapsed,
                     "Transaction insertion took too long"
                 );
             }
