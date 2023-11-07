@@ -55,7 +55,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
 
 /// The help info for the --chain flag
 pub fn chain_help() -> String {
-    format!("Possible values are either a built-in chain or the path to a chain specification file.\n\nBuilt-in chains:\n  {}", SUPPORTED_CHAINS.join(", "))
+    format!("The chain this node is running.\nPossible values are either a built-in chain or the path to a chain specification file.\n\nBuilt-in chains:\n    {}", SUPPORTED_CHAINS.join(", "))
 }
 
 /// Clap value parser for [ChainSpec]s.
