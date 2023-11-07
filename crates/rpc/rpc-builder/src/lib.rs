@@ -1342,13 +1342,16 @@ impl RpcServerConfig {
 
     /// Convenience function to do [RpcServerConfig::build] and [RpcServer::start] in one step
     pub async fn start(self, modules: TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
-        self.build().await?.start(modules).await
+        self.build(&modules).await?.start(modules).await
     }
 
     /// Builds the ws and http server(s).
     ///
     /// If both are on the same port, they are combined into one server.
-    async fn build_ws_http(&mut self) -> Result<WsHttpServer, RpcError> {
+    async fn build_ws_http(
+        &mut self,
+        modules: &TransportRpcModules,
+    ) -> Result<WsHttpServer, RpcError> {
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::LOCALHOST,
             DEFAULT_HTTP_RPC_PORT,
@@ -1358,7 +1361,7 @@ impl RpcServerConfig {
         let ws_socket_addr = self
             .ws_addr
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
-        let metrics = RpcServerMetrics::default();
+
         // If both are configured on the same port, we combine them into one server.
         if self.http_addr == self.ws_addr &&
             self.http_server_config.is_some() &&
@@ -1386,6 +1389,8 @@ impl RpcServerConfig {
             // we merge this into one server using the http setup
             self.ws_server_config.take();
 
+            modules.config.ensure_ws_http_identical()?;
+
             let builder = self.http_server_config.take().expect("is set; qed");
             let (server, addr) = WsHttpServerKind::build(
                 builder,
@@ -1393,7 +1398,12 @@ impl RpcServerConfig {
                 cors,
                 secret,
                 ServerKind::WsHttp(http_socket_addr),
-                metrics.clone(),
+                modules
+                    .http
+                    .as_ref()
+                    .or(modules.ws.as_ref())
+                    .map(|module| RpcServerMetrics::default().with_rpc_module(module))
+                    .unwrap_or_default(),
             )
             .await?;
             return Ok(WsHttpServer {
@@ -1417,7 +1427,11 @@ impl RpcServerConfig {
                 self.ws_cors_domains.take(),
                 self.jwt_secret.clone(),
                 ServerKind::WS(ws_socket_addr),
-                metrics.clone(),
+                modules
+                    .ws
+                    .as_ref()
+                    .map(|module| RpcServerMetrics::default().with_rpc_module(module))
+                    .unwrap_or_default(),
             )
             .await?;
             ws_local_addr = Some(addr);
@@ -1432,7 +1446,11 @@ impl RpcServerConfig {
                 self.http_cors_domains.take(),
                 self.jwt_secret.clone(),
                 ServerKind::Http(http_socket_addr),
-                metrics.clone(),
+                modules
+                    .http
+                    .as_ref()
+                    .map(|module| RpcServerMetrics::default().with_rpc_module(module))
+                    .unwrap_or_default(),
             )
             .await?;
             http_local_addr = Some(addr);
@@ -1452,15 +1470,20 @@ impl RpcServerConfig {
     /// This consumes the builder and returns a server.
     ///
     /// Note: The server ist not started and does nothing unless polled, See also [RpcServer::start]
-    pub async fn build(mut self) -> Result<RpcServer, RpcError> {
+    pub async fn build(mut self, modules: &TransportRpcModules) -> Result<RpcServer, RpcError> {
         let mut server = RpcServer::empty();
-        server.ws_http = self.build_ws_http().await?;
+        server.ws_http = self.build_ws_http(modules).await?;
 
         if let Some(builder) = self.ipc_server_config {
+            let metrics = modules
+                .ipc
+                .as_ref()
+                .map(|module| RpcServerMetrics::default().with_rpc_module(module))
+                .unwrap_or_default();
             let ipc_path = self
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
-            let ipc = builder.build(ipc_path.path())?;
+            let ipc = builder.set_logger(metrics).build(ipc_path.path())?;
             server.ipc = Some(ipc);
         }
 
@@ -1825,7 +1848,7 @@ pub struct RpcServer {
     /// Configured ws,http servers
     ws_http: WsHttpServer,
     /// ipc server
-    ipc: Option<IpcServer>,
+    ipc: Option<IpcServer<Identity, RpcServerMetrics>>,
 }
 
 // === impl RpcServer ===

@@ -1,31 +1,77 @@
 use jsonrpsee::{
     helpers::MethodResponseResult,
     server::logger::{HttpRequest, Logger, MethodKind, Params, TransportProtocol},
+    RpcModule,
 };
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
 };
-use std::{net::SocketAddr, time::Instant};
+use std::{collections::HashMap, net::SocketAddr, ops::Deref, time::Instant};
 
-/// Metrics for the rpc server
-#[derive(Metrics, Clone)]
-#[metrics(scope = "rpc_server")]
+/// Metrics for the RPC server
+#[derive(Default, Clone)]
 pub(crate) struct RpcServerMetrics {
+    /// Connection metrics per transport type
+    connection_metrics: ConnectionMetrics,
+
+    /// Call metrics per RPC method
+    call_metrics: HashMap<&'static str, RpcServerCallMetrics>,
+}
+
+impl RpcServerMetrics {
+    pub(crate) fn with_rpc_module(mut self, module: &RpcModule<()>) -> Self {
+        for method in module.deref().method_names() {
+            self.call_metrics
+                .insert(method, RpcServerCallMetrics::new_with_labels(&[("method", method)]));
+        }
+        self
+    }
+}
+
+#[derive(Clone)]
+struct ConnectionMetrics {
+    http: RpcServerConnectionMetrics,
+    ws: RpcServerConnectionMetrics,
+}
+
+impl ConnectionMetrics {
+    fn get_metrics(&self, transport: TransportProtocol) -> &RpcServerConnectionMetrics {
+        match transport {
+            TransportProtocol::Http => &self.http,
+            TransportProtocol::WebSocket => &self.ws,
+        }
+    }
+}
+
+impl Default for ConnectionMetrics {
+    fn default() -> Self {
+        Self {
+            http: RpcServerConnectionMetrics::new_with_labels(&[("transport", "http")]),
+            ws: RpcServerConnectionMetrics::new_with_labels(&[("transport", "ws")]),
+        }
+    }
+}
+
+/// Metrics for the RPC connections
+#[derive(Metrics, Clone)]
+#[metrics(scope = "rpc_server.connections")]
+struct RpcServerConnectionMetrics {
+    /// The number of connections opened
+    connections_opened: Counter,
+    /// The number of connections closed
+    connections_closed: Counter,
     /// The number of requests started
     requests_started: Counter,
     /// The number of requests finished
     requests_finished: Counter,
-    /// The number of ws sessions opened
-    ws_session_opened: Counter,
-    /// The number of ws sessions closed
-    ws_session_closed: Counter,
     /// Latency for a single request/response pair
     request_latency: Histogram,
 }
 
+/// Metrics for the RPC calls
 #[derive(Metrics, Clone)]
-#[metrics(scope = "rpc_server.call")]
+#[metrics(scope = "rpc_server.calls")]
 struct RpcServerCallMetrics {
     /// The number of calls started
     calls_started: Counter,
@@ -39,21 +85,21 @@ struct RpcServerCallMetrics {
 
 impl Logger for RpcServerMetrics {
     type Instant = Instant;
+
     fn on_connect(
         &self,
         _remote_addr: SocketAddr,
         _request: &HttpRequest,
         transport: TransportProtocol,
     ) {
-        match transport {
-            TransportProtocol::Http => {}
-            TransportProtocol::WebSocket => self.ws_session_opened.increment(1),
-        }
+        self.connection_metrics.get_metrics(transport).connections_opened.increment(1)
     }
-    fn on_request(&self, _transport: TransportProtocol) -> Self::Instant {
-        self.requests_started.increment(1);
+
+    fn on_request(&self, transport: TransportProtocol) -> Self::Instant {
+        self.connection_metrics.get_metrics(transport).requests_started.increment(1);
         Instant::now()
     }
+
     fn on_call(
         &self,
         method_name: &str,
@@ -61,10 +107,10 @@ impl Logger for RpcServerMetrics {
         _kind: MethodKind,
         _transport: TransportProtocol,
     ) {
-        let call_metrics =
-            RpcServerCallMetrics::new_with_labels(&[("method", method_name.to_string())]);
+        let Some(call_metrics) = self.call_metrics.get(method_name) else { return };
         call_metrics.calls_started.increment(1);
     }
+
     fn on_result(
         &self,
         method_name: &str,
@@ -72,8 +118,7 @@ impl Logger for RpcServerMetrics {
         started_at: Self::Instant,
         _transport: TransportProtocol,
     ) {
-        let call_metrics =
-            RpcServerCallMetrics::new_with_labels(&[("method", method_name.to_string())]);
+        let Some(call_metrics) = self.call_metrics.get(method_name) else { return };
 
         // capture call latency
         call_metrics.call_latency.record(started_at.elapsed().as_millis() as f64);
@@ -83,15 +128,15 @@ impl Logger for RpcServerMetrics {
             call_metrics.failed_calls.increment(1);
         }
     }
-    fn on_response(&self, _result: &str, started_at: Self::Instant, _transport: TransportProtocol) {
+
+    fn on_response(&self, _result: &str, started_at: Self::Instant, transport: TransportProtocol) {
+        let metrics = self.connection_metrics.get_metrics(transport);
         // capture request latency for this request/response pair
-        self.request_latency.record(started_at.elapsed().as_millis() as f64);
-        self.requests_finished.increment(1);
+        metrics.request_latency.record(started_at.elapsed().as_millis() as f64);
+        metrics.requests_finished.increment(1);
     }
+
     fn on_disconnect(&self, _remote_addr: SocketAddr, transport: TransportProtocol) {
-        match transport {
-            TransportProtocol::Http => {}
-            TransportProtocol::WebSocket => self.ws_session_closed.increment(1),
-        }
+        self.connection_metrics.get_metrics(transport).connections_closed.increment(1)
     }
 }
