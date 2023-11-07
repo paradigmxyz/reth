@@ -30,14 +30,9 @@ impl ExecutionArgs {
         chain_spec: Arc<ChainSpec>,
     ) -> eyre::Result<EitherExecutorFactory<EVMProcessorFactory, ParallelExecutorFactory>> {
         let factory = if self.parallel {
-            let queue_store_content =
-                std::fs::read_to_string(self.queue_store.as_ref().expect("is set"))
-                    .wrap_err("failed to read parallel queue store")?;
-            let queues = serde_json::from_str(&queue_store_content)
-                .wrap_err("failed to deserialize queue store")?;
             EitherExecutorFactory::Right(ParallelExecutorFactory::new(
                 chain_spec,
-                Arc::new(TransitionQueueStore::new(queues)),
+                Arc::new(TransitionQueueStore::new(self.queue_store.clone().expect("is set"))),
             ))
         } else {
             EitherExecutorFactory::Left(EVMProcessorFactory::new(chain_spec))
