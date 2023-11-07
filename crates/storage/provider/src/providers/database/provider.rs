@@ -52,7 +52,7 @@ use std::{
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<<DB as DatabaseGAT<'this>>::TX>;
@@ -2148,7 +2148,18 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
             let start = Instant::now();
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
-            transactions_elapsed += start.elapsed();
+            let elapsed = start.elapsed();
+            if elapsed > Duration::from_secs(1) {
+                warn!(
+                    target: "providers::db",
+                    ?block_number,
+                    tx_num = %next_tx_num,
+                    hash = %hash,
+                    ?elapsed,
+                    "Transaction insertion took too long"
+                );
+            }
+            transactions_elapsed += elapsed;
 
             if prune_modes
                 .and_then(|modes| modes.transaction_lookup)
