@@ -836,7 +836,7 @@ mod tests {
 
         let block = SealedBlock::new(header, body);
 
-        // 10 blobs times the blob gas per blob
+        // 10 blobs times the blob gas per blob.
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
 
         // validate blob, it should fail blob gas used validation
