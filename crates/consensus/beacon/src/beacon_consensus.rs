@@ -115,3 +115,63 @@ fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_primitives::constants::MAXIMUM_EXTRA_DATA_SIZE;
+
+    
+    fn create_test_chain_spec() -> Arc<ChainSpec> {
+        Arc::new(ChainSpec::default())
+    }
+
+    
+    fn create_test_sealed_header() -> SealedHeader {
+        SealedHeader::default()
+    }
+
+    #[test]
+    fn test_validate_header_with_valid_data() {
+        let chain_spec = create_test_chain_spec();
+        let beacon_consensus = BeaconConsensus::new(chain_spec);
+        let sealed_header = create_test_sealed_header();
+
+        assert!(beacon_consensus.validate_header(&sealed_header).is_ok());
+    }
+
+    #[test]
+    fn test_validate_header_against_parent_with_valid_data() {
+        let chain_spec = create_test_chain_spec();
+        let beacon_consensus = BeaconConsensus::new(chain_spec);
+        let parent = create_test_sealed_header();
+
+        let mut header = create_test_sealed_header();
+        header.header.number = 1;
+
+        header.header.parent_hash = parent.header.hash_slow();
+
+        assert!(beacon_consensus.validate_header_against_parent(&header, &parent).is_ok());
+    }
+
+    #[test]
+    fn test_validate_header_extradata_with_valid_length() {
+        let header =
+            Header { extra_data: vec![0; MAXIMUM_EXTRA_DATA_SIZE].into(), ..Default::default() };
+
+        assert!(validate_header_extradata(&header).is_ok());
+    }
+
+    #[test]
+    fn test_validate_header_extradata_with_excessive_length() {
+        let header = Header {
+            extra_data: vec![0; MAXIMUM_EXTRA_DATA_SIZE + 1].into(),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            validate_header_extradata(&header),
+            Err(ConsensusError::ExtraDataExceedsMax { len }) if len == MAXIMUM_EXTRA_DATA_SIZE + 1
+        ));
+    }
+}
