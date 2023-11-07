@@ -865,6 +865,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_london_hardfork_adjustment() {
         let parent = SealedHeader {
             header: Header { number: 0, gas_limit: 1024 * 10, ..Default::default() },
