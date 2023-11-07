@@ -472,8 +472,9 @@ impl SharedCacheAccount {
                 transition_storage.insert(*slot, value.data.clone());
             }
 
-            self.storage.get_mut(slot).unwrap().data.previous_or_original_value =
-                value.present_value;
+            if let Some(val) = self.storage.get_mut(slot) {
+                val.data.previous_or_original_value = value.present_value;
+            }
         }
 
         let mut info = self.account_info(&transition.info_diff);
