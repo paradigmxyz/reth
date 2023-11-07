@@ -2155,7 +2155,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
                     ?block_number,
                     tx_num = %next_tx_num,
                     hash = %hash,
-                    %elapsed,
+                    ?elapsed,
                     "Transaction insertion took too long"
                 );
             }
