@@ -144,6 +144,12 @@ impl TransitionRWSet {
 
         false
     }
+
+    /// Extend the rw set with contents of another.
+    pub fn extend(&mut self, other: Self) {
+        self.read_set.0.extend(other.read_set.0.into_iter());
+        self.write_set.0.extend(other.write_set.0.into_iter());
+    }
 }
 
 /// Block read and write set.
@@ -199,6 +205,19 @@ impl BlockRWSet {
             .chain(
                 self.post_block.as_ref().map(|post| (TransitionId::post_block(block_number), post)),
             )
+    }
+
+    pub fn into_transitions(
+        self,
+        block_number: BlockNumber,
+    ) -> impl Iterator<Item = (TransitionId, TransitionRWSet)> {
+        self.pre_block
+            .map(|pre| (TransitionId::pre_block(block_number), pre))
+            .into_iter()
+            .chain(self.transactions.into_iter().enumerate().map(move |(idx, rw_set)| {
+                (TransitionId::transaction(block_number, idx as u32), rw_set)
+            }))
+            .chain(self.post_block.map(|post| (TransitionId::post_block(block_number), post)))
     }
 }
 

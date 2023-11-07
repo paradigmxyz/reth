@@ -1,7 +1,6 @@
 //! EVM execution node arguments
 
 use clap::Args;
-use eyre::Context;
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockReader, PrunableBlockRangeExecutor, RangeExecutorFactory};
 use reth_revm::{

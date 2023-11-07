@@ -3,9 +3,9 @@
 use crate::rw_set::{BlockRWSet, TransitionRWSet};
 use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
-use reth_primitives::{BlockNumber, TransitionId, TransitionType};
+use reth_primitives::{BlockNumber, TransitionId};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     ffi::OsStr,
     fs,
     ops::{IndexMut, RangeInclusive},
@@ -47,13 +47,15 @@ impl TransitionQueue {
         max_batch_size: usize,
     ) -> Self {
         let mut this = Self::new(range);
+        let mut batch_rw_sets = HashMap::<usize, TransitionRWSet>::default();
 
-        for (block_number, block_rw_set) in sets.iter().sorted_unstable_by_key(|(block, _)| *block)
+        for (block_number, block_rw_set) in
+            sets.into_iter().sorted_unstable_by_key(|(block, _)| *block)
         {
             tracing::trace!(target: "evm::parallel::resolve", block_number, "Resolving dependencies");
-            for (id, rw_set) in block_rw_set.transitions(*block_number) {
+            for (id, rw_set) in block_rw_set.into_transitions(block_number) {
                 let mut depth = this
-                    .find_highest_dependency(&rw_set, &sets, max_batch_size)
+                    .find_highest_dependency(&rw_set, &batch_rw_sets, max_batch_size)
                     .map_or(0, |dep| dep + 1);
 
                 loop {
@@ -70,6 +72,8 @@ impl TransitionQueue {
 
                     depth += 1;
                 }
+
+                batch_rw_sets.entry(depth).or_default().extend(rw_set);
             }
         }
 
@@ -91,7 +95,7 @@ impl TransitionQueue {
     pub fn find_highest_dependency(
         &self,
         target: &TransitionRWSet,
-        sets: &HashMap<BlockNumber, BlockRWSet>,
+        batch_rw_sets: &HashMap<usize, TransitionRWSet>,
         max_batch_size: usize,
     ) -> Option<usize> {
         // Iterate over the list in reverse to find dependency with the highest index.
@@ -103,21 +107,12 @@ impl TransitionQueue {
                 return Some(queue_depth)
             }
 
-            for transition_id in transition_list.iter() {
-                // The dependency check has to be bidirectional since the target
-                // transition might modify the state in a way that affects the reads
-                // of the transition we are currently checking.
-                let transition_block = sets.get(&transition_id.0).unwrap();
-                let transition = match transition_id.1 {
-                    TransitionType::PreBlock => transition_block.pre_block.as_ref().unwrap(),
-                    TransitionType::Transaction(idx) => {
-                        transition_block.transactions.get(idx as usize).unwrap()
-                    }
-                    TransitionType::PostBlock => transition_block.post_block.as_ref().unwrap(),
-                };
-                if target.depends_on(transition) || transition.depends_on(target) {
-                    return Some(queue_depth)
-                }
+            let batch_set = batch_rw_sets.get(&queue_depth).unwrap();
+            // The dependency check has to be bidirectional since the target
+            // transition might modify the state in a way that affects the reads
+            // of the transition we are currently checking.
+            if target.depends_on(batch_set) || batch_set.depends_on(target) {
+                return Some(queue_depth)
             }
         }
 
