@@ -28,16 +28,16 @@ pub struct StateContext {
 pub struct EthCallResponse {
     /// eth_call output (if no error)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<Bytes>,
+    pub value: Option<Bytes>,
     /// eth_call output (if error)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
 impl EthCallResponse {
-    /// Returns the output if present, otherwise returns the error.
-    pub fn ensure_output(self) -> Result<Bytes, String> {
-        match self.output {
+    /// Returns the value if present, otherwise returns the error.
+    pub fn ensure_ok(self) -> Result<Bytes, String> {
+        match self.value {
             Some(output) => Ok(output),
             None => Err(self.error.unwrap_or_else(|| "Unknown error".to_string())),
         }
