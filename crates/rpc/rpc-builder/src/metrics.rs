@@ -12,12 +12,6 @@ use std::{net::SocketAddr, time::Instant};
 #[derive(Metrics, Clone)]
 #[metrics(scope = "rpc_server")]
 pub(crate) struct RpcServerMetrics {
-    /// The number of calls started
-    calls_started: Counter,
-    /// The number of successful calls
-    successful_calls: Counter,
-    /// The number of failed calls
-    failed_calls: Counter,
     /// The number of requests started
     requests_started: Counter,
     /// The number of requests finished
@@ -28,6 +22,17 @@ pub(crate) struct RpcServerMetrics {
     ws_session_closed: Counter,
     /// Latency for a single request/response pair
     request_latency: Histogram,
+}
+
+#[derive(Metrics, Clone)]
+#[metrics(scope = "rpc_server.call")]
+struct RpcServerCallMetrics {
+    /// The number of calls started
+    calls_started: Counter,
+    /// The number of successful calls
+    successful_calls: Counter,
+    /// The number of failed calls
+    failed_calls: Counter,
     /// Latency for a single call
     call_latency: Histogram,
 }
@@ -51,26 +56,31 @@ impl Logger for RpcServerMetrics {
     }
     fn on_call(
         &self,
-        _method_name: &str,
+        method_name: &str,
         _params: Params<'_>,
         _kind: MethodKind,
         _transport: TransportProtocol,
     ) {
-        self.calls_started.increment(1);
+        let call_metrics =
+            RpcServerCallMetrics::new_with_labels(&[("method", method_name.to_string())]);
+        call_metrics.calls_started.increment(1);
     }
     fn on_result(
         &self,
-        _method_name: &str,
+        method_name: &str,
         success: MethodResponseResult,
         started_at: Self::Instant,
         _transport: TransportProtocol,
     ) {
-        // capture call duration
-        self.call_latency.record(started_at.elapsed().as_millis() as f64);
-        if success.is_error() {
-            self.failed_calls.increment(1);
+        let call_metrics =
+            RpcServerCallMetrics::new_with_labels(&[("method", method_name.to_string())]);
+
+        // capture call latency
+        call_metrics.call_latency.record(started_at.elapsed().as_millis() as f64);
+        if success.is_success() {
+            call_metrics.successful_calls.increment(1);
         } else {
-            self.successful_calls.increment(1);
+            call_metrics.failed_calls.increment(1);
         }
     }
     fn on_response(&self, _result: &str, started_at: Self::Instant, _transport: TransportProtocol) {
