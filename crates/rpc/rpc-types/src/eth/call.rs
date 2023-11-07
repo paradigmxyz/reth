@@ -125,12 +125,13 @@ pub struct CallRequest {
     /// AccessList
     pub access_list: Option<AccessList>,
     /// Max Fee per Blob gas for EIP-4844 transactions
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_fee_per_blob_gas: Option<U256>,
     /// Blob Versioned Hashes for EIP-4844 transactions
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_versioned_hashes: Option<Vec<B256>>,
     /// EIP-2718 type
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub transaction_type: Option<U8>,
 }
 
@@ -160,10 +161,12 @@ impl CallRequest {
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CallInput {
     /// Transaction data
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<Bytes>,
     /// Transaction data
     ///
     /// This is the same as `input` but is used for backwards compatibility: <https://github.com/ethereum/go-ethereum/issues/15628>
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Bytes>,
 }
 
