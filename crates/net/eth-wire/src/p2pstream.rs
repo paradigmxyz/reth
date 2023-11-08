@@ -583,17 +583,24 @@ impl SharedCapabilities {
         Ok(Self(set_capability_offsets(local_capabilities, peer_capabilities)?))
     }
 
+    /// Iterates over the shared capabilities.
     pub fn iter_caps(&self) -> impl Iterator<Item = &SharedCapability> {
         self.0.iter()
     }
 
+    /// Returns the eth capability if it is shared.
     pub fn eth(&self) -> Result<&SharedCapability, P2PStreamError> {
         for cap in self.iter_caps() {
-            if cap.name() == "eth" {
+            if cap.is_eth() {
                 return Ok(cap)
             }
         }
         Err(P2PStreamError::CapabilityNotShared)
+    }
+
+    /// Returns the negotiated eth version if it is shared.
+    pub fn eth_version(&self) -> Result<u8, P2PStreamError> {
+        self.eth().map(|cap| cap.version())
     }
 }
 

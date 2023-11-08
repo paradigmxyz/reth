@@ -210,6 +210,11 @@ impl SharedCapability {
         }
     }
 
+    /// Returns true if the capability is eth.
+    pub fn is_eth(&self) -> bool {
+       matches!(self, SharedCapability::Eth { .. })
+    }
+
     /// Returns the version of the capability.
     pub fn version(&self) -> u8 {
         match self {

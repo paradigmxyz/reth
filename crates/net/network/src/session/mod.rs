@@ -46,6 +46,7 @@ pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
 };
+
 pub use reth_network_api::{Direction, PeerInfo};
 
 /// Internal identifier for active sessions.
@@ -912,11 +913,23 @@ async fn authenticate_stream(
         }
     };
 
+    // Ensure we negotiated eth protocol
+    let version = match p2p_stream.shared_capabilities().eth_version() {
+        Ok(version) => version,
+        Err(err) => {
+            return PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction,
+                error: Some(err.into()),
+            }
+        }
+    };
+
     // if the hello handshake was successful we can try status handshake
     //
     // Before trying status handshake, set up the version to shared_capability
-    let status =
-        Status { version: p2p_stream.shared_capabilities().eth().unwrap().version(), ..status };
+    let status = Status { version, ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,
