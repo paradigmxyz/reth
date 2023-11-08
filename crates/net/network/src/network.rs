@@ -83,22 +83,6 @@ impl NetworkHandle {
         &self.inner.to_manager_tx
     }
 
-    /// Creates a new [`NetworkEvent`] listener channel.
-    pub fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
-        UnboundedReceiverStream::new(rx)
-    }
-
-    /// Returns a new [`DiscoveryEvent`] stream.
-    ///
-    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
-    pub fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let _ = self.manager().send(NetworkHandleMessage::DiscoveryListener(tx));
-        UnboundedReceiverStream::new(rx)
-    }
-
     /// Returns a new [`FetchClient`] that can be cloned and shared.
     ///
     /// The [`FetchClient`] is the entrypoint for sending requests to the network.
@@ -180,6 +164,24 @@ impl NetworkHandle {
     /// Whether tx gossip is disabled
     pub fn tx_gossip_disabled(&self) -> bool {
         self.inner.tx_gossip_disabled
+    }
+}
+
+impl NetworkEvents for NetworkHandle {
+    /// Creates a new [`NetworkEvent`] listener channel.
+    fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
+        UnboundedReceiverStream::new(rx)
+    }
+
+    /// Returns a new [`DiscoveryEvent`] stream.
+    ///
+    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
+    fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.manager().send(NetworkHandleMessage::DiscoveryListener(tx));
+        UnboundedReceiverStream::new(rx)
     }
 }
 
@@ -337,6 +339,11 @@ struct NetworkInner {
     /// The sequencer HTTP Endpoint
     #[cfg(feature = "optimism")]
     sequencer_endpoint: Option<String>,
+}
+
+pub trait NetworkEvents {
+    fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent>;
+    fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent>;
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).

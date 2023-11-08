@@ -20,7 +20,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
 };
-use reth_network::NetworkHandle;
+use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
 use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};

@@ -49,7 +49,9 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
+use reth_network::{
+    error::NetworkError, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager,
+};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
