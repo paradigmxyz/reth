@@ -4,7 +4,7 @@ use crate::{version::ParseVersionError, EthMessage, EthVersion};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::add_arbitrary_tests;
 use reth_primitives::bytes::{BufMut, Bytes};
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,7 @@ pub enum CapabilityMessage {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Capability {
     /// The name of the subprotocol
-    pub name: String,
+    pub name: Cow<'static, str>,
     /// The version of the subprotocol
     pub version: usize,
 }
@@ -50,7 +50,27 @@ pub struct Capability {
 impl Capability {
     /// Create a new `Capability` with the given name and version.
     pub fn new(name: String, version: usize) -> Self {
-        Self { name, version }
+        Self { name: Cow::Owned(name), version }
+    }
+
+    /// Create a new `Capability` with the given static name and version.
+    pub const fn new_static(name: &'static str, version: usize) -> Self {
+        Self { name: Cow::Borrowed(name), version }
+    }
+
+    /// Returns the [EthVersion::Eth66] capability.
+    pub const fn eth_66() -> Self {
+        Self::new_static("eth", EthVersion::Eth66 as usize)
+    }
+
+    /// Returns the [EthVersion::Eth67] capability.
+    pub const fn eth_67() -> Self {
+        Self::new_static("eth", EthVersion::Eth67 as usize)
+    }
+
+    /// Returns the [EthVersion::Eth68] capability.
+    pub const fn eth_68() -> Self {
+        Self::new_static("eth", EthVersion::Eth68 as usize)
     }
 
     /// Whether this is eth v66 protocol.
@@ -83,7 +103,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Capability {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let version = u.int_in_range(0..=32)?; // TODO: What's the max?
         let name = String::arbitrary(u)?; // TODO: what possible values?
-        Ok(Self { name, version })
+        Ok(Self::new(name, version))
     }
 }
 
@@ -94,7 +114,7 @@ impl proptest::arbitrary::Arbitrary for Capability {
         any_with::<String>(args) // TODO: what possible values?
             .prop_flat_map(move |name| {
                 any_with::<usize>(()) // TODO: What's the max?
-                    .prop_map(move |version| Capability { name: name.clone(), version })
+                    .prop_map(move |version| Capability::new(name.clone(), version))
             })
             .boxed()
     }
@@ -186,9 +206,8 @@ impl Decodable for Capabilities {
 pub enum SharedCapability {
     /// The `eth` capability.
     Eth { version: EthVersion, offset: u8 },
-
     /// An unknown capability.
-    UnknownCapability { name: String, version: u8, offset: u8 },
+    UnknownCapability { name: Cow<'static, str>, version: u8, offset: u8 },
 }
 
 impl SharedCapability {
@@ -196,7 +215,7 @@ impl SharedCapability {
     pub(crate) fn new(name: &str, version: u8, offset: u8) -> Result<Self, SharedCapabilityError> {
         match name {
             "eth" => Ok(Self::Eth { version: EthVersion::try_from(version)?, offset }),
-            _ => Ok(Self::UnknownCapability { name: name.into(), version, offset }),
+            _ => Ok(Self::UnknownCapability { name: name.to_string().into(), version, offset }),
         }
     }
 
@@ -278,9 +297,9 @@ mod tests {
     #[test]
     fn capabilities_supports_eth() {
         let capabilities: Capabilities = vec![
-            Capability::new("eth".into(), 66),
-            Capability::new("eth".into(), 67),
-            Capability::new("eth".into(), 68),
+            Capability::new_static("eth", 66),
+            Capability::new_static("eth", 67),
+            Capability::new_static("eth", 68),
         ]
         .into();
 

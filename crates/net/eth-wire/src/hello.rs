@@ -125,7 +125,7 @@ mod tests {
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
-            capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
+            capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
             port: DEFAULT_DISCOVERY_PORT,
             id,
         });
@@ -145,7 +145,7 @@ mod tests {
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
-            capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
+            capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
             port: DEFAULT_DISCOVERY_PORT,
             id,
         });
@@ -164,7 +164,7 @@ mod tests {
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
-            capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
+            capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
             port: DEFAULT_DISCOVERY_PORT,
             id,
         });

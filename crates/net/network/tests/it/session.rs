@@ -49,7 +49,7 @@ async fn test_session_established_with_different_capability() {
 
     let mut net = Testnet::create(1).await;
 
-    let capabilities = vec![Capability::new("eth".into(), EthVersion::Eth66 as usize)];
+    let capabilities = vec![Capability::new_static("eth", EthVersion::Eth66 as usize)];
     let p1 = PeerConfig::with_capabilities(NoopProvider::default(), capabilities);
     net.add_peer_with_config(p1).await.unwrap();
 
