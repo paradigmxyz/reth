@@ -146,6 +146,7 @@ impl ActiveSessionHandle {
             client_version: self.client_version.clone(),
             eth_version: self.version,
             status: self.status.clone(),
+            session_established: self.established,
         }
     }
 }

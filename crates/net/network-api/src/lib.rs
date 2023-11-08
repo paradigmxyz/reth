@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use reth_eth_wire::{DisconnectReason, EthVersion, Status};
 use reth_primitives::{NodeRecord, PeerId};
 use reth_rpc_types::NetworkStatus;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
@@ -131,6 +131,8 @@ pub struct PeerInfo {
     pub eth_version: EthVersion,
     /// The Status message the peer sent for the `eth` handshake
     pub status: Arc<Status>,
+    /// The timestamp when the session to that peer has been established.
+    pub session_established: Instant,
 }
 
 /// The direction of the connection.
