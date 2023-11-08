@@ -1133,18 +1133,11 @@ where
             return Ok(status)
         }
 
-        let res = if self.sync.is_pipeline_idle() && self.hooks.active_db_write_hook().is_none() {
-            // we can only insert new payloads if the pipeline and any hook with db write
-            // are _not_ running, because they hold exclusive access to the database
+        let res = if self.sync.is_pipeline_idle() {
+            // we can only insert new payloads if the pipeline is _not_ running, because it holds
+            // exclusive access to the database
             self.try_insert_new_payload(block)
         } else {
-            if let Some(hook) = self.hooks.active_db_write_hook() {
-                debug!(
-                    target: "consensus::engine",
-                    hook = %hook.name(),
-                    "Hook is in progress, buffering new payload."
-                );
-            }
             self.try_buffer_payload(block)
         };
 
@@ -1303,12 +1296,12 @@ where
         Ok(())
     }
 
-    /// When the pipeline or a hook with DB write access is active, the tree is unable to commit
-    /// any additional blocks since the pipeline holds exclusive access to the database.
+    /// When the pipeline is active, the tree is unable to commit any additional blocks since the
+    /// pipeline holds exclusive access to the database.
     ///
     /// In this scenario we buffer the payload in the tree if the payload is valid, once the
-    /// pipeline or a hook with DB write access is finished, the tree is then able to also use the
-    /// buffered payloads to commit to a (newer) canonical chain.
+    /// pipeline is finished, the tree is then able to also use the buffered payloads to commit to a
+    /// (newer) canonical chain.
     ///
     /// This will return `SYNCING` if the block was buffered successfully, and an error if an error
     /// occurred while buffering the block.
@@ -1323,7 +1316,7 @@ where
 
     /// Attempts to insert a new payload into the tree.
     ///
-    /// Caution: This expects that the pipeline and a hook with DB write access are idle.
+    /// Caution: This expects that the pipeline is idle.
     #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_insert_new_payload(
         &mut self,
@@ -1782,13 +1775,13 @@ where
                 EngineHookEvent::NotReady => {}
                 EngineHookEvent::Started => {
                     // If the hook has read-write access to the database, it means that the engine
-                    // can't process any FCU/payload messages from CL. To prevent CL from sending us
+                    // can't process any FCU messages from CL. To prevent CL from sending us
                     // unneeded updates, we need to respond `true` on `eth_syncing` request.
                     self.sync_state_updater.update_sync_state(SyncState::Syncing)
                 }
                 EngineHookEvent::Finished(_) => {
                     // Hook with read-write access to the database has finished running, so engine
-                    // can process new FCU/payload messages from CL again. It's safe to
+                    // can process new FCU messages from CL again. It's safe to
                     // return `false` on `eth_syncing` request.
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
                     // If the hook had read-write access to the database, it means that the engine
