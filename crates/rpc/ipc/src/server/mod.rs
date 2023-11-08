@@ -46,7 +46,10 @@ pub struct IpcServer<B = Identity, L = ()> {
     service_builder: tower::ServiceBuilder<B>,
 }
 
-impl IpcServer {
+impl<L> IpcServer<Identity, L>
+where
+    L: Logger,
+{
     /// Returns the configured [Endpoint]
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
@@ -162,7 +165,7 @@ impl IpcServer {
                             stop_handle: stop_handle.clone(),
                             max_subscriptions_per_connection,
                             conn_id: id,
-                            logger,
+                            logger: logger.clone(),
                             conn: Arc::new(conn),
                             bounded_subscriptions: BoundedSubscriptions::new(
                                 max_subscriptions_per_connection,
@@ -530,7 +533,6 @@ impl<B, L> Builder<B, L> {
     /// # Examples
     ///
     /// ```rust
-    /// 
     /// #[tokio::main]
     /// async fn main() {
     ///     let builder = tower::ServiceBuilder::new();

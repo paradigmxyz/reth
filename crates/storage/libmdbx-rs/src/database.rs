@@ -39,7 +39,8 @@ impl<'txn> Database<'txn> {
         Self { dbi, _marker: PhantomData }
     }
 
-    pub(crate) fn freelist_db() -> Self {
+    /// Opens the freelist database with DBI `0`.
+    pub fn freelist_db() -> Self {
         Database { dbi: 0, _marker: PhantomData }
     }
 

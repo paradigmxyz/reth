@@ -54,12 +54,16 @@ fn fill(
             // baseFee`
             let gas_price = base_fee
                 .and_then(|base_fee| {
-                    signed_tx.effective_tip_per_gas(base_fee).map(|tip| tip + base_fee as u128)
+                    signed_tx
+                        .effective_tip_per_gas(Some(base_fee))
+                        .map(|tip| tip + base_fee as u128)
                 })
                 .unwrap_or_else(|| signed_tx.max_fee_per_gas());
 
             (Some(U128::from(gas_price)), Some(U128::from(signed_tx.max_fee_per_gas())))
         }
+        #[cfg(feature = "optimism")]
+        TxType::DEPOSIT => (None, None),
     };
 
     let chain_id = signed_tx.chain_id().map(U64::from);
@@ -102,6 +106,8 @@ fn fill(
                     .collect(),
             )
         }
+        #[cfg(feature = "optimism")]
+        PrimitiveTransaction::Deposit(_) => None,
     };
 
     let signature =
@@ -127,10 +133,16 @@ fn fill(
         block_hash,
         block_number: block_number.map(U256::from),
         transaction_index,
-
         // EIP-4844 fields
         max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas().map(U128::from),
         blob_versioned_hashes,
+        // Optimism fields
+        #[cfg(feature = "optimism")]
+        optimism: reth_rpc_types::OptimismTransactionFields {
+            source_hash: signed_tx.source_hash(),
+            mint: signed_tx.mint().map(U128::from),
+            is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
+        },
     }
 }
 

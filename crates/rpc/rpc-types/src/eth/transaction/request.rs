@@ -18,28 +18,24 @@ pub struct TransactionRequest {
     /// to address
     pub to: Option<Address>,
     /// legacy, gas Price
-    #[serde(default)]
     pub gas_price: Option<U128>,
     /// max base fee per gas sender is willing to pay
-    #[serde(default)]
     pub max_fee_per_gas: Option<U128>,
     /// miner tip
-    #[serde(default)]
     pub max_priority_fee_per_gas: Option<U128>,
     /// gas
     pub gas: Option<U256>,
     /// value of th tx in wei
     pub value: Option<U256>,
     /// Any additional data sent
-    #[serde(alias = "input")]
-    pub data: Option<Bytes>,
+    #[serde(alias = "data")]
+    pub input: Option<Bytes>,
     /// Transaction nonce
     pub nonce: Option<U64>,
     /// warm storage access pre-payment
-    #[serde(default)]
     pub access_list: Option<AccessList>,
     /// EIP-2718 type
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub transaction_type: Option<U8>,
 }
 
@@ -58,7 +54,7 @@ impl TransactionRequest {
             max_priority_fee_per_gas,
             gas,
             value,
-            data,
+            input: data,
             nonce,
             mut access_list,
             ..
@@ -161,8 +157,8 @@ impl TransactionRequest {
     }
 
     /// Sets the input data for the transaction.
-    pub fn input(mut self, input: Bytes) -> Self {
-        self.data = Some(input);
+    pub fn input(mut self, input: impl Into<Bytes>) -> Self {
+        self.input = Some(input.into());
         self
     }
 

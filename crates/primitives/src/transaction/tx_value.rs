@@ -1,20 +1,10 @@
-#[allow(unused_imports)]
-// suppress warning for UIntTryTo, which is required only when value-256 feature is disabled
-use crate::{
-    ruint::{ToUintError, UintTryFrom, UintTryTo},
-    U256,
-};
+use crate::{ruint::UintTryFrom, U256};
 use alloy_rlp::{Decodable, Encodable, Error};
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{
-    arbitrary::ParamsFor,
-    strategy::{BoxedStrategy, Strategy},
-};
-
 /// TxValue is the type of the `value` field in the various Ethereum transactions structs.
+///
 /// While the field is 256 bits, for many chains it's not possible for the field to use
 /// this full precision, hence we use a wrapper type to allow for overriding of encoding.
 #[add_arbitrary_tests(compact, rlp)]
@@ -22,7 +12,7 @@ use proptest::{
 pub struct TxValue(U256);
 
 impl From<TxValue> for U256 {
-    /// unwrap Value to U256
+    #[inline]
     fn from(value: TxValue) -> U256 {
         value.0
     }
@@ -30,50 +20,38 @@ impl From<TxValue> for U256 {
 
 impl<T> From<T> for TxValue
 where
-    Self: UintTryFrom<T>,
+    U256: UintTryFrom<T>,
 {
-    /// construct a Value from misc. other uint types
+    #[inline]
+    #[track_caller]
     fn from(value: T) -> Self {
-        match Self::uint_try_from(value) {
-            Ok(n) => n,
-            Err(e) => panic!("Uint conversion error: {e}"),
-        }
-    }
-}
-
-impl UintTryFrom<U256> for TxValue {
-    #[inline]
-    fn uint_try_from(value: U256) -> Result<Self, ToUintError<Self>> {
-        Ok(Self(value))
-    }
-}
-
-impl UintTryFrom<u128> for TxValue {
-    #[inline]
-    fn uint_try_from(value: u128) -> Result<Self, ToUintError<Self>> {
-        Ok(Self(U256::from(value)))
-    }
-}
-
-impl UintTryFrom<u64> for TxValue {
-    #[inline]
-    fn uint_try_from(value: u64) -> Result<Self, ToUintError<Self>> {
-        Ok(Self(U256::from(value)))
+        Self(U256::uint_try_from(value).unwrap())
     }
 }
 
 impl Encodable for TxValue {
+    #[inline]
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.0.encode(out)
     }
+
+    #[inline]
     fn length(&self) -> usize {
         self.0.length()
     }
 }
 
 impl Decodable for TxValue {
+    #[inline]
     fn decode(buf: &mut &[u8]) -> Result<Self, Error> {
-        Ok(TxValue(U256::decode(buf)?))
+        #[cfg(feature = "optimism")]
+        {
+            U256::decode(buf).map(Self)
+        }
+        #[cfg(not(feature = "optimism"))]
+        {
+            u128::decode(buf).map(Self::from)
+        }
     }
 }
 
@@ -83,32 +61,29 @@ impl Decodable for TxValue {
 /// This optimization should be disabled for chains such as Optimism, where
 /// some tx values may require more than 128-bit precision.
 impl Compact for TxValue {
-    #[allow(unreachable_code)]
+    #[inline]
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        #[cfg(feature = "value-256")]
+        #[cfg(feature = "optimism")]
         {
             self.0.to_compact(buf)
         }
-        #[cfg(not(feature = "value-256"))]
+        #[cfg(not(feature = "optimism"))]
         {
-            // SAFETY: For ethereum mainnet this is safe as the max value is
-            // 120000000000000000000000000 wei
-            let i: u128 = self.0.uint_try_to().expect("value could not be converted to u128");
-            i.to_compact(buf)
+            self.0.to::<u128>().to_compact(buf)
         }
     }
 
-    #[allow(unreachable_code)]
+    #[inline]
     fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
-        #[cfg(feature = "value-256")]
+        #[cfg(feature = "optimism")]
         {
             let (i, buf) = U256::from_compact(buf, identifier);
             (TxValue(i), buf)
         }
-        #[cfg(not(feature = "value-256"))]
+        #[cfg(not(feature = "optimism"))]
         {
             let (i, buf) = u128::from_compact(buf, identifier);
             (TxValue::from(i), buf)
@@ -116,37 +91,52 @@ impl Compact for TxValue {
     }
 }
 
+impl std::fmt::Display for TxValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl PartialEq<U256> for TxValue {
+    fn eq(&self, other: &U256) -> bool {
+        self.0.eq(other)
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TxValue {
+    #[inline]
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        #[cfg(feature = "value-256")]
+        #[cfg(feature = "optimism")]
         {
-            Ok(Self(U256::arbitrary(u)?))
+            U256::arbitrary(u).map(Self)
         }
-
-        #[cfg(not(feature = "value-256"))]
+        #[cfg(not(feature = "optimism"))]
         {
-            Ok(Self::try_from(u128::arbitrary(u)?).expect("to fit"))
+            u128::arbitrary(u).map(Self::from)
         }
     }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for TxValue {
-    type Parameters = ParamsFor<()>;
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        #[cfg(feature = "value-256")]
-        {
-            proptest::prelude::any::<U256>().prop_map(Self).boxed()
-        }
+    type Parameters = <U256 as proptest::arbitrary::Arbitrary>::Parameters;
+    #[inline]
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
 
-        #[cfg(not(feature = "value-256"))]
+        #[cfg(feature = "optimism")]
         {
-            proptest::prelude::any::<u128>()
-                .prop_map(|num| Self::try_from(num).expect("to fit"))
-                .boxed()
+            proptest::prelude::any::<U256>().prop_map(Self)
+        }
+        #[cfg(not(feature = "optimism"))]
+        {
+            proptest::prelude::any::<u128>().prop_map(Self::from)
         }
     }
+    #[cfg(feature = "optimism")]
+    type Strategy = proptest::arbitrary::Mapped<U256, Self>;
 
-    type Strategy = BoxedStrategy<TxValue>;
+    #[cfg(not(feature = "optimism"))]
+    type Strategy = proptest::arbitrary::Mapped<u128, Self>;
 }

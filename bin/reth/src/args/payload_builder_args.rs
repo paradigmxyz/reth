@@ -36,6 +36,18 @@ pub struct PayloadBuilderArgs {
     /// Maximum number of tasks to spawn for building a payload.
     #[arg(long = "builder.max-tasks", help_heading = "Builder", default_value = "3", value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
     pub max_payload_tasks: usize,
+
+    /// By default the pending block equals the latest block
+    /// to save resources and not leak txs from the tx-pool,
+    /// this flag enables computing of the pending block
+    /// from the tx-pool instead.
+    ///
+    /// If `compute_pending_block` is not enabled, the payload builder
+    /// will use the payload attributes from the latest block. Note
+    /// that this flag is not yet functional.
+    #[cfg(feature = "optimism")]
+    #[arg(long = "rollup.compute-pending-block")]
+    pub compute_pending_block: bool,
 }
 
 impl PayloadBuilderConfig for PayloadBuilderArgs {
@@ -57,6 +69,11 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
 
     fn max_payload_tasks(&self) -> usize {
         self.max_payload_tasks
+    }
+
+    #[cfg(feature = "optimism")]
+    fn compute_pending_block(&self) -> bool {
+        self.compute_pending_block
     }
 }
 

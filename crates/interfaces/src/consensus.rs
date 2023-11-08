@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use reth_primitives::{
-    BlockHash, BlockNumber, Header, InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
+    BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, InvalidTransactionError,
+    SealedBlock, SealedHeader, B256, U256,
 };
 use std::fmt::Debug;
 
@@ -78,7 +79,6 @@ pub trait Consensus: Debug + Send + Sync {
 }
 
 /// Consensus Errors
-#[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
 pub enum ConsensusError {
     /// Error when the gas used in the header exceeds the gas limit.
@@ -91,42 +91,22 @@ pub enum ConsensusError {
     },
 
     /// Error when the hash of block ommer is different from the expected hash.
-    #[error("block ommer hash ({got}) is different from expected ({expected})")]
-    BodyOmmersHashDiff {
-        /// The actual ommer hash.
-        got: B256,
-        /// The expected ommer hash.
-        expected: B256,
-    },
+    #[error("mismatched block ommer hash: {0}")]
+    BodyOmmersHashDiff(GotExpectedBoxed<B256>),
 
     /// Error when the state root in the block is different from the expected state root.
-    #[error("block state root ({got}) is different from expected ({expected})")]
-    BodyStateRootDiff {
-        /// The actual state root.
-        got: B256,
-        /// The expected state root.
-        expected: B256,
-    },
+    #[error("mismatched block state root: {0}")]
+    BodyStateRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the transaction root in the block is different from the expected transaction
     /// root.
-    #[error("block transaction root ({got}) is different from expected ({expected})")]
-    BodyTransactionRootDiff {
-        /// The actual transaction root.
-        got: B256,
-        /// The expected transaction root.
-        expected: B256,
-    },
+    #[error("mismatched block transaction root: {0}")]
+    BodyTransactionRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the withdrawals root in the block is different from the expected withdrawals
     /// root.
-    #[error("block withdrawals root ({got}) is different from expected ({expected})")]
-    BodyWithdrawalsRootDiff {
-        /// The actual withdrawals root.
-        got: B256,
-        /// The expected withdrawals root.
-        expected: B256,
-    },
+    #[error("mismatched block withdrawals root: {0}")]
+    BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when a block with a specific hash and number is already known.
     #[error("block with [hash={hash}, number={number}] is already known")]
@@ -156,13 +136,8 @@ pub enum ConsensusError {
     },
 
     /// Error when the parent hash does not match the expected parent hash.
-    #[error("parent hash {got_parent_hash} does not match the expected {expected_parent_hash}")]
-    ParentHashMismatch {
-        /// The expected parent hash.
-        expected_parent_hash: B256,
-        /// The actual parent hash.
-        got_parent_hash: B256,
-    },
+    #[error("mismatched parent hash: {0}")]
+    ParentHashMismatch(GotExpectedBoxed<B256>),
 
     /// Error when the block timestamp is in the past compared to the parent timestamp.
     #[error("block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}")]
@@ -205,13 +180,8 @@ pub enum ConsensusError {
     BaseFeeMissing,
 
     /// Error when the block's base fee is different from the expected base fee.
-    #[error("block base fee ({got}) is different than expected: ({expected})")]
-    BaseFeeDiff {
-        /// The expected base fee.
-        expected: u64,
-        /// The actual base fee.
-        got: u64,
-    },
+    #[error("block base fee mismatch: {0}")]
+    BaseFeeDiff(GotExpected<u64>),
 
     /// Error when there is a transaction signer recovery error.
     #[error("transaction signer recovery error")]
@@ -293,27 +263,18 @@ pub enum ConsensusError {
     },
 
     /// Error when the blob gas used in the header does not match the expected blob gas used.
-    #[error(
-        "blob gas used in the header {header_blob_gas_used} \
-         does not match the expected blob gas used {expected_blob_gas_used}"
-    )]
-    BlobGasUsedDiff {
-        /// The blob gas used in the header.
-        header_blob_gas_used: u64,
-        /// The expected blob gas used.
-        expected_blob_gas_used: u64,
-    },
+    #[error("blob gas used mismatch: {0}")]
+    BlobGasUsedDiff(GotExpected<u64>),
 
     /// Error when there is an invalid excess blob gas.
     #[error(
-        "invalid excess blob gas. Expected: {expected}, got: {got}. \
-         Parent excess blob gas: {parent_excess_blob_gas}, parent blob gas used: {parent_blob_gas_used}"
+        "invalid excess blob gas: {diff}; \
+         parent excess blob gas: {parent_excess_blob_gas}, \
+         parent blob gas used: {parent_blob_gas_used}"
     )]
     ExcessBlobGasDiff {
-        /// The expected excess blob gas.
-        expected: u64,
-        /// The actual excess blob gas.
-        got: u64,
+        /// The excess blob gas diff.
+        diff: GotExpected<u64>,
         /// The parent excess blob gas.
         parent_excess_blob_gas: u64,
         /// The parent blob gas used.

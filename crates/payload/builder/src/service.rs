@@ -75,10 +75,13 @@ pub struct PayloadBuilderHandle {
     /// Sender half of the message channel to the [PayloadBuilderService].
     to_service: mpsc::UnboundedSender<PayloadServiceCommand>,
 }
-
 // === impl PayloadBuilderHandle ===
 
 impl PayloadBuilderHandle {
+    pub(crate) fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand>) -> Self {
+        Self { to_service }
+    }
+
     /// Resolves the payload job and returns the best payload that has been built so far.
     ///
     /// Note: depending on the installed [PayloadJobGenerator], this may or may not terminate the
@@ -162,7 +165,7 @@ where
     /// All active payload jobs.
     payload_jobs: Vec<(Gen::Job, PayloadId)>,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
-    _service_tx: mpsc::UnboundedSender<PayloadServiceCommand>,
+    service_tx: mpsc::UnboundedSender<PayloadServiceCommand>,
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<PayloadServiceCommand>,
     /// Metrics for the payload builder service
@@ -175,18 +178,24 @@ impl<Gen> PayloadBuilderService<Gen>
 where
     Gen: PayloadJobGenerator,
 {
-    /// Creates a new payload builder service.
+    /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
+    /// with it.
     pub fn new(generator: Gen) -> (Self, PayloadBuilderHandle) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let service = Self {
             generator,
             payload_jobs: Vec::new(),
-            _service_tx: service_tx.clone(),
+            service_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             metrics: Default::default(),
         };
-        let handle = PayloadBuilderHandle { to_service: service_tx };
+        let handle = service.handle();
         (service, handle)
+    }
+
+    /// Returns a handle to the service.
+    pub fn handle(&self) -> PayloadBuilderHandle {
+        PayloadBuilderHandle::new(self.service_tx.clone())
     }
 
     /// Returns true if the given payload is currently being built.
@@ -319,7 +328,7 @@ type PayloadFuture =
     Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send + Sync>>;
 
 /// Message type for the [PayloadBuilderService].
-enum PayloadServiceCommand {
+pub(crate) enum PayloadServiceCommand {
     /// Start building a new payload.
     BuildNewPayload(
         PayloadBuilderAttributes,

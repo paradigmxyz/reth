@@ -51,7 +51,11 @@ impl RethNodeCommandConfig for AutoMineConfig {
     }
 }
 
+/// This test is disabled for the `optimism` feature flag due to an incompatible feature set.
+/// L1 info transactions are not included automatically, which are required for `op-reth` to
+/// process transactions.
 #[test]
+#[cfg_attr(feature = "optimism", ignore)]
 pub fn test_auto_mine() {
     // create temp path for test
     let temp_path = tempfile::TempDir::new().expect("tempdir is okay").into_path();

@@ -1,21 +1,20 @@
-use crate::U256;
+use crate::{GotExpectedBoxed, U256};
 
 /// Represents error variants that can happen when trying to validate a
 /// [Transaction](crate::Transaction)
-#[allow(missing_docs)]
 #[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
 pub enum InvalidTransactionError {
     /// The sender does not have enough funds to cover the transaction fees
     #[error(
-        "sender does not have enough funds ({available_funds}) to cover transaction fees: {cost}"
+        "sender does not have enough funds ({}) to cover transaction fees: {}", _0.got, _0.expected
     )]
-    InsufficientFunds { cost: U256, available_funds: U256 },
+    InsufficientFunds(GotExpectedBoxed<U256>),
     /// The nonce is lower than the account's nonce, or there is a nonce gap present.
     ///
     /// This is a consensus error.
     #[error("transaction nonce is not consistent")]
     NonceNotConsistent,
-    /// The transaction is before Spurious Dragon and has a chain ID
+    /// The transaction is before Spurious Dragon and has a chain ID.
     #[error("transactions before Spurious Dragon should not have a chain ID")]
     OldLegacyChainId,
     /// The chain ID in the transaction does not match the current network configuration.
@@ -36,8 +35,7 @@ pub enum InvalidTransactionError {
     /// The calculated gas of the transaction exceeds `u64::MAX`.
     #[error("gas overflow (maximum of u64)")]
     GasUintOverflow,
-    /// The transaction is specified to use less gas than required to start the
-    /// invocation.
+    /// The transaction is specified to use less gas than required to start the invocation.
     #[error("intrinsic gas too low")]
     GasTooLow,
     /// The transaction gas exceeds the limit
@@ -47,7 +45,7 @@ pub enum InvalidTransactionError {
     /// fee cap.
     #[error("max priority fee per gas higher than max fee per gas")]
     TipAboveFeeCap,
-    /// Thrown post London if the transaction's fee is less than the base fee of the block
+    /// Thrown post London if the transaction's fee is less than the base fee of the block.
     #[error("max fee per gas less than block base fee")]
     FeeCapTooLow,
     /// Thrown if the sender of a transaction is a contract.

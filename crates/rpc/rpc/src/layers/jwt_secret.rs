@@ -8,6 +8,7 @@ use reth_primitives::{
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
+    str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
@@ -101,15 +102,7 @@ impl JwtSecret {
         fs::write(fpath, hex)?;
         Ok(secret)
     }
-}
 
-impl std::fmt::Debug for JwtSecret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("JwtSecretHash").field(&"{{}}").finish()
-    }
-}
-
-impl JwtSecret {
     /// Validates a JWT token along the following rules:
     /// - The JWT signature is valid.
     /// - The JWT is signed with the `HMAC + SHA256 (HS256)` algorithm.
@@ -154,10 +147,7 @@ impl JwtSecret {
     /// ```rust
     /// use reth_rpc::{Claims, JwtSecret};
     ///
-    /// let my_claims = Claims {
-    ///     iat: 0,
-    ///     exp: None
-    /// };
+    /// let my_claims = Claims { iat: 0, exp: None };
     /// let secret = JwtSecret::random();
     /// let token = secret.encode(&my_claims).unwrap();
     /// ```
@@ -166,6 +156,20 @@ impl JwtSecret {
         let key = jsonwebtoken::EncodingKey::from_secret(bytes);
         let algo = jsonwebtoken::Header::new(Algorithm::HS256);
         jsonwebtoken::encode(&algo, claims, &key)
+    }
+}
+
+impl std::fmt::Debug for JwtSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("JwtSecretHash").field(&"{{}}").finish()
+    }
+}
+
+impl FromStr for JwtSecret {
+    type Err = JwtError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        JwtSecret::from_hex(s)
     }
 }
 

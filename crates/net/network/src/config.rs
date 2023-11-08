@@ -69,6 +69,19 @@ pub struct NetworkConfig<C> {
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
     pub hello_message: HelloMessage,
+    /// Whether to disable transaction gossip
+    pub tx_gossip_disabled: bool,
+    /// Optimism Network Config
+    #[cfg(feature = "optimism")]
+    pub optimism_network_config: OptimismNetworkConfig,
+}
+
+/// Optimmism Network Config
+#[cfg(feature = "optimism")]
+#[derive(Debug, Clone, Default)]
+pub struct OptimismNetworkConfig {
+    /// The sequencer HTTP endpoint, if provided via CLI flag
+    pub sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfig ===
@@ -148,6 +161,20 @@ pub struct NetworkConfigBuilder {
     hello_message: Option<HelloMessage>,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
+    /// Whether tx gossip is disabled
+    tx_gossip_disabled: bool,
+    /// Optimism Network Config Builder
+    #[cfg(feature = "optimism")]
+    optimism_network_config: OptimismNetworkConfigBuilder,
+}
+
+/// Optimism Network Config Builder
+#[cfg(feature = "optimism")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default)]
+pub struct OptimismNetworkConfigBuilder {
+    /// The sequencer HTTP endpoint, if provided via CLI flag
+    sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -169,6 +196,9 @@ impl NetworkConfigBuilder {
             executor: None,
             hello_message: None,
             head: None,
+            tx_gossip_disabled: false,
+            #[cfg(feature = "optimism")]
+            optimism_network_config: OptimismNetworkConfigBuilder::default(),
         }
     }
 
@@ -205,10 +235,8 @@ impl NetworkConfigBuilder {
     /// # use reth_eth_wire::HelloMessage;
     /// # use reth_network::NetworkConfigBuilder;
     /// # fn builder(builder: NetworkConfigBuilder) {
-    ///    let peer_id = builder.get_peer_id();
-    ///     builder.hello_message(
-    ///         HelloMessage::builder(peer_id).build()
-    /// );
+    /// let peer_id = builder.get_peer_id();
+    /// builder.hello_message(HelloMessage::builder(peer_id).build());
     /// # }
     /// ```
     pub fn hello_message(mut self, hello_message: HelloMessage) -> Self {
@@ -349,6 +377,19 @@ impl NetworkConfigBuilder {
         }
     }
 
+    /// Sets whether tx gossip is disabled.
+    pub fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
+        self.tx_gossip_disabled = disable_tx_gossip;
+        self
+    }
+
+    /// Sets the sequencer HTTP endpoint.
+    #[cfg(feature = "optimism")]
+    pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
+        self.optimism_network_config.sequencer_endpoint = endpoint;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///
@@ -371,6 +412,9 @@ impl NetworkConfigBuilder {
             executor,
             hello_message,
             head,
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+                optimism_network_config: OptimismNetworkConfigBuilder { sequencer_endpoint },
         } = self;
 
         let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
@@ -421,6 +465,9 @@ impl NetworkConfigBuilder {
             status,
             hello_message,
             fork_filter,
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+            optimism_network_config: OptimismNetworkConfig { sequencer_endpoint },
         }
     }
 }

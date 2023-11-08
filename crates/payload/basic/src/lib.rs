@@ -20,11 +20,11 @@ use reth_payload_builder::{
 };
 use reth_primitives::{
     bytes::BytesMut,
-    calculate_excess_blob_gas,
     constants::{
         eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
         EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
+    eip4844::calculate_excess_blob_gas,
     proofs,
     revm::{compat::into_reth_log, env::tx_env_with_recovered},
     Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts,
@@ -57,9 +57,19 @@ use tracing::{debug, trace};
 
 mod metrics;
 
+#[cfg(feature = "optimism")]
+mod optimism;
+#[cfg(feature = "optimism")]
+pub use optimism::OptimismPayloadBuilder;
+
+/// Ethereum payload builder
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
+pub struct EthereumPayloadBuilder;
+
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
-pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
+pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = EthereumPayloadBuilder> {
     /// The client that can interact with the chain.
     client: Client,
     /// txpool
@@ -89,7 +99,14 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         config: BasicPayloadJobGeneratorConfig,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
-        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, ())
+        BasicPayloadJobGenerator::with_builder(
+            client,
+            pool,
+            executor,
+            config,
+            chain_spec,
+            EthereumPayloadBuilder,
+        )
     }
 }
 
@@ -152,6 +169,8 @@ where
             self.config.extradata.clone(),
             attributes,
             Arc::clone(&self.chain_spec),
+            #[cfg(feature = "optimism")]
+            self.config.compute_pending_block,
         );
 
         let until = tokio::time::Instant::now() + self.config.deadline;
@@ -199,6 +218,9 @@ pub struct BasicPayloadJobGeneratorConfig {
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
+    /// The rollup's compute pending block configuration option.
+    #[cfg(feature = "optimism")]
+    compute_pending_block: bool,
 }
 
 // === impl BasicPayloadJobGeneratorConfig ===
@@ -242,6 +264,15 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_gas_limit = max_gas_limit;
         self
     }
+
+    /// Sets the compute pending block configuration option.
+    ///
+    /// Defaults to `false`.
+    #[cfg(feature = "optimism")]
+    pub fn compute_pending_block(mut self, compute_pending_block: bool) -> Self {
+        self.compute_pending_block = compute_pending_block;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -255,6 +286,8 @@ impl Default for BasicPayloadJobGeneratorConfig {
             // 12s slot time
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
+            #[cfg(feature = "optimism")]
+            compute_pending_block: false,
         }
     }
 }
@@ -341,6 +374,7 @@ where
                     let result = builder.try_build(args);
                     let _ = tx.send(result);
                 }));
+
                 this.pending_block = Some(PendingPayload { _cancel, payload: rx });
             }
         }
@@ -424,6 +458,39 @@ where
                 let res = build_empty_payload(&client, config);
                 let _ = tx.send(res);
             }));
+
+            // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
+            // should not pull transactions from the tx pool. In this case, we build the payload
+            // upfront with the list of transactions sent in the attributes without caring about
+            // the results of the polling job, if a best payload has not already been built.
+            #[cfg(feature = "optimism")]
+            if self.config.chain_spec.is_optimism() &&
+                self.config.attributes.optimism_payload_attributes.no_tx_pool
+            {
+                let args = BuildArguments {
+                    client: self.client.clone(),
+                    pool: self.pool.clone(),
+                    cached_reads: self.cached_reads.take().unwrap_or_default(),
+                    config: self.config.clone(),
+                    cancel: Cancelled::default(),
+                    best_payload: None,
+                };
+                if let Ok(BuildOutcome::Better { payload, cached_reads }) =
+                    self.builder.try_build(args)
+                {
+                    self.cached_reads = Some(cached_reads);
+                    trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
+                    let payload = Arc::new(payload);
+                    return (
+                        ResolveBestPayload {
+                            best_payload: Some(payload),
+                            maybe_better,
+                            empty_payload,
+                        },
+                        KeepPayloadJobAlive::Yes,
+                    )
+                }
+            }
 
             empty_payload = Some(rx);
         }
@@ -539,6 +606,22 @@ pub struct PayloadConfig {
     attributes: PayloadBuilderAttributes,
     /// The chain spec.
     chain_spec: Arc<ChainSpec>,
+    /// The rollup's compute pending block configuration option.
+    /// TODO(clabby): Implement this feature.
+    #[cfg(feature = "optimism")]
+    #[allow(dead_code)]
+    compute_pending_block: bool,
+}
+
+impl PayloadConfig {
+    /// Returns an owned instance of the [PayloadConfig]'s extra_data bytes.
+    pub(crate) fn extra_data(&self) -> reth_primitives::Bytes {
+        #[cfg(feature = "optimism")]
+        if self.chain_spec.is_optimism() {
+            return Default::default()
+        }
+        self.extra_data.clone()
+    }
 }
 
 impl PayloadConfig {
@@ -548,6 +631,7 @@ impl PayloadConfig {
         extra_data: Bytes,
         attributes: PayloadBuilderAttributes,
         chain_spec: Arc<ChainSpec>,
+        #[cfg(feature = "optimism")] compute_pending_block: bool,
     ) -> Self {
         // configure evm env based on parent block
         let (initialized_cfg, initialized_block_env) =
@@ -560,6 +644,8 @@ impl PayloadConfig {
             extra_data,
             attributes,
             chain_spec,
+            #[cfg(feature = "optimism")]
+            compute_pending_block,
         }
     }
 }
@@ -642,7 +728,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
 }
 
 // Default implementation of [PayloadBuilder] for unit type
-impl<Pool, Client> PayloadBuilder<Pool, Client> for ()
+impl<Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
@@ -674,13 +760,14 @@ where
     let state = StateProviderDatabase::new(&state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(&state)).with_bundle_update().build();
+    let extra_data = config.extra_data();
     let PayloadConfig {
         initialized_block_env,
         initialized_cfg,
         parent_block,
-        extra_data,
         attributes,
         chain_spec,
+        ..
     } = config;
 
     debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
@@ -799,11 +886,14 @@ where
             success: result.is_success(),
             cumulative_gas_used,
             logs: result.logs().into_iter().map(into_reth_log).collect(),
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
         }));
 
         // update add to total fees
-        let miner_fee =
-            tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
+        let miner_fee = tx
+            .effective_tip_per_gas(Some(base_fee))
+            .expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
         // append transaction to the list of executed transactions
@@ -907,13 +997,14 @@ fn build_empty_payload<Client>(
 where
     Client: StateProviderFactory,
 {
+    let extra_data = config.extra_data();
     let PayloadConfig {
         initialized_block_env,
         parent_block,
-        extra_data,
         attributes,
         chain_spec,
         initialized_cfg,
+        ..
     } = config;
 
     debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building empty payload");
@@ -967,9 +1058,9 @@ where
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: 0,
+        extra_data,
         blob_gas_used: None,
         excess_blob_gas: None,
-        extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
     };
 
