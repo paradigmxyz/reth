@@ -54,8 +54,8 @@ macro_rules! set_value {
                 *$field = new_value;
             }
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(TxDeposit { ref mut $field, .. }) => {
-                *$field = new_value.into();
+            MockTransaction::Deposit(_) => {
+                panic!("not implemented")
             }
         }
     };
@@ -63,23 +63,15 @@ macro_rules! set_value {
 
 /// Gets the value for the field
 macro_rules! get_value {
-    ($this:ident => source_hash) => {
-        match $this {
-            #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(ref tx) => &tx.source_hash,
-            _ => panic!("Only TxDeposit has a source_hash field."),
-        }
-    };
-
     ($this:ident => $field:ident) => {
         match $this {
-            MockTransaction::Legacy { $field, .. } |
-            MockTransaction::Eip1559 { $field, .. } |
-            MockTransaction::Eip4844 { $field, .. } |
-            MockTransaction::Eip2930 { $field, .. } => &$field,
+            MockTransaction::Legacy { $field, .. } => $field,
+            MockTransaction::Eip1559 { $field, .. } => $field,
+            MockTransaction::Eip4844 { $field, .. } => $field,
+            MockTransaction::Eip2930 { $field, .. } => $field,
             #[cfg(feature = "optimism")]
             MockTransaction::Deposit(_) => {
-                panic!("Field {} is not available in TxDeposit.", stringify!($field));
+                panic!("not implemented")
             }
         }
     };
@@ -100,8 +92,7 @@ macro_rules! make_setters_getters {
             }
 
             pub fn [<get_ $name>](&self) -> $t {
-                (*get_value!(self => $name)).clone()
-
+                get_value!(self => $name).clone()
             }
         )*}
     };
@@ -733,9 +724,25 @@ impl FromRecoveredTransaction for MockTransaction {
                 accesslist: access_list,
             },
             #[cfg(feature = "optimism")]
-            Transaction::Deposit { .. } => {
-                unimplemented!()
-            }
+            Transaction::Deposit(TxDeposit {
+                source_hash,
+                from,
+                to,
+                mint,
+                value,
+                gas_limit,
+                is_system_transaction,
+                input,
+            }) => MockTransaction::Deposit(TxDeposit {
+                source_hash,
+                from,
+                to,
+                mint,
+                value,
+                gas_limit,
+                is_system_transaction,
+                input,
+            }),
         }
     }
 }
