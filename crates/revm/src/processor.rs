@@ -10,8 +10,8 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     revm::env::{fill_cfg_and_block_env, fill_tx_env},
-    Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
+    Address, Block, BlockNumber, Bloom, ChainSpec, GotExpected, Hardfork, Header, PruneMode,
+    PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{BlockExecutor, BlockExecutorStats, PrunableBlockExecutor, StateProvider};
@@ -297,8 +297,7 @@ impl<'a> EVMProcessor<'a> {
         if block.gas_used != cumulative_gas_used {
             let receipts = Receipts::from_block_receipt(receipts);
             return Err(BlockValidationError::BlockGasUsed {
-                got: cumulative_gas_used,
-                expected: block.gas_used,
+                gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
             .into())
@@ -537,20 +536,18 @@ pub fn verify_receipt<'a>(
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
     if receipts_root != expected_receipts_root {
-        return Err(BlockValidationError::ReceiptRootDiff {
-            got: Box::new(receipts_root),
-            expected: Box::new(expected_receipts_root),
-        }
+        return Err(BlockValidationError::ReceiptRootDiff(
+            GotExpected { got: receipts_root, expected: expected_receipts_root }.into(),
+        )
         .into())
     }
 
     // Create header log bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
-        return Err(BlockValidationError::BloomLogDiff {
-            expected: Box::new(expected_logs_bloom),
-            got: Box::new(logs_bloom),
-        }
+        return Err(BlockValidationError::BloomLogDiff(
+            GotExpected { got: logs_bloom, expected: expected_logs_bloom }.into(),
+        )
         .into())
     }
 

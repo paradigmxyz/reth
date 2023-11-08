@@ -583,11 +583,18 @@ where
                     self.swarm.state_mut().update_fork_id(transition.current);
                 }
             }
-            NetworkHandleMessage::GetPeerInfo(tx) => {
+            NetworkHandleMessage::GetPeerInfos(tx) => {
                 let _ = tx.send(self.swarm.sessions_mut().get_peer_info());
             }
             NetworkHandleMessage::GetPeerInfoById(peer_id, tx) => {
                 let _ = tx.send(self.swarm.sessions_mut().get_peer_info_by_id(peer_id));
+            }
+            NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx) => {
+                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peer_ids));
+            }
+            NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx) => {
+                let peers = self.swarm.state().peers().peers_by_kind(kind);
+                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
             }
         }
     }
@@ -914,13 +921,13 @@ pub enum NetworkEvent {
         /// The remote addr of the peer to which a session was established.
         remote_addr: SocketAddr,
         /// The client version of the peer to which a session was established.
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.
         messages: PeerRequestSender,
         /// The status of the peer to which a session was established.
-        status: Status,
+        status: Arc<Status>,
         /// negotiated eth version of the session
         version: EthVersion,
     },

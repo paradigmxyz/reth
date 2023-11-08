@@ -45,7 +45,7 @@ pub trait Decompress: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
     /// Encoded type.
-    type Encoded: AsRef<[u8]> + Send + Sync;
+    type Encoded: AsRef<[u8]> + Into<Vec<u8>> + Send + Sync;
 
     /// Encodes data going into the database.
     fn encode(self) -> Self::Encoded;

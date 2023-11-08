@@ -5,7 +5,7 @@ use crate::{
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkHandle,
+    NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use reth_eth_wire::{
@@ -72,6 +72,32 @@ pub struct TransactionsHandle {
 impl TransactionsHandle {
     fn send(&self, cmd: TransactionsCommand) {
         let _ = self.manager_tx.send(cmd);
+    }
+
+    /// Fetch the [`PeerRequestSender`] for the given peer.
+    async fn peer_handle(&self, peer_id: PeerId) -> Result<Option<PeerRequestSender>, RecvError> {
+        let (tx, rx) = oneshot::channel();
+        self.send(TransactionsCommand::GetPeerSender { peer_id, peer_request_sender: tx });
+        rx.await
+    }
+
+    /// Requests the transactions directly from the given peer.
+    ///
+    /// Returns `None` if the peer is not connected.
+    ///
+    /// **Note**: this returns the response from the peer as received.
+    pub async fn get_pooled_transactions_from(
+        &self,
+        peer_id: PeerId,
+        hashes: Vec<B256>,
+    ) -> Result<Option<Vec<PooledTransactionsElement>>, RequestError> {
+        let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
+
+        let (tx, rx) = oneshot::channel();
+        let request = PeerRequest::GetPooledTransactions { request: hashes.into(), response: tx };
+        peer.try_send(request).ok();
+
+        rx.await?.map(|res| Some(res.0))
     }
 
     /// Manually propagate the transaction that belongs to the hash.
@@ -603,6 +629,10 @@ where
                 }
                 tx.send(res).ok();
             }
+            TransactionsCommand::GetPeerSender { peer_id, peer_request_sender } => {
+                let sender = self.peers.get(&peer_id).map(|peer| peer.request_tx.clone());
+                peer_request_sender.send(sender).ok();
+            }
         }
     }
 
@@ -1043,7 +1073,7 @@ struct Peer {
     version: EthVersion,
     /// The peer's client version.
     #[allow(unused)]
-    client_version: Arc<String>,
+    client_version: Arc<str>,
 }
 
 /// The type responsible for fetching missing transactions from peers.
@@ -1221,6 +1251,11 @@ enum TransactionsCommand {
     GetTransactionHashes {
         peers: Vec<PeerId>,
         tx: oneshot::Sender<HashMap<PeerId, HashSet<TxHash>>>,
+    },
+    /// Requests a clone of the sender sender channel to the peer.
+    GetPeerSender {
+        peer_id: PeerId,
+        peer_request_sender: oneshot::Sender<Option<PeerRequestSender>>,
     },
 }
 

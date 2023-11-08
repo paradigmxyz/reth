@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Compatibility layer for reth-primitives and ethereum RPC types
-"""
+description = "Compatibility layer for reth-primitives and ethereum RPC types"
 
 [dependencies]
 reth-primitives.workspace = true

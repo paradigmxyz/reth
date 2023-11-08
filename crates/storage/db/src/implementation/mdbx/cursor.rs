@@ -1,6 +1,6 @@
 //! Cursor wrapper for libmdbx-sys.
 
-use reth_interfaces::db::DatabaseWriteOperation;
+use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
 
 use crate::{
@@ -262,11 +262,14 @@ impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
             |this| {
                 this.inner
                     .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
-                    .map_err(|e| DatabaseError::Write {
-                        code: e.into(),
-                        operation: DatabaseWriteOperation::CursorUpsert,
-                        table_name: T::NAME,
-                        key: Box::from(key.as_ref()),
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            code: e.into(),
+                            operation: DatabaseWriteOperation::CursorUpsert,
+                            table_name: T::NAME,
+                            key: key.into(),
+                        }
+                        .into()
                     })
             },
         )
@@ -281,11 +284,14 @@ impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
             |this| {
                 this.inner
                     .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
-                    .map_err(|e| DatabaseError::Write {
-                        code: e.into(),
-                        operation: DatabaseWriteOperation::CursorInsert,
-                        table_name: T::NAME,
-                        key: Box::from(key.as_ref()),
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            code: e.into(),
+                            operation: DatabaseWriteOperation::CursorInsert,
+                            table_name: T::NAME,
+                            key: key.into(),
+                        }
+                        .into()
                     })
             },
         )
@@ -302,11 +308,14 @@ impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
             |this| {
                 this.inner
                     .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
-                    .map_err(|e| DatabaseError::Write {
-                        code: e.into(),
-                        operation: DatabaseWriteOperation::CursorAppend,
-                        table_name: T::NAME,
-                        key: Box::from(key.as_ref()),
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            code: e.into(),
+                            operation: DatabaseWriteOperation::CursorAppend,
+                            table_name: T::NAME,
+                            key: key.into(),
+                        }
+                        .into()
                     })
             },
         )
@@ -335,11 +344,14 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<'_, RW, T> {
             |this| {
                 this.inner
                     .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
-                    .map_err(|e| DatabaseError::Write {
-                        code: e.into(),
-                        operation: DatabaseWriteOperation::CursorAppendDup,
-                        table_name: T::NAME,
-                        key: Box::from(key.as_ref()),
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            code: e.into(),
+                            operation: DatabaseWriteOperation::CursorAppendDup,
+                            table_name: T::NAME,
+                            key: key.into(),
+                        }
+                        .into()
                     })
             },
         )

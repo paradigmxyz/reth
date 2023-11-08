@@ -2,10 +2,9 @@
 
 use crate::capability::Capability;
 use std::str::FromStr;
-use thiserror::Error;
 
 /// Error thrown when failed to parse a valid [`EthVersion`].
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("Unknown eth protocol version: {0}")]
 pub struct ParseVersionError(String);
 

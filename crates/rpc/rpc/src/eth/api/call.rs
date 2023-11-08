@@ -145,11 +145,10 @@ where
 
                 match ensure_success(res.result) {
                     Ok(output) => {
-                        results.push(EthCallResponse { output: Some(output), error: None });
+                        results.push(EthCallResponse { value: Some(output), error: None });
                     }
                     Err(err) => {
-                        results
-                            .push(EthCallResponse { output: None, error: Some(err.to_string()) });
+                        results.push(EthCallResponse { value: None, error: Some(err.to_string()) });
                     }
                 }
 

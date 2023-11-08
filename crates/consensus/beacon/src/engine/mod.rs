@@ -664,8 +664,8 @@ where
 
         let status = match make_canonical_result {
             Ok(outcome) => {
-                match outcome {
-                    CanonicalOutcome::AlreadyCanonical { ref header } => {
+                match &outcome {
+                    CanonicalOutcome::AlreadyCanonical { header } => {
                         // On Optimism, the proposers are allowed to reorg their own chain at will.
                         cfg_if::cfg_if! {
                             if #[cfg(feature = "optimism")] {
@@ -679,7 +679,7 @@ where
                                     let _ = self.update_head(header.clone());
                                     self.listeners.notify(
                                         BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                                            header.clone(),
+                                            Box::new(header.clone()),
                                             elapsed,
                                         ),
                                     );
@@ -701,7 +701,7 @@ where
                             }
                         }
                     }
-                    CanonicalOutcome::Committed { ref head } => {
+                    CanonicalOutcome::Committed { head } => {
                         debug!(
                             target: "consensus::engine",
                             hash=?state.head_block_hash,
@@ -712,7 +712,7 @@ where
                         // new VALID update that moved the canonical chain forward
                         let _ = self.update_head(head.clone());
                         self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                            head.clone(),
+                            Box::new(head.clone()),
                             elapsed,
                         ));
                     }
@@ -873,7 +873,6 @@ where
         self.update_head(head)?;
         self.update_finalized_block(update.finalized_block_hash)?;
         self.update_safe_block(update.safe_block_hash)?;
-
         Ok(())
     }
 
@@ -899,9 +898,7 @@ where
 
         head_block.total_difficulty =
             self.blockchain.header_td_by_number(head_block.number)?.ok_or_else(|| {
-                RethError::Provider(ProviderError::TotalDifficultyNotFound {
-                    block_number: head_block.number,
-                })
+                RethError::Provider(ProviderError::TotalDifficultyNotFound(head_block.number))
             })?;
         self.sync_state_updater.update_status(head_block);
 
@@ -1065,7 +1062,7 @@ where
         //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
         //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
         //    be rolled back.
-        if attrs.timestamp.to::<u64>() <= head.timestamp {
+        if attrs.timestamp <= head.timestamp {
             return OnForkChoiceUpdated::invalid_payload_attributes()
         }
 
@@ -1136,18 +1133,11 @@ where
             return Ok(status)
         }
 
-        let res = if self.sync.is_pipeline_idle() && self.hooks.active_db_write_hook().is_none() {
-            // we can only insert new payloads if the pipeline and any hook with db write
-            // are _not_ running, because they hold exclusive access to the database
+        let res = if self.sync.is_pipeline_idle() {
+            // we can only insert new payloads if the pipeline is _not_ running, because it holds
+            // exclusive access to the database
             self.try_insert_new_payload(block)
         } else {
-            if let Some(hook) = self.hooks.active_db_write_hook() {
-                debug!(
-                    target: "consensus::engine",
-                    hook = %hook.name(),
-                    "Hook is in progress, buffering new payload."
-                );
-            }
             self.try_buffer_payload(block)
         };
 
@@ -1306,12 +1296,12 @@ where
         Ok(())
     }
 
-    /// When the pipeline or a hook with DB write access is active, the tree is unable to commit
-    /// any additional blocks since the pipeline holds exclusive access to the database.
+    /// When the pipeline is active, the tree is unable to commit any additional blocks since the
+    /// pipeline holds exclusive access to the database.
     ///
     /// In this scenario we buffer the payload in the tree if the payload is valid, once the
-    /// pipeline or a hook with DB write access is finished, the tree is then able to also use the
-    /// buffered payloads to commit to a (newer) canonical chain.
+    /// pipeline is finished, the tree is then able to also use the buffered payloads to commit to a
+    /// (newer) canonical chain.
     ///
     /// This will return `SYNCING` if the block was buffered successfully, and an error if an error
     /// occurred while buffering the block.
@@ -1326,7 +1316,7 @@ where
 
     /// Attempts to insert a new payload into the tree.
     ///
-    /// Caution: This expects that the pipeline and a hook with DB write access are idle.
+    /// Caution: This expects that the pipeline is idle.
     #[instrument(level = "trace", skip_all, target = "consensus::engine", ret)]
     fn try_insert_new_payload(
         &mut self,
@@ -1562,9 +1552,9 @@ where
             let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
             match make_canonical_result {
                 Ok(outcome) => {
-                    if let CanonicalOutcome::Committed { ref head } = outcome {
+                    if let CanonicalOutcome::Committed { head } = &outcome {
                         self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                            head.clone(),
+                            Box::new(head.clone()),
                             elapsed,
                         ));
                     }
@@ -1661,7 +1651,7 @@ where
                     warn!(target: "consensus::engine", invalid_hash=?bad_block.hash, invalid_number=?bad_block.number, "Bad block detected in unwind");
 
                     // update the `invalid_headers` cache with the new invalid headers
-                    self.invalid_headers.insert(bad_block);
+                    self.invalid_headers.insert(*bad_block);
                     return None
                 }
 
@@ -1785,13 +1775,13 @@ where
                 EngineHookEvent::NotReady => {}
                 EngineHookEvent::Started => {
                     // If the hook has read-write access to the database, it means that the engine
-                    // can't process any FCU/payload messages from CL. To prevent CL from sending us
+                    // can't process any FCU messages from CL. To prevent CL from sending us
                     // unneeded updates, we need to respond `true` on `eth_syncing` request.
                     self.sync_state_updater.update_sync_state(SyncState::Syncing)
                 }
                 EngineHookEvent::Finished(_) => {
                     // Hook with read-write access to the database has finished running, so engine
-                    // can process new FCU/payload messages from CL again. It's safe to
+                    // can process new FCU messages from CL again. It's safe to
                     // return `false` on `eth_syncing` request.
                     self.sync_state_updater.update_sync_state(SyncState::Idle);
                     // If the hook had read-write access to the database, it means that the engine
