@@ -356,6 +356,75 @@ impl<'a> std::fmt::Debug for TraceBlockStream<'a> {
     }
 }
 
+/// A utility to compare RPC responses from two different clients.
+///
+/// The `RpcComparer` is designed to perform comparisons between two RPC clients.
+/// It is useful in scenarios where there's a need to ensure that two different RPC clients
+/// return consistent responses. This can be particularly valuable in testing environments
+/// where one might want to compare a test client's responses against a production client
+/// or compare two different Ethereum client implementations.
+#[derive(Debug)]
+pub struct RpcComparer<C1, C2>
+where
+    C1: TraceApiExt,
+    C2: TraceApiExt,
+{
+    client1: C1,
+    client2: C2,
+}
+impl<C1, C2> RpcComparer<C1, C2>
+where
+    C1: TraceApiExt,
+    C2: TraceApiExt,
+{
+    /// Constructs a new `RpcComparer`.
+    ///
+    /// Initializes the comparer with two clients that will be used for fetching
+    /// and comparison.
+    ///
+    /// # Arguments
+    ///
+    /// * `client1` - The first RPC client.
+    /// * `client2` - The second RPC client.
+    pub fn new(client1: C1, client2: C2) -> Self {
+        RpcComparer { client1, client2 }
+    }
+
+    /// Compares the `trace_block` responses from the two RPC clients.
+    ///
+    /// Fetches the `trace_block` responses for the provided block IDs from both clients
+    /// and compares them. If there are inconsistencies between the two responses, this
+    /// method will panic with a relevant message indicating the difference.
+    pub async fn compare_trace_block_responses(&self, block_ids: Vec<BlockId>) {
+        let stream1 = self.client1.trace_block_buffered(block_ids.clone(), 2);
+        let stream2 = self.client2.trace_block_buffered(block_ids, 2);
+
+        let mut zipped_streams = stream1.zip(stream2);
+
+        while let Some((result1, result2)) = zipped_streams.next().await {
+            match (result1, result2) {
+                (Ok((ref traces1_data, ref block1)), Ok((ref traces2_data, ref block2))) => {
+                    assert_eq!(
+                        traces1_data, traces2_data,
+                        "Mismatch in traces for block: {:?}",
+                        block1
+                    );
+                    assert_eq!(block1, block2, "Mismatch in block ids.");
+                }
+                (Err((ref err1, ref block1)), Err((ref err2, ref block2))) => {
+                    assert_eq!(
+                        format!("{:?}", err1),
+                        format!("{:?}", err2),
+                        "Different errors for block: {:?}",
+                        block1
+                    );
+                    assert_eq!(block1, block2, "Mismatch in block ids.");
+                }
+                _ => panic!("One client returned Ok while the other returned Err."),
+            }
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

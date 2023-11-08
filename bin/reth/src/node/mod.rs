@@ -4,7 +4,7 @@
 use crate::{
     args::{
         get_secret_key,
-        utils::{genesis_value_parser, parse_socket_address},
+        utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
@@ -49,7 +49,9 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
+use reth_network::{
+    error::NetworkError, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager,
+};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -110,18 +112,11 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
-    /// - dev
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         default_value_if("dev", "true", "dev"),
         value_parser = genesis_value_parser,
         required = false,
@@ -1047,6 +1042,7 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::utils::SUPPORTED_CHAINS;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_primitives::DEV;
     use std::{
@@ -1062,7 +1058,7 @@ mod tests {
 
     #[test]
     fn parse_common_node_command_chain_args() {
-        for chain in ["mainnet", "sepolia", "goerli"] {
+        for chain in SUPPORTED_CHAINS {
             let args: NodeCommand = NodeCommand::<()>::parse_from(["reth", "--chain", chain]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
@@ -1131,7 +1127,8 @@ mod tests {
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let config_path = cmd.config.clone().unwrap_or(data_dir.config_path());
-        assert!(config_path.ends_with("reth/mainnet/reth.toml"), "{:?}", cmd.config);
+        let end = format!("reth/{}/reth.toml", SUPPORTED_CHAINS[0]);
+        assert!(config_path.ends_with(end), "{:?}", cmd.config);
     }
 
     #[test]
@@ -1139,7 +1136,8 @@ mod tests {
         let cmd = NodeCommand::<()>::try_parse_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
-        assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
+        let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
+        assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
         let cmd =
             NodeCommand::<()>::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
@@ -1149,6 +1147,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
     fn parse_dev() {
         let cmd = NodeCommand::<()>::parse_from(["reth", "--dev"]);
         let chain = DEV.clone();

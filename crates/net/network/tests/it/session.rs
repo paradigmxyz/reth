@@ -4,7 +4,7 @@ use futures::StreamExt;
 use reth_eth_wire::{capability::Capability, EthVersion};
 use reth_network::{
     test_utils::{PeerConfig, Testnet},
-    NetworkEvent,
+    NetworkEvent, NetworkEvents,
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::test_utils::NoopProvider;

@@ -349,12 +349,12 @@ impl MockTransaction {
 
     pub fn get_gas_price(&self) -> u128 {
         match self {
-            MockTransaction::Legacy { gas_price, .. } => *gas_price,
-            MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
-            MockTransaction::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
+            MockTransaction::Legacy { gas_price, .. } |
             MockTransaction::Eip2930 { gas_price, .. } => *gas_price,
+            MockTransaction::Eip1559 { max_fee_per_gas, .. } |
+            MockTransaction::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => panic!("not implemented"),
+            MockTransaction::Deposit(_) => 0u128,
         }
     }
 

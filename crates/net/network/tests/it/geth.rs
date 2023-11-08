@@ -6,7 +6,7 @@ use ethers_core::{
 use ethers_providers::Middleware;
 use reth_network::{
     test_utils::{unused_tcp_and_udp_port, unused_tcp_udp, NetworkEventStream},
-    NetworkConfig, NetworkManager,
+    NetworkConfig, NetworkEvents, NetworkManager,
 };
 use reth_network_api::Peers;
 use reth_primitives::{ChainSpec, Genesis, PeerId, SealedHeader};

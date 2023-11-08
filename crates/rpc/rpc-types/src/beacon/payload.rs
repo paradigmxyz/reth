@@ -10,13 +10,63 @@
 //! See also <https://github.com/ethereum/consensus-specs/blob/master/specs/deneb/beacon-chain.md#executionpayload>
 
 use crate::{
-    beacon::withdrawals::BeaconWithdrawal, engine::ExecutionPayloadV3, ExecutionPayload,
-    ExecutionPayloadV1, ExecutionPayloadV2, Withdrawal,
+    beacon::{withdrawals::BeaconWithdrawal, BlsPublicKey},
+    engine::ExecutionPayloadV3,
+    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, Withdrawal,
 };
-use alloy_primitives::{Address, Bloom, Bytes, B256, U256, U64};
+use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DeserializeAs, DisplayFromStr, SerializeAs};
 use std::borrow::Cow;
+
+/// Response object of GET `/eth/v1/builder/header/{slot}/{parent_hash}/{pubkey}`
+///
+/// See also <https://ethereum.github.io/builder-specs/#/Builder/getHeader>
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GetExecutionPayloadHeaderResponse {
+    pub version: String,
+    pub data: ExecutionPayloadHeaderData,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionPayloadHeaderData {
+    pub message: ExecutionPayloadHeaderMessage,
+    pub signature: String,
+}
+
+#[serde_as]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionPayloadHeaderMessage {
+    pub header: ExecutionPayloadHeader,
+    #[serde_as(as = "DisplayFromStr")]
+    pub value: U256,
+    pub pubkey: BlsPublicKey,
+}
+
+/// The header of the execution payload.
+#[serde_as]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionPayloadHeader {
+    pub parent_hash: B256,
+    pub fee_recipient: Address,
+    pub state_root: B256,
+    pub receipts_root: B256,
+    pub logs_bloom: Bloom,
+    pub prev_randao: B256,
+    #[serde_as(as = "DisplayFromStr")]
+    pub block_number: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub gas_limit: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub gas_used: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub timestamp: u64,
+    pub extra_data: Bytes,
+    #[serde_as(as = "DisplayFromStr")]
+    pub base_fee_per_gas: U256,
+    pub block_hash: B256,
+    pub transactions_root: B256,
+}
 
 #[serde_as]
 #[derive(Serialize, Deserialize)]
@@ -69,7 +119,7 @@ pub mod beacon_api_payload_attributes {
         S: Serializer,
     {
         let beacon_api_payload_attributes = BeaconPayloadAttributes {
-            timestamp: payload_attributes.timestamp.to(),
+            timestamp: payload_attributes.timestamp,
             prev_randao: payload_attributes.prev_randao,
             suggested_fee_recipient: payload_attributes.suggested_fee_recipient,
             withdrawals: payload_attributes.withdrawals.clone(),
@@ -91,7 +141,7 @@ pub mod beacon_api_payload_attributes {
     {
         let beacon_api_payload_attributes = BeaconPayloadAttributes::deserialize(deserializer)?;
         Ok(PayloadAttributes {
-            timestamp: U64::from(beacon_api_payload_attributes.timestamp),
+            timestamp: beacon_api_payload_attributes.timestamp,
             prev_randao: beacon_api_payload_attributes.prev_randao,
             suggested_fee_recipient: beacon_api_payload_attributes.suggested_fee_recipient,
             withdrawals: beacon_api_payload_attributes.withdrawals,
@@ -157,10 +207,10 @@ impl<'a> From<BeaconExecutionPayloadV1<'a>> for ExecutionPayloadV1 {
             receipts_root: receipts_root.into_owned(),
             logs_bloom: logs_bloom.into_owned(),
             prev_randao: prev_randao.into_owned(),
-            block_number: U64::from(block_number),
-            gas_limit: U64::from(gas_limit),
-            gas_used: U64::from(gas_used),
-            timestamp: U64::from(timestamp),
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
             extra_data: extra_data.into_owned(),
             base_fee_per_gas,
             block_hash: block_hash.into_owned(),
@@ -195,10 +245,10 @@ impl<'a> From<&'a ExecutionPayloadV1> for BeaconExecutionPayloadV1<'a> {
             receipts_root: Cow::Borrowed(receipts_root),
             logs_bloom: Cow::Borrowed(logs_bloom),
             prev_randao: Cow::Borrowed(prev_randao),
-            block_number: block_number.to(),
-            gas_limit: gas_limit.to(),
-            gas_used: gas_used.to(),
-            timestamp: timestamp.to(),
+            block_number: *block_number,
+            gas_limit: *gas_limit,
+            gas_used: *gas_used,
+            timestamp: *timestamp,
             extra_data: Cow::Borrowed(extra_data),
             base_fee_per_gas: *base_fee_per_gas,
             block_hash: Cow::Borrowed(block_hash),
@@ -294,12 +344,8 @@ struct BeaconExecutionPayloadV3<'a> {
     /// Inner V1 payload
     #[serde(flatten)]
     payload_inner: BeaconExecutionPayloadV2<'a>,
-    /// Array of [`U64`] representing blob gas used, enabled with V3
-    /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
     #[serde_as(as = "DisplayFromStr")]
     blob_gas_used: u64,
-    /// Array of [`U64`] representing excess blob gas, enabled with V3
-    /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
     #[serde_as(as = "DisplayFromStr")]
     excess_blob_gas: u64,
 }
@@ -307,11 +353,7 @@ struct BeaconExecutionPayloadV3<'a> {
 impl<'a> From<BeaconExecutionPayloadV3<'a>> for ExecutionPayloadV3 {
     fn from(payload: BeaconExecutionPayloadV3<'a>) -> Self {
         let BeaconExecutionPayloadV3 { payload_inner, blob_gas_used, excess_blob_gas } = payload;
-        ExecutionPayloadV3 {
-            payload_inner: payload_inner.into(),
-            blob_gas_used: U64::from(blob_gas_used),
-            excess_blob_gas: U64::from(excess_blob_gas),
-        }
+        ExecutionPayloadV3 { payload_inner: payload_inner.into(), blob_gas_used, excess_blob_gas }
     }
 }
 
@@ -320,8 +362,8 @@ impl<'a> From<&'a ExecutionPayloadV3> for BeaconExecutionPayloadV3<'a> {
         let ExecutionPayloadV3 { payload_inner, blob_gas_used, excess_blob_gas } = value;
         BeaconExecutionPayloadV3 {
             payload_inner: payload_inner.into(),
-            blob_gas_used: blob_gas_used.to(),
-            excess_blob_gas: excess_blob_gas.to(),
+            blob_gas_used: *blob_gas_used,
+            excess_blob_gas: *excess_blob_gas,
         }
     }
 }
@@ -456,5 +498,26 @@ pub mod beacon_payload {
         D: Deserializer<'de>,
     {
         BeaconExecutionPayload::deserialize(deserializer).map(Into::into)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_get_payload_header_response() {
+        let s = r#"{"version":"bellatrix","data":{"message":{"header":{"parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","state_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","receipts_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","logs_bloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prev_randao":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_number":"1","gas_limit":"1","gas_used":"1","timestamp":"1","extra_data":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","base_fee_per_gas":"1","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","transactions_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2"},"value":"1","pubkey":"0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a"},"signature":"0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505"}}"#;
+        let resp: GetExecutionPayloadHeaderResponse = serde_json::from_str(s).unwrap();
+        let json: serde_json::Value = serde_json::from_str(s).unwrap();
+        assert_eq!(json, serde_json::to_value(resp).unwrap());
+    }
+
+    #[test]
+    fn serde_payload_header() {
+        let s = r#"{"parent_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","fee_recipient":"0xabcf8e0d4e9587369b2301d0790347320302cc09","state_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","receipts_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","logs_bloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prev_randao":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","block_number":"1","gas_limit":"1","gas_used":"1","timestamp":"1","extra_data":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","base_fee_per_gas":"1","block_hash":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2","transactions_root":"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2"}"#;
+        let header: ExecutionPayloadHeader = serde_json::from_str(s).unwrap();
+        let json: serde_json::Value = serde_json::from_str(s).unwrap();
+        assert_eq!(json, serde_json::to_value(header).unwrap());
     }
 }
