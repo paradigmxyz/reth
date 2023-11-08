@@ -34,7 +34,7 @@ const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 
 /// [`MAX_RESERVED_MESSAGE_ID`] is the maximum message ID reserved for the `p2p` subprotocol. If
 /// there are any incoming messages with an ID greater than this, they are subprotocol messages.
-const MAX_RESERVED_MESSAGE_ID: u8 = 0x0f;
+pub const MAX_RESERVED_MESSAGE_ID: u8 = 0x0f;
 
 /// [`MAX_P2P_MESSAGE_ID`] is the maximum message ID in use for the `p2p` subprotocol.
 const MAX_P2P_MESSAGE_ID: u8 = P2PMessageID::Pong as u8;
@@ -159,7 +159,7 @@ where
 
         // determine shared capabilities (currently returns only one capability)
         let capability_res =
-            set_capability_offsets(hello.capabilities, their_hello.capabilities.clone());
+            SharedCapabilities::try_new(hello.capabilities, their_hello.capabilities.clone());
 
         let shared_capability = match capability_res {
             Err(err) => {
@@ -223,7 +223,7 @@ pub struct P2PStream<S> {
     pinger: Pinger,
 
     /// The supported capability for this stream.
-    shared_capability: SharedCapability,
+    shared_capabilities: SharedCapabilities,
 
     /// Outgoing messages buffered for sending to the underlying stream.
     outgoing_messages: VecDeque<Bytes>,
@@ -241,13 +241,13 @@ impl<S> P2PStream<S> {
     /// Create a new [`P2PStream`] from the provided stream.
     /// New [`P2PStream`]s are assumed to have completed the `p2p` handshake successfully and are
     /// ready to send and receive subprotocol messages.
-    pub fn new(inner: S, capability: SharedCapability) -> Self {
+    pub fn new(inner: S, shared_capabilities: SharedCapabilities) -> Self {
         Self {
             inner,
             encoder: snap::raw::Encoder::new(),
             decoder: snap::raw::Decoder::new(),
             pinger: Pinger::new(PING_INTERVAL, PING_TIMEOUT),
-            shared_capability: capability,
+            shared_capabilities,
             outgoing_messages: VecDeque::new(),
             outgoing_message_buffer_capacity: MAX_P2P_CAPACITY,
             disconnecting: false,
@@ -268,9 +268,9 @@ impl<S> P2PStream<S> {
         self.outgoing_message_buffer_capacity = capacity;
     }
 
-    /// Returns the shared capability for this stream.
-    pub fn shared_capability(&self) -> &SharedCapability {
-        &self.shared_capability
+    /// Returns the shared capabilities for this stream.
+    pub fn shared_capabilities(&self) -> &SharedCapabilities {
+        &self.shared_capabilities
     }
 
     /// Returns `true` if the connection is about to disconnect.
@@ -460,7 +460,7 @@ where
                     //  * `eth/67` is reserved message IDs 0x10 - 0x19.
                     //  * `qrs/65` is reserved message IDs 0x1a - 0x21.
                     //
-                    decompress_buf[0] = bytes[0] - this.shared_capability.offset();
+                    decompress_buf[0] = bytes[0] - MAX_RESERVED_MESSAGE_ID - 1;
 
                     return Poll::Ready(Some(Ok(decompress_buf)))
                 }
@@ -539,7 +539,7 @@ where
 
         // all messages sent in this stream are subprotocol messages, so we need to switch the
         // message id based on the offset
-        compressed[0] = item[0] + this.shared_capability.offset();
+        compressed[0] = item[0] + MAX_RESERVED_MESSAGE_ID + 1;
         this.outgoing_messages.push_back(compressed.freeze());
 
         Ok(())
@@ -571,6 +571,32 @@ where
     }
 }
 
+/// Non-empty ordered list of recognized shared capabilities.
+#[derive(Debug)]
+pub struct SharedCapabilities(Vec<SharedCapability>);
+
+impl SharedCapabilities {
+    pub fn try_new(
+        local_capabilities: Vec<Capability>,
+        peer_capabilities: Vec<Capability>,
+    ) -> Result<Self, P2PStreamError> {
+        Ok(Self(set_capability_offsets(local_capabilities, peer_capabilities)?))
+    }
+
+    pub fn iter_caps(&self) -> impl Iterator<Item = &SharedCapability> {
+        self.0.iter()
+    }
+
+    pub fn eth(&self) -> Result<&SharedCapability, P2PStreamError> {
+        for cap in self.iter_caps() {
+            if cap.name() == "eth" {
+                return Ok(cap)
+            }
+        }
+        Err(P2PStreamError::CapabilityNotShared)
+    }
+}
+
 /// Determines the offsets for each shared capability between the input list of peer
 /// capabilities and the input list of locally supported capabilities.
 ///
@@ -580,7 +606,7 @@ where
 pub fn set_capability_offsets(
     local_capabilities: Vec<Capability>,
     peer_capabilities: Vec<Capability>,
-) -> Result<SharedCapability, P2PStreamError> {
+) -> Result<Vec<SharedCapability>, P2PStreamError> {
     // find intersection of capabilities
     let our_capabilities = local_capabilities.into_iter().collect::<HashSet<_>>();
 
@@ -650,17 +676,11 @@ pub fn set_capability_offsets(
         }
     }
 
-    // TODO: support multiple capabilities - we would need a new Stream type to go on top of
-    // `P2PStream` containing its capability. `P2PStream` would still send pings and handle
-    // pongs, but instead contain a map of capabilities to their respective stream / channel.
-    // Each channel would be responsible for containing the offset for that stream and would
-    // only increment / decrement message IDs.
-    // NOTE: since the `P2PStream` currently only supports one capability, we set the
-    // capability with the lowest offset.
-    Ok(shared_with_offsets
-        .first()
-        .ok_or(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))?
-        .clone())
+    if shared_with_offsets.is_empty() {
+        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+    }
+
+    Ok(shared_with_offsets)
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
@@ -928,7 +948,7 @@ mod tests {
 
             // ensure that the two share a single capability, eth67
             assert_eq!(
-                p2p_stream.shared_capability,
+                *p2p_stream.shared_capabilities.iter_caps().next().unwrap(),
                 SharedCapability::Eth {
                     version: EthVersion::Eth67,
                     offset: MAX_RESERVED_MESSAGE_ID + 1
@@ -946,7 +966,7 @@ mod tests {
 
         // ensure that the two share a single capability, eth67
         assert_eq!(
-            p2p_stream.shared_capability,
+            *p2p_stream.shared_capabilities.iter_caps().next().unwrap(),
             SharedCapability::Eth {
                 version: EthVersion::Eth67,
                 offset: MAX_RESERVED_MESSAGE_ID + 1
@@ -1019,7 +1039,7 @@ mod tests {
         let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
 
         let shared_capability =
-            set_capability_offsets(local_capabilities, peer_capabilities).unwrap();
+            set_capability_offsets(local_capabilities, peer_capabilities).unwrap()[0].clone();
 
         assert_eq!(
             shared_capability,
