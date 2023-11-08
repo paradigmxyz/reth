@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Reth RPC implementation
-"""
+description = "Reth RPC implementation"
 [dependencies]
 # reth
 reth-interfaces.workspace = true
@@ -78,4 +76,9 @@ tempfile.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 
 [features]
-optimism = ["dep:reqwest", "reth-primitives/optimism", "reth-rpc-types-compat/optimism", "reth-network-api/optimism"]
+optimism = [
+    "dep:reqwest",
+    "reth-primitives/optimism",
+    "reth-rpc-types-compat/optimism",
+    "reth-network-api/optimism",
+]

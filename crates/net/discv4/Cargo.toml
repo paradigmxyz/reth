@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Ethereum network discovery
-"""
+description = "Ethereum network discovery"
 
 [dependencies]
 # reth

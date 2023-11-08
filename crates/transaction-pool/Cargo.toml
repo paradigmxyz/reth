@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Transaction pool implementation
-"""
+description = "Transaction pool implementation"
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
@@ -70,7 +68,7 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/test-utils",
     "reth-provider/optimism",
-    "revm/optimism"
+    "revm/optimism",
 ]
 
 [[bench]]
