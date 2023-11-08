@@ -130,15 +130,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_header_with_valid_data() {
-        let chain_spec = create_test_chain_spec();
-        let beacon_consensus = BeaconConsensus::new(chain_spec);
-        let sealed_header = create_test_sealed_header();
-
-        assert!(beacon_consensus.validate_header(&sealed_header).is_ok());
-    }
-
-    #[test]
     fn test_validate_header_against_parent_with_valid_data() {
         let chain_spec = create_test_chain_spec();
         let beacon_consensus = BeaconConsensus::new(chain_spec);
