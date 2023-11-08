@@ -338,7 +338,7 @@ struct NetworkInner {
 }
 
 /// Provides event subscription for the network.
-pub trait NetworkEvents {
+pub trait NetworkEvents: Send + Sync {
     /// Creates a new [`NetworkEvent`] listener channel.
     fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent>;
     /// Returns a new [`DiscoveryEvent`] stream.
