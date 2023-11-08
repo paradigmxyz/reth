@@ -34,6 +34,7 @@ fn is_unimplemented(err: Error) -> bool {
         _ => false,
     }
 }
+
 /// Represents a builder for creating JSON-RPC requests.
 #[derive(Serialize, Deserialize)]
 struct RawRpcBuilder {
@@ -45,30 +46,29 @@ struct RawRpcBuilder {
 
 impl RawRpcBuilder {
     /// Creates a new `RawRpcBuilder` with a given endpoint.
-
     fn new(endpoint: impl Into<String>) -> Self {
         Self { endpoint: endpoint.into(), method: None, params: Vec::new(), id: None }
     }
-    /// Sets the method name for the JSON-RPC request.
 
+    /// Sets the method name for the JSON-RPC request.
     fn method(mut self, method: impl Into<String>) -> Self {
         self.method = Some(method.into());
         self
     }
-    /// Adds a parameter to the JSON-RPC request.
 
+    /// Adds a parameter to the JSON-RPC request.
     fn add_param<S: Serialize>(mut self, param: S) -> Self {
         self.params.push(serde_json::to_value(param).expect("Failed to serialize parameter"));
         self
     }
-    /// Sets the ID for the JSON-RPC request.
 
+    /// Sets the ID for the JSON-RPC request.
     fn set_id(mut self, id: i32) -> Self {
         self.id = Some(id);
         self
     }
-    /// Constructs the JSON-RPC request string based on the provided configurations.
 
+    /// Constructs the JSON-RPC request string based on the provided configurations.
     fn build(self) -> String {
         let method = self.method.unwrap_or_else(|| panic!("JSON-RPC method not set"));
         let id = self.id.unwrap_or_else(|| panic!("JSON-RPC id not set"));
