@@ -185,6 +185,11 @@ impl PeersManager {
         self.peers.iter().map(|(peer_id, v)| NodeRecord::new(v.addr, *peer_id))
     }
 
+    /// Returns an iterator over all peer ids for peers with the given kind
+    pub(crate) fn peers_by_kind(&self, kind: PeerKind) -> impl Iterator<Item = PeerId> + '_ {
+        self.peers.iter().filter_map(move |(peer_id, peer)| (peer.kind == kind).then_some(*peer_id))
+    }
+
     /// Returns the number of currently active inbound connections.
     #[inline]
     pub(crate) fn num_inbound_connections(&self) -> usize {

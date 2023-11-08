@@ -583,11 +583,18 @@ where
                     self.swarm.state_mut().update_fork_id(transition.current);
                 }
             }
-            NetworkHandleMessage::GetPeerInfo(tx) => {
+            NetworkHandleMessage::GetPeerInfos(tx) => {
                 let _ = tx.send(self.swarm.sessions_mut().get_peer_info());
             }
             NetworkHandleMessage::GetPeerInfoById(peer_id, tx) => {
                 let _ = tx.send(self.swarm.sessions_mut().get_peer_info_by_id(peer_id));
+            }
+            NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx) => {
+                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peer_ids));
+            }
+            NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx) => {
+                let peers = self.swarm.state().peers().peers_by_kind(kind);
+                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
             }
         }
     }
