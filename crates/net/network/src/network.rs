@@ -168,16 +168,12 @@ impl NetworkHandle {
 }
 
 impl NetworkEvents for NetworkHandle {
-    /// Creates a new [`NetworkEvent`] listener channel.
     fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
         UnboundedReceiverStream::new(rx)
     }
 
-    /// Returns a new [`DiscoveryEvent`] stream.
-    ///
-    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
     fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         let _ = self.manager().send(NetworkHandleMessage::DiscoveryListener(tx));
@@ -341,8 +337,13 @@ struct NetworkInner {
     sequencer_endpoint: Option<String>,
 }
 
+/// Provides event subscription for the network.
 pub trait NetworkEvents {
+    /// Creates a new [`NetworkEvent`] listener channel.
     fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent>;
+    /// Returns a new [`DiscoveryEvent`] stream.
+    ///
+    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
     fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent>;
 }
 
