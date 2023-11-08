@@ -27,7 +27,8 @@ pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
 /// A segment represents a snapshotting of some portion of the data.
 pub trait Segment {
-    /// Snapshot data using the provided range.
+    /// Snapshot data using the provided range. The `directory` parameter determines the snapshot
+    /// file's save location.
     fn snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<'_, DB>,
@@ -54,7 +55,8 @@ pub trait Segment {
     }
 }
 
-/// Returns a [`NippyJar`] according to the desired configuration.
+/// Returns a [`NippyJar`] according to the desired configuration. The `directory` parameter
+/// determines the snapshot file's save location.
 pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     provider: &DatabaseProviderRO<'_, DB>,
     directory: PathBuf,
