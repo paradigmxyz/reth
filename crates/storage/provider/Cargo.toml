@@ -13,8 +13,8 @@ description = "Reth storage provider."
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
-reth-trie = { path = "../../trie" }
-reth-nippy-jar = { path = "../nippy-jar" }
+reth-trie.workspace = true
+reth-nippy-jar.workspace = true
 
 revm.workspace = true
 
@@ -45,7 +45,7 @@ rayon.workspace = true
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
-reth-trie = { path = "../../trie", features = ["test-utils"] }
+reth-trie = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 
 alloy-rlp.workspace = true
