@@ -166,12 +166,13 @@ impl Command {
                         .add_cell(Cell::new(human_bytes(total_size as f64)));
                     stats_table.add_row(row);
 
-                    let freelist_size = tx.inner.env().freelist()? *
+                    let freelist = tx.inner.env().freelist()?;
+                    let freelist_size = freelist *
                         tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
 
                     let mut row = Row::new();
                     row.add_cell(Cell::new("Freelist size"))
-                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(freelist))
                         .add_cell(Cell::new(""))
                         .add_cell(Cell::new(""))
                         .add_cell(Cell::new(""))
