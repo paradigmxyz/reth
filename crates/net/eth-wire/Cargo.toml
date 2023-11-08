@@ -10,11 +10,11 @@ repository.workspace = true
 
 [dependencies]
 # reth
-reth-codecs = { workspace = true }
+reth-codecs.workspace = true
 reth-primitives.workspace = true
-reth-ecies = { workspace = true }
+reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
-reth-discv4 = { workspace = true }
+reth-discv4.workspace = true
 
 # metrics
 reth-metrics.workspace = true

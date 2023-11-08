@@ -16,39 +16,39 @@ normal = [
 
 [dependencies]
 # reth
-reth-config = { workspace = true }
+reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-revm = { workspace = true }
-reth-revm-inspectors = { workspace = true }
-reth-stages = { workspace = true }
+reth-revm.workspace = true
+reth-revm-inspectors.workspace = true
+reth-stages.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
 reth-transaction-pool.workspace = true
-reth-beacon-consensus = { workspace = true }
-reth-auto-seal-consensus = { workspace = true }
-reth-consensus-common = { workspace = true }
-reth-blockchain-tree = { workspace = true }
-reth-rpc-engine-api = { workspace = true }
-reth-rpc-builder = { workspace = true }
-reth-rpc = { workspace = true }
-reth-rpc-types = { workspace = true }
-reth-rpc-types-compat = { workspace = true }
+reth-beacon-consensus.workspace = true
+reth-auto-seal-consensus.workspace = true
+reth-consensus-common.workspace = true
+reth-blockchain-tree.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-rpc-builder.workspace = true
+reth-rpc.workspace = true
+reth-rpc-types.workspace = true
+reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-api.workspace = true
 reth-downloaders = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-tasks.workspace = true
-reth-net-nat = { workspace = true }
+reth-net-nat.workspace = true
 reth-payload-builder.workspace = true
-reth-basic-payload-builder = { workspace = true }
-reth-discv4 = { workspace = true }
-reth-prune = { workspace = true }
+reth-basic-payload-builder.workspace = true
+reth-discv4.workspace = true
+reth-prune.workspace = true
 reth-snapshot = { workspace = true, features = ["clap"] }
-reth-trie = { workspace = true }
-reth-nippy-jar = { workspace = true }
+reth-trie.workspace = true
+reth-nippy-jar.workspace = true
 
 # crypto
 alloy-rlp.workspace = true

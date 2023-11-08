@@ -12,7 +12,7 @@ description = "Merkle trie implementation"
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-db = { workspace = true }
+reth-db.workspace = true
 
 alloy-rlp.workspace = true
 

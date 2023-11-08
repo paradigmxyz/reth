@@ -18,12 +18,12 @@ normal = [
 # reth
 reth-interfaces.workspace = true
 reth-primitives.workspace = true
-reth-net-common = { workspace = true }
+reth-net-common.workspace = true
 reth-network-api.workspace = true
-reth-discv4 = { workspace = true }
-reth-dns-discovery = { workspace = true }
-reth-eth-wire = { workspace = true }
-reth-ecies = { workspace = true }
+reth-discv4.workspace = true
+reth-dns-discovery.workspace = true
+reth-eth-wire.workspace = true
+reth-ecies.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true

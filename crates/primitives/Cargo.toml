@@ -10,7 +10,7 @@ description = "Commonly used types in reth."
 
 [dependencies]
 # reth
-reth-codecs = { workspace = true }
+reth-codecs.workspace = true
 reth-rpc-types.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 

@@ -9,17 +9,17 @@ repository.workspace = true
 
 [dependencies]
 # reth
-reth-consensus-common = { workspace = true }
+reth-consensus-common.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-stages = { workspace = true }
+reth-stages.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
-reth-prune = { workspace = true }
-reth-snapshot = { workspace = true }
+reth-prune.workspace = true
+reth-snapshot.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-tokio-util.workspace = true
 # async
@@ -46,8 +46,8 @@ reth-blockchain-tree = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
-reth-revm = { workspace = true }
-reth-downloaders = { workspace = true }
+reth-revm.workspace = true
+reth-downloaders.workspace = true
 
 assert_matches.workspace = true
 

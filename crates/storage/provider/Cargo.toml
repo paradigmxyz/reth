@@ -13,8 +13,8 @@ description = "Reth storage provider."
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
-reth-trie = { workspace = true }
-reth-nippy-jar = { workspace = true }
+reth-trie.workspace = true
+reth-nippy-jar.workspace = true
 
 revm.workspace = true
 
