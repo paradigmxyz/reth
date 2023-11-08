@@ -15,7 +15,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneModes, U256,
+    BlockHashOrNumber, BlockNumber, Header, PruneModes, U256,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
@@ -147,7 +147,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // we need the block's transactions but we don't need the transaction hashes
             let block = provider
-                .block_with_senders(block_number, TransactionVariant::NoHash)?
+                .block_with_senders(
+                    BlockHashOrNumber::Number(block_number),
+                    TransactionVariant::NoHash,
+                )?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             fetch_block_duration += time.elapsed();

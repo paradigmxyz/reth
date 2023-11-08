@@ -1033,7 +1033,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
 
-    /// Returns the block with senders with matching number from database.
+    /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
     /// spot, and we want fast querying.**
@@ -1043,13 +1043,23 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     /// will return None.
     fn block_with_senders(
         &self,
-        block_number: BlockNumber,
+        block_number: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
-        let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
+        let block_num: BlockNumber = match block_number {
+            BlockHashOrNumber::Hash(hash) => {
+                let res = match self.block_number(hash)? {
+                    Some(num) => Ok(num),
+                    None => Err("Block number not found for given hash"),
+                };
+                res.unwrap()
+            }
+            BlockHashOrNumber::Number(num) => num,
+        };
+        let Some(header) = self.header_by_number(block_num)? else { return Ok(None) };
 
-        let ommers = self.ommers(block_number.into())?.unwrap_or_default();
-        let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
+        let ommers = self.ommers(block_num.into())?.unwrap_or_default();
+        let withdrawals = self.withdrawals_by_block(block_num.into(), header.timestamp)?;
 
         // Get the block body
         //
@@ -1057,7 +1067,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         // in the database yet, or they do exit but are not indexed. If they exist but are not
         // indexed, we don't have enough information to return the block anyways, so we return
         // `None`.
-        let body = match self.block_body_indices(block_number)? {
+        let body = match self.block_body_indices(block_num)? {
             Some(body) => body,
             None => return Ok(None),
         };

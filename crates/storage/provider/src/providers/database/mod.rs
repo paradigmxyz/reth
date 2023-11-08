@@ -250,7 +250,7 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
 
     fn block_with_senders(
         &self,
-        number: BlockNumber,
+        number: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
         self.provider()?.block_with_senders(number, transaction_kind)
