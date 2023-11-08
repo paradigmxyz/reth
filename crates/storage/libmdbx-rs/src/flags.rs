@@ -177,7 +177,7 @@ impl EnvironmentFlags {
             flags |= ffi::MDBX_COALESCE;
         }
 
-        if self.liforeclaim {
+        if true {
             flags |= ffi::MDBX_LIFORECLAIM;
         }
 
