@@ -91,7 +91,7 @@ pub trait BlockReader:
     fn ommers_with_db_info(
         &self,
         id: BlockHashOrNumber,
-    ) -> Result<(Option<Vec<Header>>, u64, u128)>;
+    ) -> Result<(Option<Vec<Header>>, u64, std::time::Duration, u64)>;
 
     /// Returns the block with matching hash from the database.
     ///
@@ -119,14 +119,14 @@ pub trait BlockReader:
     fn block_body_indices_with_db_info(
         &self,
         num: u64,
-    ) -> Result<(Option<StoredBlockBodyIndices>, u64, u128)>;
+    ) -> Result<(Option<StoredBlockBodyIndices>, u64, std::time::Duration, u64)>;
 
     /// Returns (the block with senders with matching number, read db size, read db time).
     #[cfg(feature = "enable_db_speed_record")]
     fn block_with_senders_with_db_info(
         &self,
         number: BlockNumber,
-    ) -> Result<(Option<BlockWithSenders>, u64, u128)>;
+    ) -> Result<(Option<BlockWithSenders>, u64, std::time::Duration, u64)>;
 
     /// Returns the block with senders with matching number from database.
     ///

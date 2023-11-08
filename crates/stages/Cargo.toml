@@ -48,8 +48,8 @@ rayon.workspace = true
 num-traits = "0.2.15"
 
 serde_json.workspace = true
-revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard" }
-# revm-utils = { path = "/home/andy/Source/work/revm/crates/utils" }
+# revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard" }
+revm-utils = { workspace = true, optional = true }
 
 minstant = { version = "0.1.3", optional = true }
 
@@ -81,8 +81,8 @@ serde_json.workspace = true
 [features]
 test-utils = ["reth-interfaces/test-utils"]
 open_performance_dashboard = []
-enable_opcode_metrics = ["reth-provider/enable_opcode_metrics"]
-enable_cache_record = ["reth-provider/enable_cache_record"]
+enable_opcode_metrics = ["reth-provider/enable_opcode_metrics", "revm-utils"]
+enable_cache_record = ["reth-provider/enable_cache_record","revm-utils"]
 finish_after_execution_stage = []
 enable_execution_duration_record = ["minstant"]
 enable_tps_gas_record = []

@@ -17,7 +17,7 @@ pub trait WithdrawalsProvider: Send + Sync {
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> Result<(Option<Vec<Withdrawal>>, u64, u128)>;
+    ) -> Result<(Option<Vec<Withdrawal>>, u64, std::time::Duration, u64)>;
 
     /// Get latest withdrawal from this block or earlier .
     fn latest_withdrawal(&self) -> Result<Option<Withdrawal>>;

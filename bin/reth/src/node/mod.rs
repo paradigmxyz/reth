@@ -81,6 +81,9 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
+#[cfg(feature = "open_performance_dashboard")]
+use crate::performance_metrics::DashboardListener;
+
 pub mod cl_events;
 pub mod events;
 
@@ -247,11 +250,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         self.start_metrics_endpoint(Arc::clone(&db)).await?;
 
-        #[cfg(feature = "open_performance_dashboard")]
-        {
-            start_performance_dashboard(&ctx.task_executor);
-        }
-
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
         let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
@@ -267,8 +265,20 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         self.init_trusted_nodes(&mut config);
 
+        #[cfg(feature = "open_performance_dashboard")]
+        let dashboard_tx = {
+            let (dashboard_tx, dashboard_rx) = unbounded_channel();
+            let dashboard_listener = DashboardListener::new(dashboard_rx);
+            ctx.task_executor.spawn_critical("dashboard listener task", dashboard_listener);
+
+            dashboard_tx
+        };
+
         debug!(target: "reth::cli", "Spawning metrics listener task");
         let (metrics_tx, metrics_rx) = unbounded_channel();
+        #[cfg(feature = "open_performance_dashboard")]
+        let metrics_listener = MetricsListener::new(metrics_rx, dashboard_tx);
+        #[cfg(not(feature = "open_performance_dashboard"))]
         let metrics_listener = MetricsListener::new(metrics_rx);
         ctx.task_executor.spawn_critical("metrics listener task", metrics_listener);
 
@@ -929,25 +939,6 @@ async fn run_network_until_shutdown<C>(
             }
         }
     }
-}
-
-#[cfg(feature = "open_performance_dashboard")]
-fn start_performance_dashboard(task_executor: &TaskExecutor) {
-    use crate::performance_metrics::{metric_handler::*, metric_recoder::*, metric_storage::*};
-
-    let storage = Arc::new(PerformanceDashboardMetricStorage::default());
-
-    let recorder = PerformanceDashboardRecorder::new(storage.clone());
-    metrics::set_boxed_recorder(Box::new(recorder)).unwrap();
-
-    let mut performance_dashboard_handler = PerformanceDashboardMetricHandler::new(storage);
-
-    task_executor.spawn_critical(
-        "performance dashboard",
-        Box::pin(async move {
-            performance_dashboard_handler.run(3).await;
-        }),
-    );
 }
 
 #[cfg(test)]

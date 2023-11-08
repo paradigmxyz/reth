@@ -132,8 +132,8 @@ impl HeaderProvider for MockEthProvider {
     fn header_by_number_with_db_info(
         &self,
         num: BlockNumber,
-    ) -> Result<(Option<Header>, u64, u128)> {
-        Ok((self.header_by_number(num)?, 0, 0))
+    ) -> Result<(Option<Header>, u64, std::time::Duration, u64)> {
+        Ok((self.header_by_number(num)?, 0, std::time::Duration::default(), 0))
     }
 
     fn header_by_number(&self, num: u64) -> Result<Option<Header>> {
@@ -154,8 +154,8 @@ impl HeaderProvider for MockEthProvider {
     fn header_td_by_number_with_db_info(
         &self,
         number: BlockNumber,
-    ) -> Result<(Option<U256>, u64, u128)> {
-        Ok((self.header_td_by_number(number)?, 0, 0))
+    ) -> Result<(Option<U256>, u64, std::time::Duration, u64)> {
+        Ok((self.header_td_by_number(number)?, 0, std::time::Duration::default(), 0))
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
@@ -260,7 +260,7 @@ impl TransactionsProvider for MockEthProvider {
     fn transactions_by_tx_range_with_db_info(
         &self,
         _range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<TransactionSignedNoHash>, u64, u128)> {
+    ) -> Result<(Vec<TransactionSignedNoHash>, u64, std::time::Duration, u64)> {
         unimplemented!()
     }
 
@@ -272,7 +272,7 @@ impl TransactionsProvider for MockEthProvider {
     fn senders_by_tx_range_with_db_info(
         &self,
         _range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<Address>, u64, u128)> {
+    ) -> Result<(Vec<Address>, u64, std::time::Duration, u64)> {
         unimplemented!()
     }
 
@@ -392,8 +392,8 @@ impl BlockReader for MockEthProvider {
     fn ommers_with_db_info(
         &self,
         _id: BlockHashOrNumber,
-    ) -> Result<(Option<Vec<Header>>, u64, u128)> {
-        Ok((None, 0, 0))
+    ) -> Result<(Option<Vec<Header>>, u64, std::time::Duration, u64)> {
+        Ok((None, 0, std::time::Duration::default(), 0))
     }
 
     fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
@@ -404,16 +404,16 @@ impl BlockReader for MockEthProvider {
     fn block_body_indices_with_db_info(
         &self,
         _num: u64,
-    ) -> Result<(Option<StoredBlockBodyIndices>, u64, u128)> {
-        Ok((None, 0, 0))
+    ) -> Result<(Option<StoredBlockBodyIndices>, u64, std::time::Duration, u64)> {
+        Ok((None, 0, std::time::Duration::default(), 0))
     }
 
     #[cfg(feature = "enable_db_speed_record")]
     fn block_with_senders_with_db_info(
         &self,
         _number: BlockNumber,
-    ) -> Result<(Option<BlockWithSenders>, u64, u128)> {
-        Ok((None, 0, 0))
+    ) -> Result<(Option<BlockWithSenders>, u64, std::time::Duration, u64)> {
+        Ok((None, 0, std::time::Duration::default(), 0))
     }
 
     fn block_with_senders(&self, _number: BlockNumber) -> Result<Option<BlockWithSenders>> {
@@ -610,7 +610,7 @@ impl WithdrawalsProvider for MockEthProvider {
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
-    ) -> Result<(Option<Vec<reth_primitives::Withdrawal>>, u64, u128)> {
+    ) -> Result<(Option<Vec<reth_primitives::Withdrawal>>, u64, std::time::Duration, u64)> {
         unimplemented!()
     }
 }

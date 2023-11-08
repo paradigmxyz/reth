@@ -16,7 +16,10 @@ pub trait HeaderProvider: Send + Sync {
 
     /// Get header by block number and db time
     #[cfg(feature = "enable_db_speed_record")]
-    fn header_by_number_with_db_info(&self, num: u64) -> Result<(Option<Header>, u64, u128)>;
+    fn header_by_number_with_db_info(
+        &self,
+        num: u64,
+    ) -> Result<(Option<Header>, u64, std::time::Duration, u64)>;
 
     /// Get header by block number
     fn header_by_number(&self, num: u64) -> Result<Option<Header>>;
@@ -37,7 +40,7 @@ pub trait HeaderProvider: Send + Sync {
     fn header_td_by_number_with_db_info(
         &self,
         number: BlockNumber,
-    ) -> Result<(Option<U256>, u64, u128)>;
+    ) -> Result<(Option<U256>, u64, std::time::Duration, u64)>;
 
     /// Get total difficulty by block number.
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>>;

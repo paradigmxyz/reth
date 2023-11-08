@@ -84,15 +84,13 @@ incremental = false
 
 revm = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard" }
 revm-primitives = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard" }
-
-# revm = { path = "/home/andy/Source/work/revm/crates/revm"}
-# revm-primitives = { path = "/home/andy/Source/work/revm/crates/primitives" }
-
+revm-interpreter = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard"}
 
 [workspace.dependencies]
 ## reth
 revm = { version = "3" }
 revm-primitives = "1.1"
+revm-interpreter = "1.1.2"
 reth = { path = "./bin/reth" }
 reth-primitives = { path = "./crates/primitives" }
 reth-interfaces = { path = "./crates/interfaces" }
@@ -169,3 +167,5 @@ toml = "0.7"
 proptest = "1.0"
 arbitrary = "1.1"
 assert_matches = "1.5.0"
+
+revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard"}

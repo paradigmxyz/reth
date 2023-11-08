@@ -143,27 +143,32 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut state = PostState::default();
         state.add_prune_modes(prune_modes);
 
+        #[cfg(feature = "enable_tps_gas_record")]
+        if let Some(metrics_tx) = &mut self.metrics_tx {
+            let _ = metrics_tx.send(MetricEvent::BlockTpsAndGasSwitch { switch: true });
+        }
+
         for block_number in start_block..=max_block {
             #[cfg(feature = "enable_execution_duration_record")]
             duration_record.start_time_recorder();
 
             #[cfg(feature = "enable_db_speed_record")]
             let (td, block) = {
-                let (option_td, db_size, db_time) =
+                let (option_td, db_size, db_time, get_time_count) =
                     provider.header_td_by_number_with_db_info(block_number)?;
                 let td =
                     option_td.ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
-                db_speed_record.add_read_header_td_db_time(db_time);
+                db_speed_record.add_read_header_td_db_time(db_time, get_time_count);
                 db_speed_record.add_read_header_td_db_size(db_size);
 
-                let (option_block, db_size, db_time) =
+                let (option_block, db_size, db_time, get_time_count) =
                     provider.block_with_senders_with_db_info(block_number)?;
                 let block = option_block
                     .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
                 db_speed_record.add_read_block_with_senders_db_size(db_size);
-                db_speed_record.add_read_block_with_senders_db_time(db_time);
+                db_speed_record.add_read_block_with_senders_db_time(db_time, get_time_count);
 
                 (td, block)
             };
@@ -198,12 +203,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // Gas and txs metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
-                #[cfg(not(feature = "enable_tps_gas_record"))]
                 let _ =
                     metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
 
                 #[cfg(feature = "enable_tps_gas_record")]
                 let _ = metrics_tx.send(MetricEvent::BlockTpsAndGas {
+                    block_number,
                     txs: block.body.len() as u64,
                     gas: block.header.gas_used,
                 });
@@ -220,10 +225,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             #[cfg(feature = "enable_cache_record")]
             {
-                println!("");
                 let cachedb_size = executor.get_cachedb_size();
-                println!("block_number: {:?}, cachedb_size = {:?}", block_number, cachedb_size);
-                println!("");
+                if let Some(metrics_tx) = &mut self.metrics_tx {
+                    let _ = metrics_tx
+                        .send(MetricEvent::CacheDbSizeInfo { block_number, cachedb_size });
+                }
             }
 
             #[cfg(feature = "enable_test_max_th")]
@@ -243,24 +249,27 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 break
             }
         }
+
+        #[cfg(feature = "enable_tps_gas_record")]
+        if let Some(metrics_tx) = &mut self.metrics_tx {
+            let _ = metrics_tx.send(MetricEvent::BlockTpsAndGasSwitch { switch: false });
+        }
+
         #[cfg(feature = "enable_cache_record")]
         {
-            println!("");
-            println!("===================================");
             let cachedb_record = executor.get_cachedb_record();
-            println!("cachedb_record = {}", serde_json::to_string(&cachedb_record).unwrap());
-            println!("===================================");
-            println!("");
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let _ =
+                    metrics_tx.send(MetricEvent::CacheDbInfo { cache_db_record: cachedb_record });
+            }
         }
 
         #[cfg(feature = "enable_opcode_metrics")]
         {
             let record = executor.get_opcode_record();
-            println!("");
-            println!("===================================");
-            println!("revm_record = {}", serde_json::to_string(&record).unwrap());
-            println!("===================================");
-            println!("");
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let _ = metrics_tx.send(MetricEvent::RevmMetricTime { revm_metric_record: record });
+            }
         }
 
         // Write remaining changes
@@ -269,7 +278,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         #[cfg(feature = "enable_db_speed_record")]
         let write_to_db_time = {
-            db_speed_record.write_to_db_size = u64::try_from(state.size()).unwrap();
+            db_speed_record.add_write_to_db_size(u64::try_from(state.size()).unwrap());
             Instant::now()
         };
 
@@ -283,22 +292,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         #[cfg(feature = "enable_db_speed_record")]
         {
-            db_speed_record.write_to_db_time = write_to_db_time.elapsed().as_nanos();
+            db_speed_record.add_write_to_db_time(write_to_db_time.elapsed(), 1);
 
             if let Some(metrics_tx) = &mut self.metrics_tx {
-                let _ = metrics_tx.send(MetricEvent::DBSpeedInfo {
-                    read_header_td_db_time: db_speed_record.read_header_td_db_time,
-                    read_header_td_db_size: db_speed_record.read_header_td_db_size,
-                    read_block_with_senders_db_time: db_speed_record
-                        .read_block_with_senders_db_time,
-                    read_block_with_senders_db_size: db_speed_record
-                        .read_block_with_senders_db_size,
-                    write_to_db_time: db_speed_record.write_to_db_time,
-                    write_to_db_size: db_speed_record.write_to_db_size,
-                });
+                let _ = metrics_tx.send(MetricEvent::DBSpeedInfo { db_speed_record });
             }
-
-            println!("\ndb_speed_record: {:?}\n", db_speed_record);
         }
 
         trace!(target: "sync::stages::execution", took = ?start.elapsed(), "Wrote state");
@@ -309,15 +307,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             if let Some(metrics_tx) = &mut self.metrics_tx {
                 let _ = metrics_tx.send(MetricEvent::ExecutionStageTime {
-                    execute_inner: duration_record.execute_inner.as_nanos(),
-                    read_block: duration_record.read_block.as_nanos(),
-                    execute_tx: duration_record.execute_tx.as_nanos(),
-                    process_state: duration_record.process_state.as_nanos(),
-                    write_to_db: duration_record.write_to_db.as_nanos(),
+                    execute_duration_record: duration_record,
                 });
             }
-
-            println!("duration_record: {:?}", duration_record);
         }
 
         let done = stage_progress == max_block;

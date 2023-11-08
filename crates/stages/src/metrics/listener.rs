@@ -12,6 +12,14 @@ use std::{
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::trace;
 
+#[cfg(feature = "enable_db_speed_record")]
+use super::util::DbSpeedRecord;
+#[cfg(feature = "enable_execution_duration_record")]
+use super::util::ExecutionDurationRecord;
+
+#[cfg(feature = "enable_cache_record")]
+use revm_utils::types::*;
+
 /// Alias type for metric producers to use.
 pub type MetricEventsSender = UnboundedSender<MetricEvent>;
 
@@ -38,51 +46,54 @@ pub enum MetricEvent {
         /// Gas processed.
         gas: u64,
     },
-    // /// Revm metric record.
-    // #[cfg(feature = "enable_opcode_metrics")]
-    // RevmMetricRecord {
-    //     /// Revm metric record.
-    //     record: RevmMetricRecord,
-    //     /// size of cacheDb.
-    //     cachedb_size: usize,
-    // },
     /// Execution stage processed .
     #[cfg(feature = "enable_execution_duration_record")]
     ExecutionStageTime {
-        /// total time of execute_inner
-        execute_inner: u128,
-        /// total time of  get block td and block_with_senders
-        read_block: u128,
-        /// time of revm execute tx(execute_and_verify_receipt)
-        execute_tx: u128,
-        /// time of process state(state.extend)
-        process_state: u128,
-        /// time of write to db
-        write_to_db: u128,
+        /// excution duration record.
+        execute_duration_record: ExecutionDurationRecord,
     },
     /// Execution stage processed some amount of txs and gas in a block.
     #[cfg(feature = "enable_tps_gas_record")]
     BlockTpsAndGas {
+        /// block number
+        block_number: u64,
         /// Txs processed.
         txs: u64,
         /// Gas processed.
         gas: u64,
     },
+    /// block tps and gas record switch
+    #[cfg(feature = "enable_tps_gas_record")]
+    BlockTpsAndGasSwitch {
+        /// true:start block tps and gas record.
+        /// false: stop block tps and gas record.
+        switch: bool,
+    },
     /// db speed metric record
     #[cfg(feature = "enable_db_speed_record")]
     DBSpeedInfo {
-        /// total time of read header td from db
-        read_header_td_db_time: u128,
-        /// total data size of read header td from db
-        read_header_td_db_size: u64,
-        /// total time of read block with senders from db
-        read_block_with_senders_db_time: u128,
-        /// total data size of read block with senders from db
-        read_block_with_senders_db_size: u64,
-        /// time of write to db
-        write_to_db_time: u128,
-        /// data size of write to db
-        write_to_db_size: u64,
+        /// db speed record.
+        db_speed_record: DbSpeedRecord,
+    },
+    /// opcode record in revm
+    #[cfg(feature = "enable_opcode_metrics")]
+    RevmMetricTime {
+        /// opcode record in revm.
+        revm_metric_record: revm_utils::types::RevmMetricRecord,
+    },
+    /// cacheDB size when execute a block
+    #[cfg(feature = "enable_cache_record")]
+    CacheDbSizeInfo {
+        /// block number
+        block_number: u64,
+        /// cache db size
+        cachedb_size: usize,
+    },
+    /// revm cacheDB metric record
+    #[cfg(feature = "enable_cache_record")]
+    CacheDbInfo {
+        /// cache db record.
+        cache_db_record: CacheDbRecord,
     },
 }
 
@@ -92,12 +103,22 @@ pub enum MetricEvent {
 pub struct MetricsListener {
     events_rx: UnboundedReceiver<MetricEvent>,
     pub(crate) sync_metrics: SyncMetrics,
+
+    #[cfg(feature = "open_performance_dashboard")]
+    dashboard_events_tx: MetricEventsSender,
 }
 
 impl MetricsListener {
+    #[cfg(not(feature = "open_performance_dashboard"))]
     /// Creates a new [MetricsListener] with the provided receiver of [MetricEvent].
     pub fn new(events_rx: UnboundedReceiver<MetricEvent>) -> Self {
         Self { events_rx, sync_metrics: SyncMetrics::default() }
+    }
+
+    #[cfg(feature = "open_performance_dashboard")]
+    /// Creates a new [MetricsListener] with the provided receiver of [MetricEvent].
+    pub fn new(events_rx: UnboundedReceiver<MetricEvent>, events_tx: MetricEventsSender) -> Self {
+        Self { events_rx, sync_metrics: SyncMetrics::default(), dashboard_events_tx: events_tx }
     }
 
     fn handle_event(&mut self, event: MetricEvent) {
@@ -137,74 +158,42 @@ impl MetricsListener {
                 .mgas_processed_total
                 .increment(gas as f64 / MGAS_TO_GAS as f64),
             #[cfg(feature = "enable_execution_duration_record")]
-            MetricEvent::ExecutionStageTime {
-                execute_inner,
-                read_block,
-                execute_tx,
-                process_state,
-                write_to_db,
-            } => {
-                self.sync_metrics
-                    .execution_stage
-                    .execute_inner_time
-                    .increment(execute_inner.try_into().expect("truncation error"));
-                self.sync_metrics
-                    .execution_stage
-                    .read_block_info_time
-                    .increment(read_block.try_into().expect("truncation error"));
-                self.sync_metrics
-                    .execution_stage
-                    .revm_execute_time
-                    .increment(execute_tx.try_into().expect("truncation error"));
-                self.sync_metrics
-                    .execution_stage
-                    .post_process_time
-                    .increment(process_state.try_into().expect("truncation error"));
-                self.sync_metrics
-                    .execution_stage
-                    .write_to_db_time
-                    .increment(write_to_db.try_into().expect("truncation error"));
+            MetricEvent::ExecutionStageTime { execute_duration_record } => {
+                let _ = self
+                    .dashboard_events_tx
+                    .send(MetricEvent::ExecutionStageTime { execute_duration_record });
             }
             #[cfg(feature = "enable_tps_gas_record")]
-            MetricEvent::BlockTpsAndGas { txs, gas } => {
-                self.sync_metrics.execution_stage.txs_processed_total.increment(txs);
-                self.sync_metrics
-                    .execution_stage
-                    .mgas_processed_total
-                    .increment(gas as f64 / MGAS_TO_GAS as f64);
+            MetricEvent::BlockTpsAndGas { block_number, txs, gas } => {
+                let _ = self.dashboard_events_tx.send(MetricEvent::BlockTpsAndGas {
+                    block_number,
+                    txs,
+                    gas,
+                });
+            }
+            #[cfg(feature = "enable_tps_gas_record")]
+            MetricEvent::BlockTpsAndGasSwitch { switch } => {
+                let _ = self.dashboard_events_tx.send(MetricEvent::BlockTpsAndGasSwitch { switch });
             }
             #[cfg(feature = "enable_db_speed_record")]
-            MetricEvent::DBSpeedInfo {
-                read_header_td_db_time,
-                read_header_td_db_size,
-                read_block_with_senders_db_time,
-                read_block_with_senders_db_size,
-                write_to_db_time,
-                write_to_db_size,
-            } => {
-                self.sync_metrics
-                    .execution_stage
-                    .read_header_td_db_time
-                    .increment(read_header_td_db_time.try_into().expect("truncation error"));
-                self.sync_metrics
-                    .execution_stage
-                    .read_header_td_db_size
-                    .increment(read_header_td_db_size);
-                self.sync_metrics.execution_stage.read_block_with_senders_db_time.increment(
-                    read_block_with_senders_db_time.try_into().expect("truncation error"),
-                );
-                self.sync_metrics
-                    .execution_stage
-                    .read_block_with_senders_db_size
-                    .increment(read_block_with_senders_db_size);
-                self.sync_metrics
-                    .execution_stage
-                    .db_speed_write_to_db_time
-                    .increment(write_to_db_time.try_into().expect("truncation error"));
-                self.sync_metrics
-                    .execution_stage
-                    .db_speed_write_to_db_size
-                    .increment(write_to_db_size);
+            MetricEvent::DBSpeedInfo { db_speed_record } => {
+                let _ = self.dashboard_events_tx.send(MetricEvent::DBSpeedInfo { db_speed_record });
+            }
+            #[cfg(feature = "enable_opcode_metrics")]
+            MetricEvent::RevmMetricTime { revm_metric_record } => {
+                let _ = self
+                    .dashboard_events_tx
+                    .send(MetricEvent::RevmMetricTime { revm_metric_record });
+            }
+            #[cfg(feature = "enable_cache_record")]
+            MetricEvent::CacheDbSizeInfo { block_number, cachedb_size } => {
+                let _ = self
+                    .dashboard_events_tx
+                    .send(MetricEvent::CacheDbSizeInfo { block_number, cachedb_size });
+            }
+            #[cfg(feature = "enable_cache_record")]
+            MetricEvent::CacheDbInfo { cache_db_record } => {
+                let _ = self.dashboard_events_tx.send(MetricEvent::CacheDbInfo { cache_db_record });
             }
         }
     }

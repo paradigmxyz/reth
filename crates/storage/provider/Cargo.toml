@@ -34,8 +34,8 @@ parking_lot.workspace = true
 reth-rlp = { workspace = true, optional = true }
 
 
-revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard", optional = true }
-# revm-utils = { path = "/home/andy/Source/work/revm/crates/utils", optional = true }
+# revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard", optional = true }
+revm-utils = { workspace = true, optional = true }
 
 minstant = { version = "0.1.3", optional = true }
 

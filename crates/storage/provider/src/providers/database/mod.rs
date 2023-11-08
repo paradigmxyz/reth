@@ -161,7 +161,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     fn header_by_number_with_db_info(
         &self,
         number: BlockNumber,
-    ) -> Result<(Option<Header>, u64, u128)> {
+    ) -> Result<(Option<Header>, u64, std::time::Duration, u64)> {
         self.provider()?.header_by_number_with_db_info(number)
     }
 
@@ -177,7 +177,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     fn header_td_by_number_with_db_info(
         &self,
         number: BlockNumber,
-    ) -> Result<(Option<U256>, u64, u128)> {
+    ) -> Result<(Option<U256>, u64, std::time::Duration, u64)> {
         self.provider()?.header_td_by_number_with_db_info(number)
     }
 
@@ -254,7 +254,7 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
     fn ommers_with_db_info(
         &self,
         id: BlockHashOrNumber,
-    ) -> Result<(Option<Vec<Header>>, u64, u128)> {
+    ) -> Result<(Option<Vec<Header>>, u64, std::time::Duration, u64)> {
         self.provider()?.ommers_with_db_info(id)
     }
 
@@ -266,7 +266,7 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
     fn block_body_indices_with_db_info(
         &self,
         number: u64,
-    ) -> Result<(Option<StoredBlockBodyIndices>, u64, u128)> {
+    ) -> Result<(Option<StoredBlockBodyIndices>, u64, std::time::Duration, u64)> {
         self.provider()?.block_body_indices_with_db_info(number)
     }
 
@@ -274,7 +274,7 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
     fn block_with_senders_with_db_info(
         &self,
         number: BlockNumber,
-    ) -> Result<(Option<BlockWithSenders>, u64, u128)> {
+    ) -> Result<(Option<BlockWithSenders>, u64, std::time::Duration, u64)> {
         self.provider()?.block_with_senders_with_db_info(number)
     }
 
@@ -336,7 +336,7 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
     fn transactions_by_tx_range_with_db_info(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<TransactionSignedNoHash>, u64, u128)> {
+    ) -> Result<(Vec<TransactionSignedNoHash>, u64, std::time::Duration, u64)> {
         self.provider()?.transactions_by_tx_range_with_db_info(range)
     }
 
@@ -348,7 +348,7 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
     fn senders_by_tx_range_with_db_info(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<Address>, u64, u128)> {
+    ) -> Result<(Vec<Address>, u64, std::time::Duration, u64)> {
         self.provider()?.senders_by_tx_range_with_db_info(range)
     }
 
@@ -385,7 +385,7 @@ impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> Result<(Option<Vec<Withdrawal>>, u64, u128)> {
+    ) -> Result<(Option<Vec<Withdrawal>>, u64, std::time::Duration, u64)> {
         self.provider()?.withdrawals_by_block_with_db_info(id, timestamp)
     }
 
