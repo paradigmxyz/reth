@@ -121,12 +121,10 @@ mod tests {
     use super::*;
     use reth_primitives::constants::MAXIMUM_EXTRA_DATA_SIZE;
 
-    
     fn create_test_chain_spec() -> Arc<ChainSpec> {
         Arc::new(ChainSpec::default())
     }
 
-    
     fn create_test_sealed_header() -> SealedHeader {
         SealedHeader::default()
     }
