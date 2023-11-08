@@ -13,7 +13,7 @@ use eyre::WrapErr;
 use human_bytes::human_bytes;
 use reth_db::{
     database::Database,
-    open_db, open_db_read_only,
+    mdbx, open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
     Tables,
 };
@@ -164,6 +164,19 @@ impl Command {
                         .add_cell(Cell::new(""))
                         .add_cell(Cell::new(""))
                         .add_cell(Cell::new(human_bytes(total_size as f64)));
+                    stats_table.add_row(row);
+
+                    let freelist = tx.inner.env().freelist()?;
+                    let freelist_size = freelist *
+                        tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
+
+                    let mut row = Row::new();
+                    row.add_cell(Cell::new("Freelist size"))
+                        .add_cell(Cell::new(freelist))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(""))
+                        .add_cell(Cell::new(human_bytes(freelist_size as f64)));
                     stats_table.add_row(row);
 
                     Ok::<(), eyre::Report>(())
