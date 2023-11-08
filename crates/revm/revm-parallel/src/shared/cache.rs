@@ -7,6 +7,7 @@ use revm::{
     primitives::{Account, AccountInfo, Address, Bytecode, HashMap, B256},
     TransitionState,
 };
+use std::collections::HashSet;
 
 /// Cache state contains both modified and original values.
 ///
@@ -20,6 +21,8 @@ pub struct SharedCacheState {
     pub accounts: RwLock<HashMap<Address, SharedCacheAccount>>,
     /// Mapping of the code hash of created contracts to the respective bytecode.
     pub contracts: DashMap<B256, Bytecode>,
+    /// Touched accounts.
+    pub touched: HashMap<BlockNumber, HashSet<Address>>,
     /// Has EIP-161 state clear enabled (Spurious Dragon hardfork).
     pub has_state_clear: bool,
 }
@@ -36,6 +39,7 @@ impl SharedCacheState {
         Self {
             accounts: RwLock::new(HashMap::default()),
             contracts: DashMap::default(),
+            touched: HashMap::default(),
             has_state_clear,
         }
     }
@@ -86,20 +90,24 @@ impl SharedCacheState {
             let previous_info = this_account.latest_account_info();
 
             for (transition_id, account) in account_states {
+                if account.is_touched() {
+                    self.touched.entry(transition_id.0).or_default().insert(address);
+                }
                 this_account.apply_account_transition(&previous_info, account, transition_id);
             }
         }
     }
 
     /// Take account transitions from shared cache state.
-    pub fn take_transitions(&self, block_number: BlockNumber) -> TransitionState {
+    pub fn take_transitions(&mut self, block_number: BlockNumber) -> TransitionState {
         let mut accounts = self.accounts.write();
-        let mut transitions = HashMap::with_capacity(accounts.len());
-        for (address, account) in accounts.iter_mut() {
+        let mut transitions = HashMap::default();
+        for address in self.touched.remove(&block_number).unwrap_or_default() {
+            let account = accounts.get_mut(&address).unwrap();
             if let Some(transition) =
                 account.finalize_transition(block_number, self.has_state_clear)
             {
-                transitions.insert(*address, transition);
+                transitions.insert(address, transition);
             }
         }
         TransitionState { transitions }
