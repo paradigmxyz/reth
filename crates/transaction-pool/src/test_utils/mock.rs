@@ -309,7 +309,7 @@ impl MockTransaction {
             MockTransaction::Eip2930 { gas_price, .. } => *gas_price = val,
             #[cfg(feature = "optimism")]
             MockTransaction::Deposit(_) => {
-                0u128;
+                let val = 0u128;
             }
         }
         self
@@ -341,7 +341,7 @@ impl MockTransaction {
             }
             #[cfg(feature = "optimism")]
             MockTransaction::Deposit(_) => {
-                0u128;
+                let val = 0u128;
             }
         }
         self
