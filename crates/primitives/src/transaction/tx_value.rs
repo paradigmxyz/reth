@@ -91,6 +91,18 @@ impl Compact for TxValue {
     }
 }
 
+impl std::fmt::Display for TxValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl PartialEq<U256> for TxValue {
+    fn eq(&self, other: &U256) -> bool {
+        self.0.eq(other)
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TxValue {
     #[inline]
@@ -108,12 +120,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TxValue {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for TxValue {
-    #[cfg(feature = "optimism")]
-    type Strategy = proptest::arbitrary::Mapped<U256, Self>;
-    #[cfg(not(feature = "optimism"))]
-    type Strategy = proptest::arbitrary::Mapped<u128, Self>;
     type Parameters = <U256 as proptest::arbitrary::Arbitrary>::Parameters;
-
     #[inline]
     fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
         use proptest::strategy::Strategy;
@@ -127,4 +134,9 @@ impl proptest::arbitrary::Arbitrary for TxValue {
             proptest::prelude::any::<u128>().prop_map(Self::from)
         }
     }
+    #[cfg(feature = "optimism")]
+    type Strategy = proptest::arbitrary::Mapped<U256, Self>;
+
+    #[cfg(not(feature = "optimism"))]
+    type Strategy = proptest::arbitrary::Mapped<u128, Self>;
 }
