@@ -595,7 +595,7 @@ mod tests {
             let server_hello = HelloMessage {
                 protocol_version: ProtocolVersion::V5,
                 client_version: "bitcoind/1.0.0".to_string(),
-                capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
+                capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
                 port: DEFAULT_DISCOVERY_PORT,
                 id: pk2id(&server_key.public_key(SECP256K1)),
             };
@@ -623,7 +623,7 @@ mod tests {
         let client_hello = HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "bitcoind/1.0.0".to_string(),
-            capabilities: vec![Capability::new("eth".into(), EthVersion::Eth67 as usize)],
+            capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
             port: DEFAULT_DISCOVERY_PORT,
             id: pk2id(&client_key.public_key(SECP256K1)),
         };
