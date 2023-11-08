@@ -5,7 +5,8 @@ use crate::{
     error::NetworkError,
     eth_requests::EthRequestHandler,
     transactions::{TransactionsHandle, TransactionsManager},
-    NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkHandle, NetworkManager,
+    NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkHandle,
+    NetworkManager,
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
