@@ -51,7 +51,7 @@ where
     }
 
     async fn peers(&self) -> RpcResult<Vec<PeerInfo>> {
-        let peers = self.network.get_peers().await.to_rpc_result()?;
+        let peers = self.network.get_all_peers().await.to_rpc_result()?;
         let peers = peers
             .into_iter()
             .map(|peer| PeerInfo {
