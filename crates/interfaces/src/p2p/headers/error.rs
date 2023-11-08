@@ -13,10 +13,11 @@ pub enum HeadersDownloaderError {
     #[error("valid downloaded header cannot be attached to the local head: {error}")]
     DetachedHead {
         /// The local head we attempted to attach to.
-        local_head: SealedHeader,
+        local_head: Box<SealedHeader>,
         /// The header we attempted to attach.
-        header: SealedHeader,
+        header: Box<SealedHeader>,
         /// The error that occurred when attempting to attach the header.
+        #[source]
         error: Box<ConsensusError>,
     },
 }

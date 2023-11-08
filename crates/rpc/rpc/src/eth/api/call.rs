@@ -145,11 +145,10 @@ where
 
                 match ensure_success(res.result) {
                     Ok(output) => {
-                        results.push(EthCallResponse { output: Some(output), error: None });
+                        results.push(EthCallResponse { value: Some(output), error: None });
                     }
                     Err(err) => {
-                        results
-                            .push(EthCallResponse { output: None, error: Some(err.to_string()) });
+                        results.push(EthCallResponse { value: None, error: Some(err.to_string()) });
                     }
                 }
 
@@ -231,11 +230,11 @@ where
 
         // if the provided gas limit is less than computed cap, use that
         let gas_limit = std::cmp::min(U256::from(env.tx.gas_limit), highest_gas_limit);
-        env.block.gas_limit = gas_limit;
+        env.tx.gas_limit = gas_limit.saturating_to();
 
         trace!(target: "rpc::eth::estimate", ?env, "Starting gas estimation");
 
-        // execute the call without writing to db
+        // transact with the highest __possible__ gas limit
         let ethres = transact(&mut db, env.clone());
 
         // Exceptional case: init used too much gas, we need to increase the gas limit and try
@@ -255,6 +254,8 @@ where
                 // succeeded
             }
             ExecutionResult::Halt { reason, gas_used } => {
+                // here we don't check for invalid opcode because already executed with highest gas
+                // limit
                 return Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
             }
             ExecutionResult::Revert { output, .. } => {
@@ -317,7 +318,11 @@ where
                 }
                 ExecutionResult::Halt { reason, .. } => {
                     match reason {
-                        Halt::OutOfGas(_) => {
+                        Halt::OutOfGas(_) | Halt::InvalidFEOpcode => {
+                            // either out of gas or invalid opcode can be thrown dynamically if
+                            // gasLeft is too low, so we treat this as `out of gas`, we know this
+                            // call succeeds with a higher gaslimit. common usage of invalid opcode in openzeppelin <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
+
                             // increase the lowest gas limit
                             lowest_gas_limit = mid_gas_limit;
                         }

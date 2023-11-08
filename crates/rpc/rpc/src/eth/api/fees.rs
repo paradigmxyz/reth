@@ -163,7 +163,7 @@ where
 
                 Some(TxGasAndReward {
                     gas_used,
-                    reward: tx.effective_gas_tip(header.base_fee_per_gas).unwrap_or_default(),
+                    reward: tx.effective_tip_per_gas(header.base_fee_per_gas).unwrap_or_default(),
                 })
             })
             .collect::<Vec<_>>();

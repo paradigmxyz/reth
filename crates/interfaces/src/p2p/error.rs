@@ -1,7 +1,9 @@
 use super::headers::client::HeadersRequest;
-use crate::{consensus, db};
+use crate::{consensus::ConsensusError, db};
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{BlockHashOrNumber, BlockNumber, Header, WithPeerId, B256};
+use reth_primitives::{
+    BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, WithPeerId, B256,
+};
 use std::ops::RangeInclusive;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -118,47 +120,28 @@ pub type DownloadResult<T> = Result<T, DownloadError>;
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum DownloadError {
     /* ==================== HEADER ERRORS ==================== */
-    /// Header validation failed
+    /// Header validation failed.
     #[error("failed to validate header {hash}: {error}")]
     HeaderValidation {
         /// Hash of header failing validation
         hash: B256,
         /// The details of validation failure
         #[source]
-        error: consensus::ConsensusError,
+        error: Box<ConsensusError>,
     },
-    /// Received an invalid tip
-    #[error("received invalid tip: {received}. Expected {expected}")]
-    InvalidTip {
-        /// The hash of the received tip
-        received: B256,
-        /// The hash of the expected tip
-        expected: B256,
-    },
-    /// Received a tip with an invalid tip number
-    #[error("received invalid tip number: {received}. Expected {expected}")]
-    InvalidTipNumber {
-        /// The block number of the received tip
-        received: u64,
-        /// The block number of the expected tip
-        expected: u64,
-    },
+    /// Received an invalid tip.
+    #[error("received invalid tip: {0}")]
+    InvalidTip(GotExpectedBoxed<B256>),
+    /// Received a tip with an invalid tip number.
+    #[error("received invalid tip number: {0}")]
+    InvalidTipNumber(GotExpected<u64>),
     /// Received a response to a request with unexpected start block
-    #[error("headers response starts at unexpected block: {received}. Expected {expected}")]
-    HeadersResponseStartBlockMismatch {
-        /// The block number of the received tip
-        received: u64,
-        /// The hash of the expected tip
-        expected: u64,
-    },
+    #[error("headers response starts at unexpected block: {0}")]
+    HeadersResponseStartBlockMismatch(GotExpected<u64>),
     /// Received headers with less than expected items.
-    #[error("received less headers than expected: {received}. Expected {expected}")]
-    HeadersResponseTooShort {
-        /// How many headers we received.
-        received: u64,
-        /// How many headers we expected.
-        expected: u64,
-    },
+    #[error("received less headers than expected: {0}")]
+    HeadersResponseTooShort(GotExpected<u64>),
+
     /* ==================== BODIES ERRORS ==================== */
     /// Block validation failed
     #[error("failed to validate body for header {hash}: {error}")]
@@ -167,16 +150,11 @@ pub enum DownloadError {
         hash: B256,
         /// The details of validation failure
         #[source]
-        error: consensus::ConsensusError,
+        error: Box<ConsensusError>,
     },
     /// Received more bodies than requested.
-    #[error("received more bodies than requested. Expected: {expected}. Received: {received}")]
-    TooManyBodies {
-        /// How many bodies we received.
-        received: usize,
-        /// How many bodies we expected.
-        expected: usize,
-    },
+    #[error("received more bodies than requested: {0}")]
+    TooManyBodies(GotExpected<usize>),
     /// Headers missing from the database.
     #[error("header missing from the database: {block_number}")]
     MissingHeader {

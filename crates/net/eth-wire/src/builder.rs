@@ -10,9 +10,8 @@ use reth_primitives::{Chain, ForkId, PeerId, B256, U256};
 ///
 /// # Example
 /// ```
-/// use reth_eth_wire::EthVersion;
-/// use reth_primitives::{Chain, U256, B256, MAINNET_GENESIS_HASH, MAINNET, Hardfork};
-/// use reth_eth_wire::types::Status;
+/// use reth_eth_wire::{types::Status, EthVersion};
+/// use reth_primitives::{Chain, Hardfork, B256, MAINNET, MAINNET_GENESIS_HASH, U256};
 ///
 /// // this is just an example status message!
 /// let status = Status::builder()

@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
 use crate::{
-    args::GasPriceOracleArgs,
+    args::{types::ZeroAsNone, GasPriceOracleArgs},
     cli::{
         components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
         config::RethRpcConfig,
@@ -52,7 +52,7 @@ pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 /// Default max response size in MB.
 ///
 /// This is only relevant for very large trace responses.
-pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 115;
+pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 150;
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
@@ -116,9 +116,22 @@ pub struct RpcServerArgs {
     #[arg(long = "authrpc.port", default_value_t = constants::DEFAULT_AUTH_PORT)]
     pub auth_port: u16,
 
-    /// Path to a JWT secret to use for authenticated RPC endpoints
+    /// Path to a JWT secret to use for the authenticated engine-API RPC server.
+    ///
+    /// This will enforce JWT authentication for all requests coming from the consensus layer.
+    ///
+    /// If no path is provided, a secret will be generated and stored in the datadir under
+    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
     pub auth_jwtsecret: Option<PathBuf>,
+
+    /// Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and
+    /// `--ws.api`.
+    ///
+    /// This is __not__ used for the authenticated engine-API RPC server, see
+    /// `--authrpc.jwtsecret`.
+    #[arg(long = "rpc.jwtsecret", value_name = "HEX", global = true, required = false)]
+    pub rpc_jwtsecret: Option<JwtSecret>,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
     #[arg(long, default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB)]
@@ -140,9 +153,13 @@ pub struct RpcServerArgs {
     #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_TRACING_REQUESTS)]
     pub rpc_max_tracing_requests: u32,
 
-    /// Maximum number of logs that can be returned in a single response.
-    #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_LOGS_PER_RESPONSE)]
-    pub rpc_max_logs_per_response: usize,
+    /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
+    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNone::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
+    pub rpc_max_blocks_per_filter: ZeroAsNone,
+
+    /// Maximum number of logs that can be returned in a single response. (0 = no limit)
+    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNone::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
+    pub rpc_max_logs_per_response: ZeroAsNone,
 
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     #[arg(
@@ -326,7 +343,8 @@ impl RethRpcConfig for RpcServerArgs {
     fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
-            .max_logs_per_response(self.rpc_max_logs_per_response)
+            .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
+            .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
             .rpc_gas_cap(self.rpc_gas_cap)
             .gpo_config(self.gas_price_oracle_config())
     }
@@ -392,7 +410,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn rpc_server_config(&self) -> RpcServerConfig {
-        let mut config = RpcServerConfig::default();
+        let mut config = RpcServerConfig::default().with_jwt_secret(self.rpc_secret_key());
 
         if self.http {
             let socket_address = SocketAddr::new(self.http_addr, self.http_port);
@@ -422,7 +440,7 @@ impl RethRpcConfig for RpcServerArgs {
         Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
     }
 
-    fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
+    fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
         match self.auth_jwtsecret.as_ref() {
             Some(fpath) => {
                 debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
@@ -438,6 +456,10 @@ impl RethRpcConfig for RpcServerArgs {
                 }
             }
         }
+    }
+
+    fn rpc_secret_key(&self) -> Option<JwtSecret> {
+        self.rpc_jwtsecret.clone()
     }
 }
 
@@ -597,5 +619,37 @@ mod tests {
             SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8888))
         );
         assert_eq!(config.ipc_endpoint().unwrap().path(), constants::DEFAULT_IPC_ENDPOINT);
+    }
+
+    #[test]
+    fn test_zero_filter_limits() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc-max-blocks-per-filter",
+            "0",
+            "--rpc-max-logs-per-response",
+            "0",
+        ])
+        .args;
+
+        let config = args.eth_config().filter_config();
+        assert_eq!(config.max_blocks_per_filter, Some(u64::MAX));
+        assert_eq!(config.max_logs_per_response, Some(usize::MAX));
+    }
+
+    #[test]
+    fn test_custom_filter_limits() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc-max-blocks-per-filter",
+            "100",
+            "--rpc-max-logs-per-response",
+            "200",
+        ])
+        .args;
+
+        let config = args.eth_config().filter_config();
+        assert_eq!(config.max_blocks_per_filter, Some(100));
+        assert_eq!(config.max_logs_per_response, Some(200));
     }
 }

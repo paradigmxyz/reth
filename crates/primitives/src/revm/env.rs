@@ -4,8 +4,11 @@ use crate::{
     revm::config::revm_spec,
     revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
     Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, B256, U256,
+    TransactionSignedEcRecovered, B256, U256,
 };
+
+#[cfg(feature = "optimism")]
+use revm_primitives::OptimismFields;
 
 /// Convenience function to call both [fill_cfg_env] and [fill_block_env]
 pub fn fill_cfg_and_block_env(
@@ -41,6 +44,11 @@ pub fn fill_cfg_env(
     cfg_env.chain_id = chain_spec.chain().id();
     cfg_env.spec_id = spec_id;
     cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+
+    #[cfg(feature = "optimism")]
+    {
+        cfg_env.optimism = chain_spec.is_optimism();
+    }
 }
 
 /// Fill block environment from Block.
@@ -109,7 +117,17 @@ pub fn recover_header_signer(header: &Header) -> Option<Address> {
 /// Returns a new [TxEnv] filled with the transaction's data.
 pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEnv {
     let mut tx_env = TxEnv::default();
+
+    #[cfg(not(feature = "optimism"))]
     fill_tx_env(&mut tx_env, transaction.as_ref(), transaction.signer());
+
+    #[cfg(feature = "optimism")]
+    {
+        let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
+        transaction.encode_enveloped(&mut envelope_buf);
+        fill_tx_env(&mut tx_env, transaction.as_ref(), transaction.signer(), envelope_buf.into());
+    }
+
     tx_env
 }
 
@@ -149,6 +167,13 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
         // blob fields can be None for this tx
         blob_hashes: Vec::new(),
         max_fee_per_blob_gas: None,
+        #[cfg(feature = "optimism")]
+        optimism: OptimismFields {
+            source_hash: None,
+            mint: None,
+            is_system_transaction: Some(false),
+            enveloped_tx: None,
+        },
     };
 
     // ensure the block gas limit is >= the tx
@@ -159,63 +184,65 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
 }
 
 /// Fill transaction environment from [TransactionSignedEcRecovered].
+#[cfg(not(feature = "optimism"))]
 pub fn fill_tx_env_with_recovered(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
-    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer())
+    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
+}
+
+/// Fill transaction environment from [TransactionSignedEcRecovered] and the given envelope.
+#[cfg(feature = "optimism")]
+pub fn fill_tx_env_with_recovered(
+    tx_env: &mut TxEnv,
+    transaction: &TransactionSignedEcRecovered,
+    envelope: Bytes,
+) {
+    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
 }
 
 /// Fill transaction environment from a [Transaction] and the given sender address.
-pub fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address)
-where
+pub fn fill_tx_env<T>(
+    tx_env: &mut TxEnv,
+    transaction: T,
+    sender: Address,
+    #[cfg(feature = "optimism")] envelope: Bytes,
+) where
     T: AsRef<Transaction>,
 {
     tx_env.caller = sender;
     match transaction.as_ref() {
-        Transaction::Legacy(TxLegacy {
-            nonce,
-            chain_id,
-            gas_price,
-            gas_limit,
-            to,
-            value,
-            input,
-        }) => {
-            tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = U256::from(*gas_price);
+        Transaction::Legacy(tx) => {
+            tx_env.gas_limit = tx.gas_limit;
+            tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
-            tx_env.transact_to = match to {
-                TransactionKind::Call(to) => TransactTo::Call(*to),
+            tx_env.transact_to = match tx.to {
+                TransactionKind::Call(to) => TransactTo::Call(to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
-            tx_env.data = input.clone();
-            tx_env.chain_id = *chain_id;
-            tx_env.nonce = Some(*nonce);
+            tx_env.value = tx.value.into();
+            tx_env.data = tx.input.clone();
+            tx_env.chain_id = tx.chain_id;
+            tx_env.nonce = Some(tx.nonce);
             tx_env.access_list.clear();
             tx_env.blob_hashes.clear();
             tx_env.max_fee_per_blob_gas.take();
+
+            #[cfg(feature = "optimism")]
+            fill_op_tx_env(tx_env, transaction, envelope);
         }
-        Transaction::Eip2930(TxEip2930 {
-            nonce,
-            chain_id,
-            gas_price,
-            gas_limit,
-            to,
-            value,
-            input,
-            access_list,
-        }) => {
-            tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = U256::from(*gas_price);
+        Transaction::Eip2930(tx) => {
+            tx_env.gas_limit = tx.gas_limit;
+            tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
-            tx_env.transact_to = match to {
-                TransactionKind::Call(to) => TransactTo::Call(*to),
+            tx_env.transact_to = match tx.to {
+                TransactionKind::Call(to) => TransactTo::Call(to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
-            tx_env.data = input.clone();
-            tx_env.chain_id = Some(*chain_id);
-            tx_env.nonce = Some(*nonce);
-            tx_env.access_list = access_list
+            tx_env.value = tx.value.into();
+            tx_env.data = tx.input.clone();
+            tx_env.chain_id = Some(tx.chain_id);
+            tx_env.nonce = Some(tx.nonce);
+            tx_env.access_list = tx
+                .access_list
                 .0
                 .iter()
                 .map(|l| {
@@ -224,30 +251,24 @@ where
                 .collect();
             tx_env.blob_hashes.clear();
             tx_env.max_fee_per_blob_gas.take();
+
+            #[cfg(feature = "optimism")]
+            fill_op_tx_env(tx_env, transaction, envelope);
         }
-        Transaction::Eip1559(TxEip1559 {
-            nonce,
-            chain_id,
-            gas_limit,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-            to,
-            value,
-            input,
-            access_list,
-        }) => {
-            tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = U256::from(*max_fee_per_gas);
-            tx_env.gas_priority_fee = Some(U256::from(*max_priority_fee_per_gas));
-            tx_env.transact_to = match to {
-                TransactionKind::Call(to) => TransactTo::Call(*to),
+        Transaction::Eip1559(tx) => {
+            tx_env.gas_limit = tx.gas_limit;
+            tx_env.gas_price = U256::from(tx.max_fee_per_gas);
+            tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+            tx_env.transact_to = match tx.to {
+                TransactionKind::Call(to) => TransactTo::Call(to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
-            tx_env.data = input.clone();
-            tx_env.chain_id = Some(*chain_id);
-            tx_env.nonce = Some(*nonce);
-            tx_env.access_list = access_list
+            tx_env.value = tx.value.into();
+            tx_env.data = tx.input.clone();
+            tx_env.chain_id = Some(tx.chain_id);
+            tx_env.nonce = Some(tx.nonce);
+            tx_env.access_list = tx
+                .access_list
                 .0
                 .iter()
                 .map(|l| {
@@ -256,40 +277,98 @@ where
                 .collect();
             tx_env.blob_hashes.clear();
             tx_env.max_fee_per_blob_gas.take();
+
+            #[cfg(feature = "optimism")]
+            fill_op_tx_env(tx_env, transaction, envelope);
         }
-        Transaction::Eip4844(TxEip4844 {
-            nonce,
-            chain_id,
-            gas_limit,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-            to,
-            value,
-            access_list,
-            blob_versioned_hashes,
-            max_fee_per_blob_gas,
-            input,
-        }) => {
-            tx_env.gas_limit = *gas_limit;
-            tx_env.gas_price = U256::from(*max_fee_per_gas);
-            tx_env.gas_priority_fee = Some(U256::from(*max_priority_fee_per_gas));
-            tx_env.transact_to = match to {
-                TransactionKind::Call(to) => TransactTo::Call(*to),
+        Transaction::Eip4844(tx) => {
+            tx_env.gas_limit = tx.gas_limit;
+            tx_env.gas_price = U256::from(tx.max_fee_per_gas);
+            tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+            tx_env.transact_to = match tx.to {
+                TransactionKind::Call(to) => TransactTo::Call(to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = (*value).into();
-            tx_env.data = input.clone();
-            tx_env.chain_id = Some(*chain_id);
-            tx_env.nonce = Some(*nonce);
-            tx_env.access_list = access_list
+            tx_env.value = tx.value.into();
+            tx_env.data = tx.input.clone();
+            tx_env.chain_id = Some(tx.chain_id);
+            tx_env.nonce = Some(tx.nonce);
+            tx_env.access_list = tx
+                .access_list
                 .0
                 .iter()
                 .map(|l| {
                     (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
                 })
                 .collect();
-            tx_env.blob_hashes = blob_versioned_hashes.clone();
-            tx_env.max_fee_per_blob_gas = Some(U256::from(*max_fee_per_blob_gas));
+            tx_env.blob_hashes = tx.blob_versioned_hashes.clone();
+            tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
+
+            #[cfg(feature = "optimism")]
+            fill_op_tx_env(tx_env, transaction, envelope);
         }
+        #[cfg(feature = "optimism")]
+        Transaction::Deposit(tx) => {
+            tx_env.gas_limit = tx.gas_limit;
+            tx_env.gas_price = U256::ZERO;
+            tx_env.gas_priority_fee = None;
+            match tx.to {
+                TransactionKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
+                TransactionKind::Create => tx_env.transact_to = TransactTo::create(),
+            }
+            tx_env.value = tx.value.into();
+            tx_env.data = tx.input.clone();
+            tx_env.chain_id = None;
+            tx_env.nonce = None;
+
+            fill_op_tx_env(tx_env, transaction, envelope);
+        }
+    }
+}
+
+#[cfg(feature = "optimism")]
+#[inline(always)]
+fn fill_op_tx_env<T: AsRef<Transaction>>(tx_env: &mut TxEnv, transaction: T, envelope: Bytes) {
+    match transaction.as_ref() {
+        Transaction::Deposit(tx) => {
+            tx_env.optimism = OptimismFields {
+                source_hash: Some(tx.source_hash),
+                mint: tx.mint,
+                is_system_transaction: Some(tx.is_system_transaction),
+                enveloped_tx: Some(envelope),
+            };
+        }
+        _ => {
+            tx_env.optimism = OptimismFields {
+                source_hash: None,
+                mint: None,
+                is_system_transaction: Some(false),
+                enveloped_tx: Some(envelope),
+            }
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn test_fill_cfg_and_block_env() {
+        let mut cfg_env = CfgEnv::default();
+        let mut block_env = BlockEnv::default();
+        let header = Header::default();
+        let chain_spec = ChainSpec::default();
+        let total_difficulty = U256::ZERO;
+
+        fill_cfg_and_block_env(
+            &mut cfg_env,
+            &mut block_env,
+            &chain_spec,
+            &header,
+            total_difficulty,
+        );
+
+        assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
     }
 }

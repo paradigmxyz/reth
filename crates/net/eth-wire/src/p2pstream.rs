@@ -13,11 +13,11 @@ use reth_codecs::derive_arbitrary;
 use reth_metrics::metrics::counter;
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    hex,
+    hex, GotExpected,
 };
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
-    io,
+    fmt, io,
     pin::Pin,
     task::{ready, Context, Poll},
     time::Duration,
@@ -26,6 +26,7 @@ use tokio_stream::Stream;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use tracing::{debug, trace};
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
@@ -93,7 +94,7 @@ where
         mut self,
         hello: HelloMessage,
     ) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
-        tracing::trace!(?hello, "sending p2p hello to peer");
+        trace!(?hello, "sending p2p hello to peer");
 
         // send our hello message with the Sink
         let mut raw_hello_bytes = BytesMut::new();
@@ -123,21 +124,26 @@ where
         let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..]) {
             Ok(P2PMessage::Hello(hello)) => Ok(hello),
             Ok(P2PMessage::Disconnect(reason)) => {
-                tracing::debug!("Disconnected by peer during handshake: {}", reason);
+                if matches!(reason, DisconnectReason::TooManyPeers) {
+                    // Too many peers is a very common disconnect reason that spams the DEBUG logs
+                    trace!(%reason, "Disconnected by peer during handshake");
+                } else {
+                    debug!(%reason, "Disconnected by peer during handshake");
+                };
                 counter!("p2pstream.disconnected_errors", 1);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             Err(err) => {
-                tracing::debug!(?err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
+                debug!(?err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
                 Err(P2PStreamError::HandshakeError(err.into()))
             }
             Ok(msg) => {
-                tracing::debug!("expected hello message but received: {:?}", msg);
+                debug!(?msg, "expected hello message but received another message");
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::NonHelloMessageInHandshake))
             }
         }?;
 
-        tracing::trace!(
+        trace!(
             hello=?their_hello,
             "validating incoming p2p hello from peer"
         );
@@ -145,10 +151,10 @@ where
         if (hello.protocol_version as u8) != their_hello.protocol_version as u8 {
             // send a disconnect message notifying the peer of the protocol version mismatch
             self.send_disconnect(DisconnectReason::IncompatibleP2PProtocolVersion).await?;
-            return Err(P2PStreamError::MismatchedProtocolVersion {
-                expected: hello.protocol_version as u8,
-                got: their_hello.protocol_version as u8,
-            })
+            return Err(P2PStreamError::MismatchedProtocolVersion(GotExpected {
+                got: their_hello.protocol_version,
+                expected: hello.protocol_version,
+            }))
         }
 
         // determine shared capabilities (currently returns only one capability)
@@ -181,7 +187,7 @@ where
     ) -> Result<(), P2PStreamError> {
         let mut buf = BytesMut::new();
         P2PMessage::Disconnect(reason).encode(&mut buf);
-        tracing::trace!(
+        trace!(
             %reason,
             "Sending disconnect message during the handshake",
         );
@@ -311,7 +317,7 @@ impl<S> P2PStream<S> {
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(buf.len() - 1));
         let compressed_size =
             self.encoder.compress(&buf[1..], &mut compressed[1..]).map_err(|err| {
-                tracing::debug!(
+                debug!(
                     ?err,
                     msg=%hex::encode(&buf[1..]),
                     "error compressing disconnect"
@@ -389,7 +395,7 @@ where
             // each message following a successful handshake is compressed with snappy, so we need
             // to decompress the message before we can decode it.
             this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..]).map_err(|err| {
-                tracing::debug!(
+                debug!(
                     ?err,
                     msg=%hex::encode(&bytes[1..]),
                     "error decompressing p2p message"
@@ -400,7 +406,7 @@ where
             let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
             match id {
                 _ if id == P2PMessageID::Ping as u8 => {
-                    tracing::trace!("Received Ping, Sending Pong");
+                    trace!("Received Ping, Sending Pong");
                     this.send_pong();
                     // This is required because the `Sink` may not be polled externally, and if
                     // that happens, the pong will never be sent.
@@ -408,7 +414,7 @@ where
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
                     let reason = DisconnectReason::decode(&mut &decompress_buf[1..]).map_err(|err| {
-                        tracing::debug!(
+                        debug!(
                             ?err, msg=%hex::encode(&decompress_buf[1..]), "Failed to decode disconnect message from peer"
                         );
                         err
@@ -519,7 +525,7 @@ where
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
         let compressed_size =
             this.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
-                tracing::debug!(
+                debug!(
                     ?err,
                     msg=%hex::encode(&item[1..]),
                     "error compressing p2p message"
@@ -633,7 +639,7 @@ pub fn set_capability_offsets(
         match shared_capability {
             SharedCapability::UnknownCapability { .. } => {
                 // Capabilities which are not shared are ignored
-                tracing::debug!("unknown capability: name={:?}, version={}", name, version,);
+                debug!("unknown capability: name={:?}, version={}", name, version,);
             }
             SharedCapability::Eth { .. } => {
                 // increment the offset if the capability is known
@@ -817,6 +823,12 @@ pub enum ProtocolVersion {
     V5 = 5,
 }
 
+impl fmt::Display for ProtocolVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "v{}", *self as u8)
+    }
+}
+
 impl Encodable for ProtocolVersion {
     fn encode(&self, out: &mut dyn BufMut) {
         (*self as u8).encode(out)
@@ -964,9 +976,9 @@ mod tests {
                 Ok((_, hello)) => {
                     panic!("expected handshake to fail, instead got a successful Hello: {hello:?}")
                 }
-                Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
-                    assert_eq!(expected, server_hello.protocol_version as u8);
+                Err(P2PStreamError::MismatchedProtocolVersion(GotExpected { got, expected })) => {
                     assert_ne!(expected, got);
+                    assert_eq!(expected, server_hello.protocol_version);
                 }
                 Err(other_err) => {
                     panic!("expected mismatched protocol version error, got {other_err:?}")
@@ -987,9 +999,9 @@ mod tests {
             Ok((_, hello)) => {
                 panic!("expected handshake to fail, instead got a successful Hello: {hello:?}")
             }
-            Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
-                assert_eq!(expected, client_hello.protocol_version as u8);
+            Err(P2PStreamError::MismatchedProtocolVersion(GotExpected { got, expected })) => {
                 assert_ne!(expected, got);
+                assert_eq!(expected, client_hello.protocol_version);
             }
             Err(other_err) => {
                 panic!("expected mismatched protocol version error, got {other_err:?}")

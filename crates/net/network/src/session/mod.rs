@@ -202,7 +202,7 @@ impl SessionManager {
         let session_id = self.next_id();
 
         trace!(
-            target : "net::session",
+            target: "net::session",
             ?remote_addr,
             ?session_id,
             "new pending incoming session"
@@ -347,7 +347,7 @@ impl SessionManager {
                 return match event {
                     ActiveSessionMessage::Disconnected { peer_id, remote_addr } => {
                         trace!(
-                            target : "net::session",
+                            target: "net::session",
                             ?peer_id,
                             "gracefully disconnected active session."
                         );
@@ -359,7 +359,7 @@ impl SessionManager {
                         remote_addr,
                         error,
                     } => {
-                        trace!(target : "net::session",  ?peer_id, ?error,"closed session.");
+                        trace!(target: "net::session",  ?peer_id, ?error,"closed session.");
                         self.remove_active_session(&peer_id);
                         Poll::Ready(SessionEvent::SessionClosedOnConnectionError {
                             remote_addr,
@@ -407,7 +407,7 @@ impl SessionManager {
                 // If there's already a session to the peer then we disconnect right away
                 if self.active_sessions.contains_key(&peer_id) {
                     trace!(
-                        target : "net::session",
+                        target: "net::session",
                         ?session_id,
                         ?remote_addr,
                         ?peer_id,
@@ -465,9 +465,9 @@ impl SessionManager {
 
                 self.spawn(session);
 
-                let client_version = Arc::new(client_id);
+                let client_version = client_id.into();
                 let handle = ActiveSessionHandle {
-                    status,
+                    status: status.clone(),
                     direction,
                     session_id,
                     remote_id: peer_id,
@@ -501,7 +501,7 @@ impl SessionManager {
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
                 trace!(
-                    target : "net::session",
+                    target: "net::session",
                     ?session_id,
                     ?remote_addr,
                     ?error,
@@ -531,7 +531,7 @@ impl SessionManager {
                 error,
             } => {
                 trace!(
-                    target : "net::session",
+                    target: "net::session",
                     ?error,
                     ?session_id,
                     ?remote_addr,
@@ -544,7 +544,7 @@ impl SessionManager {
             PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
                 self.remove_pending_session(&session_id);
                 trace!(
-                    target : "net::session",
+                    target: "net::session",
                     ?error,
                     ?session_id,
                     ?remote_addr,
@@ -571,15 +571,32 @@ impl SessionManager {
     }
 
     /// Returns [`PeerInfo`] for all connected peers
-    pub fn get_peer_info(&self) -> Vec<PeerInfo> {
+    pub(crate) fn get_peer_info(&self) -> Vec<PeerInfo> {
         self.active_sessions.values().map(ActiveSessionHandle::peer_info).collect()
     }
 
     /// Returns [`PeerInfo`] for a given peer.
     ///
     /// Returns `None` if there's no active session to the peer.
-    pub fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
+    pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
         self.active_sessions.get(&peer_id).map(ActiveSessionHandle::peer_info)
+    }
+    /// Returns [`PeerInfo`] for a given peer.
+    ///
+    /// Returns `None` if there's no active session to the peer.
+    pub(crate) fn get_peer_infos_by_ids(
+        &self,
+        peer_ids: impl IntoIterator<Item = PeerId>,
+    ) -> Vec<PeerInfo> {
+        let mut infos = Vec::new();
+        for peer_id in peer_ids {
+            if let Some(info) =
+                self.active_sessions.get(&peer_id).map(ActiveSessionHandle::peer_info)
+            {
+                infos.push(info);
+            }
+        }
+        infos
     }
 }
 
@@ -595,13 +612,13 @@ pub enum SessionEvent {
         /// The remote node's socket address
         remote_addr: SocketAddr,
         /// The user agent of the remote node, usually containing the client name and version
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         /// The capabilities the remote node has announced
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,
         /// The Status message the peer sent during the `eth` handshake
-        status: Status,
+        status: Arc<Status>,
         /// The channel for sending messages to the peer with the session
         messages: PeerRequestSender,
         /// The direction of the session, either `Inbound` or `Outgoing`
@@ -761,7 +778,7 @@ async fn start_pending_outbound_session(
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
             if let Err(err) = stream.set_nodelay(true) {
-                tracing::warn!(target : "net::session", "set nodelay failed: {:?}", err);
+                tracing::warn!(target: "net::session", "set nodelay failed: {:?}", err);
             }
             MeteredStream::new_with_meter(stream, bandwidth_meter)
         }
@@ -917,8 +934,8 @@ async fn authenticate_stream(
         local_addr,
         peer_id: their_hello.id,
         capabilities: Arc::new(Capabilities::from(their_hello.capabilities)),
-        status: their_status,
-        conn: eth_stream,
+        status: Arc::new(their_status),
+        conn: Box::new(eth_stream),
         direction,
         client_id: their_hello.client_version,
     }

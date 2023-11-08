@@ -5617,7 +5617,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "100% = 1 core",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {

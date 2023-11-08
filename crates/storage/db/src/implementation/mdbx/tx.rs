@@ -11,7 +11,7 @@ use crate::{
     DatabaseError,
 };
 use parking_lot::RwLock;
-use reth_interfaces::db::DatabaseWriteOperation;
+use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
 use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
 
@@ -238,12 +238,13 @@ impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
             Some(value.as_ref().len()),
             |tx| {
                 tx.put(self.get_dbi::<T>()?, key.as_ref(), value, WriteFlags::UPSERT).map_err(|e| {
-                    DatabaseError::Write {
+                    DatabaseWriteError {
                         code: e.into(),
                         operation: DatabaseWriteOperation::Put,
                         table_name: T::NAME,
-                        key: Box::from(key.as_ref()),
+                        key: key.into(),
                     }
+                    .into()
                 })
             },
         )

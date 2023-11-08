@@ -1,6 +1,6 @@
 //! Util functions for revm related ops
 
-use reth_primitives::{hex, Address, B256};
+use reth_primitives::{hex, revm_primitives::db::DatabaseRef, Address, Bytes, B256, KECCAK_EMPTY};
 use revm::{
     interpreter::CreateInputs,
     primitives::{CreateScheme, SpecId},
@@ -34,4 +34,26 @@ pub(crate) fn get_create_address(call: &CreateInputs, nonce: u64) -> Address {
             call.caller.create2_from_code(B256::from(salt), call.init_code.clone())
         }
     }
+}
+
+/// Loads the code for the given account from the account itself or the database
+///
+/// Returns None if the code hash is the KECCAK_EMPTY hash
+#[inline]
+pub(crate) fn load_account_code<DB: DatabaseRef>(
+    db: DB,
+    db_acc: &revm::primitives::AccountInfo,
+) -> Option<Bytes> {
+    db_acc
+        .code
+        .as_ref()
+        .map(|code| code.original_bytes())
+        .or_else(|| {
+            if db_acc.code_hash == KECCAK_EMPTY {
+                None
+            } else {
+                db.code_by_hash_ref(db_acc.code_hash).ok().map(|code| code.original_bytes())
+            }
+        })
+        .map(Into::into)
 }
