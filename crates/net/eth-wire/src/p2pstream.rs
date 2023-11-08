@@ -207,6 +207,27 @@ where
 
 /// A P2PStream wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
 /// protocol messages.
+///
+/// This stream supports multiple shared capabilities, that were negotiated during the handshake.
+///
+/// ### Message-ID based multiplexing
+///
+/// > Each capability is given as much of the message-ID space as it needs. All such capabilities
+/// > must statically specify how many message IDs they require. On connection and reception of the
+/// > Hello message, both peers have equivalent information about what capabilities they share
+/// > (including versions) and are able to form consensus over the composition of message ID space.
+///
+/// > Message IDs are assumed to be compact from ID 0x10 onwards (0x00-0x0f is reserved for the
+/// > "p2p" capability) and given to each shared (equal-version, equal-name) capability in
+/// > alphabetic order. Capability names are case-sensitive. Capabilities which are not shared are
+/// > ignored. If multiple versions are shared of the same (equal name) capability, the numerically
+/// > highest wins, others are ignored.
+///
+/// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#message-id-based-multiplexing>
+///
+/// This stream emits Bytes that start with the normalized message id, so that the first byte of
+/// each message starts from 0. If this stream only supports a single capability, for example `eth`
+/// then the first byte of each message will match [EthMessageID](crate::types::EthMessageID).
 #[pin_project]
 #[derive(Debug)]
 pub struct P2PStream<S> {
@@ -269,6 +290,9 @@ impl<S> P2PStream<S> {
     }
 
     /// Returns the shared capabilities for this stream.
+    ///
+    /// This includes all the shared capabilities that were negotiated during the handshake and
+    /// their offsets based on the number of messages of each capability.
     pub fn shared_capabilities(&self) -> &SharedCapabilities {
         &self.shared_capabilities
     }
