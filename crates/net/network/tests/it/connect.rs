@@ -12,7 +12,7 @@ use reth_interfaces::{
 use reth_net_common::ban_list::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
-    NetworkConfigBuilder, NetworkEvent, NetworkManager, PeersConfig,
+    NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
 use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId};

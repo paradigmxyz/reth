@@ -140,7 +140,7 @@ pub use discovery::{Discovery, DiscoveryEvent};
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
-pub use network::NetworkHandle;
+pub use network::{NetworkEvents, NetworkHandle};
 pub use peers::PeersConfig;
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
