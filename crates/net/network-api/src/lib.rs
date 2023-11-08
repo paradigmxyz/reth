@@ -83,8 +83,32 @@ pub trait Peers: PeersInfo {
     /// Adds a peer to the known peer set, with the given kind.
     fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr);
 
+    /// Returns the rpc [PeerInfo] for all connected [PeerKind::Trusted] peers.
+    async fn get_trusted_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+        self.get_peers_by_kind(PeerKind::Trusted).await
+    }
+
+    /// Returns the rpc [PeerInfo] for all connected [PeerKind::Basic] peers.
+    async fn get_basic_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+        self.get_peers_by_kind(PeerKind::Basic).await
+    }
+
+    /// Returns the rpc [PeerInfo] for all connected peers with the given kind.
+    async fn get_peers_by_kind(&self, kind: PeerKind) -> Result<Vec<PeerInfo>, NetworkError>;
+
     /// Returns the rpc [PeerInfo] for all connected peers.
-    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError>;
+    async fn get_all_peers(&self) -> Result<Vec<PeerInfo>, NetworkError>;
+
+    /// Returns the rpc [PeerInfo] for the given peer id.
+    ///
+    /// Returns `None` if the peer is not connected.
+    async fn get_peer_by_id(&self, peer_id: PeerId) -> Result<Option<PeerInfo>, NetworkError>;
+
+    /// Returns the rpc [PeerInfo] for the given peers if they are connected.
+    ///
+    /// Note: This only returns peers that are connected, unconnected peers are ignored but keeping
+    /// the order in which they were requested.
+    async fn get_peers_by_id(&self, peer_ids: Vec<PeerId>) -> Result<Vec<PeerInfo>, NetworkError>;
 
     /// Removes a peer from the peer set that corresponds to given kind.
     fn remove_peer(&self, peer: PeerId, kind: PeerKind);

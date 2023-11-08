@@ -108,18 +108,6 @@ impl NetworkHandle {
         rx.await
     }
 
-    /// Returns [`PeerInfo`] for a given peer.
-    ///
-    /// Returns `None` if there's no active session to the peer.
-    pub async fn get_peer_by_id(
-        &self,
-        peer_id: PeerId,
-    ) -> Result<Option<PeerInfo>, oneshot::error::RecvError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfoById(peer_id, tx));
-        rx.await
-    }
-
     /// Returns the mode of the network, either pow, or pos
     pub fn mode(&self) -> &NetworkMode {
         &self.inner.network_mode
@@ -215,9 +203,27 @@ impl Peers for NetworkHandle {
         self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
     }
 
-    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+    async fn get_peers_by_kind(&self, kind: PeerKind) -> Result<Vec<PeerInfo>, NetworkError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfo(tx));
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx));
+        Ok(rx.await?)
+    }
+
+    async fn get_all_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfos(tx));
+        Ok(rx.await?)
+    }
+
+    async fn get_peer_by_id(&self, peer_id: PeerId) -> Result<Option<PeerInfo>, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfoById(peer_id, tx));
+        Ok(rx.await?)
+    }
+
+    async fn get_peers_by_id(&self, peer_ids: Vec<PeerId>) -> Result<Vec<PeerInfo>, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx));
         Ok(rx.await?)
     }
 
@@ -372,10 +378,14 @@ pub(crate) enum NetworkHandleMessage {
     StatusUpdate { head: Head },
     /// Get the current status
     GetStatus(oneshot::Sender<NetworkStatus>),
+    /// Get PeerInfo for the given peerids
+    GetPeerInfosByIds(Vec<PeerId>, oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo from all the peers
-    GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
+    GetPeerInfos(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
+    /// Get PeerInfo for a specific peer
+    GetPeerInfosByPeerKind(PeerKind, oneshot::Sender<Vec<PeerInfo>>),
     /// Get the reputation for a specific peer
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Gracefully shutdown network
