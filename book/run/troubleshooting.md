@@ -17,7 +17,7 @@ If you're:
    ```
 
 then most likely you're experiencing issues with the [database freelist](https://github.com/paradigmxyz/reth/issues/5228).
-To confirm it, check if the values on `Freelist` chart on [Grafana dashboard](./observability.md#prometheus--grafana)
+To confirm it, check if the values on the `Freelist` chart on [Grafana dashboard](./observability.md#prometheus--grafana)
 is greater than 10M.
 
 Currently, there are two main ways to fix this issue.
@@ -50,7 +50,7 @@ equal to the [freshly synced node](../installation/installation.md#hardware-requ
    mv reth_compact.dat $(reth db path)/mdbx.dat
    ```
 7. Start Reth
-8. Confirm that the values on `Freelist` chart is near zero and the values on `Canonical Commit Latency time` chart
+8. Confirm that the values on the `Freelist` chart is near zero and the values on the `Canonical Commit Latency time` chart
 is less than 1 second.
 9. Delete original database
    ```bash
