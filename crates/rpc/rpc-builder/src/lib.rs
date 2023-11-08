@@ -18,16 +18,33 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
-//! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
+//! use reth_provider::{
+//!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+//!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
+//! };
+//! use reth_rpc_builder::{
+//!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
+//! };
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
-//! pub async fn launch<Provider, Pool, Network, Events>(provider: Provider, pool: Pool, network: Network, events: Events)
-//! where
-//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//! pub async fn launch<Provider, Pool, Network, Events>(
+//!     provider: Provider,
+//!     pool: Pool,
+//!     network: Network,
+//!     events: Events,
+//! ) where
+//!     Provider: AccountReader
+//!         + BlockReaderIdExt
+//!         + ChainSpecProvider
+//!         + ChangeSetReader
+//!         + StateProviderFactory
+//!         + EvmEnvProvider
+//!         + Clone
+//!         + Unpin
+//!         + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events: CanonStateSubscriptions +  Clone + 'static,
+//!     Events: CanonStateSubscriptions + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -36,7 +53,9 @@
 //!         RethRpcModule::Eth,
 //!         RethRpcModule::Web3,
 //!     ]);
-//!     let transport_modules = RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events).build(transports);
+//!     let transport_modules =
+//!         RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events)
+//!             .build(transports);
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(transport_modules)
@@ -49,22 +68,40 @@
 //!
 //!
 //! ```
-//! use tokio::try_join;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
+//! use reth_provider::{
+//!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+//!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
+//! };
 //! use reth_rpc::JwtSecret;
-//! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
+//! use reth_rpc_api::EngineApiServer;
+//! use reth_rpc_builder::{
+//!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
+//!     TransportRpcModuleConfig,
+//! };
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
-//! use reth_rpc_api::EngineApiServer;
-//! use reth_rpc_builder::auth::AuthServerConfig;
-//! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(provider: Provider, pool: Pool, network: Network, events: Events, engine_api: EngineApi)
-//! where
-//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//! use tokio::try_join;
+//! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(
+//!     provider: Provider,
+//!     pool: Pool,
+//!     network: Network,
+//!     events: Events,
+//!     engine_api: EngineApi,
+//! ) where
+//!     Provider: AccountReader
+//!         + BlockReaderIdExt
+//!         + ChainSpecProvider
+//!         + ChangeSetReader
+//!         + StateProviderFactory
+//!         + EvmEnvProvider
+//!         + Clone
+//!         + Unpin
+//!         + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events: CanonStateSubscriptions +  Clone + 'static,
-//!     EngineApi: EngineApiServer
+//!     Events: CanonStateSubscriptions + Clone + 'static,
+//!     EngineApi: EngineApiServer,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -73,20 +110,20 @@
 //!         RethRpcModule::Eth,
 //!         RethRpcModule::Web3,
 //!     ]);
-//!     let builder = RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
+//!     let builder =
+//!         RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
 //!
-//!   // configure the server modules
-//!    let (modules, auth_module, _registry) = builder.build_with_auth_server(transports, engine_api);
+//!     // configure the server modules
+//!     let (modules, auth_module, _registry) =
+//!         builder.build_with_auth_server(transports, engine_api);
 //!
-//!   // start the servers
-//!   let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
-//!   let config = RpcServerConfig::default();
+//!     // start the servers
+//!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
+//!     let config = RpcServerConfig::default();
 //!
-//!   let (_rpc_handle, _auth_handle) = try_join!(
-//!         modules.start_server(config),
-//!         auth_module.start_server(auth_config),
-//!  ).unwrap();
-//!
+//!     let (_rpc_handle, _auth_handle) =
+//!         try_join!(modules.start_server(config), auth_module.start_server(auth_config),)
+//!             .unwrap();
 //! }
 //! ```
 
@@ -98,10 +135,10 @@
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics};
 use constants::*;
 use error::{RpcError, ServerKind};
+use hyper::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
@@ -117,9 +154,9 @@ use reth_rpc::{
         cache::{cache_new_blocks_task, EthStateCache},
         gas_oracle::GasPriceOracle,
     },
-    AdminApi, BlockingTaskGuard, BlockingTaskPool, DebugApi, EngineEthApi, EthApi, EthFilter,
-    EthPubSub, EthSubscriptionIdProvider, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
-    TxPoolApi, Web3Api,
+    AdminApi, AuthLayer, BlockingTaskGuard, BlockingTaskPool, Claims, DebugApi, EngineEthApi,
+    EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
+    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -130,6 +167,7 @@ use std::{
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
@@ -514,19 +552,25 @@ impl RpcModuleSelection {
     /// Create a selection from the [RethRpcModule] string identifiers
     ///
     /// ```
-    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// assert_eq!(
+    ///     config,
+    ///     RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
+    /// );
     /// ```
     ///
     /// Create a unique selection from the [RethRpcModule] string identifiers
     ///
     /// ```
-    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin", "eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// assert_eq!(
+    ///     config,
+    ///     RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
+    /// );
     /// ```
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
@@ -1043,9 +1087,8 @@ where
                 self.provider.clone(),
                 self.pool.clone(),
                 cache.clone(),
-                self.config.eth.max_logs_per_response,
+                self.config.eth.filter_config(),
                 executor.clone(),
-                self.config.eth.stale_filter_ttl,
             );
 
             let pubsub = EthPubSub::with_spawner(
@@ -1141,6 +1184,8 @@ pub struct RpcServerConfig {
     ipc_server_config: Option<IpcServerBuilder>,
     /// The Endpoint where to launch the ipc server
     ipc_endpoint: Option<Endpoint>,
+    /// JWT secret for authentication
+    jwt_secret: Option<JwtSecret>,
 }
 
 impl fmt::Debug for RpcServerConfig {
@@ -1153,6 +1198,7 @@ impl fmt::Debug for RpcServerConfig {
             .field("ws_addr", &self.ws_addr)
             .field("ipc_server_config", &self.ipc_server_config)
             .field("ipc_endpoint", &self.ipc_endpoint.as_ref().map(|endpoint| endpoint.path()))
+            .field("jwt_secret", &self.jwt_secret)
             .finish()
     }
 }
@@ -1264,6 +1310,12 @@ impl RpcServerConfig {
         self
     }
 
+    /// Configures the JWT secret for authentication.
+    pub fn with_jwt_secret(mut self, secret: Option<JwtSecret>) -> Self {
+        self.jwt_secret = secret;
+        self
+    }
+
     /// Returns true if any server is configured.
     ///
     /// If no server is configured, no server will be be launched on [RpcServerConfig::start].
@@ -1290,22 +1342,26 @@ impl RpcServerConfig {
 
     /// Convenience function to do [RpcServerConfig::build] and [RpcServer::start] in one step
     pub async fn start(self, modules: TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
-        self.build().await?.start(modules).await
+        self.build(&modules).await?.start(modules).await
     }
 
     /// Builds the ws and http server(s).
     ///
     /// If both are on the same port, they are combined into one server.
-    async fn build_ws_http(&mut self) -> Result<WsHttpServer, RpcError> {
+    async fn build_ws_http(
+        &mut self,
+        modules: &TransportRpcModules,
+    ) -> Result<WsHttpServer, RpcError> {
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::LOCALHOST,
             DEFAULT_HTTP_RPC_PORT,
         )));
+        let jwt_secret = self.jwt_secret.clone();
 
         let ws_socket_addr = self
             .ws_addr
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
-        let metrics = RpcServerMetrics::default();
+
         // If both are configured on the same port, we combine them into one server.
         if self.http_addr == self.ws_addr &&
             self.http_server_config.is_some() &&
@@ -1328,22 +1384,33 @@ impl RpcServerConfig {
             }
             .cloned();
 
+            let secret = self.jwt_secret.clone();
+
             // we merge this into one server using the http setup
             self.ws_server_config.take();
+
+            modules.config.ensure_ws_http_identical()?;
 
             let builder = self.http_server_config.take().expect("is set; qed");
             let (server, addr) = WsHttpServerKind::build(
                 builder,
                 http_socket_addr,
                 cors,
+                secret,
                 ServerKind::WsHttp(http_socket_addr),
-                metrics.clone(),
+                modules
+                    .http
+                    .as_ref()
+                    .or(modules.ws.as_ref())
+                    .map(RpcServerMetrics::new)
+                    .unwrap_or_default(),
             )
             .await?;
             return Ok(WsHttpServer {
                 http_local_addr: Some(addr),
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
+                jwt_secret,
             })
         }
 
@@ -1358,8 +1425,9 @@ impl RpcServerConfig {
                 builder,
                 ws_socket_addr,
                 self.ws_cors_domains.take(),
+                self.jwt_secret.clone(),
                 ServerKind::WS(ws_socket_addr),
-                metrics.clone(),
+                modules.ws.as_ref().map(RpcServerMetrics::new).unwrap_or_default(),
             )
             .await?;
             ws_local_addr = Some(addr);
@@ -1372,8 +1440,9 @@ impl RpcServerConfig {
                 builder,
                 http_socket_addr,
                 self.http_cors_domains.take(),
+                self.jwt_secret.clone(),
                 ServerKind::Http(http_socket_addr),
-                metrics.clone(),
+                modules.http.as_ref().map(RpcServerMetrics::new).unwrap_or_default(),
             )
             .await?;
             http_local_addr = Some(addr);
@@ -1384,6 +1453,7 @@ impl RpcServerConfig {
             http_local_addr,
             ws_local_addr,
             server: WsHttpServers::DifferentPort { http: http_server, ws: ws_server },
+            jwt_secret,
         })
     }
 
@@ -1392,15 +1462,16 @@ impl RpcServerConfig {
     /// This consumes the builder and returns a server.
     ///
     /// Note: The server ist not started and does nothing unless polled, See also [RpcServer::start]
-    pub async fn build(mut self) -> Result<RpcServer, RpcError> {
+    pub async fn build(mut self, modules: &TransportRpcModules) -> Result<RpcServer, RpcError> {
         let mut server = RpcServer::empty();
-        server.ws_http = self.build_ws_http().await?;
+        server.ws_http = self.build_ws_http(modules).await?;
 
         if let Some(builder) = self.ipc_server_config {
+            let metrics = modules.ipc.as_ref().map(RpcServerMetrics::new).unwrap_or_default();
             let ipc_path = self
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
-            let ipc = builder.build(ipc_path.path())?;
+            let ipc = builder.set_logger(metrics).build(ipc_path.path())?;
             server.ipc = Some(ipc);
         }
 
@@ -1416,8 +1487,8 @@ impl RpcServerConfig {
 ///
 /// ```
 /// use reth_rpc_builder::{RethRpcModule, TransportRpcModuleConfig};
-///  let config = TransportRpcModuleConfig::default()
-///       .with_http([RethRpcModule::Eth, RethRpcModule::Admin]);
+/// let config =
+///     TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth, RethRpcModule::Admin]);
 /// ```
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct TransportRpcModuleConfig {
@@ -1603,6 +1674,8 @@ struct WsHttpServer {
     ws_local_addr: Option<SocketAddr>,
     /// Configured ws,http servers
     server: WsHttpServers,
+    /// The jwt secret.
+    jwt_secret: Option<JwtSecret>,
 }
 
 /// Enum for holding the http and ws servers in all possible combinations.
@@ -1667,6 +1740,12 @@ enum WsHttpServerKind {
     Plain(Server<Identity, RpcServerMetrics>),
     /// Http server with cors
     WithCors(Server<Stack<CorsLayer, Identity>, RpcServerMetrics>),
+    /// Http server with auth
+    WithAuth(Server<Stack<AuthLayer<JwtAuthValidator>, Identity>, RpcServerMetrics>),
+    /// Http server with cors and auth
+    WithCorsAuth(
+        Server<Stack<AuthLayer<JwtAuthValidator>, Stack<CorsLayer, Identity>>, RpcServerMetrics>,
+    ),
 }
 
 // === impl WsHttpServerKind ===
@@ -1677,30 +1756,69 @@ impl WsHttpServerKind {
         match self {
             WsHttpServerKind::Plain(server) => server.start(module),
             WsHttpServerKind::WithCors(server) => server.start(module),
+            WsHttpServerKind::WithAuth(server) => server.start(module),
+            WsHttpServerKind::WithCorsAuth(server) => server.start(module),
         }
     }
 
-    /// Builds
+    /// Builds the server according to the given config parameters.
+    ///
+    /// Returns the address of the started server.
     async fn build(
         builder: ServerBuilder,
         socket_addr: SocketAddr,
         cors_domains: Option<String>,
+        jwt_secret: Option<JwtSecret>,
         server_kind: ServerKind,
         metrics: RpcServerMetrics,
     ) -> Result<(Self, SocketAddr), RpcError> {
         if let Some(cors) = cors_domains.as_deref().map(cors::create_cors_layer) {
             let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
-            let middleware = tower::ServiceBuilder::new().layer(cors);
+
+            if let Some(secret) = jwt_secret {
+                // stack cors and auth layers
+                let middleware = tower::ServiceBuilder::new()
+                    .layer(cors)
+                    .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+
+                let server = builder
+                    .set_middleware(middleware)
+                    .set_logger(metrics)
+                    .build(socket_addr)
+                    .await
+                    .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind))?;
+                let local_addr = server.local_addr()?;
+                let server = WsHttpServerKind::WithCorsAuth(server);
+                Ok((server, local_addr))
+            } else {
+                let middleware = tower::ServiceBuilder::new().layer(cors);
+                let server = builder
+                    .set_middleware(middleware)
+                    .set_logger(metrics)
+                    .build(socket_addr)
+                    .await
+                    .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind))?;
+                let local_addr = server.local_addr()?;
+                let server = WsHttpServerKind::WithCors(server);
+                Ok((server, local_addr))
+            }
+        } else if let Some(secret) = jwt_secret {
+            // jwt auth layered service
+            let middleware = tower::ServiceBuilder::new()
+                .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
             let server = builder
                 .set_middleware(middleware)
                 .set_logger(metrics)
                 .build(socket_addr)
                 .await
-                .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind))?;
+                .map_err(|err| {
+                    RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr))
+                })?;
             let local_addr = server.local_addr()?;
-            let server = WsHttpServerKind::WithCors(server);
+            let server = WsHttpServerKind::WithAuth(server);
             Ok((server, local_addr))
         } else {
+            // plain server without any middleware
             let server = builder
                 .set_logger(metrics)
                 .build(socket_addr)
@@ -1718,7 +1836,7 @@ pub struct RpcServer {
     /// Configured ws,http servers
     ws_http: WsHttpServer,
     /// ipc server
-    ipc: Option<IpcServer>,
+    ipc: Option<IpcServer<Identity, RpcServerMetrics>>,
 }
 
 // === impl RpcServer ===
@@ -1731,6 +1849,10 @@ impl RpcServer {
     /// Returns the [`SocketAddr`] of the http server if started.
     pub fn http_local_addr(&self) -> Option<SocketAddr> {
         self.ws_http.http_local_addr
+    }
+    /// Return the JwtSecret of the the server
+    pub fn jwt(&self) -> Option<JwtSecret> {
+        self.ws_http.jwt_secret.clone()
     }
 
     /// Returns the [`SocketAddr`] of the ws server if started.
@@ -1759,6 +1881,7 @@ impl RpcServer {
             ws: None,
             ipc_endpoint: None,
             ipc: None,
+            jwt_secret: None,
         };
 
         let (http, ws) = ws_http.server.start(http, ws, &config).await?;
@@ -1799,11 +1922,28 @@ pub struct RpcServerHandle {
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
     ipc: Option<ServerHandle>,
+    jwt_secret: Option<JwtSecret>,
 }
 
 // === impl RpcServerHandle ===
 
 impl RpcServerHandle {
+    /// Configures the JWT secret for authentication.
+    fn bearer_token(&self) -> Option<String> {
+        self.jwt_secret.as_ref().map(|secret| {
+            format!(
+                "Bearer {}",
+                secret
+                    .encode(&Claims {
+                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
+                            Duration::from_secs(60))
+                        .as_secs(),
+                        exp: None,
+                    })
+                    .unwrap()
+            )
+        })
+    }
     /// Returns the [`SocketAddr`] of the http server if started.
     pub fn http_local_addr(&self) -> Option<SocketAddr> {
         self.http_local_addr
@@ -1849,19 +1989,28 @@ impl RpcServerHandle {
     /// Returns a http client connected to the server.
     pub fn http_client(&self) -> Option<jsonrpsee::http_client::HttpClient> {
         let url = self.http_url()?;
-        let client = jsonrpsee::http_client::HttpClientBuilder::default()
-            .build(url)
-            .expect("Failed to create http client");
-        Some(client)
-    }
 
+        let client = if let Some(token) = self.bearer_token() {
+            jsonrpsee::http_client::HttpClientBuilder::default()
+                .set_headers(HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]))
+                .build(url)
+        } else {
+            jsonrpsee::http_client::HttpClientBuilder::default().build(url)
+        };
+
+        client.expect("failed to create http client").into()
+    }
     /// Returns a ws client connected to the server.
     pub async fn ws_client(&self) -> Option<jsonrpsee::ws_client::WsClient> {
         let url = self.ws_url()?;
-        let client = jsonrpsee::ws_client::WsClientBuilder::default()
-            .build(url)
-            .await
-            .expect("Failed to create ws client");
+        let mut builder = jsonrpsee::ws_client::WsClientBuilder::default();
+
+        if let Some(token) = self.bearer_token() {
+            let headers = HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]);
+            builder = builder.set_headers(headers);
+        }
+
+        let client = builder.build(url).await.expect("failed to create ws client");
         Some(client)
     }
 }

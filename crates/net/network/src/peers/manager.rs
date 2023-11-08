@@ -185,6 +185,11 @@ impl PeersManager {
         self.peers.iter().map(|(peer_id, v)| NodeRecord::new(v.addr, *peer_id))
     }
 
+    /// Returns an iterator over all peer ids for peers with the given kind
+    pub(crate) fn peers_by_kind(&self, kind: PeerKind) -> impl Iterator<Item = PeerId> + '_ {
+        self.peers.iter().filter_map(move |(peer_id, peer)| (peer.kind == kind).then_some(*peer_id))
+    }
+
     /// Returns the number of currently active inbound connections.
     #[inline]
     pub(crate) fn num_inbound_connections(&self) -> usize {
@@ -540,7 +545,7 @@ impl PeersManager {
     /// protocol
     pub(crate) fn set_discovered_fork_id(&mut self, peer_id: PeerId, fork_id: ForkId) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            trace!(target : "net::peers", ?peer_id, ?fork_id, "set discovered fork id");
+            trace!(target: "net::peers", ?peer_id, ?fork_id, "set discovered fork id");
             peer.fork_id = Some(fork_id);
         }
     }
@@ -589,7 +594,7 @@ impl PeersManager {
                 }
             }
             Entry::Vacant(entry) => {
-                trace!(target : "net::peers", ?peer_id, ?addr, "discovered new node");
+                trace!(target: "net::peers", ?peer_id, ?addr, "discovered new node");
                 let mut peer = Peer::with_kind(addr, kind);
                 peer.fork_id = fork_id;
                 entry.insert(peer);
@@ -606,11 +611,11 @@ impl PeersManager {
         }
         let mut peer = entry.remove();
 
-        trace!(target : "net::peers",  ?peer_id, "remove discovered node");
+        trace!(target: "net::peers",  ?peer_id, "remove discovered node");
         self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
 
         if peer.state.is_connected() {
-            trace!(target : "net::peers",  ?peer_id, "disconnecting on remove from discovery");
+            trace!(target: "net::peers",  ?peer_id, "disconnecting on remove from discovery");
             // we terminate the active session here, but only remove the peer after the session
             // was disconnected, this prevents the case where the session is scheduled for
             // disconnect but the node is immediately rediscovered, See also
@@ -697,7 +702,7 @@ impl PeersManager {
                     break
                 }
 
-                trace!(target : "net::peers",  ?peer_id, addr=?peer.addr, "schedule outbound connection");
+                trace!(target: "net::peers",  ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
                 peer.state = PeerConnectionState::Out;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr }

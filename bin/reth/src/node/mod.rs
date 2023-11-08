@@ -4,7 +4,7 @@
 use crate::{
     args::{
         get_secret_key,
-        utils::{genesis_value_parser, parse_socket_address},
+        utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
@@ -49,7 +49,9 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
+use reth_network::{
+    error::NetworkError, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager,
+};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -110,18 +112,11 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
-    /// - dev
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         default_value_if("dev", "true", "dev"),
         value_parser = genesis_value_parser,
         required = false,
@@ -186,6 +181,11 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[clap(flatten)]
     pub pruning: PruningArgs,
 
+    /// Rollup related arguments
+    #[cfg(feature = "optimism")]
+    #[clap(flatten)]
+    pub rollup: crate::args::RollupArgs,
+
     /// Additional cli arguments
     #[clap(flatten)]
     pub ext: Ext::Node,
@@ -209,6 +209,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            #[cfg(feature = "optimism")]
+            rollup,
             ..
         } = self;
         NodeCommand {
@@ -226,6 +228,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            #[cfg(feature = "optimism")]
+            rollup,
             ext,
         }
     }
@@ -260,7 +264,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
+        info!(target: "reth::cli", "{}", DisplayHardforks::new(self.chain.hardforks()));
 
         let consensus = self.consensus();
 
@@ -525,7 +529,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // extract the jwt secret from the args if possible
         let default_jwt_path = data_dir.jwt_path();
-        let jwt_secret = self.rpc.jwt_secret(default_jwt_path)?;
+        let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
 
         // adjust rpc port numbers based on instance number
         self.adjust_instance_ports();
@@ -543,6 +547,27 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         });
 
         self.ext.on_node_started(&components)?;
+
+        // If `enable_genesis_walkback` is set to true, the rollup client will need to
+        // perform the derivation pipeline from genesis, validating the data dir.
+        // When set to false, set the finalized, safe, and unsafe head block hashes
+        // on the rollup client using a fork choice update. This prevents the rollup
+        // client from performing the derivation pipeline from genesis, and instead
+        // starts syncing from the current tip in the DB.
+        #[cfg(feature = "optimism")]
+        if self.chain.is_optimism() && !self.rollup.enable_genesis_walkback {
+            let client = _rpc_server_handles.auth.http_client();
+            reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
+                &client,
+                reth_rpc_types::engine::ForkchoiceState {
+                    head_block_hash: head.hash,
+                    safe_block_hash: head.hash,
+                    finalized_block_hash: head.hash,
+                },
+                None,
+            )
+            .await?;
+        }
 
         rx.await??;
 
@@ -789,7 +814,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         secret_key: SecretKey,
         default_peers_path: PathBuf,
     ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
-        self.network
+        let cfg_builder = self
+            .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
@@ -802,8 +828,17 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 self.network.addr,
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
-            )))
-            .build(ProviderFactory::new(db, self.chain.clone()))
+            )));
+
+        // When `sequencer_endpoint` is configured, the node will forward all transactions to a
+        // Sequencer node for execution and inclusion on L1, and disable its own txpool
+        // gossip to prevent other parties in the network from learning about them.
+        #[cfg(feature = "optimism")]
+        let cfg_builder = cfg_builder
+            .sequencer_endpoint(self.rollup.sequencer_http.clone())
+            .disable_tx_gossip(self.rollup.disable_txpool_gossip);
+
+        cfg_builder.build(ProviderFactory::new(db, self.chain.clone()))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -918,34 +953,41 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(pipeline)
     }
 
+    /// Builds a [Pruner] with the given config.
     fn build_pruner<DB: Database>(
         &self,
         config: &PruneConfig,
         db: DB,
         highest_snapshots_rx: HighestSnapshotsTracker,
     ) -> Pruner<DB> {
-        let mut segments = SegmentSet::new();
-
-        if let Some(mode) = config.segments.receipts {
-            segments = segments.add_segment(reth_prune::segments::Receipts::new(mode));
-        }
-        if !config.segments.receipts_log_filter.is_empty() {
-            segments = segments.add_segment(reth_prune::segments::ReceiptsByLogs::new(
-                config.segments.receipts_log_filter.clone(),
-            ));
-        }
-        if let Some(mode) = config.segments.transaction_lookup {
-            segments = segments.add_segment(reth_prune::segments::TransactionLookup::new(mode));
-        }
-        if let Some(mode) = config.segments.sender_recovery {
-            segments = segments.add_segment(reth_prune::segments::SenderRecovery::new(mode));
-        }
-        if let Some(mode) = config.segments.account_history {
-            segments = segments.add_segment(reth_prune::segments::AccountHistory::new(mode));
-        }
-        if let Some(mode) = config.segments.storage_history {
-            segments = segments.add_segment(reth_prune::segments::StorageHistory::new(mode));
-        }
+        let segments = SegmentSet::default()
+            // Receipts
+            .segment_opt(config.segments.receipts.map(reth_prune::segments::Receipts::new))
+            // Receipts by logs
+            .segment_opt((!config.segments.receipts_log_filter.is_empty()).then(|| {
+                reth_prune::segments::ReceiptsByLogs::new(
+                    config.segments.receipts_log_filter.clone(),
+                )
+            }))
+            // Transaction lookup
+            .segment_opt(
+                config
+                    .segments
+                    .transaction_lookup
+                    .map(reth_prune::segments::TransactionLookup::new),
+            )
+            // Sender recovery
+            .segment_opt(
+                config.segments.sender_recovery.map(reth_prune::segments::SenderRecovery::new),
+            )
+            // Account history
+            .segment_opt(
+                config.segments.account_history.map(reth_prune::segments::AccountHistory::new),
+            )
+            // Storage history
+            .segment_opt(
+                config.segments.storage_history.map(reth_prune::segments::StorageHistory::new),
+            );
 
         Pruner::new(
             db,
@@ -987,7 +1029,7 @@ async fn run_network_until_shutdown<C>(
     if let Some(file_path) = persistent_peers_file {
         let known_peers = network.all_peers().collect::<Vec<_>>();
         if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
-            trace!(target : "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
+            trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
             let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
             match parent_dir.and_then(|_| std::fs::write(&file_path, known_peers)) {
                 Ok(_) => {
@@ -1004,6 +1046,7 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::utils::SUPPORTED_CHAINS;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_primitives::DEV;
     use std::{
@@ -1019,7 +1062,7 @@ mod tests {
 
     #[test]
     fn parse_common_node_command_chain_args() {
-        for chain in ["mainnet", "sepolia", "goerli"] {
+        for chain in SUPPORTED_CHAINS {
             let args: NodeCommand = NodeCommand::<()>::parse_from(["reth", "--chain", chain]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
@@ -1088,7 +1131,8 @@ mod tests {
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let config_path = cmd.config.clone().unwrap_or(data_dir.config_path());
-        assert!(config_path.ends_with("reth/mainnet/reth.toml"), "{:?}", cmd.config);
+        let end = format!("reth/{}/reth.toml", SUPPORTED_CHAINS[0]);
+        assert!(config_path.ends_with(end), "{:?}", cmd.config);
     }
 
     #[test]
@@ -1096,7 +1140,8 @@ mod tests {
         let cmd = NodeCommand::<()>::try_parse_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
         let db_path = data_dir.db_path();
-        assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", cmd.config);
+        let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
+        assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
         let cmd =
             NodeCommand::<()>::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
@@ -1106,6 +1151,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
     fn parse_dev() {
         let cmd = NodeCommand::<()>::parse_from(["reth", "--dev"]);
         let chain = DEV.clone();

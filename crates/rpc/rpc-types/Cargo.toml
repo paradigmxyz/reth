@@ -36,8 +36,13 @@ proptest-derive = { workspace = true, optional = true }
 [features]
 default = ["jsonrpsee-types"]
 arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary"]
+optimism = []
 
 [dev-dependencies]
 # misc
+alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde", "arbitrary"] }
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-derive.workspace = true
 rand.workspace = true
 similar-asserts = "1.4"
