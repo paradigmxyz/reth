@@ -10,8 +10,8 @@ description = "Reth node implementation"
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
-  # Used for diagrams in docs
-  "aquamarine",
+    # Used for diagrams in docs
+    "aquamarine",
 ]
 
 [dependencies]
@@ -118,17 +118,17 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 optimism = [
-  "reth-primitives/optimism",
-  "reth-revm/optimism",
-  "reth-interfaces/optimism",
-  "reth-rpc/optimism",
-  "reth-rpc-engine-api/optimism",
-  "reth-transaction-pool/optimism",
-  "reth-provider/optimism",
-  "reth-beacon-consensus/optimism",
-  "reth-basic-payload-builder/optimism",
-  "reth-network/optimism",
-  "reth-network-api/optimism",
+    "reth-primitives/optimism",
+    "reth-revm/optimism",
+    "reth-interfaces/optimism",
+    "reth-rpc/optimism",
+    "reth-rpc-engine-api/optimism",
+    "reth-transaction-pool/optimism",
+    "reth-provider/optimism",
+    "reth-beacon-consensus/optimism",
+    "reth-basic-payload-builder/optimism",
+    "reth-network/optimism",
+    "reth-network-api/optimism",
 ]
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
