@@ -22,7 +22,7 @@ use reth_rpc_types::{
     TransactionRequest,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
@@ -72,14 +72,14 @@ impl RawRpcBuilder {
     fn build(self) -> String {
         let method = self.method.unwrap_or_else(|| panic!("JSON-RPC method not set"));
         let id = self.id.unwrap_or_else(|| panic!("JSON-RPC id not set"));
+        let params: Vec<String> = self.params.into_iter().map(|p| p.to_string()).collect();
 
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": self.params,
-        })
-        .to_string()
+        format!(
+            r#"{{"jsonrpc":"2.0","id":{},"method":"{}","params":[{}]}}"#,
+            id,
+            method,
+            params.join(",")
+        )
     }
 }
 
@@ -521,6 +521,6 @@ mod tests {
             .build();
 
         let expected = r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xaa00000000000000000000000000000000000000","0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2"]}"#;
-        assert_eq!(rpc_string, expected);
+        assert_eq!(rpc_string, expected, "RPC string did not match expected format.");
     }
 }
