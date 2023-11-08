@@ -396,24 +396,21 @@ where
                                     // looking up the tree is blocking
                                     let res = provider
                                         .find_block_by_hash(block_hash, BlockSource::Database);
-                                    res.map(|maybe_block| {
-                                        maybe_block
-                                            .map(|block| {
-                                                let block_number = block.header.number;
-                                                let block_sender = provider.block_with_senders(
-                                                    block_number,
-                                                    TransactionVariant::WithHash,
-                                                );
-                                                let _ = action_tx.send(
-                                                    CacheAction::BlockWithSendersResult {
-                                                        block_hash,
-                                                        res: block_sender,
-                                                    },
-                                                );
-                                            })
-                                            .unwrap_or_else(|| {})
-                                    })
-                                    .unwrap_or_else(|e| {});
+                                    if let Ok(Some(block)) = res {
+                                        let block_number = block.header.number;
+                                        let block_sender = provider.block_with_senders(
+                                            block_number,
+                                            TransactionVariant::WithHash,
+                                        );
+                                        let _ = action_tx.send(
+                                            CacheAction::BlockWithSendersResult {
+                                                block_hash,
+                                                res: block_sender,
+                                            },
+                                        );
+                                    } else if let Err(e) = res {
+                                        // Handle error
+                                    }
                                 }));
                             }
                         }
