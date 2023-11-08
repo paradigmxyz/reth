@@ -36,7 +36,7 @@ impl Command {
 
         let segment = segments::Transactions::new(compression, filters);
 
-        segment.snapshot::<DB>(provider, "".into(), range.clone())?;
+        segment.snapshot::<DB>(provider, PathBuf::default(), range.clone())?;
 
         // Default name doesn't have any configuration
         let default_name: PathBuf = SnapshotSegment::Transactions.filename(&range).into();

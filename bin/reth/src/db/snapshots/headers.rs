@@ -35,7 +35,7 @@ impl Command {
 
         let segment = segments::Headers::new(compression, filters);
 
-        segment.snapshot::<DB>(provider, "".into(), range.clone())?;
+        segment.snapshot::<DB>(provider, PathBuf::default(), range.clone())?;
 
         // Default name doesn't have any configuration
         let default_name: PathBuf = SnapshotSegment::Headers.filename(&range).into();

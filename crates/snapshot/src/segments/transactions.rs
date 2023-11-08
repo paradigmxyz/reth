@@ -6,7 +6,7 @@ use reth_primitives::{
     BlockNumber, SnapshotSegment, TxNumber,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
-use std::{ops::RangeInclusive, path::PathBuf};
+use std::{ops::RangeInclusive, path::Path};
 
 /// Snapshot segment responsible for [SnapshotSegment::Transactions] part of data.
 #[derive(Debug)]
@@ -35,7 +35,7 @@ impl Segment for Transactions {
     fn snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<'_, DB>,
-        directory: PathBuf,
+        directory: impl AsRef<Path>,
         block_range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()> {
         let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;

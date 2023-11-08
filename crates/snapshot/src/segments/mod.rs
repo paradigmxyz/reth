@@ -21,7 +21,7 @@ use reth_primitives::{
     BlockNumber, SnapshotSegment,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
-use std::{ops::RangeInclusive, path::PathBuf};
+use std::{ops::RangeInclusive, path::Path};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
@@ -32,7 +32,7 @@ pub trait Segment {
     fn snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<'_, DB>,
-        directory: PathBuf,
+        directory: impl AsRef<Path>,
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()>;
 
@@ -59,7 +59,7 @@ pub trait Segment {
 /// determines the snapshot file's save location.
 pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     provider: &DatabaseProviderRO<'_, DB>,
-    directory: PathBuf,
+    directory: impl AsRef<Path>,
     segment: SnapshotSegment,
     segment_config: SegmentConfig,
     block_range: RangeInclusive<BlockNumber>,
@@ -69,7 +69,7 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
     let mut nippy_jar = NippyJar::new(
         COLUMNS,
-        &directory.join(segment.filename(&block_range).as_str()),
+        &directory.as_ref().join(segment.filename(&block_range).as_str()),
         SegmentHeader::new(block_range, tx_range, segment),
     );
 

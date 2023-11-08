@@ -9,7 +9,7 @@ use reth_primitives::{
     BlockNumber, SnapshotSegment,
 };
 use reth_provider::DatabaseProviderRO;
-use std::{ops::RangeInclusive, path::PathBuf};
+use std::{ops::RangeInclusive, path::Path};
 
 /// Snapshot segment responsible for [SnapshotSegment::Headers] part of data.
 #[derive(Debug)]
@@ -38,7 +38,7 @@ impl Segment for Headers {
     fn snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<'_, DB>,
-        directory: PathBuf,
+        directory: impl AsRef<Path>,
         range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()> {
         let range_len = range.clone().count();
