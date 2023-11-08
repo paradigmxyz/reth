@@ -12,7 +12,7 @@ description = "Reth RPC testing helpers"
 # reth
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
-reth-rpc-api = { path = "../rpc-api", default-features = false, features = ["client"] }
+reth-rpc-api = { workspace = true, default-features = false, features = ["client"] }
 
 # async
 async-trait.workspace = true

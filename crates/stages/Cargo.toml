@@ -19,9 +19,9 @@ normal = [
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
-reth-codecs = { path = "../storage/codecs" }
+reth-codecs = { workspace = true }
 reth-provider.workspace = true
-reth-trie = { path = "../trie" }
+reth-trie = { workspace = true }
 reth-tokio-util.workspace = true
 
 # revm
@@ -56,11 +56,11 @@ num-traits = "0.2.15"
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-downloaders = { path = "../net/downloaders" }
-reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]
-reth-blockchain-tree = { path = "../blockchain-tree" }
-reth-revm = { path = "../revm" }
-reth-trie = { path = "../trie", features = ["test-utils"] }
+reth-downloaders = { workspace = true }
+reth-eth-wire = { workspace = true } # TODO(onbjerg): We only need this for [BlockBody]
+reth-blockchain-tree = { workspace = true }
+reth-revm = { workspace = true }
+reth-trie = { workspace = true, features = ["test-utils"] }
 
 alloy-rlp.workspace = true
 itertools.workspace = true

@@ -11,8 +11,8 @@ description = "Ethereum network discovery"
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-net-common = { path = "../common" }
-reth-net-nat = { path = "../nat" }
+reth-net-common = { workspace = true }
+reth-net-nat = { workspace = true }
 
 # ethereum
 alloy-rlp = { workspace = true, features = ["derive"] }

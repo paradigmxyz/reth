@@ -11,7 +11,7 @@ description = "Support for EIP-1459 Node Discovery via DNS"
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-net-common = { path = "../common" }
+reth-net-common = { workspace = true }
 
 # ethereum
 alloy-rlp.workspace = true
