@@ -576,6 +576,7 @@ where
 pub struct SharedCapabilities(Vec<SharedCapability>);
 
 impl SharedCapabilities {
+    /// Merges the local and peer capabilities and returns a new [`SharedCapabilities`] instance.
     pub fn try_new(
         local_capabilities: Vec<Capability>,
         peer_capabilities: Vec<Capability>,
@@ -607,7 +608,7 @@ impl SharedCapabilities {
 /// Determines the offsets for each shared capability between the input list of peer
 /// capabilities and the input list of locally supported capabilities.
 ///
-/// Currently only `eth` versions 66 and 67 are supported.
+/// Currently only `eth` versions 66, 67, 68 are supported.
 /// Additionally, the `p2p` capability version 5 is supported, but is
 /// expected _not_ to be in neither `local_capabilities` or `peer_capabilities`.
 pub fn set_capability_offsets(
@@ -630,8 +631,7 @@ pub fn set_capability_offsets(
     // This would cause the peers to send messages with the wrong message id, which is usually a
     // protocol violation.
     //
-    // The `Ord` implementation for `SmolStr` (used here) currently delegates to rust's `Ord`
-    // implementation for `str`, which also orders strings lexicographically.
+    // The `Ord` implementation for `str` orders strings lexicographically.
     let mut shared_capability_names = BTreeSet::new();
 
     // find highest shared version of each shared capability
@@ -673,6 +673,8 @@ pub fn set_capability_offsets(
             SharedCapability::UnknownCapability { .. } => {
                 // Capabilities which are not shared are ignored
                 debug!("unknown capability: name={:?}, version={}", name, version,);
+
+                // TODO(mattsse): track shared caps
             }
             SharedCapability::Eth { .. } => {
                 // increment the offset if the capability is known
