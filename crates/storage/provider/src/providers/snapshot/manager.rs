@@ -2,6 +2,10 @@ use super::{LoadedJar, SnapshotJarProvider};
 use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
 use dashmap::DashMap;
 use parking_lot::RwLock;
+use reth_db::{
+    codecs::CompactU256,
+    snapshot::{HeaderMask, TransactionMask},
+};
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
@@ -199,7 +203,7 @@ impl SnapshotProvider {
             .and_then(|tracker| tracker.borrow().and_then(|highest| highest.highest(segment)))
     }
 
-    /// Iterates through segment snapshots in reverse order, executing a function until it
+    /// Iterates through segment snapshots in reverse order, executing a function until it returns
     /// some object. Useful for finding objects by [`TxHash`] or [`BlockHash`].
     pub fn find_snapshot<T>(
         &self,
@@ -231,8 +235,18 @@ impl SnapshotProvider {
 }
 
 impl HeaderProvider for SnapshotProvider {
-    fn header(&self, _block_hash: &BlockHash) -> RethResult<Option<Header>> {
-        todo!()
+    fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
+        self.find_snapshot(SnapshotSegment::Headers, |jar_provider| {
+            Ok(jar_provider
+                .cursor()?
+                .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
+                .and_then(|(header, hash)| {
+                    if &hash == block_hash {
+                        return Some(header)
+                    }
+                    None
+                }))
+        })
     }
 
     fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
@@ -240,12 +254,18 @@ impl HeaderProvider for SnapshotProvider {
             .header_by_number(num)
     }
 
-    fn header_td(&self, _block_hash: &BlockHash) -> RethResult<Option<U256>> {
-        todo!()
+    fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
+        self.find_snapshot(SnapshotSegment::Headers, |jar_provider| {
+            Ok(jar_provider
+                .cursor()?
+                .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
+                .and_then(|(td, hash)| (&hash == block_hash).then_some(td.0)))
+        })
     }
 
-    fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
-        todo!();
+    fn header_td_by_number(&self, num: BlockNumber) -> RethResult<Option<U256>> {
+        self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
+            .header_td_by_number(num)
     }
 
     fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
@@ -259,14 +279,15 @@ impl HeaderProvider for SnapshotProvider {
         todo!();
     }
 
-    fn sealed_header(&self, _number: BlockNumber) -> RethResult<Option<SealedHeader>> {
-        todo!();
+    fn sealed_header(&self, num: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
+            .sealed_header(num)
     }
 }
 
 impl BlockHashReader for SnapshotProvider {
-    fn block_hash(&self, _number: u64) -> RethResult<Option<B256>> {
-        todo!()
+    fn block_hash(&self, num: u64) -> RethResult<Option<B256>> {
+        self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?.block_hash(num)
     }
 
     fn canonical_hashes_range(
@@ -297,8 +318,19 @@ impl BlockNumReader for SnapshotProvider {
 }
 
 impl TransactionsProvider for SnapshotProvider {
-    fn transaction_id(&self, _tx_hash: TxHash) -> RethResult<Option<TxNumber>> {
-        todo!()
+    fn transaction_id(&self, tx_hash: TxHash) -> RethResult<Option<TxNumber>> {
+        self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
+            let mut cursor = jar_provider.cursor()?;
+            if cursor
+                .get_one::<TransactionMask<TransactionSignedNoHash>>((&tx_hash).into())?
+                .and_then(|tx| (tx.hash() == tx_hash).then_some(tx))
+                .is_some()
+            {
+                Ok(Some(cursor.number()))
+            } else {
+                Ok(None)
+            }
+        })
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
@@ -308,13 +340,20 @@ impl TransactionsProvider for SnapshotProvider {
 
     fn transaction_by_id_no_hash(
         &self,
-        _id: TxNumber,
+        num: TxNumber,
     ) -> RethResult<Option<TransactionSignedNoHash>> {
-        todo!()
+        self.get_segment_provider_from_transaction(SnapshotSegment::Transactions, num, None)?
+            .transaction_by_id_no_hash(num)
     }
 
-    fn transaction_by_hash(&self, _hash: TxHash) -> RethResult<Option<TransactionSigned>> {
-        todo!()
+    fn transaction_by_hash(&self, hash: TxHash) -> RethResult<Option<TransactionSigned>> {
+        self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
+            Ok(jar_provider
+                .cursor()?
+                .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
+                .map(|tx| tx.with_hash())
+                .and_then(|tx| (tx.hash_ref() == &hash).then_some(tx)))
+        })
     }
 
     fn transaction_by_hash_with_meta(
@@ -353,7 +392,7 @@ impl TransactionsProvider for SnapshotProvider {
         todo!()
     }
 
-    fn transaction_sender(&self, _id: TxNumber) -> RethResult<Option<Address>> {
-        todo!()
+    fn transaction_sender(&self, id: TxNumber) -> RethResult<Option<Address>> {
+        Ok(self.transaction_by_id_no_hash(id)?.and_then(|tx| tx.recover_signer()))
     }
 }
