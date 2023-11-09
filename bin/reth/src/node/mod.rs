@@ -530,7 +530,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // extract the jwt secret from the args if possible
         let default_jwt_path = data_dir.jwt_path();
-        let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?.unwrap();
+        let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
 
         // adjust rpc port numbers based on instance number
         self.adjust_instance_ports();
