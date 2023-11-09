@@ -30,7 +30,9 @@ pub enum P2PStreamError {
     #[error("ping timed out with")]
     PingTimeout,
     #[error(transparent)]
-    ParseVersionError(#[from] SharedCapabilityError),
+    ParseSharedCapability(#[from] SharedCapabilityError),
+    #[error("capability not supported on stream to this peer")]
+    CapabilityNotShared,
     #[error("mismatched protocol version in Hello message: {0}")]
     MismatchedProtocolVersion(GotExpected<ProtocolVersion>),
     #[error("started ping task before the handshake completed")]

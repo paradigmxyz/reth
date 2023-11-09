@@ -73,8 +73,8 @@ struct RpcServerConnectionMetrics {
     requests_started: Counter,
     /// The number of requests finished
     requests_finished: Counter,
-    /// Latency for a single request/response pair
-    request_latency: Histogram,
+    /// Response for a single request/response pair
+    request_time_seconds: Histogram,
 }
 
 /// Metrics for the RPC calls
@@ -82,13 +82,13 @@ struct RpcServerConnectionMetrics {
 #[metrics(scope = "rpc_server.calls")]
 struct RpcServerCallMetrics {
     /// The number of calls started
-    calls_started: Counter,
+    started: Counter,
     /// The number of successful calls
-    successful_calls: Counter,
+    successful: Counter,
     /// The number of failed calls
-    failed_calls: Counter,
-    /// Latency for a single call
-    call_latency: Histogram,
+    failed: Counter,
+    /// Response for a single call
+    time_seconds: Histogram,
 }
 
 impl Logger for RpcServerMetrics {
@@ -116,7 +116,7 @@ impl Logger for RpcServerMetrics {
         _transport: TransportProtocol,
     ) {
         let Some(call_metrics) = self.inner.call_metrics.get(method_name) else { return };
-        call_metrics.calls_started.increment(1);
+        call_metrics.started.increment(1);
     }
 
     fn on_result(
@@ -129,18 +129,18 @@ impl Logger for RpcServerMetrics {
         let Some(call_metrics) = self.inner.call_metrics.get(method_name) else { return };
 
         // capture call latency
-        call_metrics.call_latency.record(started_at.elapsed().as_millis() as f64);
+        call_metrics.time_seconds.record(started_at.elapsed().as_secs_f64());
         if success.is_success() {
-            call_metrics.successful_calls.increment(1);
+            call_metrics.successful.increment(1);
         } else {
-            call_metrics.failed_calls.increment(1);
+            call_metrics.failed.increment(1);
         }
     }
 
     fn on_response(&self, _result: &str, started_at: Self::Instant, transport: TransportProtocol) {
         let metrics = self.inner.connection_metrics.get_metrics(transport);
         // capture request latency for this request/response pair
-        metrics.request_latency.record(started_at.elapsed().as_millis() as f64);
+        metrics.request_time_seconds.record(started_at.elapsed().as_secs_f64());
         metrics.requests_finished.increment(1);
     }
 
