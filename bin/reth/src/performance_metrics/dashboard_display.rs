@@ -63,6 +63,7 @@ impl OpcodeStats {
     pub(crate) fn print(&self, header: &str) {
         self.print_summay(header);
         self.print_opcode();
+        self.print_sload_percentile();
         self.print_category();
     }
 
@@ -178,6 +179,23 @@ impl OpcodeStats {
                 v.duration_percent * 100.0,
             );
         }
+    }
+
+    fn print_sload_percentile(&self) {
+        let total_cnt: u128 = self.opcode_record.sload_opcode_record.iter().map(|&v| v.1).sum();
+        println!("\n");
+        println!("================================sload time percentile=====================================");
+        println!("Time (us)    Percentile (%)");
+        let mut max_per = 0.0;
+        for value in self.opcode_record.sload_opcode_record.iter() {
+            let p = value.1 as f64 / total_cnt as f64;
+            if value.0 == u128::MAX {
+                max_per = p;
+                break
+            }
+            println!("{:5} {:15.3}", value.0, p * 100.0);
+        }
+        println!("{:>5} {:15.3}", "MAX", max_per * 100.0);
     }
 }
 
