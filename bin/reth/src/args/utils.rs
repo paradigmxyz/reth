@@ -1,37 +1,63 @@
 //! Clap parser utilities
 
-use reth_primitives::{
-    fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256, DEV, GOERLI, HOLESKY, MAINNET,
-    SEPOLIA,
-};
+use reth_primitives::{fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
     time::Duration,
 };
+use tracing::{debug, info};
+
+use reth_rpc::{JwtError, JwtSecret};
 
 #[cfg(feature = "optimism")]
 use reth_primitives::{BASE_GOERLI, BASE_MAINNET};
+
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
+
+#[cfg(feature = "optimism")]
+/// Chains supported by op-reth. First value should be used as the default.
+pub const SUPPORTED_CHAINS: &[&str] = &["base", "base_goerli"];
+#[cfg(not(feature = "optimism"))]
+/// Chains supported by reth. First value should be used as the default.
+pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "goerli", "holesky", "dev"];
 
 /// Helper to parse a [Duration] from seconds
 pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;
     Ok(Duration::from_secs(seconds))
 }
+/// Attempts to retrieve or create a JWT secret from the specified path.
+
+pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtError> {
+    if path.exists() {
+        debug!(target: "reth::cli", ?path, "Reading JWT auth secret file");
+        JwtSecret::from_file(path)
+    } else {
+        info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
+        JwtSecret::try_create(path)
+    }
+}
 
 /// Clap value parser for [ChainSpec]s that takes either a built-in chainspec or the path
 /// to a custom one.
 pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
+        #[cfg(not(feature = "optimism"))]
         "mainnet" => MAINNET.clone(),
+        #[cfg(not(feature = "optimism"))]
         "goerli" => GOERLI.clone(),
+        #[cfg(not(feature = "optimism"))]
         "sepolia" => SEPOLIA.clone(),
+        #[cfg(not(feature = "optimism"))]
         "holesky" => HOLESKY.clone(),
+        #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
-        "base-goerli" => BASE_GOERLI.clone(),
+        "base_goerli" | "base-goerli" => BASE_GOERLI.clone(),
         #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
         _ => {
@@ -41,6 +67,11 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
     })
 }
 
+/// The help info for the --chain flag
+pub fn chain_help() -> String {
+    format!("The chain this node is running.\nPossible values are either a built-in chain or the path to a chain specification file.\n\nBuilt-in chains:\n    {}", SUPPORTED_CHAINS.join(", "))
+}
+
 /// Clap value parser for [ChainSpec]s.
 ///
 /// The value parser matches either a known chain, the path
@@ -48,53 +79,33 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
 /// a serialized [ChainSpec] or Genesis struct.
 pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
+        #[cfg(not(feature = "optimism"))]
         "mainnet" => MAINNET.clone(),
+        #[cfg(not(feature = "optimism"))]
         "goerli" => GOERLI.clone(),
+        #[cfg(not(feature = "optimism"))]
         "sepolia" => SEPOLIA.clone(),
+        #[cfg(not(feature = "optimism"))]
         "holesky" => HOLESKY.clone(),
+        #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
-        "base-goerli" => BASE_GOERLI.clone(),
+        "base_goerli" | "base-goerli" => BASE_GOERLI.clone(),
         #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
         _ => {
             // try to read json from path first
-            let mut raw =
-                match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
-                    Ok(raw) => raw,
-                    Err(io_err) => {
-                        // valid json may start with "\n", but must contain "{"
-                        if s.contains('{') {
-                            s.to_string()
-                        } else {
-                            return Err(io_err.into()) // assume invalid path
-                        }
+            let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
+                Ok(raw) => raw,
+                Err(io_err) => {
+                    // valid json may start with "\n", but must contain "{"
+                    if s.contains('{') {
+                        s.to_string()
+                    } else {
+                        return Err(io_err.into()) // assume invalid path
                     }
-                };
-
-            // The ethereum mainnet TTD is 58750000000000000000000, and geth serializes this
-            // without quotes, because that is how golang `big.Int`s marshal in JSON. Numbers
-            // are arbitrary precision in JSON, so this is valid JSON. This number is also
-            // greater than a `u64`.
-            //
-            // Unfortunately, serde_json only supports parsing up to `u64`, resorting to `f64`
-            // once `u64` overflows:
-            // <https://github.com/serde-rs/json/blob/4bc1eaa03a6160593575bc9bc60c94dba4cab1e3/src/de.rs#L1411-L1415>
-            // <https://github.com/serde-rs/json/blob/4bc1eaa03a6160593575bc9bc60c94dba4cab1e3/src/de.rs#L479-L484>
-            // <https://github.com/serde-rs/json/blob/4bc1eaa03a6160593575bc9bc60c94dba4cab1e3/src/de.rs#L102-L108>
-            //
-            // serde_json does have an arbitrary precision feature, but this breaks untagged
-            // enums in serde:
-            // <https://github.com/serde-rs/serde/issues/2230>
-            // <https://github.com/serde-rs/serde/issues/1183>
-            //
-            // To solve this, we surround the mainnet TTD with quotes, which our custom Visitor
-            // accepts.
-            if raw.contains("58750000000000000000000") &&
-                !raw.contains("\"58750000000000000000000\"")
-            {
-                raw = raw.replacen("58750000000000000000000", "\"58750000000000000000000\"", 1);
-            }
+                }
+            };
 
             // both serialized Genesis and ChainSpec structs supported
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
@@ -167,18 +178,9 @@ mod tests {
     use secp256k1::rand::thread_rng;
     use std::collections::HashMap;
 
-    #[cfg(feature = "optimism")]
-    #[test]
-    fn parse_optimism_chain_spec() {
-        for chain in ["base-goerli", "base"] {
-            chain_spec_value_parser(chain).unwrap();
-            genesis_value_parser(chain).unwrap();
-        }
-    }
-
     #[test]
     fn parse_known_chain_spec() {
-        for chain in ["mainnet", "sepolia", "goerli", "holesky"] {
+        for chain in SUPPORTED_CHAINS {
             chain_spec_value_parser(chain).unwrap();
             genesis_value_parser(chain).unwrap();
         }
