@@ -7,11 +7,7 @@ use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
     ServerBuilder, TransportRpcModuleConfig,
 };
-use std::{
-    borrow::Cow,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{borrow::Cow, path::PathBuf, time::Duration};
 
 /// A trait that provides configured RPC server.
 ///
@@ -67,15 +63,8 @@ pub trait RethRpcConfig {
     ///
     /// The `default_jwt_path` provided as an argument will be used as the default location for the
     /// jwt secret in case the `auth_jwtsecret` argument is not provided.
-    // fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError>;
-    // This function tries to read the JWT secret from the specified path.
-    // If the file doesn't exist at the path, it will create a new JWT secret.
 
-    ///
-    fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtError>;
-
-    ///
-    fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<Option<JwtSecret>, JwtError>;
+    fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError>;
     ///
     /// Returns the configured jwt secret key for the regular rpc servers, if any.
     ///
