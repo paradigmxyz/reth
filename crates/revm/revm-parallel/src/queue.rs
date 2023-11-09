@@ -16,10 +16,27 @@ use std::{
 #[derive(
     Deref, DerefMut, serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Default, Debug,
 )]
-pub struct TransitionBatch(
+pub struct TransitionBatch {
     /// Collection of transition ids.
-    pub Vec<TransitionId>,
-);
+    #[deref]
+    #[deref_mut]
+    pub transitions: Vec<TransitionId>,
+    /// The gas used by this batch.
+    pub gas_used: u128,
+}
+
+impl TransitionBatch {
+    /// Create new transition batch.
+    pub fn new(transitions: Vec<TransitionId>, gas_used: u128) -> Self {
+        Self { transitions, gas_used }
+    }
+}
+
+impl From<(Vec<TransitionId>, u128)> for TransitionBatch {
+    fn from((transitions, gas_used): (Vec<TransitionId>, u128)) -> Self {
+        Self::new(transitions, gas_used)
+    }
+}
 
 /// The queue of transition lists that represent the order of execution for the block.
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -35,8 +52,11 @@ impl TransitionQueue {
     }
 
     /// Set transitions batches.
-    pub fn with_batches(mut self, batches: impl IntoIterator<Item = Vec<TransitionId>>) -> Self {
-        self.batches = batches.into_iter().map(TransitionBatch).collect();
+    pub fn with_batches(
+        mut self,
+        batches: impl IntoIterator<Item = (Vec<TransitionId>, u128)>,
+    ) -> Self {
+        self.batches = batches.into_iter().map(TransitionBatch::from).collect();
         self
     }
 
@@ -60,13 +80,14 @@ impl TransitionQueue {
 
                 loop {
                     if depth >= this.batches.len() {
-                        this.append_transition(id);
+                        this.append_transition(id, rw_set.gas_used);
                         break
                     }
 
                     let batch = this.batches.index_mut(depth);
                     if batch.len() < max_batch_size {
                         batch.push(id);
+                        batch.gas_used += rw_set.gas_used as u128;
                         break
                     }
 
@@ -119,18 +140,9 @@ impl TransitionQueue {
         None
     }
 
-    /// Insert transition id at depth or append it to the end of the queue.
-    pub fn insert_at(&mut self, depth: usize, id: TransitionId) {
-        if depth < self.batches.len() {
-            self.batches.index_mut(depth).push(id);
-        } else {
-            self.append_transition(id);
-        }
-    }
-
     /// Appends transition as a separate batch to the queue.
-    pub fn append_transition(&mut self, id: TransitionId) {
-        self.batches.push(TransitionBatch(Vec::from([id])))
+    pub fn append_transition(&mut self, id: TransitionId, gas_used: u64) {
+        self.batches.push(TransitionBatch::new(Vec::from([id]), gas_used as u128))
     }
 
     /// Appends transition batch to the queue.
@@ -206,8 +218,9 @@ impl TransitionQueueStore {
                 queue.batches.append(&mut loaded.batches);
             } else {
                 for batch in loaded.batches {
-                    queue.append_batch(TransitionBatch(
-                        batch.0.into_iter().filter(|id| range.contains(&id.0)).collect(),
+                    queue.append_batch(TransitionBatch::new(
+                        batch.transitions.into_iter().filter(|id| range.contains(&id.0)).collect(),
+                        batch.gas_used, // TODO: invalid
                     ));
                 }
             }

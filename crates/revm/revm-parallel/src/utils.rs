@@ -54,6 +54,7 @@ pub fn resolve_block_dependencies<'a>(
         let mut rw_set = TransitionRWSet {
             read_set: inspector.into_inner(),
             write_set: RevmAccessSet::default(),
+            gas_used: result.result.gas_used(),
         };
 
         // Record transaction `from` and `to` reads.

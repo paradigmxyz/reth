@@ -79,6 +79,8 @@ pub struct TransitionRWSet {
     pub read_set: RevmAccessSet,
     /// The collection of EVM keys written by the transition.
     pub write_set: RevmAccessSet,
+    /// Gas used by this transition.
+    pub gas_used: u64,
 }
 
 impl TransitionRWSet {
@@ -91,6 +93,12 @@ impl TransitionRWSet {
     /// Set the write set.
     pub fn with_write_set(mut self, write_set: RevmAccessSet) -> Self {
         self.write_set = write_set;
+        self
+    }
+
+    /// Set the gas used.
+    pub fn with_gas_used(mut self, gas_used: u64) -> Self {
+        self.gas_used = gas_used;
         self
     }
 

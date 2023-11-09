@@ -211,6 +211,36 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         ))
     }
 
+    fn execute_state_transition(&self, transition: StateTransitionData) -> StateTransition {
+        let state = self.state.clone();
+        match transition {
+            StateTransitionData::PreBlock(_) => {
+                unimplemented!("pre block transition is not implemented")
+            }
+            StateTransitionData::Transaction(block_number, idx, env) => {
+                let mut evm = EVM::with_env(env);
+                evm.database(state);
+                StateTransition::Transaction(block_number, idx, evm.transact_ref())
+            }
+            StateTransitionData::PostBlock(block_number, increments) => {
+                // TODO: simplify
+                let account_states_result = increments
+                    .into_iter()
+                    .map(|(address, increment)| {
+                        let mut info = state
+                            .basic_ref(address)
+                            .map_err(EVMError::Database)?
+                            .unwrap_or_default();
+                        info.balance += U256::from(increment);
+                        let status = AccountStatus::Loaded | AccountStatus::Touched;
+                        Ok((address, Account { info, status, storage: Default::default() }))
+                    })
+                    .collect();
+                StateTransition::PostBlock(block_number, account_states_result)
+            }
+        }
+    }
+
     /// Execute a batch of transactions in parallel.
     pub fn execute_batch(&mut self, batch: &TransitionBatch) -> Result<(), BlockExecutionError> {
         let mut transitions = Vec::with_capacity(batch.len());
@@ -220,46 +250,17 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
 
         tracing::trace!(target: "evm::parallel", ?batch, "Executing block batch");
 
-        let transition_results = transitions
-            .into_par_iter()
-            .map(|transition| {
-                let state = self.state.clone();
-                match transition {
-                    StateTransitionData::PreBlock(_) => {
-                        unimplemented!("pre block transition is not implemented")
-                    }
-                    StateTransitionData::Transaction(block_number, idx, env) => {
-                        let mut evm = EVM::with_env(env);
-                        evm.database(state);
-                        StateTransition::Transaction(block_number, idx, evm.transact_ref())
-                    }
-                    StateTransitionData::PostBlock(block_number, increments) => {
-                        // TODO: simplify
-                        StateTransition::PostBlock(
-                            block_number,
-                            increments
-                                .into_iter()
-                                .map(|(address, increment)| {
-                                    let mut info = state
-                                        .basic_ref(address)
-                                        .map_err(EVMError::Database)?
-                                        .unwrap_or_default();
-                                    info.balance += U256::from(increment);
-                                    Ok((
-                                        address,
-                                        Account {
-                                            info,
-                                            status: AccountStatus::Loaded | AccountStatus::Touched,
-                                            storage: revm::primitives::HashMap::default(),
-                                        },
-                                    ))
-                                })
-                                .collect(),
-                        )
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
+        let transition_results: Vec<_> = if batch.gas_used / transitions.len() as u128 > 21_000 {
+            transitions
+                .into_par_iter()
+                .map(|transition| self.execute_state_transition(transition))
+                .collect()
+        } else {
+            transitions
+                .into_iter()
+                .map(|transition| self.execute_state_transition(transition))
+                .collect()
+        };
 
         let mut states =
             revm::primitives::HashMap::<Address, Vec<(TransitionId, Account)>>::default();
