@@ -136,7 +136,11 @@ mod test {
             let db_provider = factory.provider().unwrap();
             let manager = SnapshotProvider::default();
             let jar_provider = manager
-                .get_segment_provider(SnapshotSegment::Headers, 0, Some(snap_file.path().into()))
+                .get_segment_provider_from_block(
+                    SnapshotSegment::Headers,
+                    0,
+                    Some(snap_file.path().into()),
+                )
                 .unwrap();
 
             assert!(!headers.is_empty());

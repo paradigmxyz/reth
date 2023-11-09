@@ -80,8 +80,11 @@ impl Command {
             .into();
 
         let provider = SnapshotProvider::default();
-        let jar_provider =
-            provider.get_segment_provider(SnapshotSegment::Receipts, self.from, Some(path))?;
+        let jar_provider = provider.get_segment_provider_from_block(
+            SnapshotSegment::Receipts,
+            self.from,
+            Some(path),
+        )?;
         let mut cursor = jar_provider.cursor()?;
 
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {

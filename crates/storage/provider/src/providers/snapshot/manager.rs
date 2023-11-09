@@ -1,23 +1,41 @@
 use super::{LoadedJar, SnapshotJarProvider};
 use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
 use dashmap::DashMap;
-use reth_interfaces::RethResult;
+use parking_lot::RwLock;
+use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{HighestSnapshots, BLOCKS_PER_SNAPSHOT},
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, SealedHeader,
-    SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    B256, U256,
+    snapshot::HighestSnapshots, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo,
+    Header, SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
-use std::{ops::RangeBounds, path::PathBuf};
+use revm::primitives::HashMap;
+use std::{
+    collections::BTreeMap,
+    ops::{RangeBounds, RangeInclusive},
+    path::PathBuf,
+};
 use tokio::sync::watch;
 
-/// SnapshotProvider
+/// Alias type for a map that can be queried for transaction/block ranges from a block/transaction
+/// segment respectively. It uses `BlockNumber` to represent the block end of a snapshot range or
+/// `TxNumber` to represent the transaction end of a snapshot range.
+///
+/// Can be in one of the two formats:
+/// - `HashMap<SnapshotSegment, BTreeMap<BlockNumber, RangeInclusive<TxNumber>>>`
+/// - `HashMap<SnapshotSegment, BTreeMap<TxNumber, RangeInclusive<BlockNumber>>>`
+type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<u64, RangeInclusive<u64>>>;
+
+/// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
 #[derive(Debug, Default)]
 pub struct SnapshotProvider {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
+    /// Available snapshot ranges on disk indexed by max blocks.
+    snapshots_block_index: RwLock<SegmentRanges>,
+    /// Available snapshot ranges on disk indexed by max transactions.
+    snapshots_tx_index: RwLock<SegmentRanges>,
     /// Tracks the latest and highest snapshot of every segment.
     highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
     /// Directory where snapshots are located
@@ -27,7 +45,13 @@ pub struct SnapshotProvider {
 impl SnapshotProvider {
     /// Creates a new [`SnapshotProvider`].
     pub fn new(path: PathBuf) -> Self {
-        Self { map: Default::default(), highest_tracker: None, path }
+        Self {
+            map: Default::default(),
+            snapshots_block_index: Default::default(),
+            snapshots_tx_index: Default::default(),
+            highest_tracker: None,
+            path,
+        }
     }
 
     /// Adds a highest snapshot tracker to the provider
@@ -39,30 +63,122 @@ impl SnapshotProvider {
         self
     }
 
-    /// Gets the provider of the requested segment and range.
-    pub fn get_segment_provider(
+    /// Gets the [`SnapshotJarProvider`] of the requested segment and block.
+    pub fn get_segment_provider_from_block(
         &self,
         segment: SnapshotSegment,
         block: BlockNumber,
-        mut path: Option<PathBuf>,
+        path: Option<PathBuf>,
     ) -> RethResult<SnapshotJarProvider<'_>> {
-        // TODO this invalidates custom length snapshots.
-        let snapshot = block / BLOCKS_PER_SNAPSHOT;
-        let key = (snapshot, segment);
+        self.get_segment_provider(
+            segment,
+            || self.get_segment_ranges_from_block(segment, block),
+            path,
+        )
+    }
 
-        if let Some(jar) = self.map.get(&key) {
-            return Ok(jar.into())
+    /// Gets the [`SnapshotJarProvider`] of the requested segment and transaction.
+    pub fn get_segment_provider_from_transaction(
+        &self,
+        segment: SnapshotSegment,
+        tx: TxNumber,
+        path: Option<PathBuf>,
+    ) -> RethResult<SnapshotJarProvider<'_>> {
+        self.get_segment_provider(
+            segment,
+            || self.get_segment_ranges_from_transaction(segment, tx),
+            path,
+        )
+    }
+
+    /// Gets the [`SnapshotJarProvider`] of the requested segment and block or transaction.
+    pub fn get_segment_provider(
+        &self,
+        segment: SnapshotSegment,
+        fn_ranges: impl Fn() -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>,
+        path: Option<PathBuf>,
+    ) -> RethResult<SnapshotJarProvider<'_>> {
+        // If we have a path, then get the block range and transaction range from its name.
+        // Otherwise, check `self.available_snapshots`
+        let snapshot_ranges = match path {
+            Some(path) => SnapshotSegment::parse_filename(
+                &path.file_name().ok_or_else(|| ProviderError::MissingSnapshot)?.to_string_lossy(),
+            )
+            .and_then(|(parsed_segment, block_range, tx_range)| {
+                if parsed_segment == segment {
+                    return Some((block_range, tx_range));
+                }
+                None
+            }),
+            None => fn_ranges(),
+        };
+
+        // Return cached `LoadedJar` or insert it for the first time, and then, return it.
+        match snapshot_ranges {
+            Some((block_range, tx_range)) => {
+                let key = (*block_range.end(), segment);
+                if let Some(jar) = self.map.get(&key) {
+                    Ok(jar.into())
+                } else {
+                    self.map.insert(
+                        key,
+                        LoadedJar::new(NippyJar::load(
+                            &self.path.join(segment.filename(&block_range, &tx_range)),
+                        )?)?,
+                    );
+                    Ok(self.map.get(&key).expect("qed").into())
+                }
+            }
+            None => Err(ProviderError::MissingSnapshot.into()),
         }
+    }
 
-        if let Some(path) = &path {
-            self.map.insert(key, LoadedJar::new(NippyJar::load(path)?)?);
-        } else {
-            path = Some(self.path.join(segment.filename(
-                &((snapshot * BLOCKS_PER_SNAPSHOT)..=((snapshot + 1) * BLOCKS_PER_SNAPSHOT - 1)),
-            )));
+    /// Gets a snapshot segment's block range and transaction range from the provider inner block
+    /// index.
+    fn get_segment_ranges_from_block(
+        &self,
+        segment: SnapshotSegment,
+        block: u64,
+    ) -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
+        let snapshots = self.snapshots_block_index.read();
+        if let Some(segment_snapshots) = snapshots.get(&segment) {
+            // It's more probable that the request comes from a newer block height, so we iterate
+            // the snapshots in reverse.
+            let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
+
+            while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
+                let block_start =
+                    snapshots_rev_iter.peek().map(|(block_end, _)| *block_end + 1).unwrap_or(0);
+                if block_start <= block {
+                    return Some((block_start..=*block_end, tx_range.clone()));
+                }
+            }
         }
+        None
+    }
 
-        self.get_segment_provider(segment, block, path)
+    /// Gets a snapshot segment's block range and transaction range from the provider inner
+    /// transaction index.
+    fn get_segment_ranges_from_transaction(
+        &self,
+        segment: SnapshotSegment,
+        tx: u64,
+    ) -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
+        let snapshots = self.snapshots_tx_index.read();
+        if let Some(segment_snapshots) = snapshots.get(&segment) {
+            // It's more probable that the request comes from a newer tx height, so we iterate
+            // the snapshots in reverse.
+            let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
+
+            while let Some((tx_end, block_range)) = snapshots_rev_iter.next() {
+                let tx_start =
+                    snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
+                if tx_start <= tx {
+                    return Some((block_range.clone(), tx_start..=*tx_end));
+                }
+            }
+        }
+        None
     }
 
     /// Gets the highest snapshot if it exists for a snapshot segment.
@@ -79,7 +195,8 @@ impl HeaderProvider for SnapshotProvider {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
-        self.get_segment_provider(SnapshotSegment::Headers, num, None)?.header_by_number(num)
+        self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
+            .header_by_number(num)
     }
 
     fn header_td(&self, _block_hash: &BlockHash) -> RethResult<Option<U256>> {
@@ -144,9 +261,7 @@ impl TransactionsProvider for SnapshotProvider {
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
-        // TODO `num` is provided after checking the index
-        let block_num = num;
-        self.get_segment_provider(SnapshotSegment::Transactions, block_num, None)?
+        self.get_segment_provider_from_transaction(SnapshotSegment::Transactions, num, None)?
             .transaction_by_id(num)
     }
 

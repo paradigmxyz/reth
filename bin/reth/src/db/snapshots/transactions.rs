@@ -80,8 +80,11 @@ impl Command {
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
         let provider = SnapshotProvider::default();
-        let jar_provider =
-            provider.get_segment_provider(SnapshotSegment::Transactions, self.from, Some(path))?;
+        let jar_provider = provider.get_segment_provider_from_block(
+            SnapshotSegment::Transactions,
+            self.from,
+            Some(path),
+        )?;
         let mut cursor = jar_provider.cursor()?;
 
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {

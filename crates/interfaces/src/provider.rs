@@ -95,8 +95,8 @@ pub enum ProviderError {
     #[error("this provider does not support this request")]
     UnsupportedProvider,
     /// Snapshot file is not found for block.
-    #[error("not able to find snapshot file for block {0}")]
-    MissingSnapshot(BlockNumber),
+    #[error("not able to find snapshot file")]
+    MissingSnapshot,
 }
 
 /// A root mismatch error at a given block height.
