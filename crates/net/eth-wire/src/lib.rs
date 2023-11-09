@@ -22,6 +22,7 @@ mod ethstream;
 mod hello;
 mod p2pstream;
 mod pinger;
+mod protocol;
 pub use builder::*;
 pub mod types;
 pub use types::*;

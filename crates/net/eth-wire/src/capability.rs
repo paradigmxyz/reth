@@ -60,19 +60,28 @@ impl Capability {
         Self { name: Cow::Borrowed(name), version }
     }
 
+    /// Returns the corresponding eth capability for the given version.
+    pub const fn eth(version: EthVersion) -> Self {
+        match version {
+            EthVersion::Eth66 => Self::eth_66(),
+            EthVersion::Eth67 => Self::eth_67(),
+            EthVersion::Eth68 => Self::eth_68(),
+        }
+    }
+
     /// Returns the [EthVersion::Eth66] capability.
     pub const fn eth_66() -> Self {
-        Self::new_static("eth", EthVersion::Eth66 as usize)
+        Self::eth(EthVersion::Eth66)
     }
 
     /// Returns the [EthVersion::Eth67] capability.
     pub const fn eth_67() -> Self {
-        Self::new_static("eth", EthVersion::Eth67 as usize)
+        Self::eth(EthVersion::Eth67)
     }
 
     /// Returns the [EthVersion::Eth68] capability.
     pub const fn eth_68() -> Self {
-        Self::new_static("eth", EthVersion::Eth68 as usize)
+        Self::eth(EthVersion::Eth68)
     }
 
     /// Whether this is eth v66 protocol.
@@ -97,6 +106,12 @@ impl Capability {
 impl fmt::Display for Capability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.name, self.version)
+    }
+}
+
+impl From<EthVersion> for Capability {
+    fn from(value: EthVersion) -> Self {
+        Capability::eth(value)
     }
 }
 
