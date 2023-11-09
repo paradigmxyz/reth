@@ -1,4 +1,4 @@
-//! Builder structs for [`Status`] and [`HelloMessage`] messages.
+//! Builder structs for messages.
 
 use crate::Status;
 use reth_primitives::{Chain, ForkId, B256, U256};
