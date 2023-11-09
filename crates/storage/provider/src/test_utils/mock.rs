@@ -439,7 +439,7 @@ impl BlockReader for MockEthProvider {
 
     fn block_with_senders(
         &self,
-        _number: BlockHashOrNumber,
+        _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
         Ok(None)

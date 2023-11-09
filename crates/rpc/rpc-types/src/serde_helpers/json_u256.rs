@@ -162,11 +162,11 @@ where
         } else {
             // We could try to convert to a u128 here but there would probably be loss of
             // precision, so we just return an error.
-            return Err(Error::custom("Deserializing a large non-mainnet TTD is not supported"))
+            return Err(Error::custom("Deserializing a large non-mainnet TTD is not supported"));
         }
     } else {
         // must be i64 - negative numbers are not supported
-        return Err(Error::custom("Negative TTD values are invalid and will not be deserialized"))
+        return Err(Error::custom("Negative TTD values are invalid and will not be deserialized"));
     };
 
     Ok(num)

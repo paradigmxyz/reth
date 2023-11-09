@@ -1043,19 +1043,11 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     /// will return None.
     fn block_with_senders(
         &self,
-        block_number: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
-        let block_num: BlockNumber = match block_number {
-            BlockHashOrNumber::Hash(hash) => {
-                let res = match self.block_number(hash)? {
-                    Some(num) => Ok(num),
-                    None => Err("Block number not found for given hash"),
-                };
-                res.unwrap()
-            }
-            BlockHashOrNumber::Number(num) => num,
-        };
+        let block_num = self.convert_hash_or_number(id).unwrap().unwrap();
+
         let Some(header) = self.header_by_number(block_num)? else { return Ok(None) };
 
         let ommers = self.ommers(block_num.into())?.unwrap_or_default();

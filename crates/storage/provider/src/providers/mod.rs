@@ -268,10 +268,10 @@ where
     /// Returns `None` if block is not found.
     fn block_with_senders(
         &self,
-        number: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
-        self.database.provider()?.block_with_senders(number, transaction_kind)
+        self.database.provider()?.block_with_senders(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {

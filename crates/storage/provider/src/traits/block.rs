@@ -119,7 +119,7 @@ pub trait BlockReader:
     /// Returns `None` if block is not found.
     fn block_with_senders(
         &self,
-        number: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>>;
 

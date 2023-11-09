@@ -94,7 +94,7 @@ impl BlockReader for NoopProvider {
 
     fn block_with_senders(
         &self,
-        _number: BlockHashOrNumber,
+        _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> RethResult<Option<reth_primitives::BlockWithSenders>> {
         Ok(None)
