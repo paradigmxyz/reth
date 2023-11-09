@@ -148,4 +148,4 @@ pub use session::{
     SessionLimits, SessionManager, SessionsConfig,
 };
 
-pub use reth_eth_wire::{DisconnectReason, HelloBuilder, HelloMessage};
+pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};

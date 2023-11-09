@@ -10,7 +10,7 @@ use crate::{
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
-use reth_eth_wire::{HelloMessage, Status};
+use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
     mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
 };
@@ -68,7 +68,7 @@ pub struct NetworkConfig<C> {
     /// The `Status` message to send to peers at the beginning.
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
-    pub hello_message: HelloMessage,
+    pub hello_message: HelloMessageWithProtocols,
     /// Whether to disable transaction gossip
     pub tx_gossip_disabled: bool,
     /// Optimism Network Config
@@ -158,7 +158,7 @@ pub struct NetworkConfigBuilder {
     #[serde(skip)]
     executor: Option<Box<dyn TaskSpawner>>,
     /// Sets the hello message for the p2p handshake in RLPx
-    hello_message: Option<HelloMessage>,
+    hello_message: Option<HelloMessageWithProtocols>,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
     /// Whether tx gossip is disabled
@@ -239,7 +239,7 @@ impl NetworkConfigBuilder {
     /// builder.hello_message(HelloMessage::builder(peer_id).build());
     /// # }
     /// ```
-    pub fn hello_message(mut self, hello_message: HelloMessage) -> Self {
+    pub fn hello_message(mut self, hello_message: HelloMessageWithProtocols) -> Self {
         self.hello_message = Some(hello_message);
         self
     }
