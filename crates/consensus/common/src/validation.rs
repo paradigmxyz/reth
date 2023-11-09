@@ -865,38 +865,19 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn test_london_hardfork_adjustment() {
+    fn test_invalid_gas_limit_increase_exceeding_limit() {
+        let gas_limit = 1024 * 10;
         let parent = SealedHeader {
-            header: Header { number: 0, gas_limit: 1024 * 10, ..Default::default() },
+            header: Header { gas_limit, ..Default::default() },
             ..Default::default()
         };
-
-        let mut chain_spec = ChainSpec::default();
-        chain_spec
-            .hardforks
-            .insert(Hardfork::London, ForkCondition::Block(parent.header.number + 1));
-
         let child = SealedHeader {
             header: Header {
-                number: parent.header.number + 1,
-                gas_limit: parent.header.gas_limit,
+                gas_limit: parent.header.gas_limit + parent.header.gas_limit / 1024 + 1,
                 ..Default::default()
             },
             ..Default::default()
         };
-
-        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
-    }
-
-    fn create_header(gas_limit: u64) -> SealedHeader {
-        SealedHeader { header: Header { gas_limit, ..Default::default() }, ..Default::default() }
-    }
-
-    #[test]
-    fn test_invalid_gas_limit_increase_exceeding_limit() {
-        let parent = create_header(1024 * 10);
-        let child = create_header(parent.header.gas_limit + parent.header.gas_limit / 1024 + 1);
         let chain_spec = ChainSpec::default();
 
         assert_eq!(
@@ -910,8 +891,15 @@ mod tests {
 
     #[test]
     fn test_valid_gas_limit_decrease_within_limit() {
-        let parent = create_header(1024 * 20);
-        let child = create_header(parent.header.gas_limit - 5);
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit - 5, ..Default::default() },
+            ..Default::default()
+        };
         let chain_spec = ChainSpec::default();
 
         assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
@@ -919,8 +907,18 @@ mod tests {
 
     #[test]
     fn test_invalid_gas_limit_decrease_exceeding_limit() {
-        let parent = create_header(1024 * 20);
-        let child = create_header(parent.header.gas_limit - parent.header.gas_limit / 1024 - 1);
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header {
+                gas_limit: parent.header.gas_limit - parent.header.gas_limit / 1024 - 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let chain_spec = ChainSpec::default();
 
         assert_eq!(
