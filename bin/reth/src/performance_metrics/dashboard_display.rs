@@ -89,11 +89,11 @@ impl OpcodeStats {
 
     fn print_opcode(&self) {
         let opcode_width = 15;
-        let count_width = 12;
+        let count_width = 18;
         let count_percent_width = 12;
-        let time_width = 12;
+        let time_width = 18;
         let time_percent_width = 12;
-        let total_gas_width = 12;
+        let total_gas_width = 20;
         let total_gas_percent_width = 12;
         let cost_width = 12;
         let base_gas_width = 12;
