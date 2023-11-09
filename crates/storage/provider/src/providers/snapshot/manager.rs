@@ -116,20 +116,31 @@ impl SnapshotProvider {
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         match snapshot_ranges {
             Some((block_range, tx_range)) => {
-                let key = (*block_range.end(), segment);
-                if let Some(jar) = self.map.get(&key) {
-                    Ok(jar.into())
-                } else {
-                    self.map.insert(
-                        key,
-                        LoadedJar::new(NippyJar::load(
-                            &self.path.join(segment.filename(&block_range, &tx_range)),
-                        )?)?,
-                    );
-                    Ok(self.map.get(&key).expect("qed").into())
-                }
+                self.get_or_create_jar_provider(segment, &block_range, &tx_range)
             }
             None => Err(ProviderError::MissingSnapshot.into()),
+        }
+    }
+
+    /// Given a segment, block range and transaction range it returns a cached
+    /// [`SnapshotJarProvider`]. TODO: we should check the size and pop N if there's too many.
+    fn get_or_create_jar_provider(
+        &self,
+        segment: SnapshotSegment,
+        block_range: &RangeInclusive<u64>,
+        tx_range: &RangeInclusive<u64>,
+    ) -> Result<SnapshotJarProvider<'_>, reth_interfaces::RethError> {
+        let key = (*block_range.end(), segment);
+        if let Some(jar) = self.map.get(&key) {
+            Ok(jar.into())
+        } else {
+            self.map.insert(
+                key,
+                LoadedJar::new(NippyJar::load(
+                    &self.path.join(segment.filename(block_range, tx_range)),
+                )?)?,
+            );
+            Ok(self.map.get(&key).expect("qed").into())
         }
     }
 
@@ -186,6 +197,36 @@ impl SnapshotProvider {
         self.highest_tracker
             .as_ref()
             .and_then(|tracker| tracker.borrow().and_then(|highest| highest.highest(segment)))
+    }
+
+    /// Iterates through segment snapshots in reverse order, executing a function until it
+    /// some object. Useful for finding objects by [`TxHash`] or [`BlockHash`].
+    pub fn find_snapshot<T>(
+        &self,
+        segment: SnapshotSegment,
+        func: impl Fn(SnapshotJarProvider<'_>) -> RethResult<Option<T>>,
+    ) -> RethResult<Option<T>> {
+        let snapshots = self.snapshots_block_index.read();
+        if let Some(segment_snapshots) = snapshots.get(&segment) {
+            // It's more probable that the request comes from a newer block height, so we iterate
+            // the snapshots in reverse.
+            let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
+
+            while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
+                let block_start =
+                    snapshots_rev_iter.peek().map(|(block_end, _)| *block_end + 1).unwrap_or(0);
+
+                if let Some(res) = func(self.get_or_create_jar_provider(
+                    segment,
+                    &(block_start..=*block_end),
+                    tx_range,
+                )?)? {
+                    return Ok(Some(res))
+                }
+            }
+        }
+
+        Ok(None)
     }
 }
 
