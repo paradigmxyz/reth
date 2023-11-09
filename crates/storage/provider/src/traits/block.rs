@@ -112,14 +112,14 @@ pub trait BlockReader:
     /// Returns `None` if block is not found.
     fn block_body_indices(&self, num: u64) -> RethResult<Option<StoredBlockBodyIndices>>;
 
-    /// Returns the block with senders with matching number from database.
+    /// Returns the block with senders with matching number or hash from database.
     ///
     /// Returns the block's transactions in the requested variant.
     ///
     /// Returns `None` if block is not found.
     fn block_with_senders(
         &self,
-        number: BlockNumber,
+        id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>>;
 

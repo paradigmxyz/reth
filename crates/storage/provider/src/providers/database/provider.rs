@@ -1033,7 +1033,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
 
-    /// Returns the block with senders with matching number from database.
+    /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
     /// spot, and we want fast querying.**
@@ -1043,9 +1043,13 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     /// will return None.
     fn block_with_senders(
         &self,
-        block_number: BlockNumber,
+        id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
+        let Some(block_number) = self.convert_hash_or_number(id)? else {
+            return Ok(None);
+        };
+
         let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
 
         let ommers = self.ommers(block_number.into())?.unwrap_or_default();
