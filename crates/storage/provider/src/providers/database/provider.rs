@@ -1046,9 +1046,8 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
-        let block_number = match self.convert_hash_or_number(id)? {
-            Some(number) => number,
-            None => return Ok(None),
+        let Some(block_number) = self.convert_hash_or_number(id)? else {
+            return Ok(None);
         };
 
         let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
