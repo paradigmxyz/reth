@@ -4,10 +4,12 @@ mod compression;
 mod filters;
 mod segment;
 
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{BlockNumber, TxNumber};
 pub use compression::Compression;
 pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
 pub use segment::{SegmentConfig, SegmentHeader, SnapshotSegment};
+
+use std::{ops::RangeInclusive, path::Path};
 
 /// Default snapshot block count.
 pub const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
@@ -35,4 +37,21 @@ impl HighestSnapshots {
             SnapshotSegment::Receipts => self.receipts,
         }
     }
+}
+
+/// Given the snapshot's location, it returns an iterator over the existing snapshots in the format
+/// of a tuple composed by the segment, block range and transaction range.
+pub fn iter_snapshots(
+    path: impl AsRef<Path>,
+) -> Result<
+    impl Iterator<Item = (SnapshotSegment, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>,
+    std::io::Error,
+> {
+    let entries = std::fs::read_dir(path.as_ref())?.filter_map(Result::ok);
+    Ok(entries.filter_map(|entry| {
+        if let Ok(true) = entry.metadata().map(|metadata| metadata.is_file()) {
+            return SnapshotSegment::parse_filename(&entry.file_name().to_string_lossy())
+        }
+        None
+    }))
 }

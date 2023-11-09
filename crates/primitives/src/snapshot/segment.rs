@@ -53,10 +53,21 @@ impl SnapshotSegment {
     }
 
     /// Returns the default file name for the provided segment and range.
-    pub fn filename(&self, range: &RangeInclusive<BlockNumber>) -> String {
+    pub fn filename(
+        &self,
+        block_range: &RangeInclusive<BlockNumber>,
+        tx_range: &RangeInclusive<TxNumber>,
+    ) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`.]
-        format!("snapshot_{}_{}_{}", self.as_ref(), range.start(), range.end(),)
+        format!(
+            "snapshot_{}_{}_{}_{}_{}",
+            self.as_ref(),
+            block_range.start(),
+            block_range.end(),
+            tx_range.start(),
+            tx_range.end(),
+        )
     }
 
     /// Returns file name for the provided segment and range, alongisde filters, compression.
@@ -64,9 +75,10 @@ impl SnapshotSegment {
         &self,
         filters: Filters,
         compression: Compression,
-        range: &RangeInclusive<BlockNumber>,
+        block_range: &RangeInclusive<BlockNumber>,
+        tx_range: &RangeInclusive<TxNumber>,
     ) -> String {
-        let prefix = self.filename(range);
+        let prefix = self.filename(block_range, tx_range);
 
         let filters_name = match filters {
             Filters::WithFilters(inclusion_filter, phf) => {
@@ -81,17 +93,26 @@ impl SnapshotSegment {
     }
 
     /// Takes a filename and parses the [`SnapshotSegment`] and its inclusive range.
-    pub fn parse_filename(name: &str) -> Option<(Self, RangeInclusive<BlockNumber>)> {
+    pub fn parse_filename(
+        name: &str,
+    ) -> Option<(Self, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
         let parts: Vec<&str> = name.split('_').collect();
-        if let (Ok(segment), true) = (Self::from_str(parts[1]), parts.len() >= 4) {
-            let start: u64 = parts[2].parse().unwrap_or(0);
-            let end: u64 = parts[3].parse().unwrap_or(0);
+        if let (Ok(segment), true) = (Self::from_str(parts[1]), parts.len() >= 6) {
+            let block_start: u64 = parts[2].parse().unwrap_or(0);
+            let block_end: u64 = parts[3].parse().unwrap_or(0);
 
-            if start <= end || parts[0] != "snapshot" {
+            if block_start <= block_end || parts[0] != "snapshot" {
                 return None
             }
 
-            return Some((segment, start..=end))
+            let tx_start: u64 = parts[4].parse().unwrap_or(0);
+            let tx_end: u64 = parts[5].parse().unwrap_or(0);
+
+            if tx_start <= tx_end {
+                return None
+            }
+
+            return Some((segment, block_start..=block_end, tx_start..=tx_end))
         }
         None
     }

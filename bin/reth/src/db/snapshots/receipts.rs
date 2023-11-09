@@ -27,21 +27,22 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let range = self.from..=(self.from + self.block_interval - 1);
+        let block_range = self.from..=(self.from + self.block_interval - 1);
         let filters = if self.with_filters {
             Filters::WithFilters(inclusion_filter, phf)
         } else {
             Filters::WithoutFilters
         };
 
-        let segment = segments::Receipts::new(compression, filters);
-
-        segment.snapshot::<DB>(provider, PathBuf::default(), range.clone())?;
+        let segment: segments::Receipts = segments::Receipts::new(compression, filters);
+        segment.snapshot::<DB>(provider, PathBuf::default(), block_range.clone())?;
 
         // Default name doesn't have any configuration
-        let default_name: PathBuf = SnapshotSegment::Receipts.filename(&range).into();
+        let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
+        let default_name: PathBuf =
+            SnapshotSegment::Receipts.filename(&block_range, &tx_range).into();
         let new_name: PathBuf = SnapshotSegment::Receipts
-            .filename_with_configuration(filters, compression, &range)
+            .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
 
         std::fs::rename(default_name, new_name)?;
@@ -75,7 +76,7 @@ impl Command {
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
         let path = SnapshotSegment::Receipts
-            .filename_with_configuration(filters, compression, &block_range)
+            .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
 
         let provider = SnapshotProvider::default();

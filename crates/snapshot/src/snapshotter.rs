@@ -4,9 +4,10 @@ use crate::{segments, segments::Segment, SnapshotterError};
 use reth_db::database::Database;
 use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{
-    snapshot::HighestSnapshots, BlockNumber, ChainSpec, SnapshotSegment, TxNumber,
+    snapshot::{iter_snapshots, HighestSnapshots},
+    BlockNumber, ChainSpec, SnapshotSegment, TxNumber,
 };
-use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory};
+use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt};
 use std::{collections::HashMap, ops::RangeInclusive, path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::warn;
@@ -153,15 +154,8 @@ impl<DB: Database> Snapshotter<DB> {
         // It walks over the directory and parses the snapshot filenames extracing `SnapshotSegment`
         // and their inclusive range. It then takes the maximum block number for each specific
         // segment.
-        for (segment, range) in std::fs::read_dir(&self.snapshots_path)
+        for (segment, block_range, _) in iter_snapshots(&self.snapshots_path)
             .map_err(|err| RethError::Custom(err.to_string()))?
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                if let Ok(true) = entry.metadata().map(|metadata| metadata.is_file()) {
-                    return SnapshotSegment::parse_filename(&entry.file_name().to_string_lossy())
-                }
-                None
-            })
         {
             let max_segment_block = match segment {
                 SnapshotSegment::Headers => &mut self.highest_snapshots.headers,
@@ -169,8 +163,8 @@ impl<DB: Database> Snapshotter<DB> {
                 SnapshotSegment::Receipts => &mut self.highest_snapshots.receipts,
             };
 
-            if max_segment_block.map_or(true, |block| block < *range.end()) {
-                *max_segment_block = Some(*range.end());
+            if max_segment_block.map_or(true, |block| block < *block_range.end()) {
+                *max_segment_block = Some(*block_range.end());
             }
         }
 
@@ -220,13 +214,11 @@ impl<DB: Database> Snapshotter<DB> {
     ) -> RethResult<()> {
         if let Some(block_range) = block_range {
             let temp = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
-            let filename = S::segment().filename(&block_range);
+            let provider = self.provider_factory.provider()?;
+            let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
+            let filename = S::segment().filename(&block_range, &tx_range);
 
-            S::default().snapshot::<DB>(
-                &self.provider_factory.provider()?,
-                temp.clone(),
-                block_range.clone(),
-            )?;
+            S::default().snapshot::<DB>(&provider, temp.clone(), block_range)?;
 
             std::fs::rename(temp.join(&filename), self.snapshots_path.join(filename))
                 .map_err(|err| RethError::Custom(err.to_string()))?;
