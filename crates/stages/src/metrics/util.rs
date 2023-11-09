@@ -112,35 +112,35 @@ impl ExecutionDurationRecord {
 
         let rdtsc_overhead: u64 = self.execute_inner.0 * RDTSC_OVERHEAD;
         if self.execute_inner.1.as_nanos() < rdtsc_overhead as u128 {
-            panic!("rdtsc overhead too larget");
+            println!("rdtsc overhead too larget");
         }
         ret.execute_inner =
             (self.execute_inner.0, self.execute_inner.1 - Duration::from_nanos(rdtsc_overhead));
 
         let rdtsc_overhead: u64 = self.read_block.0 * RDTSC_OVERHEAD;
         if self.read_block.1.as_nanos() < rdtsc_overhead as u128 {
-            panic!("rdtsc overhead too larget");
+            println!("rdtsc overhead too larget");
         }
         ret.read_block =
             (self.read_block.0, self.read_block.1 - Duration::from_nanos(rdtsc_overhead));
 
         let rdtsc_overhead: u64 = self.execute_tx.0 * RDTSC_OVERHEAD;
         if self.execute_tx.1.as_nanos() < rdtsc_overhead as u128 {
-            panic!("rdtsc overhead too larget");
+            println!("rdtsc overhead too larget");
         }
         ret.execute_tx =
             (self.execute_tx.0, self.execute_tx.1 - Duration::from_nanos(rdtsc_overhead));
 
         let rdtsc_overhead: u64 = self.process_state.0 * RDTSC_OVERHEAD;
         if self.process_state.1.as_nanos() < rdtsc_overhead as u128 {
-            panic!("rdtsc overhead too larget");
+            println!("rdtsc overhead too larget");
         }
         ret.process_state =
             (self.process_state.0, self.process_state.1 - Duration::from_nanos(rdtsc_overhead));
 
         let rdtsc_overhead: u64 = self.write_to_db.0 * RDTSC_OVERHEAD;
         if self.write_to_db.1.as_nanos() < rdtsc_overhead as u128 {
-            panic!("rdtsc overhead too larget");
+            println!("rdtsc overhead too larget");
         }
         ret.write_to_db =
             (self.write_to_db.0, self.write_to_db.1 - Duration::from_nanos(rdtsc_overhead));
@@ -322,7 +322,7 @@ impl DbSpeedRecord {
 
         let rdtsc_overhead: u64 = self.read_header_td_db_time.0 * RDTSC_OVERHEAD;
         if self.read_header_td_db_time.1.as_nanos() < rdtsc_overhead as u128 {
-            panic!("rdtsc overhead too larget");
+            println!("rdtsc overhead too larget");
         }
         ret.read_header_td_db_time.1 = self
             .read_header_td_db_time
@@ -332,7 +332,7 @@ impl DbSpeedRecord {
 
         let rdtsc_overhead: u64 = self.read_block_with_senders_db_time.0 * RDTSC_OVERHEAD;
         if self.read_block_with_senders_db_time.1.as_nanos() < rdtsc_overhead as u128 {
-            panic!("rdtsc overhead too larget");
+            println!("rdtsc overhead too larget");
         }
         ret.read_block_with_senders_db_time.1 = self
             .read_block_with_senders_db_time
@@ -342,7 +342,7 @@ impl DbSpeedRecord {
 
         let rdtsc_overhead: u64 = self.write_to_db_time.0 * RDTSC_OVERHEAD;
         if self.write_to_db_time.1.as_nanos() < rdtsc_overhead as u128 {
-            panic!("rdtsc overhead too larget");
+            println!("rdtsc overhead too larget");
         }
         ret.write_to_db_time.1 = self
             .write_to_db_time

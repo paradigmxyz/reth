@@ -239,7 +239,7 @@ impl RevmMetricTimeDisplayer {
         for (i, v) in self.revm_metric_record.opcode_record.iter().enumerate() {
             let rdtsc_overhead: u64 = v.0 * RDTSC_OVERHEAD;
             if v.1.as_nanos() < rdtsc_overhead as u128 {
-                panic!("rdtsc overhead too larget");
+                println!("rdtsc overhead too larget");
             }
             pure_record.opcode_record[i].1 = v.1 - Duration::from_nanos(rdtsc_overhead);
         }
