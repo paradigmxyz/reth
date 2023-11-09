@@ -90,7 +90,7 @@ arbitrary = ["revm-primitives/arbitrary", "reth-rpc-types/arbitrary", "dep:arbit
 c-kzg = ["revm-primitives/c-kzg", "dep:c-kzg"]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 clap = ["dep:clap"]
-optimism = ["reth-codecs/optimism"]
+optimism = ["reth-codecs/optimism", "revm-primitives/optimism", "revm/optimism"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
