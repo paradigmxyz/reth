@@ -2,7 +2,6 @@
 //!
 //! See also <https://github.com/ethereum/devp2p/blob/master/README.md>
 
-
 use std::future::Future;
 use std::net::SocketAddr;
 use tokio::sync::mpsc::UnboundedSender;
@@ -28,10 +27,10 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     type AuthError: std::error::Error + Send + Sync + 'static;
     type Authentication: Future<Output = Result<(), Self::AuthError>> + Send + 'static;
 
-    /// Returns the capabilities supported by this protocol.
+    /// Returns the protocols to announce.
     ///
     /// This will be negotiated with the remote peer.
-    fn capabilities(&self) -> Vec<Capability>;
+    fn protocols(&self) -> Vec<Capability>;
 
     fn authenticate(self, direction: Direction, peer_id: PeerId);
 }
