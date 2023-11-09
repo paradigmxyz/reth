@@ -1046,12 +1046,15 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
-        let block_num = self.convert_hash_or_number(id).unwrap().unwrap();
+        let block_number = match self.convert_hash_or_number(id)? {
+            Some(number) => number,
+            None => return Ok(None),
+        };
 
-        let Some(header) = self.header_by_number(block_num)? else { return Ok(None) };
+        let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
 
-        let ommers = self.ommers(block_num.into())?.unwrap_or_default();
-        let withdrawals = self.withdrawals_by_block(block_num.into(), header.timestamp)?;
+        let ommers = self.ommers(block_number.into())?.unwrap_or_default();
+        let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
 
         // Get the block body
         //
@@ -1059,7 +1062,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         // in the database yet, or they do exit but are not indexed. If they exist but are not
         // indexed, we don't have enough information to return the block anyways, so we return
         // `None`.
-        let body = match self.block_body_indices(block_num)? {
+        let body = match self.block_body_indices(block_number)? {
             Some(body) => body,
             None => return Ok(None),
         };
