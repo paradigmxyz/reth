@@ -476,7 +476,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Adds the transaction into the pool.
     ///
-    /// This pool consists of three sub-pools: `Queued`, `Pending`, `BaseFee`, and `Blob`.
+    /// This pool consists of four sub-pools: `Queued`, `Pending`, `BaseFee`, and `Blob`.
     ///
     /// The `Queued` pool contains transactions with gaps in its dependency tree: It requires
     /// additional transactions that are note yet present in the pool. And transactions that the
