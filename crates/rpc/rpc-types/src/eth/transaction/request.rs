@@ -41,7 +41,7 @@ pub struct TransactionRequest {
     pub max_fee_per_blob_gas: Option<U128>,
     /// blob versioned hashes for EIP-4844 transactions.
     pub blob_versioned_hashes: Option<Vec<B256>>,
-    
+
     /// sidecar for EIP-4844 transactions
     pub sidecar: Option<BlobTransactionSidecar>,
 }
@@ -149,12 +149,12 @@ impl TransactionRequest {
                     max_fee_per_blob_gas: max_fee_per_blob_gas.unwrap_or_default(),
                     blob_versioned_hashes: blob_versioned_hashes.unwrap_or_default(),
                     sidecar: sidecar
-                    .map(|s| BlobTransactionSidecar {
-                        blobs: s.blobs,
-                        commitments: s.commitments,
-                        proofs: s.proofs,
-                    })
-                    .unwrap(), // deep copy sidecar
+                        .map(|s| BlobTransactionSidecar {
+                            blobs: s.blobs,
+                            commitments: s.commitments,
+                            proofs: s.proofs,
+                        })
+                        .unwrap(), // deep copy sidecar
                 }))
             }
 
