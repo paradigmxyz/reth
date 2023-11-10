@@ -248,9 +248,9 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
             transitions.push(self.get_state_transition(*transition_id)?);
         }
 
+        let gas_per_transition = batch.gas_used / transitions.len() as u128;
         tracing::trace!(target: "evm::parallel", ?batch, "Executing block batch");
-
-        let transition_results: Vec<_> = if batch.gas_used / transitions.len() as u128 > 21_000 {
+        let transition_results: Vec<_> = if gas_per_transition > 21_000 {
             transitions
                 .into_par_iter()
                 .map(|transition| self.execute_state_transition(transition))

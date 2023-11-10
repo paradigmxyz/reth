@@ -72,7 +72,7 @@ pub struct Command {
     #[arg(long)]
     from: u64,
 
-    /// The end block of the range.
+    /// The end block of the range (exclusive).
     #[arg(long)]
     to: u64,
 
@@ -123,8 +123,8 @@ impl Command {
         let mut start_block = self.from;
         let transition_store = TransitionQueueStore::new(self.out.clone());
         while start_block <= self.to {
-            let end_block = self.to.min(start_block + self.interval);
-            let range = start_block..=end_block;
+            let end_block = (self.to + 1).min(start_block + self.interval);
+            let range = start_block..end_block;
             let mut block_rw_sets = HashMap::default();
 
             let provider = factory.provider().map_err(PipelineError::Interface)?;
