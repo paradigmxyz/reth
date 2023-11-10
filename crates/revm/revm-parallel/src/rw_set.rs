@@ -2,8 +2,7 @@
 
 use derive_more::Deref;
 use reth_primitives::{Address, BlockNumber, TransitionId, B256};
-use revm::TransitionAccount;
-use std::collections::HashSet;
+use revm::{primitives::HashSet, TransitionAccount};
 
 /// The key representing a unique data piece of EVM state.
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
