@@ -32,7 +32,7 @@ pub use traits::{
 pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
-    HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
+    LatestStateProvider, LatestStateProviderRef, ProviderFactory,
 };
 
 #[cfg(any(test, feature = "test-utils"))]

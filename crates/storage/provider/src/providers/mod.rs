@@ -29,7 +29,7 @@ use std::{
 use tracing::trace;
 
 pub use state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+    historical::HistoricalStateProvider,
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
 
