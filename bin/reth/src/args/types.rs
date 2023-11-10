@@ -61,6 +61,8 @@ impl FromStr for MaxU32 {
 macro_rules! max_values {
     ($name:ident, $ty:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        /// A helper type for parsing "max" as the maximum value of the specified type.
+
         pub(crate) struct $name(pub(crate) $ty);
 
         impl fmt::Display for $name {
