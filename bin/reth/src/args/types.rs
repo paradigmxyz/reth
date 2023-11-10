@@ -45,7 +45,7 @@ macro_rules! max_values {
 
         impl $name {
             /// Returns the inner value.
-            pub fn get(&self) -> $ty {
+            pub const fn get(&self) -> $ty {
                 self.0
             }
         }
