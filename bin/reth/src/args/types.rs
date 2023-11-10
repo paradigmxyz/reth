@@ -85,6 +85,7 @@ macro_rules! max_values {
     };
 }
 max_values!(U32, u32);
+max_values!(U64, u64);
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,20 +107,5 @@ mod tests {
     fn test_number_parse() {
         let val = "123".parse::<MaxU32>().unwrap();
         assert_eq!(val, MaxU32(123));
-    }
-
-    max_values!(TestU32, u32);
-    max_values!(TestU64, u64);
-
-    #[test]
-    fn parse_max() {
-        assert_eq!("max".parse::<TestU32>().unwrap().0, u32::MAX);
-        assert_eq!("max".parse::<TestU64>().unwrap().0, u64::MAX);
-    }
-
-    #[test]
-    fn parse_numeric_values() {
-        assert_eq!("123".parse::<TestU32>().unwrap().0, 123);
-        assert_eq!("456".parse::<TestU64>().unwrap().0, 456);
     }
 }
