@@ -58,6 +58,31 @@ impl FromStr for MaxU32 {
     }
 }
 
+macro_rules! max_values {
+    ($name:ident, $ty:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub(crate) struct $name(pub(crate) $ty);
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = ParseIntError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                if s.eq_ignore_ascii_case("max") {
+                    Ok($name(<$ty>::MAX))
+                } else {
+                    s.parse::<$ty>().map($name)
+                }
+            }
+        }
+    };
+}
+max_values!(U32, u32);
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +104,20 @@ mod tests {
     fn test_number_parse() {
         let val = "123".parse::<MaxU32>().unwrap();
         assert_eq!(val, MaxU32(123));
+    }
+
+    max_values!(TestU32, u32);
+    max_values!(TestU64, u64);
+
+    #[test]
+    fn parse_max() {
+        assert_eq!("max".parse::<TestU32>().unwrap().0, u32::MAX);
+        assert_eq!("max".parse::<TestU64>().unwrap().0, u64::MAX);
+    }
+
+    #[test]
+    fn parse_numeric_values() {
+        assert_eq!("123".parse::<TestU32>().unwrap().0, 123);
+        assert_eq!("456".parse::<TestU64>().unwrap().0, 456);
     }
 }
