@@ -357,7 +357,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn rpc_max_response_size_bytes(&self) -> u32 {
-        self.rpc_max_response_size.0.saturating_mul(1024 * 1024)
+        self.rpc_max_response_size.get().saturating_mul(1024 * 1024)
     }
 
     fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
