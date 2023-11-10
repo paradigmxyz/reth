@@ -43,6 +43,13 @@ macro_rules! max_values {
 
         pub struct $name(pub $ty);
 
+        impl $name {
+            /// Returns the inner value.
+            pub fn get(&self) -> $ty {
+                self.0
+            }
+        }
+
         impl fmt::Display for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "{}", self.0)
