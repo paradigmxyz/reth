@@ -41,7 +41,6 @@ pub struct TransactionRequest {
     pub max_fee_per_blob_gas: Option<U128>,
     /// blob versioned hashes for EIP-4844 transactions.
     pub blob_versioned_hashes: Option<Vec<B256>>,
-
     /// sidecar for EIP-4844 transactions
     pub sidecar: Option<BlobTransactionSidecar>,
 }
