@@ -27,6 +27,8 @@ pub(crate) struct BlobTransactions<T: PoolTransaction> {
     by_id: BTreeMap<TransactionId, BlobTransaction<T>>,
     /// _All_ transactions sorted by blob priority.
     all: BTreeSet<BlobTransaction<T>>,
+    /// Keeps track of the current fees, so transaction priority can be calculated on insertion.
+    pending_fees: PendingFees,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`PoolTransaction::size`].
@@ -55,8 +57,8 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         // keep track of size
         self.size_of += tx.size();
 
-        let ord = BlobOrd { submission_id };
-        let transaction = BlobTransaction { ord, transaction: tx };
+        // set transaction, which will also calculate priority based on current pending fees
+        let transaction = BlobTransaction::new(tx, submission_id, &self.pending_fees);
 
         self.by_id.insert(id, transaction.clone());
         self.all.insert(transaction);
@@ -136,9 +138,19 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         transactions
     }
 
+    /// Resorts the transactions in the pool based on the pool's current [PendingFees].
+    pub(crate) fn reprioritize(&mut self) {
+        for tx in self.by_id.values_mut() {
+            tx.update_priority(&self.pending_fees);
+        }
+    }
+
     /// Removes all transactions (and their descendants) which:
     ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`, _and_
     ///  * have a `max_fee_per_gas` greater than or equal to the given `base_fee`
+    ///
+    /// This also sets the [PendingFees] for the pool, resorting transactions based on their
+    /// updated priority.
     ///
     /// Note: the transactions are not returned in a particular order.
     pub(crate) fn enforce_pending_fees(
@@ -151,6 +163,10 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         for id in to_remove {
             removed.push(self.remove_transaction(&id).expect("transaction exists"));
         }
+
+        // set pending fees and reprioritize / resort
+        self.pending_fees = pending_fees.clone();
+        self.reprioritize();
 
         removed
     }
@@ -167,15 +183,6 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     pub(crate) fn assert_invariants(&self) {
         assert_eq!(self.by_id.len(), self.all.len(), "by_id.len() != all.len()");
     }
-
-// Optimisation tradeoffs:
-//
-//   - Eviction relies on 3 fee minimums per account (exec tip, exec cap and blob cap). Maintaining
-//   these values across all transactions from the account is problematic as each transaction
-//   replacement or inclusion would require a rescan of all other transactions to recalculate the
-//   minimum. Instead, the pool maintains a rolling minimum across the nonce range. Updating all
-//   the minimums will need to be done only starting at the swapped in/out nonce and leading up to
-//   the first no-change.
 }
 
 impl<T: PoolTransaction> Default for BlobTransactions<T> {
@@ -185,6 +192,7 @@ impl<T: PoolTransaction> Default for BlobTransactions<T> {
             by_id: Default::default(),
             all: Default::default(),
             size_of: Default::default(),
+            pending_fees: Default::default(),
         }
     }
 }
@@ -195,6 +203,35 @@ struct BlobTransaction<T: PoolTransaction> {
     transaction: Arc<ValidPoolTransaction<T>>,
     /// The value that determines the order of this transaction.
     ord: BlobOrd,
+}
+
+impl<T: PoolTransaction> BlobTransaction<T> {
+    /// Creates a new blob transaction, based on the pool transaction, submission id, and current
+    /// pending fees.
+    pub(crate) fn new(
+        transaction: Arc<ValidPoolTransaction<T>>,
+        submission_id: u64,
+        pending_fees: &PendingFees,
+    ) -> Self {
+        let priority = blob_tx_priority(
+            pending_fees.blob_fee,
+            transaction.max_fee_per_blob_gas().unwrap_or_default(),
+            pending_fees.base_fee as u128,
+            transaction.max_fee_per_gas(),
+        );
+        let ord = BlobOrd { submission_id, priority };
+        Self { transaction, ord }
+    }
+
+    /// Updates the priority for the transaction based on the current pending fees.
+    pub(crate) fn update_priority(&mut self, pending_fees: &PendingFees) {
+        self.ord.priority = blob_tx_priority(
+            pending_fees.blob_fee,
+            self.transaction.max_fee_per_blob_gas().unwrap_or_default(),
+            pending_fees.base_fee as u128,
+            self.transaction.max_fee_per_gas(),
+        );
+    }
 }
 
 impl<T: PoolTransaction> Clone for BlobTransaction<T> {
@@ -233,14 +270,13 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
 /// The `current_fee` is the current value of the fee, this would be the base fee for the EIP1559
 /// component, and the blob fee (computed from the current head) for the blob component.
 ///
-/// This is suppoed to get the number of fee jumps required to get from the current fee to the
-/// fee cap, or where the transaction would not be executable any more.
+/// This is supposed to get the number of fee jumps required to get from the current fee to the fee
+/// cap, or where the transaction would not be executable any more.
 fn fee_delta(max_tx_fee: u128, current_fee: u128) -> f64 {
     // jumps = log1.125(txfee) - log1.125(basefee)
     // TODO: should we do this without f64?
     let jumps = (max_tx_fee as f64).log(1.125) - (current_fee as f64).log(1.125);
     // delta = sign(jumps) * log(abs(jumps))
-    // TODO: which log here? 10? e? 2?
     jumps.signum() * jumps.abs().log2()
 }
 
@@ -262,7 +298,9 @@ fn blob_tx_priority(
 struct BlobOrd {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,
-    // TODO(mattsse): add ord values
+    // The priority for this transaction, calculated using the [`blob_tx_priority`] function,
+    // taking into account both the blob and priority fee.
+    pub(crate) priority: f64,
 }
 
 impl Eq for BlobOrd {}
@@ -281,6 +319,6 @@ impl PartialOrd<Self> for BlobOrd {
 
 impl Ord for BlobOrd {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.submission_id.cmp(&self.submission_id)
+        other.priority.total_cmp(&self.priority)
     }
 }
