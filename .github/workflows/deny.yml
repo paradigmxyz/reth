@@ -1,3 +1,5 @@
+# Runs `cargo-deny` when modifying `Cargo.lock`.
+
 name: deny
 
 on:
@@ -10,7 +12,6 @@ on:
   merge_group:
 
 env:
-  RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
 
 concurrency: deny-${{ github.head_ref || github.run_id }}
@@ -20,7 +21,7 @@ jobs:
     name: deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v1
         with:
           command: check all

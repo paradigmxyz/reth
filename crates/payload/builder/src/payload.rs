@@ -1,6 +1,6 @@
 //! Contains types required for building a payload.
 
-use alloy_rlp::Encodable;
+use alloy_rlp::{Encodable, Error as DecodeError};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge, Address, BlobTransactionSidecar, ChainSpec,
     Header, SealedBlock, Withdrawal, B256, U256,
@@ -9,11 +9,16 @@ use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
     PayloadId,
 };
+
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v3, convert_block_to_payload_field_v2,
     convert_standalone_withdraw_to_withdrawal, from_primitive_sidecar, try_block_to_payload_v1,
 };
 use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId};
+
+#[cfg(feature = "optimism")]
+use reth_primitives::TransactionSigned;
+
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
@@ -137,6 +142,21 @@ pub struct PayloadBuilderAttributes {
     pub withdrawals: Vec<Withdrawal>,
     /// Root of the parent beacon block
     pub parent_beacon_block_root: Option<B256>,
+    /// Optimism Payload Builder Attributes
+    #[cfg(feature = "optimism")]
+    pub optimism_payload_attributes: OptimismPayloadBuilderAttributes,
+}
+
+/// Optimism Payload Builder Attributes
+#[cfg(feature = "optimism")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptimismPayloadBuilderAttributes {
+    /// NoTxPool option for the generated payload
+    pub no_tx_pool: bool,
+    /// Transactions for the generated payload
+    pub transactions: Vec<TransactionSigned>,
+    /// The gas limit for the generated payload
+    pub gas_limit: Option<u64>,
 }
 
 // === impl PayloadBuilderAttributes ===
@@ -145,8 +165,22 @@ impl PayloadBuilderAttributes {
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [PayloadId] for the given parent and attributes
-    pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
+    pub fn try_new(parent: B256, attributes: PayloadAttributes) -> Result<Self, DecodeError> {
+        #[cfg(not(feature = "optimism"))]
         let id = payload_id(&parent, &attributes);
+
+        #[cfg(feature = "optimism")]
+        let (id, transactions) = {
+            let transactions = attributes
+                .optimism_payload_attributes
+                .transactions
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(|tx| TransactionSigned::decode_enveloped(tx.clone()))
+                .collect::<Result<_, _>>()?;
+            (payload_id(&parent, &attributes, &transactions), transactions)
+        };
 
         let withdraw = attributes.withdrawals.map(
             |withdrawals: Vec<reth_rpc_types::engine::payload::Withdrawal>| {
@@ -157,17 +191,22 @@ impl PayloadBuilderAttributes {
             },
         );
 
-        Self {
+        Ok(Self {
             id,
             parent,
-            timestamp: attributes.timestamp.to(),
+            timestamp: attributes.timestamp,
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
             withdrawals: withdraw.unwrap_or_default(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
-        }
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: OptimismPayloadBuilderAttributes {
+                no_tx_pool: attributes.optimism_payload_attributes.no_tx_pool.unwrap_or_default(),
+                transactions,
+                gas_limit: attributes.optimism_payload_attributes.gas_limit,
+            },
+        })
     }
-
     /// Returns the configured [CfgEnv] and [BlockEnv] for the targeted payload (that has the
     /// `parent` as its parent).
     ///
@@ -181,6 +220,11 @@ impl PayloadBuilderAttributes {
         // configure evm env based on parent block
         let mut cfg = CfgEnv::default();
         cfg.chain_id = chain_spec.chain().id();
+
+        #[cfg(feature = "optimism")]
+        {
+            cfg.optimism = chain_spec.is_optimism();
+        }
 
         // ensure we're not missing any timestamp based hardforks
         cfg.spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp);
@@ -229,11 +273,15 @@ impl PayloadBuilderAttributes {
 /// Generates the payload id for the configured payload
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
+pub(crate) fn payload_id(
+    parent: &B256,
+    attributes: &PayloadAttributes,
+    #[cfg(feature = "optimism")] txs: &Vec<TransactionSigned>,
+) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());
-    hasher.update(&attributes.timestamp.to::<u64>().to_be_bytes()[..]);
+    hasher.update(&attributes.timestamp.to_be_bytes()[..]);
     hasher.update(attributes.prev_randao.as_slice());
     hasher.update(attributes.suggested_fee_recipient.as_slice());
     if let Some(withdrawals) = &attributes.withdrawals {
@@ -241,9 +289,25 @@ pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> Paylo
         withdrawals.encode(&mut buf);
         hasher.update(buf);
     }
+
     if let Some(parent_beacon_block) = attributes.parent_beacon_block_root {
         hasher.update(parent_beacon_block);
     }
+
+    #[cfg(feature = "optimism")]
+    {
+        let no_tx_pool = attributes.optimism_payload_attributes.no_tx_pool.unwrap_or_default();
+        if no_tx_pool || !txs.is_empty() {
+            hasher.update([no_tx_pool as u8]);
+            hasher.update(txs.len().to_be_bytes());
+            txs.iter().for_each(|tx| hasher.update(tx.hash()));
+        }
+
+        if let Some(gas_limit) = attributes.optimism_payload_attributes.gas_limit {
+            hasher.update(gas_limit.to_be_bytes());
+        }
+    }
+
     let out = hasher.finalize();
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }

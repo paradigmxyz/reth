@@ -9,24 +9,26 @@ use reth_interfaces::{
     RethError,
 };
 use reth_primitives::{
-    revm::{
-        compat::into_reth_log,
-        env::{fill_cfg_and_block_env, fill_tx_env},
-    },
-    Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
+    revm::env::{fill_cfg_and_block_env, fill_tx_env},
+    Address, Block, BlockNumber, Bloom, ChainSpec, GotExpected, Hardfork, Header, PruneMode,
+    PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
 };
-use reth_provider::{
-    BlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableBlockExecutor,
-    StateProvider,
-};
+use reth_provider::{BlockExecutor, BlockExecutorStats, PrunableBlockExecutor, StateProvider};
 use revm::{
     db::{states::bundle_state::BundleRetention, StateDBBox},
     primitives::ResultAndState,
-    DatabaseCommit, State, EVM,
+    State, EVM,
 };
 use std::{sync::Arc, time::Instant};
+
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::compat::into_reth_log;
+#[cfg(not(feature = "optimism"))]
+use reth_provider::BundleStateWithReceipts;
+#[cfg(not(feature = "optimism"))]
+use revm::DatabaseCommit;
+#[cfg(not(feature = "optimism"))]
 use tracing::{debug, trace};
 
 /// EVMProcessor is a block executor that uses revm to execute blocks or multiple blocks.
@@ -49,9 +51,9 @@ use tracing::{debug, trace};
 #[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a> {
     /// The configured chain-spec
-    chain_spec: Arc<ChainSpec>,
+    pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
-    evm: EVM<StateDBBox<'a, RethError>>,
+    pub(crate) evm: EVM<StateDBBox<'a, RethError>>,
     /// Hook and inspector stack that we want to invoke on that hook.
     stack: InspectorStack,
     /// The collection of receipts.
@@ -59,10 +61,10 @@ pub struct EVMProcessor<'a> {
     /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
-    receipts: Receipts,
+    pub(crate) receipts: Receipts,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
-    first_block: Option<BlockNumber>,
+    pub(crate) first_block: Option<BlockNumber>,
     /// The maximum known block.
     tip: Option<BlockNumber>,
     /// Pruning configuration.
@@ -72,7 +74,7 @@ pub struct EVMProcessor<'a> {
     /// block. None means there isn't any kind of configuration.
     pruning_address_filter: Option<(u64, Vec<Address>)>,
     /// Execution stats
-    stats: BlockExecutorStats,
+    pub(crate) stats: BlockExecutorStats,
 }
 
 impl<'a> EVMProcessor<'a> {
@@ -148,7 +150,7 @@ impl<'a> EVMProcessor<'a> {
         self.evm.db().expect("Database inside EVM is always set")
     }
 
-    fn recover_senders(
+    pub(crate) fn recover_senders(
         &mut self,
         body: &[TransactionSigned],
         senders: Option<Vec<Address>>,
@@ -169,7 +171,7 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Initializes the config and block env.
-    fn init_env(&mut self, header: &Header, total_difficulty: U256) {
+    pub(crate) fn init_env(&mut self, header: &Header, total_difficulty: U256) {
         // Set state clear flag.
         let state_clear_flag =
             self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(header.number);
@@ -236,7 +238,7 @@ impl<'a> EVMProcessor<'a> {
         }
         // increment balances
         self.db_mut()
-            .increment_balances(balance_increments.into_iter().map(|(k, v)| (k, v)))
+            .increment_balances(balance_increments)
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
         Ok(())
@@ -252,7 +254,15 @@ impl<'a> EVMProcessor<'a> {
         sender: Address,
     ) -> Result<ResultAndState, BlockExecutionError> {
         // Fill revm structure.
+        #[cfg(not(feature = "optimism"))]
         fill_tx_env(&mut self.evm.env.tx, transaction, sender);
+
+        #[cfg(feature = "optimism")]
+        {
+            let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
+            transaction.encode_enveloped(&mut envelope_buf);
+            fill_tx_env(&mut self.evm.env.tx, transaction, sender, envelope_buf.into());
+        }
 
         let hash = transaction.hash();
         let out = if self.stack.should_inspect(&self.evm.env, hash) {
@@ -271,79 +281,8 @@ impl<'a> EVMProcessor<'a> {
         out.map_err(|e| BlockValidationError::EVM { hash, error: e.into() }.into())
     }
 
-    /// Runs the provided transactions and commits their state to the run-time database.
-    ///
-    /// The returned [BundleStateWithReceipts] can be used to persist the changes to disk, and
-    /// contains the changes made by each transaction.
-    ///
-    /// The changes in [BundleStateWithReceipts] have a transition ID associated with them: there is
-    /// one transition ID for each transaction (with the first executed tx having transition ID
-    /// 0, and so on).
-    ///
-    /// The second returned value represents the total gas used by this block of transactions.
-    pub fn execute_transactions(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
-        self.init_env(&block.header, total_difficulty);
-
-        // perf: do not execute empty blocks
-        if block.body.is_empty() {
-            return Ok((Vec::new(), 0))
-        }
-
-        let senders = self.recover_senders(&block.body, senders)?;
-
-        let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.len());
-        for (transaction, sender) in block.body.iter().zip(senders) {
-            let time = Instant::now();
-            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
-            // must be no greater than the block’s gasLimit.
-            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
-                }
-                .into())
-            }
-            // Execute transaction.
-            let ResultAndState { result, state } = self.transact(transaction, sender)?;
-            trace!(
-                target: "evm",
-                ?transaction, ?result, ?state,
-                "Executed transaction"
-            );
-            self.stats.execution_duration += time.elapsed();
-            let time = Instant::now();
-
-            self.db_mut().commit(state);
-
-            self.stats.apply_state_duration += time.elapsed();
-
-            // append gas used
-            cumulative_gas_used += result.gas_used();
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(Receipt {
-                tx_type: transaction.tx_type(),
-                // Success flag was added in `EIP-658: Embedding transaction status code in
-                // receipts`.
-                success: result.is_success(),
-                cumulative_gas_used,
-                // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
-            });
-        }
-
-        Ok((receipts, cumulative_gas_used))
-    }
-
     /// Execute the block, verify gas usage and apply post-block state changes.
-    fn execute_inner(
+    pub(crate) fn execute_inner(
         &mut self,
         block: &Block,
         total_difficulty: U256,
@@ -358,8 +297,7 @@ impl<'a> EVMProcessor<'a> {
         if block.gas_used != cumulative_gas_used {
             let receipts = Receipts::from_block_receipt(receipts);
             return Err(BlockValidationError::BlockGasUsed {
-                got: cumulative_gas_used,
-                expected: block.gas_used,
+                gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
             .into())
@@ -457,6 +395,8 @@ impl<'a> EVMProcessor<'a> {
     }
 }
 
+/// Default Ethereum implementation of the [BlockExecutor] trait for the [EVMProcessor].
+#[cfg(not(feature = "optimism"))]
 impl<'a> BlockExecutor for EVMProcessor<'a> {
     fn execute(
         &mut self,
@@ -493,6 +433,69 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         }
 
         self.save_receipts(receipts)
+    }
+
+    fn execute_transactions(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        self.init_env(&block.header, total_difficulty);
+
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok((Vec::new(), 0))
+        }
+
+        let senders = self.recover_senders(&block.body, senders)?;
+
+        let mut cumulative_gas_used = 0;
+        let mut receipts = Vec::with_capacity(block.body.len());
+        for (transaction, sender) in block.body.iter().zip(senders) {
+            let time = Instant::now();
+            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
+            // must be no greater than the block’s gasLimit.
+            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
+            if transaction.gas_limit() > block_available_gas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: transaction.gas_limit(),
+                    block_available_gas,
+                }
+                .into())
+            }
+            // Execute transaction.
+            let ResultAndState { result, state } = self.transact(transaction, sender)?;
+            trace!(
+                target: "evm",
+                ?transaction, ?result, ?state,
+                "Executed transaction"
+            );
+            self.stats.execution_duration += time.elapsed();
+            let time = Instant::now();
+
+            self.db_mut().commit(state);
+
+            self.stats.apply_state_duration += time.elapsed();
+
+            // append gas used
+            cumulative_gas_used += result.gas_used();
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                // convert to reth log
+                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
+            });
+        }
+
+        Ok((receipts, cumulative_gas_used))
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
@@ -533,20 +536,18 @@ pub fn verify_receipt<'a>(
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
     if receipts_root != expected_receipts_root {
-        return Err(BlockValidationError::ReceiptRootDiff {
-            got: Box::new(receipts_root),
-            expected: Box::new(expected_receipts_root),
-        }
+        return Err(BlockValidationError::ReceiptRootDiff(
+            GotExpected { got: receipts_root, expected: expected_receipts_root }.into(),
+        )
         .into())
     }
 
     // Create header log bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
-        return Err(BlockValidationError::BloomLogDiff {
-            expected: Box::new(expected_logs_bloom),
-            got: Box::new(logs_bloom),
-        }
+        return Err(BlockValidationError::BloomLogDiff(
+            GotExpected { got: logs_bloom, expected: expected_logs_bloom }.into(),
+        )
         .into())
     }
 
@@ -564,7 +565,9 @@ mod tests {
         trie::AccountProof,
         Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
-    use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
+    use reth_provider::{
+        AccountReader, BlockHashReader, BundleStateWithReceipts, StateRootProvider,
+    };
     use revm::{Database, TransitionState};
     use std::collections::HashMap;
 

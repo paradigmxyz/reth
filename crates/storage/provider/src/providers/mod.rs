@@ -260,7 +260,7 @@ where
         self.database.provider()?.block_body_indices(number)
     }
 
-    /// Returns the block with senders with matching number from database.
+    /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: If [TransactionVariant::NoHash] is provided then the transactions have invalid
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
@@ -268,10 +268,10 @@ where
     /// Returns `None` if block is not found.
     fn block_with_senders(
         &self,
-        number: BlockNumber,
+        id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
-        self.database.provider()?.block_with_senders(number, transaction_kind)
+        self.database.provider()?.block_with_senders(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {

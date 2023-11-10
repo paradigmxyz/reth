@@ -51,6 +51,11 @@ impl NetworkInfo for NoopNetwork {
     fn is_initially_syncing(&self) -> bool {
         false
     }
+
+    #[cfg(feature = "optimism")]
+    fn sequencer_endpoint(&self) -> Option<&str> {
+        None
+    }
 }
 
 impl PeersInfo for NoopNetwork {
@@ -67,7 +72,19 @@ impl PeersInfo for NoopNetwork {
 impl Peers for NoopNetwork {
     fn add_peer_kind(&self, _peer: PeerId, _kind: PeerKind, _addr: SocketAddr) {}
 
-    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+    async fn get_peers_by_kind(&self, _kind: PeerKind) -> Result<Vec<PeerInfo>, NetworkError> {
+        Ok(vec![])
+    }
+
+    async fn get_all_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+        Ok(vec![])
+    }
+
+    async fn get_peer_by_id(&self, _peer_id: PeerId) -> Result<Option<PeerInfo>, NetworkError> {
+        Ok(None)
+    }
+
+    async fn get_peers_by_id(&self, _peer_id: Vec<PeerId>) -> Result<Vec<PeerInfo>, NetworkError> {
         Ok(vec![])
     }
 

@@ -10,11 +10,11 @@ repository.workspace = true
 
 [dependencies]
 # reth
-reth-codecs = { path = "../../storage/codecs" }
+reth-codecs.workspace = true
 reth-primitives.workspace = true
-reth-ecies = { path = "../ecies" }
+reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
-reth-discv4 = { path = "../discv4" }
+reth-discv4.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -55,6 +55,7 @@ proptest-derive.workspace = true
 default = ["serde"]
 serde = ["dep:serde"]
 arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+optimism = ["reth-primitives/optimism"]
 
 [[test]]
 name = "fuzz_roundtrip"

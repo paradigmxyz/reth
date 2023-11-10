@@ -1,58 +1,59 @@
 [workspace]
 members = [
-    "bin/reth",
-    "crates/config",
-    "crates/consensus/auto-seal",
-    "crates/consensus/beacon",
-    "crates/consensus/common",
-    "crates/blockchain-tree",
-    "crates/interfaces",
-    "crates/payload/builder",
-    "crates/metrics",
-    "crates/metrics/metrics-derive",
-    "crates/net/common",
-    "crates/net/ecies",
-    "crates/net/eth-wire",
-    "crates/net/discv4",
-    "crates/net/dns",
-    "crates/net/nat",
-    "crates/net/network-api",
-    "crates/net/network",
-    "crates/net/downloaders",
-    "crates/payload/basic",
-    "crates/primitives",
-    "crates/prune",
-    "crates/revm",
-    "crates/revm/revm-inspectors",
-    "crates/rpc/ipc",
-    "crates/rpc/rpc",
-    "crates/rpc/rpc-api",
-    "crates/rpc/rpc-builder",
-    "crates/rpc/rpc-engine-api",
-    "crates/rpc/rpc-types",
-    "crates/rpc/rpc-testing-util",
-    "crates/snapshot",
-    "crates/stages",
-    "crates/storage/codecs",
-    "crates/storage/db",
-    "crates/storage/libmdbx-rs",
-    "crates/storage/libmdbx-rs/mdbx-sys",
-    "crates/storage/provider",
-    "crates/storage/nippy-jar",
-    "crates/tracing",
-    "crates/tasks",
-    "crates/transaction-pool",
-    "crates/trie",
-    "testing/ef-tests",
-    "crates/rpc/rpc-types-compat",
-    "crates/tokio-util",
-    "examples",
-    "examples/additional-rpc-namespace-in-cli",
-    "examples/cli-extension-event-hooks",
-    "examples/rpc-db",
-    "examples/manual-p2p",
-    "examples/beacon-api-sse",
-    "examples/trace-transaction-cli"
+    "bin/reth/",
+    "crates/blockchain-tree/",
+    "crates/config/",
+    "crates/consensus/auto-seal/",
+    "crates/consensus/beacon/",
+    "crates/consensus/common/",
+    "crates/interfaces/",
+    "crates/metrics/",
+    "crates/metrics/metrics-derive/",
+    "crates/net/common/",
+    "crates/net/discv4/",
+    "crates/net/dns/",
+    "crates/net/downloaders/",
+    "crates/net/ecies/",
+    "crates/net/eth-wire/",
+    "crates/net/nat/",
+    "crates/net/network/",
+    "crates/net/network-api/",
+    "crates/payload/basic/",
+    "crates/payload/builder/",
+    "crates/primitives/",
+    "crates/prune/",
+    "crates/revm/",
+    "crates/revm/revm-inspectors/",
+    "crates/rpc/ipc/",
+    "crates/rpc/rpc/",
+    "crates/rpc/rpc-api/",
+    "crates/rpc/rpc-builder/",
+    "crates/rpc/rpc-engine-api/",
+    "crates/rpc/rpc-testing-util/",
+    "crates/rpc/rpc-types/",
+    "crates/rpc/rpc-types-compat/",
+    "crates/snapshot/",
+    "crates/stages/",
+    "crates/storage/codecs/",
+    "crates/storage/codecs/derive/",
+    "crates/storage/db/",
+    "crates/storage/libmdbx-rs/",
+    "crates/storage/libmdbx-rs/mdbx-sys/",
+    "crates/storage/nippy-jar/",
+    "crates/storage/provider/",
+    "crates/tasks/",
+    "crates/tokio-util/",
+    "crates/tracing/",
+    "crates/transaction-pool/",
+    "crates/trie/",
+    "examples/",
+    "examples/additional-rpc-namespace-in-cli/",
+    "examples/beacon-api-sse/",
+    "examples/cli-extension-event-hooks/",
+    "examples/manual-p2p/",
+    "examples/rpc-db/",
+    "examples/trace-transaction-cli/",
+    "testing/ef-tests/",
 ]
 default-members = ["bin/reth"]
 
@@ -74,8 +75,7 @@ exclude = [".github/"]
 inherits = "release"
 debug = true
 
-# Meant for testing - all optimizations, but with debug assertions and overflow
-# checks
+# Meant for testing - all optimizations, but with debug assertions and overflow checks.
 [profile.hivetests]
 inherits = "test"
 opt-level = 3
@@ -87,34 +87,58 @@ codegen-units = 1
 incremental = false
 
 [workspace.dependencies]
-## reth
-reth = { path = "./bin/reth" }
-reth-primitives = { path = "./crates/primitives" }
-reth-interfaces = { path = "./crates/interfaces" }
-reth-provider = { path = "./crates/storage/provider" }
-reth-db = { path = "./crates/storage/db" }
-reth-rpc-types = { path = "./crates/rpc/rpc-types" }
-reth-rpc-builder = { path = "./crates/rpc/rpc-builder" }
-reth-blockchain-tree = { path = "./crates/blockchain-tree" }
-reth-beacon-consensus = { path = "./crates/consensus/beacon" }
-reth-metrics = { path = "./crates/metrics" }
-reth-revm = { path = "./crates/revm" }
-reth-payload-builder = { path = "./crates/payload/builder" }
-reth-transaction-pool = { path = "./crates/transaction-pool" }
-reth-tasks = { path = "./crates/tasks" }
-reth-network = { path = "./crates/net/network" }
-reth-network-api = { path = "./crates/net/network-api" }
-reth-rpc-types-compat = { path = "./crates/rpc/rpc-types-compat" }
-reth-discv4 = { path = "./crates/net/discv4" }
-reth-eth-wire = { path = "./crates/net/eth-wire" }
-reth-ecies = { path = "./crates/net/ecies" }
-reth-tracing = { path = "./crates/tracing" }
+# reth
+reth = { path = "bin/reth" }
+reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
+reth-basic-payload-builder = { path = "crates/payload/basic" }
+reth-beacon-consensus = { path = "crates/consensus/beacon" }
+reth-blockchain-tree = { path = "crates/blockchain-tree" }
+reth-codecs = { path = "crates/storage/codecs" }
+reth-config = { path = "crates/config" }
+reth-consensus-common = { path = "crates/consensus/common" }
+reth-db = { path = "crates/storage/db" }
+reth-discv4 = { path = "crates/net/discv4" }
+reth-dns-discovery = { path = "crates/net/dns" }
+reth-downloaders = { path = "crates/net/downloaders" }
+reth-ecies = { path = "crates/net/ecies" }
+reth-eth-wire = { path = "crates/net/eth-wire" }
+reth-interfaces = { path = "crates/interfaces" }
+reth-ipc = { path = "crates/rpc/ipc" }
+reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
+reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
+reth-metrics = { path = "crates/metrics" }
+reth-metrics-derive = { path = "crates/metrics/metrics-derive" }
+reth-net-common = { path = "crates/net/common" }
+reth-net-nat = { path = "crates/net/nat" }
+reth-network = { path = "crates/net/network" }
+reth-network-api = { path = "crates/net/network-api" }
+reth-nippy-jar = { path = "crates/storage/nippy-jar" }
+reth-payload-builder = { path = "crates/payload/builder" }
+reth-primitives = { path = "crates/primitives" }
+reth-provider = { path = "crates/storage/provider" }
+reth-prune = { path = "crates/prune" }
+reth-revm = { path = "crates/revm" }
+reth-revm-inspectors = { path = "crates/revm/revm-inspectors" }
+reth-rpc = { path = "crates/rpc/rpc" }
+reth-rpc-api = { path = "crates/rpc/rpc-api" }
+reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
+reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
+reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
+reth-rpc-types = { path = "crates/rpc/rpc-types" }
+reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
+reth-snapshot = { path = "crates/snapshot" }
+reth-stages = { path = "crates/stages" }
+reth-tasks = { path = "crates/tasks" }
 reth-tokio-util = { path = "crates/tokio-util" }
+reth-tracing = { path = "crates/tracing" }
+reth-transaction-pool = { path = "crates/transaction-pool" }
+reth-trie = { path = "crates/trie" }
+
 # revm
 revm = { git = "https://github.com/bluealloy/revm", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
 
-## eth
+# eth
 alloy-primitives = "0.4"
 alloy-dyn-abi = "0.4"
 alloy-sol-types = "0.4"
@@ -126,11 +150,11 @@ ethers-middleware = { version = "2.0", default-features = false }
 discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
 igd = { git = "https://github.com/stevefan1999-personal/rust-igd", rev = "c2d1f83eb1612a462962453cb0703bc93258b173" }
 
-## js
+# js
 boa_engine = "0.17"
 boa_gc = "0.17"
 
-## misc
+# misc
 aquamarine = "0.3"
 bytes = "1.5"
 bitflags = "2.4"
@@ -151,27 +175,27 @@ hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
 
-### proc-macros
+# proc-macros
 proc-macro2 = "1.0"
 quote = "1.0"
 
-## tokio
+# tokio
 tokio-stream = "0.1.11"
 tokio = { version = "1.21", default-features = false }
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
-## async
+# async
 async-trait = "0.1.68"
 futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
 
-## json
+# rpc
 jsonrpsee = { version = "0.20" }
 jsonrpsee-core = { version = "0.20" }
 jsonrpsee-types = { version = "0.20" }
 
-## crypto
+# crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [
     "global-context",
     "rand-std",
@@ -181,11 +205,11 @@ enr = { version = "0.9", default-features = false, features = ["k256"] }
 # for eip-4844
 c-kzg = "0.4.0"
 
-## config
+# config
 confy = "0.5"
 toml = "0.8"
 
-### misc-testing
+# misc-testing
 arbitrary = "1.1"
 assert_matches = "1.5.0"
 tempfile = "3.8"
