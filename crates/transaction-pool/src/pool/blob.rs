@@ -19,6 +19,10 @@ use super::txpool::PendingFees;
 /// This expects that certain constraints are met:
 ///   - blob transactions are always gap less
 pub(crate) struct BlobTransactions<T: PoolTransaction> {
+    /// Keeps track of transactions inserted in the pool.
+    ///
+    /// This way we can determine when transactions were submitted to the pool.
+    submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: BTreeMap<TransactionId, BlobTransaction<T>>,
     /// _All_ transactions sorted by blob priority.
@@ -48,15 +52,22 @@ impl<T: PoolTransaction> BlobTransactions<T> {
             "transaction already included {:?}",
             self.by_id.contains_key(&id)
         );
+        let submission_id = self.next_id();
 
         // keep track of size
         self.size_of += tx.size();
 
         // set transaction, which will also calculate priority based on current pending fees
-        let transaction = BlobTransaction::new(tx, &self.pending_fees);
+        let transaction = BlobTransaction::new(tx, submission_id, &self.pending_fees);
 
         self.by_id.insert(id, transaction.clone());
         self.all.insert(transaction);
+    }
+
+    fn next_id(&mut self) -> u64 {
+        let id = self.submission_id;
+        self.submission_id = self.submission_id.wrapping_add(1);
+        id
     }
 
     /// Removes the transaction from the pool
@@ -187,6 +198,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
 impl<T: PoolTransaction> Default for BlobTransactions<T> {
     fn default() -> Self {
         Self {
+            submission_id: 0,
             by_id: Default::default(),
             all: Default::default(),
             size_of: Default::default(),
@@ -208,6 +220,7 @@ impl<T: PoolTransaction> BlobTransaction<T> {
     /// pending fees.
     pub(crate) fn new(
         transaction: Arc<ValidPoolTransaction<T>>,
+        submission_id: u64,
         pending_fees: &PendingFees,
     ) -> Self {
         let priority = blob_tx_priority(
@@ -216,7 +229,7 @@ impl<T: PoolTransaction> BlobTransaction<T> {
             pending_fees.base_fee as u128,
             transaction.max_fee_per_gas(),
         );
-        let ord = BlobOrd { priority };
+        let ord = BlobOrd { priority, submission_id };
         Self { transaction, ord }
     }
 
@@ -293,6 +306,8 @@ fn blob_tx_priority(
 
 #[derive(Debug, Clone)]
 struct BlobOrd {
+    /// Identifier that tags when transaction was submitted in the pool.
+    pub(crate) submission_id: u64,
     // The priority for this transaction, calculated using the [`blob_tx_priority`] function,
     // taking into account both the blob and priority fee.
     pub(crate) priority: f64,
@@ -314,6 +329,13 @@ impl PartialOrd<Self> for BlobOrd {
 
 impl Ord for BlobOrd {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.priority.total_cmp(&self.priority)
+        let ord = other.priority.total_cmp(&self.priority);
+
+        // use submission_id to break ties
+        if ord == Ordering::Equal {
+            self.submission_id.cmp(&other.submission_id)
+        } else {
+            ord
+        }
     }
 }
