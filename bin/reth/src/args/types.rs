@@ -64,7 +64,6 @@ macro_rules! max_values {
 }
 max_values!(MaxU32, u32);
 max_values!(MaxU64, u64);
-max_values!(U64, u64);
 #[cfg(test)]
 mod tests {
     use super::*;
