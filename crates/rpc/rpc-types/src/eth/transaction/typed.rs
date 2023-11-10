@@ -76,7 +76,6 @@ pub struct Eip4844TransactionRequest {
     pub access_list: AccessList,
     pub max_fee_per_blob_gas: U128,
     pub blob_versioned_hashes: Vec<B256>,
-    pub gas_price: U128,
     pub sidecar: BlobTransactionSidecar,
 }
 
