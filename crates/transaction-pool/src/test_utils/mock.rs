@@ -36,6 +36,40 @@ pub fn mock_tx_pool() -> MockTxPool {
     MockTxPool::new(Default::default(), Default::default())
 }
 
+macro_rules! op_set_value {
+    ($this:ident, sender, $value:ident) => {
+        $this.from = $value;
+    };
+    ($this:ident, gas_limit, $value:ident) => {
+        $this.gas_limit = $value;
+    };
+    ($this:ident, value, $value:ident) => {
+        $this.value = $value.into();
+    };
+    ($this:ident, input, $value:ident) => {
+        $this.value = $value;
+    };
+    ($this:ident, $other:ident, $field:ident) => {};
+}
+
+macro_rules! op_get_value {
+    ($this:ident, sender) => {
+        $this.from
+    };
+    ($this:ident, gas_limit) => {
+        $this.gas_limit
+    };
+    ($this:ident, value) => {
+        $this.value.into()
+    };
+    ($this:ident, input) => {
+        $this.input.clone()
+    };
+    ($this:ident, $other:ident) => {
+        Default::default()
+    };
+}
+
 /// Sets the value for the field
 macro_rules! set_value {
     ($this:ident => $field:ident) => {
@@ -54,8 +88,8 @@ macro_rules! set_value {
                 *$field = new_value;
             }
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => {
-                panic!("not implemented")
+            MockTransaction::Deposit(ref mut tx) => {
+                op_set_value!(tx, $this, new_value);
             }
         }
     };
@@ -63,15 +97,15 @@ macro_rules! set_value {
 
 /// Gets the value for the field
 macro_rules! get_value {
-    ($this:ident => $field:ident) => {
+    ($this:tt => $field:ident) => {
         match $this {
-            MockTransaction::Legacy { $field, .. } => $field,
-            MockTransaction::Eip1559 { $field, .. } => $field,
-            MockTransaction::Eip4844 { $field, .. } => $field,
-            MockTransaction::Eip2930 { $field, .. } => $field,
+            MockTransaction::Legacy { $field, .. } => $field.clone(),
+            MockTransaction::Eip1559 { $field, .. } => $field.clone(),
+            MockTransaction::Eip4844 { $field, .. } => $field.clone(),
+            MockTransaction::Eip2930 { $field, .. } => $field.clone(),
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => {
-                panic!("not implemented")
+            MockTransaction::Deposit(tx) => {
+                op_get_value!(tx, $field)
             }
         }
     };
@@ -92,7 +126,7 @@ macro_rules! make_setters_getters {
             }
 
             pub fn [<get_ $name>](&self) -> $t {
-                get_value!(self => $name).clone()
+                get_value!(self => $name)
             }
         )*}
     };
@@ -308,9 +342,7 @@ impl MockTransaction {
             }
             MockTransaction::Eip2930 { gas_price, .. } => *gas_price = val,
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => {
-                let val = 0u128;
-            }
+            MockTransaction::Deposit(_) => {}
         }
         self
     }
@@ -340,9 +372,7 @@ impl MockTransaction {
                 *gas_price = val;
             }
             #[cfg(feature = "optimism")]
-            MockTransaction::Deposit(_) => {
-                let val = 0u128;
-            }
+            MockTransaction::Deposit(_) => {}
         }
         self
     }
