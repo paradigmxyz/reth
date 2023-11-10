@@ -4,13 +4,12 @@ use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{BlockId, Bytes, TxHash, B256};
 use reth_rpc_api::clients::TraceApiClient;
 use reth_rpc_types::{
-    state::StateOverride,
     trace::{
         filter::TraceFilter,
         parity::{LocalizedTransactionTrace, TraceResults, TraceType},
         tracerequest::TraceCallRequest,
     },
-    BlockOverrides, CallRequest, Index,
+    CallRequest, Index,
 };
 use std::{
     collections::HashSet,
@@ -40,17 +39,7 @@ pub type TraceGetResult =
 pub type TraceFilterResult =
     Result<(Vec<LocalizedTransactionTrace>, TraceFilter), (RpcError, TraceFilter)>;
 /// Represents the result of a single trace call.
-pub type TraceCallResult = Result<
-    TraceResults,
-    (
-        RpcError,
-        CallRequest,
-        HashSet<TraceType>,
-        Option<BlockId>,
-        Option<StateOverride>,
-        Option<Box<BlockOverrides>>,
-    ),
->;
+pub type TraceCallResult = Result<TraceResults, (RpcError, TraceCallRequest)>;
 
 /// An extension trait for the Trace API.
 #[async_trait::async_trait]
@@ -371,14 +360,7 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
                 .await
             {
                 Ok(result) => Ok(result),
-                Err(err) => Err((
-                    err,
-                    request.call,
-                    request.trace_types,
-                    request.block_id,
-                    request.state_overrides,
-                    request.block_overrides,
-                )),
+                Err(err) => Err((err, request)),
             }
         });
         TraceCallStream { stream: Box::pin(stream) }
