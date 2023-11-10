@@ -131,7 +131,7 @@ impl TransactionRequest {
             // EIP4884
             (None, Some(_), access_list, Some(_), blob_versioned_hashes, sidecar) => {
                 // As per the EIP, we follow the same semantics as EIP-1559.
-                Some(TypedTransactionRequest::EIP4844(crate::Eip4844TransactionRequest {
+                Some(TypedTransactionRequest::EIP4844(crate::EIP4844TransactionRequest {
                     chain_id: 0,
                     nonce: nonce.unwrap_or_default(),
                     max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
