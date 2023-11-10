@@ -3,7 +3,7 @@
 //! See also <https://github.com/ethereum/devp2p/blob/master/README.md>
 
 use futures::{Stream, StreamExt};
-use reth_eth_wire::{capability::SharedCapability, protocol::Protocol};
+use reth_eth_wire::{capability::SharedCapabilities, protocol::Protocol};
 use reth_network_api::Direction;
 use reth_primitives::BytesMut;
 use reth_rpc_types::PeerId;
@@ -54,7 +54,7 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     /// protocol.
     fn on_unsupported_by_peer(
         self,
-        supported: &SharedCapability,
+        supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
     ) -> OnNotSupported;
@@ -211,7 +211,7 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
 
     fn on_unsupported_by_peer(
         self,
-        supported: &SharedCapability,
+        supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
     ) -> OnNotSupported;
@@ -234,7 +234,7 @@ where
 
     fn on_unsupported_by_peer(
         self,
-        supported: &SharedCapability,
+        supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
     ) -> OnNotSupported {
