@@ -41,7 +41,14 @@ macro_rules! max_values {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         /// A helper type for parsing "max" as the maximum value of the specified type.
 
-        pub(crate) struct $name(pub(crate) $ty);
+        pub struct $name(pub $ty);
+
+        impl $name {
+            /// Returns the inner value.
+            pub const fn get(&self) -> $ty {
+                self.0
+            }
+        }
 
         impl fmt::Display for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
