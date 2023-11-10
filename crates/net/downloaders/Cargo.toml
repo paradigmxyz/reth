@@ -50,4 +50,4 @@ itertools.workspace = true
 tempfile.workspace = true
 
 [features]
-test-utils = ["dep:alloy-rlp", "dep:tempfile", "dep:itertools"]
+test-utils = ["dep:alloy-rlp", "dep:tempfile", "dep:itertools", "reth-interfaces/test-utils"]

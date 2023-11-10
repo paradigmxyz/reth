@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Reth RPC types
-"""
+description = "Reth RPC types"
 
 [dependencies]
 # # ethereum
@@ -36,6 +34,7 @@ proptest-derive = { workspace = true, optional = true }
 [features]
 default = ["jsonrpsee-types"]
 arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary"]
+optimism = []
 
 [dev-dependencies]
 # misc

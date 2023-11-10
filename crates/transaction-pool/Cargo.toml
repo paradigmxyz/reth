@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Transaction pool implementation
-"""
+description = "Transaction pool implementation"
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
@@ -24,6 +22,7 @@ reth-interfaces.workspace = true
 reth-tasks.workspace = true
 revm.workspace = true
 alloy-rlp.workspace = true
+reth-revm = { workspace = true, optional = true }
 
 # async/futures
 async-trait.workspace = true
@@ -64,6 +63,14 @@ default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
 arbitrary = ["proptest", "reth-primitives/arbitrary"]
+optimism = [
+    "dep:reth-revm",
+    "reth-revm?/optimism",
+    "reth-primitives/optimism",
+    "reth-provider/test-utils",
+    "reth-provider/optimism",
+    "revm/optimism",
+]
 
 [[bench]]
 name = "reorder"

@@ -62,12 +62,12 @@ A simple and safe approach to achieve this is to use the Armbian build framework
 
 To be able to build an Armbian image and set those values, you will need to:
 - Clone the Armbian build framework repository
-```shell
+```bash
 git clone https://github.com/armbian/build
 cd build
 ```
 - Run the compile script with the following parameters:
-```shell
+```bash
 ./compile.sh \
 BUILD_MINIMAL=yes \
 BUILD_DESKTOP=no \

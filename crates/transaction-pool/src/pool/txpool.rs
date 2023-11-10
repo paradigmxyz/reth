@@ -476,7 +476,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Adds the transaction into the pool.
     ///
-    /// This pool consists of two three-pools: `Queued`, `Pending` and `BaseFee`.
+    /// This pool consists of four sub-pools: `Queued`, `Pending`, `BaseFee`, and `Blob`.
     ///
     /// The `Queued` pool contains transactions with gaps in its dependency tree: It requires
     /// additional transactions that are note yet present in the pool. And transactions that the
@@ -494,6 +494,11 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// the sender's balance or nonce and instead their `feeCap` determines whether the
     /// transaction is _currently_ (on the current state) ready or needs to be parked until the
     /// `feeCap` satisfies the block's `baseFee`.
+    ///
+    /// The `Blob` pool contains _blob_ transactions that currently can't satisfy the dynamic fee
+    /// requirement, or blob fee requirement. Transactions become executable only if the
+    /// transaction `feeCap` is greater than the block's `baseFee` and the `maxBlobFee` is greater
+    /// than the block's `blobFee`.
     pub(crate) fn add_transaction(
         &mut self,
         tx: ValidPoolTransaction<T::Transaction>,

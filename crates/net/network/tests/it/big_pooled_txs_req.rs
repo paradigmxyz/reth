@@ -2,7 +2,7 @@ use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
-    PeerRequest,
+    NetworkEvents, PeerRequest,
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{Signature, TransactionSigned, B256};

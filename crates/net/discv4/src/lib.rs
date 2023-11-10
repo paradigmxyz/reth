@@ -193,36 +193,31 @@ impl Discv4 {
     ///
     /// ```
     /// # use std::io;
-    /// use std::net::SocketAddr;
-    /// use std::str::FromStr;
     /// use rand::thread_rng;
-    /// use secp256k1::SECP256K1;
-    /// use reth_primitives::{NodeRecord, PeerId};
     /// use reth_discv4::{Discv4, Discv4Config};
+    /// use reth_primitives::{NodeRecord, PeerId};
+    /// use secp256k1::SECP256K1;
+    /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {
     /// // generate a (random) keypair
-    ///  let mut rng = thread_rng();
-    ///  let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-    ///  let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+    /// let mut rng = thread_rng();
+    /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
+    /// let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
     ///
-    ///  let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
-    ///  let local_enr = NodeRecord {
-    ///      address: socket.ip(),
-    ///      tcp_port: socket.port(),
-    ///      udp_port: socket.port(),
-    ///      id,
-    ///  };
-    ///  let config = Discv4Config::default();
+    /// let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
+    /// let local_enr =
+    ///     NodeRecord { address: socket.ip(), tcp_port: socket.port(), udp_port: socket.port(), id };
+    /// let config = Discv4Config::default();
     ///
-    ///  let(discv4, mut service) = Discv4::bind(socket, local_enr, secret_key, config).await.unwrap();
+    /// let (discv4, mut service) = Discv4::bind(socket, local_enr, secret_key, config).await.unwrap();
     ///
-    ///   // get an update strea
-    ///   let updates = service.update_stream();
+    /// // get an update strea
+    /// let updates = service.update_stream();
     ///
-    ///   let _handle = service.spawn();
+    /// let _handle = service.spawn();
     ///
-    ///   // lookup the local node in the DHT
-    ///   let _discovered = discv4.lookup_self().await.unwrap();
+    /// // lookup the local node in the DHT
+    /// let _discovered = discv4.lookup_self().await.unwrap();
     ///
     /// # Ok(())
     /// # }

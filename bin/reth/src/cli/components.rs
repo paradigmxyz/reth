@@ -1,5 +1,6 @@
 //! Components that are used by the node command.
 
+use reth_network::NetworkEvents;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::ChainSpec;
 use reth_provider::{
@@ -47,7 +48,7 @@ pub trait RethNodeComponents: Clone + Send + Sync + 'static {
     /// The transaction pool type
     type Pool: TransactionPool + Clone + Unpin + 'static;
     /// The network type used to communicate with p2p.
-    type Network: NetworkInfo + Peers + Clone + 'static;
+    type Network: NetworkInfo + Peers + NetworkEvents + Clone + 'static;
     /// The events type used to create subscriptions.
     type Events: CanonStateSubscriptions + Clone + 'static;
     /// The type that is used to spawn tasks.
@@ -116,7 +117,7 @@ where
     Provider: FullProvider + Clone + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + Unpin + 'static,
-    Network: NetworkInfo + Peers + Clone + 'static,
+    Network: NetworkInfo + Peers + NetworkEvents + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
 {
     type Provider = Provider;
@@ -153,11 +154,10 @@ where
 /// # Example
 ///
 /// ```rust
-/// use reth::cli::components::RethRpcServerHandles;
-/// use reth::rpc::api::EthApiClient;
+/// use reth::{cli::components::RethRpcServerHandles, rpc::api::EthApiClient};
 /// # async fn t(handles: RethRpcServerHandles) {
-///    let client = handles.rpc.http_client().expect("http server not started");
-///    let block_number = client.block_number().await.unwrap();
+/// let client = handles.rpc.http_client().expect("http server not started");
+/// let block_number = client.block_number().await.unwrap();
 /// # }
 /// ```
 #[derive(Debug, Clone)]
