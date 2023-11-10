@@ -297,8 +297,8 @@ impl<'a, DB: Database> StateProvider for HistoricalStateProvider<'a, DB> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
-        AccountReader, HistoricalStateProvider, ProviderFactory, StateProvider,
+        providers::state::historical::HistoryInfo, AccountReader, HistoricalStateProvider,
+        ProviderFactory, StateProvider,
     };
     use reth_db::{
         database::Database,
@@ -317,12 +317,6 @@ mod tests {
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
     const STORAGE: B256 = b256!("0000000000000000000000000000000000000000000000000000000000000001");
-
-    fn assert_state_provider<T: StateProvider>() {}
-    #[allow(unused)]
-    fn assert_historical_state_provider<T: DbTx>() {
-        assert_state_provider::<HistoricalStateProvider<T>>();
-    }
 
     #[test]
     fn history_provider_get_account() {
@@ -387,31 +381,53 @@ mod tests {
         tx.put::<tables::PlainAccountState>(HIGHER_ADDRESS, higher_acc_plain).unwrap();
         tx.commit().unwrap();
 
-        let tx = db.tx().unwrap();
+        let provider_factory =
+            ProviderFactory::new(db, Arc::new(ChainSpecBuilder::mainnet().build()));
 
         // run
-        assert_eq!(HistoricalStateProvider::new(&tx, 1).basic_account(ADDRESS), Ok(None));
-        assert_eq!(HistoricalStateProvider::new(&tx, 2).basic_account(ADDRESS), Ok(Some(acc_at3)));
-        assert_eq!(HistoricalStateProvider::new(&tx, 3).basic_account(ADDRESS), Ok(Some(acc_at3)));
-        assert_eq!(HistoricalStateProvider::new(&tx, 4).basic_account(ADDRESS), Ok(Some(acc_at7)));
-        assert_eq!(HistoricalStateProvider::new(&tx, 7).basic_account(ADDRESS), Ok(Some(acc_at7)));
-        assert_eq!(HistoricalStateProvider::new(&tx, 9).basic_account(ADDRESS), Ok(Some(acc_at10)));
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 10).basic_account(ADDRESS),
+            HistoricalStateProvider::new(&provider_factory, 1).basic_account(ADDRESS),
+            Ok(None)
+        );
+        assert_eq!(
+            HistoricalStateProvider::new(&provider_factory, 2).basic_account(ADDRESS),
+            Ok(Some(acc_at3))
+        );
+        assert_eq!(
+            HistoricalStateProvider::new(&provider_factory, 3).basic_account(ADDRESS),
+            Ok(Some(acc_at3))
+        );
+        assert_eq!(
+            HistoricalStateProvider::new(&provider_factory, 4).basic_account(ADDRESS),
+            Ok(Some(acc_at7))
+        );
+        assert_eq!(
+            HistoricalStateProvider::new(&provider_factory, 7).basic_account(ADDRESS),
+            Ok(Some(acc_at7))
+        );
+        assert_eq!(
+            HistoricalStateProvider::new(&provider_factory, 9).basic_account(ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 11).basic_account(ADDRESS),
+            HistoricalStateProvider::new(&provider_factory, 10).basic_account(ADDRESS),
+            Ok(Some(acc_at10))
+        );
+        assert_eq!(
+            HistoricalStateProvider::new(&provider_factory, 11).basic_account(ADDRESS),
             Ok(Some(acc_at15))
         );
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 16).basic_account(ADDRESS),
+            HistoricalStateProvider::new(&provider_factory, 16).basic_account(ADDRESS),
             Ok(Some(acc_plain))
         );
 
-        assert_eq!(HistoricalStateProvider::new(&tx, 1).basic_account(HIGHER_ADDRESS), Ok(None));
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 1000).basic_account(HIGHER_ADDRESS),
+            HistoricalStateProvider::new(&provider_factory, 1).basic_account(HIGHER_ADDRESS),
+            Ok(None)
+        );
+        assert_eq!(
+            HistoricalStateProvider::new(&provider_factory, 1000).basic_account(HIGHER_ADDRESS),
             Ok(Some(higher_acc_plain))
         );
     }
@@ -466,41 +482,48 @@ mod tests {
         tx.put::<tables::PlainStorageState>(HIGHER_ADDRESS, higher_entry_plain).unwrap();
         tx.commit().unwrap();
 
-        let tx = db.tx().unwrap();
+        let provider_factory =
+            ProviderFactory::new(db, Arc::new(ChainSpecBuilder::mainnet().build()));
 
         // run
-        assert_eq!(HistoricalStateProvider::new(&tx, 0).storage(ADDRESS, STORAGE), Ok(None));
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 3).storage(ADDRESS, STORAGE),
+            HistoricalStateProvider::new(&provider_factory, 0).storage(ADDRESS, STORAGE),
+            Ok(None)
+        );
+        assert_eq!(
+            HistoricalStateProvider::new(&provider_factory, 3).storage(ADDRESS, STORAGE),
             Ok(Some(U256::ZERO))
         );
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 4).storage(ADDRESS, STORAGE),
+            HistoricalStateProvider::new(&provider_factory, 4).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
         );
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 7).storage(ADDRESS, STORAGE),
+            HistoricalStateProvider::new(&provider_factory, 7).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
         );
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 9).storage(ADDRESS, STORAGE),
+            HistoricalStateProvider::new(&provider_factory, 9).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at10.value))
         );
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 10).storage(ADDRESS, STORAGE),
+            HistoricalStateProvider::new(&provider_factory, 10).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at10.value))
         );
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 11).storage(ADDRESS, STORAGE),
+            HistoricalStateProvider::new(&provider_factory, 11).storage(ADDRESS, STORAGE),
             Ok(Some(entry_at15.value))
         );
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 16).storage(ADDRESS, STORAGE),
+            HistoricalStateProvider::new(&provider_factory, 16).storage(ADDRESS, STORAGE),
             Ok(Some(entry_plain.value))
         );
-        assert_eq!(HistoricalStateProvider::new(&tx, 1).storage(HIGHER_ADDRESS, STORAGE), Ok(None));
         assert_eq!(
-            HistoricalStateProvider::new(&tx, 1000).storage(HIGHER_ADDRESS, STORAGE),
+            HistoricalStateProvider::new(&provider_factory, 1).storage(HIGHER_ADDRESS, STORAGE),
+            Ok(None)
+        );
+        assert_eq!(
+            HistoricalStateProvider::new(&provider_factory, 1000).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(higher_entry_plain.value))
         );
     }
