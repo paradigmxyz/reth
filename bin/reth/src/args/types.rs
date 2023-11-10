@@ -36,28 +36,6 @@ impl FromStr for ZeroAsNone {
     }
 }
 
-/// A helper type for parsing "max" as `u32::MAX`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MaxU32(pub u32);
-
-impl fmt::Display for MaxU32 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for MaxU32 {
-    type Err = ParseIntError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s == "max" {
-            Ok(MaxU32(u32::MAX))
-        } else {
-            s.parse::<u32>().map(MaxU32)
-        }
-    }
-}
-
 macro_rules! max_values {
     ($name:ident, $ty:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,17 +73,5 @@ mod tests {
         let val = "0".parse::<ZeroAsNone>().unwrap();
         assert_eq!(val, ZeroAsNone(None));
         assert_eq!(val.unwrap_or_max(), u64::MAX);
-    }
-
-    #[test]
-    fn test_max_parse() {
-        let val = "max".parse::<MaxU32>().unwrap();
-        assert_eq!(val, MaxU32(u32::MAX));
-    }
-
-    #[test]
-    fn test_number_parse() {
-        let val = "123".parse::<MaxU32>().unwrap();
-        assert_eq!(val, MaxU32(123));
     }
 }
