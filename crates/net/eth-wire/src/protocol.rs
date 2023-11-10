@@ -44,10 +44,25 @@ impl Protocol {
     pub const fn eth_68() -> Self {
         Self::eth(EthVersion::Eth68)
     }
+
+    /// Consumes the type and returns a tuple of the [Capability] and number of messages.
+    #[inline]
+    pub(crate) fn split(self) -> (Capability, u8) {
+        (self.cap, self.messages)
+    }
 }
 
 impl From<EthVersion> for Protocol {
     fn from(version: EthVersion) -> Self {
         Self::eth(version)
     }
+}
+
+/// A helper type to keep track of the protocol version and number of messages used by the protocol.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ProtoVersion {
+    /// Number of messages for a protocol
+    pub(crate) messages: u8,
+    /// Version of the protocol
+    pub(crate) version: usize,
 }

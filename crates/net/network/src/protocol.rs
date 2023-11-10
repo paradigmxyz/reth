@@ -2,16 +2,16 @@
 //!
 //! See also <https://github.com/ethereum/devp2p/blob/master/README.md>
 
-use std::future::Future;
-use std::net::SocketAddr;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use reth_eth_wire::capability::{Capability, SharedCapability};
 use reth_network_api::Direction;
 use reth_primitives::BytesMut;
 use reth_rpc_types::PeerId;
+use std::{future::Future, net::SocketAddr};
+use tokio::sync::mpsc::UnboundedSender;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// A trait that allows to offer additional RLPx-based application-level protocols when establishing a peer-to-peer connection.
+/// A trait that allows to offer additional RLPx-based application-level protocols when establishing
+/// a peer-to-peer connection.
 pub trait ProtocolHandler: Send + Sync + 'static {
     /// The type responsible for negotiating the protocol with the remote.
     type ConnectionHandler: ConnectionHandler;
@@ -20,7 +20,11 @@ pub trait ProtocolHandler: Send + Sync + 'static {
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Self::ConnectionHandler>;
 
     /// Invoked when a new outgoing connection to the remote is requested
-    fn on_outgoing(&self, socket_addr: SocketAddr, peer_id: PeerId) -> Option<Self::ConnectionHandler>;
+    fn on_outgoing(
+        &self,
+        socket_addr: SocketAddr,
+        peer_id: PeerId,
+    ) -> Option<Self::ConnectionHandler>;
 }
 
 pub trait ConnectionHandler: Send + Sync + 'static {
@@ -41,15 +45,13 @@ pub struct SharedProtocols {
     /// Negotiated capabilities.
     shared_capabilities: Vec<SharedCapability>,
     from_wire: UnboundedReceiverStream<BytesMut>,
-    to_wire: UnboundedSender<Result<BytesMut, ()>>
+    to_wire: UnboundedSender<Result<BytesMut, ()>>,
 }
 
 impl SharedProtocols {
-
-    pub fn shared_capabilities(&self) -> impl IntoIterator<Item = (&str, u8)>  + '_{
+    pub fn shared_capabilities(&self) -> impl IntoIterator<Item = (&str, u8)> + '_ {
         self.shared_capabilities.iter().map(|c| (c.name(), c.version()))
     }
-
 }
 
 #[cfg(test)]

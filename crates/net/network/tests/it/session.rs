@@ -1,7 +1,7 @@
 //! Session tests
 
 use futures::StreamExt;
-use reth_eth_wire::{capability::Capability, EthVersion};
+use reth_eth_wire::EthVersion;
 use reth_network::{
     test_utils::{PeerConfig, Testnet},
     NetworkEvent, NetworkEvents,
@@ -49,8 +49,7 @@ async fn test_session_established_with_different_capability() {
 
     let mut net = Testnet::create(1).await;
 
-    let capabilities = vec![Capability::new_static("eth", EthVersion::Eth66 as usize)];
-    let p1 = PeerConfig::with_capabilities(NoopProvider::default(), capabilities);
+    let p1 = PeerConfig::with_protocols(NoopProvider::default(), Some(EthVersion::Eth66.into()));
     net.add_peer_with_config(p1).await.unwrap();
 
     net.for_each(|peer| assert_eq!(0, peer.num_peers()));
