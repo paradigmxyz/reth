@@ -1,7 +1,10 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
 use crate::{
-    args::{types::ZeroAsNone, GasPriceOracleArgs},
+    args::{
+        types::{MaxU32, ZeroAsNone},
+        GasPriceOracleArgs,
+    },
     cli::{
         components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
         config::RethRpcConfig,
@@ -138,8 +141,8 @@ pub struct RpcServerArgs {
     pub rpc_max_request_size: u32,
 
     /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
-    #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB)]
-    pub rpc_max_response_size: u32,
+    #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = MaxU32(RPC_DEFAULT_MAX_RESPONSE_SIZE_MB))]
+    pub rpc_max_response_size: MaxU32,
 
     /// Set the the maximum concurrent subscriptions per connection.
     #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN)]
@@ -354,7 +357,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn rpc_max_response_size_bytes(&self) -> u32 {
-        self.rpc_max_response_size.saturating_mul(1024 * 1024)
+        self.rpc_max_response_size.0.saturating_mul(1024 * 1024)
     }
 
     fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
