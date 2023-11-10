@@ -110,7 +110,7 @@ impl<DB: Database> ProviderFactory<DB> {
         let storage_history_prune_checkpoint =
             provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProvider::new(&self, block_number);
+        let mut state_provider = HistoricalStateProvider::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
