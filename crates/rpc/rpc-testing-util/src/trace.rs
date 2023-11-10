@@ -8,6 +8,7 @@ use reth_rpc_types::{
     trace::{
         filter::TraceFilter,
         parity::{LocalizedTransactionTrace, TraceResults, TraceType},
+        tracerequest::TraceCallRequest,
     },
     BlockOverrides, CallRequest, Index,
 };
@@ -111,14 +112,7 @@ pub trait TraceApiExt {
     where
         I: IntoIterator<Item = TraceFilter>;
     /// Returns a new stream that yields the trace results for the given call requests.
-    fn trace_call_stream(
-        &self,
-        call: CallRequest,
-        trace_types: HashSet<TraceType>,
-        block_id: Option<BlockId>,
-        state_overrides: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
-    ) -> TraceCallStream<'_>;
+    fn trace_call_stream(&self, request: TraceCallRequest) -> TraceCallStream<'_>;
 }
 /// `TraceCallStream` provides an asynchronous stream of tracing results.
 
@@ -364,29 +358,27 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         TraceFilterStream { stream: Box::pin(stream) }
     }
 
-    fn trace_call_stream(
-        &self,
-        call: CallRequest,
-        trace_types: HashSet<TraceType>,
-        block_id: Option<BlockId>,
-        state_overrides: Option<StateOverride>,
-        block_overrides: Option<Box<BlockOverrides>>,
-    ) -> TraceCallStream<'_> {
+    fn trace_call_stream(&self, request: TraceCallRequest) -> TraceCallStream<'_> {
         let stream = futures::stream::once(async move {
             match self
                 .trace_call(
-                    call.clone(),
-                    trace_types.clone(),
-                    block_id,
-                    state_overrides.clone(),
-                    block_overrides.clone(),
+                    request.call.clone(),
+                    request.trace_types.clone(),
+                    request.block_id,
+                    request.state_overrides.clone(),
+                    request.block_overrides.clone(),
                 )
                 .await
             {
                 Ok(result) => Ok(result),
-                Err(err) => {
-                    Err((err, call, trace_types, block_id, state_overrides, block_overrides))
-                }
+                Err(err) => Err((
+                    err,
+                    request.call,
+                    request.trace_types,
+                    request.block_id,
+                    request.state_overrides,
+                    request.block_overrides,
+                )),
             }
         });
         TraceCallStream { stream: Box::pin(stream) }
