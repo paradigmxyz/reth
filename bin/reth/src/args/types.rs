@@ -1,6 +1,6 @@
 //! Additional helper types for CLI parsing.
 
-use std::{fmt, str::FromStr};
+use std::{fmt, num::ParseIntError, str::FromStr};
 
 /// A helper type that maps `0` to `None` when parsing CLI arguments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +36,34 @@ impl FromStr for ZeroAsNone {
     }
 }
 
+macro_rules! max_values {
+    ($name:ident, $ty:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        /// A helper type for parsing "max" as the maximum value of the specified type.
+
+        pub(crate) struct $name(pub(crate) $ty);
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = ParseIntError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                if s.eq_ignore_ascii_case("max") {
+                    Ok($name(<$ty>::MAX))
+                } else {
+                    s.parse::<$ty>().map($name)
+                }
+            }
+        }
+    };
+}
+max_values!(MaxU32, u32);
+max_values!(MaxU64, u64);
 #[cfg(test)]
 mod tests {
     use super::*;
