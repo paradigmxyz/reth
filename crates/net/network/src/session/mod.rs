@@ -10,7 +10,8 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthVersion, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
+    DisconnectReason, EthVersion, HelloMessageWithProtocols, Status, UnauthedEthStream,
+    UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::{
@@ -72,7 +73,7 @@ pub struct SessionManager {
     /// The `Status` message to send to peers.
     status: Status,
     /// THe `HelloMessage` message to send to peers.
-    hello_message: HelloMessage,
+    hello_message: HelloMessageWithProtocols,
     /// The [`ForkFilter`] used to validate the peer's `Status` message.
     fork_filter: ForkFilter,
     /// Size of the command buffer per session.
@@ -115,7 +116,7 @@ impl SessionManager {
         config: SessionsConfig,
         executor: Box<dyn TaskSpawner>,
         status: Status,
-        hello_message: HelloMessage,
+        hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
         bandwidth_meter: BandwidthMeter,
     ) -> Self {
@@ -164,7 +165,7 @@ impl SessionManager {
     }
 
     /// Returns the session hello message.
-    pub fn hello_message(&self) -> HelloMessage {
+    pub fn hello_message(&self) -> HelloMessageWithProtocols {
         self.hello_message.clone()
     }
 
@@ -742,7 +743,7 @@ pub(crate) async fn start_pending_incoming_session(
     events: mpsc::Sender<PendingSessionEvent>,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
-    hello: HelloMessage,
+    hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
 ) {
@@ -771,7 +772,7 @@ async fn start_pending_outbound_session(
     remote_addr: SocketAddr,
     remote_peer_id: PeerId,
     secret_key: SecretKey,
-    hello: HelloMessage,
+    hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
     bandwidth_meter: BandwidthMeter,
@@ -820,7 +821,7 @@ async fn authenticate(
     remote_addr: SocketAddr,
     secret_key: SecretKey,
     direction: Direction,
-    hello: HelloMessage,
+    hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
 ) {
@@ -896,7 +897,7 @@ async fn authenticate_stream(
     remote_addr: SocketAddr,
     local_addr: Option<SocketAddr>,
     direction: Direction,
-    hello: HelloMessage,
+    hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
 ) -> PendingSessionEvent {

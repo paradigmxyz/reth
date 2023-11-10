@@ -1,6 +1,6 @@
-//! Support for representing the version of the `eth`. [`Capability`].
+//! Support for representing the version of the `eth`. [`Capability`](crate::capability::Capability)
+//! and [Protocol](crate::protocol::Protocol).
 
-use crate::capability::Capability;
 use std::str::FromStr;
 
 /// Error thrown when failed to parse a valid [`EthVersion`].
@@ -27,7 +27,7 @@ impl EthVersion {
     pub const LATEST: EthVersion = EthVersion::Eth68;
 
     /// Returns the total number of messages the protocol version supports.
-    pub fn total_messages(&self) -> u8 {
+    pub const fn total_messages(&self) -> u8 {
         match self {
             EthVersion::Eth66 => 15,
             EthVersion::Eth67 | EthVersion::Eth68 => {
@@ -108,13 +108,6 @@ impl From<EthVersion> for &'static str {
             EthVersion::Eth67 => "67",
             EthVersion::Eth68 => "68",
         }
-    }
-}
-
-impl From<EthVersion> for Capability {
-    #[inline]
-    fn from(v: EthVersion) -> Capability {
-        Capability { name: "eth".into(), version: v as usize }
     }
 }
 

@@ -92,7 +92,7 @@ tempfile.workspace = true
 [features]
 default = ["serde"]
 serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr?/serde", "dep:serde_json"]
-test-utils = ["reth-provider/test-utils", "dep:enr", "dep:tempfile"]
+test-utils = ["reth-provider/test-utils", "dep:enr", "dep:tempfile", "reth-transaction-pool/test-utils"]
 geth-tests = []
 optimism = [
     "reth-primitives/optimism",

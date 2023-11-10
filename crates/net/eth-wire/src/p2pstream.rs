@@ -1,10 +1,9 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
 use crate::{
-    capability::{Capability, SharedCapability},
     disconnect::CanDisconnect,
     errors::{P2PHandshakeError, P2PStreamError},
     pinger::{Pinger, PingerEvent},
-    DisconnectReason, HelloMessage,
+    DisconnectReason, HelloMessage, HelloMessageWithProtocols,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
@@ -16,7 +15,7 @@ use reth_primitives::{
     hex, GotExpected,
 };
 use std::{
-    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    collections::VecDeque,
     fmt, io,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -24,6 +23,7 @@ use std::{
 };
 use tokio_stream::Stream;
 
+use crate::capability::SharedCapabilities;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -92,13 +92,13 @@ where
     /// completed successfully. This also returns the `Hello` message sent by the remote peer.
     pub async fn handshake(
         mut self,
-        hello: HelloMessage,
+        hello: HelloMessageWithProtocols,
     ) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
         trace!(?hello, "sending p2p hello to peer");
 
         // send our hello message with the Sink
         let mut raw_hello_bytes = BytesMut::new();
-        P2PMessage::Hello(hello.clone()).encode(&mut raw_hello_bytes);
+        P2PMessage::Hello(hello.message()).encode(&mut raw_hello_bytes);
         self.inner.send(raw_hello_bytes.into()).await?;
 
         let first_message_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
@@ -159,7 +159,7 @@ where
 
         // determine shared capabilities (currently returns only one capability)
         let capability_res =
-            SharedCapabilities::try_new(hello.capabilities, their_hello.capabilities.clone());
+            SharedCapabilities::try_new(hello.protocols, their_hello.capabilities.clone());
 
         let shared_capability = match capability_res {
             Err(err) => {
@@ -595,127 +595,6 @@ where
     }
 }
 
-/// Non-empty ordered list of recognized shared capabilities.
-#[derive(Debug)]
-pub struct SharedCapabilities(Vec<SharedCapability>);
-
-impl SharedCapabilities {
-    /// Merges the local and peer capabilities and returns a new [`SharedCapabilities`] instance.
-    pub fn try_new(
-        local_capabilities: Vec<Capability>,
-        peer_capabilities: Vec<Capability>,
-    ) -> Result<Self, P2PStreamError> {
-        Ok(Self(set_capability_offsets(local_capabilities, peer_capabilities)?))
-    }
-
-    /// Iterates over the shared capabilities.
-    pub fn iter_caps(&self) -> impl Iterator<Item = &SharedCapability> {
-        self.0.iter()
-    }
-
-    /// Returns the eth capability if it is shared.
-    pub fn eth(&self) -> Result<&SharedCapability, P2PStreamError> {
-        for cap in self.iter_caps() {
-            if cap.is_eth() {
-                return Ok(cap)
-            }
-        }
-        Err(P2PStreamError::CapabilityNotShared)
-    }
-
-    /// Returns the negotiated eth version if it is shared.
-    pub fn eth_version(&self) -> Result<u8, P2PStreamError> {
-        self.eth().map(|cap| cap.version())
-    }
-}
-
-/// Determines the offsets for each shared capability between the input list of peer
-/// capabilities and the input list of locally supported capabilities.
-///
-/// Currently only `eth` versions 66, 67, 68 are supported.
-/// Additionally, the `p2p` capability version 5 is supported, but is
-/// expected _not_ to be in neither `local_capabilities` or `peer_capabilities`.
-pub fn set_capability_offsets(
-    local_capabilities: Vec<Capability>,
-    peer_capabilities: Vec<Capability>,
-) -> Result<Vec<SharedCapability>, P2PStreamError> {
-    // find intersection of capabilities
-    let our_capabilities = local_capabilities.into_iter().collect::<HashSet<_>>();
-
-    // map of capability name to version
-    let mut shared_capabilities = HashMap::new();
-
-    // The `Ord` implementation for capability names should be equivalent to geth (and every other
-    // client), since geth uses golang's default string comparison, which orders strings
-    // lexicographically.
-    // https://golang.org/pkg/strings/#Compare
-    //
-    // This is important because the capability name is used to determine the message id offset, so
-    // if the sorting is not identical, offsets for connected peers could be inconsistent.
-    // This would cause the peers to send messages with the wrong message id, which is usually a
-    // protocol violation.
-    //
-    // The `Ord` implementation for `str` orders strings lexicographically.
-    let mut shared_capability_names = BTreeSet::new();
-
-    // find highest shared version of each shared capability
-    for peer_capability in peer_capabilities {
-        // if this is Some, we share this capability
-        if our_capabilities.contains(&peer_capability) {
-            // If multiple versions are shared of the same (equal name) capability, the numerically
-            // highest wins, others are ignored
-
-            let version = shared_capabilities.get(&peer_capability.name);
-            if version.is_none() ||
-                (version.is_some() && peer_capability.version > *version.expect("is some; qed"))
-            {
-                shared_capabilities.insert(peer_capability.name.clone(), peer_capability.version);
-                shared_capability_names.insert(peer_capability.name);
-            }
-        }
-    }
-
-    // disconnect if we don't share any capabilities
-    if shared_capabilities.is_empty() {
-        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
-    }
-
-    // order versions based on capability name (alphabetical) and select offsets based on
-    // BASE_OFFSET + prev_total_message
-    let mut shared_with_offsets = Vec::new();
-
-    // Message IDs are assumed to be compact from ID 0x10 onwards (0x00-0x0f is reserved for the
-    // "p2p" capability) and given to each shared (equal-version, equal-name) capability in
-    // alphabetic order.
-    let mut offset = MAX_RESERVED_MESSAGE_ID + 1;
-    for name in shared_capability_names {
-        let version = shared_capabilities.get(&name).unwrap();
-
-        let shared_capability = SharedCapability::new(&name, *version as u8, offset)?;
-
-        match shared_capability {
-            SharedCapability::UnknownCapability { .. } => {
-                // Capabilities which are not shared are ignored
-                debug!("unknown capability: name={:?}, version={}", name, version,);
-
-                // TODO(mattsse): track shared caps
-            }
-            SharedCapability::Eth { .. } => {
-                // increment the offset if the capability is known
-                offset += shared_capability.num_messages()?;
-
-                shared_with_offsets.push(shared_capability);
-            }
-        }
-    }
-
-    if shared_with_offsets.is_empty() {
-        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
-    }
-
-    Ok(shared_with_offsets)
-}
-
 /// This represents only the reserved `p2p` subprotocol messages.
 #[derive_arbitrary(rlp)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -906,7 +785,7 @@ impl Decodable for ProtocolVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DisconnectReason, EthVersion};
+    use crate::{capability::SharedCapability, DisconnectReason, EthVersion};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::util::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
@@ -914,12 +793,13 @@ mod tests {
     use tokio_util::codec::Decoder;
 
     /// Returns a testing `HelloMessage` and new secretkey
-    fn eth_hello() -> (HelloMessage, SecretKey) {
+    fn eth_hello() -> (HelloMessageWithProtocols, SecretKey) {
         let server_key = SecretKey::new(&mut rand::thread_rng());
-        let hello = HelloMessage {
+        let protocols = vec![EthVersion::Eth67.into()];
+        let hello = HelloMessageWithProtocols {
             protocol_version: ProtocolVersion::V5,
             client_version: "bitcoind/1.0.0".to_string(),
-            capabilities: vec![EthVersion::Eth67.into()],
+            protocols,
             port: DEFAULT_DISCOVERY_PORT,
             id: pk2id(&server_key.public_key(SECP256K1)),
         };
@@ -1017,7 +897,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let handle = tokio::spawn(async move {
+        let handle = tokio::spawn(Box::pin(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = crate::PassthroughCodec::default().framed(incoming);
@@ -1037,7 +917,7 @@ mod tests {
                     panic!("expected mismatched protocol version error, got {other_err:?}")
                 }
             }
-        });
+        }));
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = crate::PassthroughCodec::default().framed(outgoing);
@@ -1063,50 +943,6 @@ mod tests {
 
         // make sure the server receives the message and asserts before ending the test
         handle.await.unwrap();
-    }
-
-    #[test]
-    fn test_peer_lower_capability_version() {
-        let local_capabilities: Vec<Capability> =
-            vec![EthVersion::Eth66.into(), EthVersion::Eth67.into(), EthVersion::Eth68.into()];
-        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
-
-        let shared_capability =
-            set_capability_offsets(local_capabilities, peer_capabilities).unwrap()[0].clone();
-
-        assert_eq!(
-            shared_capability,
-            SharedCapability::Eth {
-                version: EthVersion::Eth66,
-                offset: MAX_RESERVED_MESSAGE_ID + 1
-            }
-        )
-    }
-
-    #[test]
-    fn test_peer_capability_version_too_low() {
-        let local_capabilities: Vec<Capability> = vec![EthVersion::Eth67.into()];
-        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
-
-        let shared_capability = set_capability_offsets(local_capabilities, peer_capabilities);
-
-        assert!(matches!(
-            shared_capability,
-            Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
-        ))
-    }
-
-    #[test]
-    fn test_peer_capability_version_too_high() {
-        let local_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
-        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth67.into()];
-
-        let shared_capability = set_capability_offsets(local_capabilities, peer_capabilities);
-
-        assert!(matches!(
-            shared_capability,
-            Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
-        ))
     }
 
     #[test]

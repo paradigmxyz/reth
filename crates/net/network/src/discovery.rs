@@ -14,11 +14,12 @@ use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
+    pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{wrappers::ReceiverStream, Stream};
 
 /// An abstraction over the configured discovery protocol.
 ///
@@ -213,6 +214,14 @@ impl Discovery {
                 return Poll::Pending
             }
         }
+    }
+}
+
+impl Stream for Discovery {
+    type Item = DiscoveryEvent;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(Some(ready!(self.get_mut().poll(cx))))
     }
 }
 

@@ -319,12 +319,10 @@ where
 mod tests {
     use super::UnauthedEthStream;
     use crate::{
-        capability::Capability,
         errors::{EthHandshakeError, EthStreamError},
-        hello::HelloMessage,
         p2pstream::{ProtocolVersion, UnauthedP2PStream},
         types::{broadcast::BlockHashNumber, EthMessage, EthVersion, Status},
-        EthStream, PassthroughCodec,
+        EthStream, HelloMessageWithProtocols, PassthroughCodec,
     };
     use futures::{SinkExt, StreamExt};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
@@ -592,10 +590,10 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
 
-            let server_hello = HelloMessage {
+            let server_hello = HelloMessageWithProtocols {
                 protocol_version: ProtocolVersion::V5,
                 client_version: "bitcoind/1.0.0".to_string(),
-                capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
+                protocols: vec![EthVersion::Eth67.into()],
                 port: DEFAULT_DISCOVERY_PORT,
                 id: pk2id(&server_key.public_key(SECP256K1)),
             };
@@ -620,10 +618,10 @@ mod tests {
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
 
-        let client_hello = HelloMessage {
+        let client_hello = HelloMessageWithProtocols {
             protocol_version: ProtocolVersion::V5,
             client_version: "bitcoind/1.0.0".to_string(),
-            capabilities: vec![Capability::new_static("eth", EthVersion::Eth67 as usize)],
+            protocols: vec![EthVersion::Eth67.into()],
             port: DEFAULT_DISCOVERY_PORT,
             id: pk2id(&client_key.public_key(SECP256K1)),
         };
