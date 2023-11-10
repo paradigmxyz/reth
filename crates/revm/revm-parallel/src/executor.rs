@@ -148,7 +148,7 @@ pub struct ParallelExecutor<'a, Provider> {
     loaded: HashMap<BlockNumber, LoadedBlock>,
     /// Executed blocks pending validation.
     executed: BTreeMap<BlockNumber, LoadedBlock>,
-    /// The block number of the next block number for va
+    /// The block number of the next block pending validation.
     next_block_pending_validation: Option<BlockNumber>,
 }
 
@@ -250,17 +250,18 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
 
         let gas_per_transition = batch.gas_used / transitions.len() as u128;
         tracing::debug!(target: "evm::parallel", ?batch, "Executing block batch");
-        let transition_results: Vec<_> = if transitions.len() > 1 && gas_per_transition > 100_000 {
-            transitions
-                .into_par_iter()
-                .map(|transition| self.execute_state_transition(transition))
-                .collect()
-        } else {
-            transitions
-                .into_iter()
-                .map(|transition| self.execute_state_transition(transition))
-                .collect()
-        };
+        let transition_results: Vec<_> =
+            if transitions.len() > 100 || gas_per_transition > 1_000_000 {
+                transitions
+                    .into_par_iter()
+                    .map(|transition| self.execute_state_transition(transition))
+                    .collect()
+            } else {
+                transitions
+                    .into_iter()
+                    .map(|transition| self.execute_state_transition(transition))
+                    .collect()
+            };
 
         let mut states =
             revm::primitives::HashMap::<Address, Vec<(TransitionId, Account)>>::default();
