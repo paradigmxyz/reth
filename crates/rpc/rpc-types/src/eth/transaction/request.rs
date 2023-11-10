@@ -109,8 +109,8 @@ impl TransactionRequest {
                 }))
             }
             // EIP1559
-            (None, Some(_), access_list, None, None, None)
-            | (None, None, access_list @ None, None, None, None) => {
+            (None, Some(_), access_list, None, None, None) |
+            (None, None, access_list @ None, None, None, None) => {
                 // Empty fields fall back to the canonical transaction schema.
                 Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
                     nonce: nonce.unwrap_or_default(),
