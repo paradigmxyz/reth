@@ -48,6 +48,7 @@ pub use handle::{
     SessionCommand,
 };
 
+use crate::protocol::RlpxSubProtocols;
 pub use reth_network_api::{Direction, PeerInfo};
 
 /// Internal identifier for active sessions.
@@ -101,6 +102,9 @@ pub struct SessionManager {
     active_session_tx: MeteredPollSender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
+    /// Additional RLPx sub-protocols to be used by the session manager.
+    #[allow(unused)]
+    extra_protocols: RlpxSubProtocols,
     /// Used to measure inbound & outbound bandwidth across all managed streams
     bandwidth_meter: BandwidthMeter,
     /// Metrics for the session manager.
@@ -111,6 +115,7 @@ pub struct SessionManager {
 
 impl SessionManager {
     /// Creates a new empty [`SessionManager`].
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         secret_key: SecretKey,
         config: SessionsConfig,
@@ -118,6 +123,7 @@ impl SessionManager {
         status: Status,
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
+        extra_protocols: RlpxSubProtocols,
         bandwidth_meter: BandwidthMeter,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
@@ -142,6 +148,7 @@ impl SessionManager {
             active_session_tx: MeteredPollSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
             bandwidth_meter,
+            extra_protocols,
             metrics: Default::default(),
         }
     }
