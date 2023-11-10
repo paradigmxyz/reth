@@ -322,3 +322,30 @@ impl Ord for BlobOrd {
         other.priority.total_cmp(&self.priority)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::fee_delta;
+
+    #[test]
+    fn test_priority() {
+        // Test vectors from:
+        // <https://github.com/ethereum/go-ethereum/blob/e91cdb49beb4b2a3872b5f2548bf2d6559e4f561/core/txpool/blobpool/priority_test.go#L27-L49>
+        let vectors = vec![
+            (7u128, 10u128, 2f64),
+            (17_200_000_000, 17_200_000_000, 0f64),
+            (9_853_941_692, 11_085_092_510, 0f64),
+            (11_544_106_391, 10_356_781_100, 0f64),
+            (17_200_000_000, 7, -7f64),
+            (7, 17_200_000_000, 7f64),
+        ];
+
+        for (base_fee, tx_fee, expected) in vectors {
+            let actual = fee_delta(tx_fee, base_fee);
+            println!("fee_delta({}, {}) = {}, expected: {}", tx_fee, base_fee, actual, expected);
+            // assert_eq!(actual, expected, "fee_delta({}, {}) = {}", tx_fee, base_fee, actual);
+        }
+        // TODO: convert priority / delta into u64 methods to match vector
+        panic!()
+    }
+}
