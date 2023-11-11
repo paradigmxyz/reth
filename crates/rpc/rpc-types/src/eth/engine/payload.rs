@@ -1,7 +1,9 @@
-use crate::eth::transaction::BlobTransactionSidecar;
 pub use crate::Withdrawal;
+use crate::{
+    eth::transaction::BlobTransactionSidecar,
+    kzg::{Blob, Bytes48},
+};
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
-use c_kzg::{Blob, Bytes48};
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.

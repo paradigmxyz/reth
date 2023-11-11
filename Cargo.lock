@@ -6476,7 +6476,6 @@ dependencies = [
  "alloy-rlp",
  "arbitrary",
  "bytes",
- "c-kzg",
  "itertools 0.11.0",
  "jsonrpsee-types",
  "proptest",
