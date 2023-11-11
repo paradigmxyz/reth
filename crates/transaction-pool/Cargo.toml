@@ -39,6 +39,7 @@ metrics.workspace = true
 aquamarine.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+schnellru.workspace = true
 serde = { workspace = true, features = ["derive", "rc"], optional = true }
 fnv = "1.0.7"
 bitflags.workspace = true

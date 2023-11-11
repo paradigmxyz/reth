@@ -1,11 +1,13 @@
 //! Storage for blob data of EIP4844 transactions.
 
+pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
 use reth_primitives::{BlobTransactionSidecar, B256};
-use std::fmt;
+use std::{fmt, sync::atomic::AtomicUsize};
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
+pub mod disk;
 mod mem;
 mod noop;
 mod tracker;
@@ -66,6 +68,40 @@ pub enum BlobStoreError {
     /// Other implementation specific error.
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
+}
+
+/// Keeps track of the size of the blob store.
+#[derive(Debug, Default)]
+pub(crate) struct BlobStoreSize {
+    data_size: AtomicUsize,
+    num_blobs: AtomicUsize,
+}
+
+impl BlobStoreSize {
+    #[inline]
+    pub(crate) fn add_size(&self, add: usize) {
+        self.data_size.fetch_add(add, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn sub_size(&self, sub: usize) {
+        self.data_size.fetch_sub(sub, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn update_len(&self, len: usize) {
+        self.num_blobs.store(len, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn data_size(&self) -> usize {
+        self.data_size.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub(crate) fn blobs_len(&self) -> usize {
+        self.num_blobs.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 #[cfg(test)]

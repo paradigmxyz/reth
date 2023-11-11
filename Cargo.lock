@@ -6614,6 +6614,7 @@ dependencies = [
  "reth-revm",
  "reth-tasks",
  "revm",
+ "schnellru",
  "serde",
  "thiserror",
  "tokio",
