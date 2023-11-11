@@ -9,6 +9,7 @@ use crate::kzg::{
     self, Blob, Bytes48, KzgSettings, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
+use bytes::BufMut;
 
 use serde::{Deserialize, Serialize};
 
@@ -325,6 +326,7 @@ impl BlobTransactionSidecar {
     /// - `blobs`
     /// - `commitments`
     /// - `proofs`
+    #[inline]
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
         BlobTransactionSidecarRlp::wrap_ref(self).encode(out);
     }
@@ -340,6 +342,7 @@ impl BlobTransactionSidecar {
     /// - `blobs`
     /// - `commitments`
     /// - `proofs`
+    #[inline]
     pub(crate) fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(BlobTransactionSidecarRlp::decode(buf)?.unwrap())
     }
@@ -350,6 +353,24 @@ impl BlobTransactionSidecar {
         self.blobs.len() * BYTES_PER_BLOB + // blobs
         self.commitments.len() * BYTES_PER_COMMITMENT + // commitments
         self.proofs.len() * BYTES_PER_PROOF // proofs
+    }
+}
+
+impl Encodable for BlobTransactionSidecar {
+    /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.encode_inner(out)
+    }
+
+    fn length(&self) -> usize {
+        self.fields_len()
+    }
+}
+
+impl Decodable for BlobTransactionSidecar {
+    /// Decodes the inner [BlobTransactionSidecar] fields from RLP bytes, without a RLP header.
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Self::decode_inner(buf)
     }
 }
 
@@ -420,8 +441,6 @@ impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
     type Parameters = ParamsFor<String>;
-    type Strategy = BoxedStrategy<BlobTransactionSidecar>;
-
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         proptest_vec(proptest_vec(proptest_any::<u8>(), BYTES_PER_BLOB), 1..=5)
             .prop_map(move |blobs| {
@@ -445,6 +464,8 @@ impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
             })
             .boxed()
     }
+
+    type Strategy = BoxedStrategy<BlobTransactionSidecar>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
