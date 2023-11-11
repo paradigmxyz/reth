@@ -135,7 +135,10 @@
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics};
+use crate::{
+    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
+    RpcModuleSelection::Selection,
+};
 use constants::*;
 use error::{RpcError, ServerKind};
 use hyper::{header::AUTHORIZATION, HeaderMap};
@@ -679,10 +682,14 @@ impl FromStr for RpcModuleSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Ok(Selection(vec![]))
+        }
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
         match first {
             "all" | "All" => Ok(RpcModuleSelection::All),
+            "none" | "None" => Ok(Selection(vec![])),
             _ => RpcModuleSelection::try_from_selection(modules),
         }
     }
@@ -2036,6 +2043,12 @@ mod tests {
     }
 
     #[test]
+    fn parse_rpc_module_selection_none() {
+        let selection = "none".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(selection, Selection(vec![]));
+    }
+
+    #[test]
     fn parse_rpc_unique_module_selection() {
         let selection = "eth,admin,eth,net".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(
@@ -2116,6 +2129,20 @@ mod tests {
                     RethRpcModule::Eth,
                     RethRpcModule::Admin
                 ])),
+                ws: None,
+                ipc: None,
+                config: None,
+            }
+        )
+    }
+
+    #[test]
+    fn test_configure_transport_config_none() {
+        let config = TransportRpcModuleConfig::default().with_http(Vec::<RethRpcModule>::new());
+        assert_eq!(
+            config,
+            TransportRpcModuleConfig {
+                http: Some(RpcModuleSelection::Selection(vec![])),
                 ws: None,
                 ipc: None,
                 config: None,
