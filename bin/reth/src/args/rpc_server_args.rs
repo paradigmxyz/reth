@@ -536,6 +536,14 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_server_args_parser_none() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "none"]).args;
+        let apis = args.http_api.unwrap();
+        let expected = RpcModuleSelection::None;
+        assert_eq!(apis, expected);
+    }
+
+    #[test]
     fn test_transport_rpc_module_config() {
         let args = CommandParser::<RpcServerArgs>::parse_from([
             "reth",

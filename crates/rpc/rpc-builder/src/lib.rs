@@ -511,6 +511,8 @@ pub enum RpcModuleSelection {
     Standard,
     /// Only use the configured modules.
     Selection(Vec<RethRpcModule>),
+    /// None modules are configured.
+    None,
 }
 
 // === impl RpcModuleSelection ===
@@ -637,6 +639,7 @@ impl RpcModuleSelection {
             RpcModuleSelection::All => Box::new(Self::all_modules().into_iter()),
             RpcModuleSelection::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
             RpcModuleSelection::Selection(s) => Box::new(s.iter().copied()),
+            RpcModuleSelection::None => Box::new(std::iter::empty()),
         }
     }
 
@@ -646,6 +649,7 @@ impl RpcModuleSelection {
             RpcModuleSelection::All => Self::all_modules(),
             RpcModuleSelection::Selection(s) => s,
             RpcModuleSelection::Standard => Self::STANDARD_MODULES.to_vec(),
+            RpcModuleSelection::None => Vec::new(),
         }
     }
 
@@ -683,6 +687,7 @@ impl FromStr for RpcModuleSelection {
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
         match first {
             "all" | "All" => Ok(RpcModuleSelection::All),
+            "none" | "None" => Ok(RpcModuleSelection::None),
             _ => RpcModuleSelection::try_from_selection(modules),
         }
     }
@@ -725,6 +730,8 @@ pub enum RethRpcModule {
     Reth,
     /// `ots_` module
     Ots,
+    /// none
+    None,
 }
 
 // === impl RethRpcModule ===
@@ -1031,6 +1038,7 @@ where
                                 .into_rpc()
                                 .into()
                         }
+                        RethRpcModule::None => Methods::default(),
                     })
                     .clone()
             })
@@ -2036,6 +2044,12 @@ mod tests {
     }
 
     #[test]
+    fn parse_rpc_module_selection_none() {
+        let selection = "none".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(selection, RpcModuleSelection::None);
+    }
+
+    #[test]
     fn parse_rpc_unique_module_selection() {
         let selection = "eth,admin,eth,net".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(
@@ -2116,6 +2130,20 @@ mod tests {
                     RethRpcModule::Eth,
                     RethRpcModule::Admin
                 ])),
+                ws: None,
+                ipc: None,
+                config: None,
+            }
+        )
+    }
+
+    #[test]
+    fn test_configure_transport_config_none() {
+        let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::None]);
+        assert_eq!(
+            config,
+            TransportRpcModuleConfig {
+                http: Some(RpcModuleSelection::Selection(vec![RethRpcModule::None])),
                 ws: None,
                 ipc: None,
                 config: None,
