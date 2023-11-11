@@ -56,6 +56,13 @@ macro_rules! max_values {
             }
         }
 
+        impl From<$ty> for $name {
+            #[inline]
+            fn from(value: $ty) -> Self {
+                Self(value)
+            }
+        }
+
         impl FromStr for $name {
             type Err = ParseIntError;
 
