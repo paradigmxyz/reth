@@ -410,6 +410,12 @@ impl From<u64> for BlockId {
     }
 }
 
+impl From<U64> for BlockId {
+    fn from(value: U64) -> Self {
+        BlockNumberOrTag::Number(value.into_limbs()[0]).into()
+    }
+}
+
 impl From<BlockNumberOrTag> for BlockId {
     fn from(num: BlockNumberOrTag) -> Self {
         BlockId::Number(num)
