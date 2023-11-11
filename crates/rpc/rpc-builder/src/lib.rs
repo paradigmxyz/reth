@@ -683,6 +683,9 @@ impl FromStr for RpcModuleSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Ok(RpcModuleSelection::None)
+        }
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
         match first {
@@ -730,8 +733,6 @@ pub enum RethRpcModule {
     Reth,
     /// `ots_` module
     Ots,
-    /// none
-    None,
 }
 
 // === impl RethRpcModule ===
@@ -1038,7 +1039,6 @@ where
                                 .into_rpc()
                                 .into()
                         }
-                        RethRpcModule::None => Methods::default(),
                     })
                     .clone()
             })
@@ -2139,11 +2139,11 @@ mod tests {
 
     #[test]
     fn test_configure_transport_config_none() {
-        let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::None]);
+        let config = TransportRpcModuleConfig::default().with_http(Vec::<RethRpcModule>::new());
         assert_eq!(
             config,
             TransportRpcModuleConfig {
-                http: Some(RpcModuleSelection::Selection(vec![RethRpcModule::None])),
+                http: Some(RpcModuleSelection::Selection(vec![])),
                 ws: None,
                 ipc: None,
                 config: None,
