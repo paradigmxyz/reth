@@ -137,20 +137,20 @@ pub struct RpcServerArgs {
     pub rpc_jwtsecret: Option<JwtSecret>,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
-    #[arg(long, default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB)]
-    pub rpc_max_request_size: u32,
+    #[arg(long, default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into())]
+    pub rpc_max_request_size: MaxU32,
 
     /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
-    #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = MaxU32(RPC_DEFAULT_MAX_RESPONSE_SIZE_MB))]
+    #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into())]
     pub rpc_max_response_size: MaxU32,
 
     /// Set the the maximum concurrent subscriptions per connection.
-    #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN)]
-    pub rpc_max_subscriptions_per_connection: u32,
+    #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
+    pub rpc_max_subscriptions_per_connection: MaxU32,
 
     /// Maximum number of RPC server connections.
-    #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS)]
-    pub rpc_max_connections: u32,
+    #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS.into())]
+    pub rpc_max_connections: MaxU32,
 
     /// Maximum number of concurrent tracing requests.
     #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_TRACING_REQUESTS)]
@@ -353,7 +353,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn rpc_max_request_size_bytes(&self) -> u32 {
-        self.rpc_max_request_size.saturating_mul(1024 * 1024)
+        self.rpc_max_request_size.get().saturating_mul(1024 * 1024)
     }
 
     fn rpc_max_response_size_bytes(&self) -> u32 {
@@ -398,18 +398,18 @@ impl RethRpcConfig for RpcServerArgs {
 
     fn http_ws_server_builder(&self) -> ServerBuilder {
         ServerBuilder::new()
-            .max_connections(self.rpc_max_connections)
+            .max_connections(self.rpc_max_connections.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
             .max_response_body_size(self.rpc_max_response_size_bytes())
-            .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection)
+            .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
     }
 
     fn ipc_server_builder(&self) -> IpcServerBuilder {
         IpcServerBuilder::default()
-            .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection)
+            .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
             .max_response_body_size(self.rpc_max_response_size_bytes())
-            .max_connections(self.rpc_max_connections)
+            .max_connections(self.rpc_max_connections.get())
     }
 
     fn rpc_server_config(&self) -> RpcServerConfig {
