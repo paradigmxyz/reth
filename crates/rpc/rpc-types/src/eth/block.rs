@@ -289,7 +289,7 @@ impl From<u64> for BlockNumberOrTag {
 
 impl From<U64> for BlockNumberOrTag {
     fn from(num: U64) -> Self {
-        num.into_limbs()[0].into()
+        num.to::<u64>().into()
     }
 }
 
