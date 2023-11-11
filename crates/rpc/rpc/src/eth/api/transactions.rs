@@ -570,7 +570,7 @@ where
             Some(TypedTransactionRequest::EIP4844(mut m)) => {
                 m.chain_id = chain_id.to();
                 m.gas_limit = gas_limit;
-                m.gas_price = gas_price;
+                m.max_fee_per_gas = max_fee_per_gas;
 
                 TypedTransactionRequest::EIP4844(m)
             }
