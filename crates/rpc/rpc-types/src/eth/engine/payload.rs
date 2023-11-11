@@ -204,8 +204,11 @@ pub struct BlobsBundleV1 {
     pub blobs: Vec<Blob>,
 }
 
-impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
-    fn from(sidecars: Vec<BlobTransactionSidecar>) -> Self {
+impl BlobsBundleV1 {
+    /// Creates a new blob bundle from the given sidecars.
+    ///
+    /// This folds the sidecar fields into single commit, proof, and blob vectors.
+    pub fn new(sidecars: impl IntoIterator<Item = BlobTransactionSidecar>) -> Self {
         let (commitments, proofs, blobs) = sidecars.into_iter().fold(
             (Vec::new(), Vec::new(), Vec::new()),
             |(mut commitments, mut proofs, mut blobs), sidecar| {
@@ -217,9 +220,7 @@ impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
         );
         Self { commitments, proofs, blobs }
     }
-}
 
-impl BlobsBundleV1 {
     /// Take `len` blob data from the bundle.
     ///
     /// # Panics
@@ -231,6 +232,22 @@ impl BlobsBundleV1 {
             self.proofs.drain(0..len).collect(),
             self.blobs.drain(0..len).collect(),
         )
+    }
+
+    /// Returns the sidecar from the bundle
+    ///
+    /// # Panics
+    ///
+    /// If len is more than the blobs bundle len.
+    pub fn pop_sidecar(&mut self, len: usize) -> BlobTransactionSidecar {
+        let (commitments, proofs, blobs) = self.take(len);
+        BlobTransactionSidecar { commitments, proofs, blobs }
+    }
+}
+
+impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
+    fn from(sidecars: Vec<BlobTransactionSidecar>) -> Self {
+        Self::new(sidecars)
     }
 }
 
