@@ -1,9 +1,9 @@
 //! Async caching support for eth RPC
 
-use futures::{future::Either, Stream, StreamExt};
+use futures::{future::Either,Stream, StreamExt};
 use http::Response;
 use reth_interfaces::{provider::ProviderError, RethResult};
-use reth_primitives::{Block, BlockWithSenders, Receipt, SealedBlock, TransactionSigned, B256};
+use reth_primitives::{Block, BlockWithSenders, Receipt, SealedBlock, TransactionSigned, B256,BlockHashOrNumber};
 use reth_provider::{
     BlockReader, BlockSource, CanonStateNotification, EvmEnvProvider, StateProviderFactory,
     TransactionVariant,
@@ -33,7 +33,6 @@ pub use multi_consumer::MultiConsumerLruCache;
 
 #[derive(Debug)]
 pub enum ResponseSender {
-    Block(BlockResponseSender),
     BlockTransactions(BlockTransactionsResponseSender),
     BlockWithSenders(BlockWithSendersResponseSender),
 }
@@ -44,8 +43,6 @@ enum BlockData {
     BlockWithSenders(BlockWithSenders),
 }
 
-/// The type that can send the response to a requested [Block]
-type BlockResponseSender = oneshot::Sender<RethResult<Option<Block>>>;
 
 /// The type that can send the response to a requested [Block]
 type BlockTransactionsResponseSender = oneshot::Sender<RethResult<Option<Vec<TransactionSigned>>>>;
@@ -59,7 +56,7 @@ type ReceiptsResponseSender = oneshot::Sender<RethResult<Option<Vec<Receipt>>>>;
 /// The type that can send the response to a requested env
 type EnvResponseSender = oneshot::Sender<RethResult<(CfgEnv, BlockEnv)>>;
 
-type BlockLruCache<L> = MultiConsumerLruCache<B256, BlockWithSenders, L, ResponseSender>;
+type BlockLruCache<L> = MultiConsumerLruCache<B256, BlockWithSenders, L, Either<BlockWithSendersResponseSender,BlockTransactionsResponseSender>>;
 
 type ReceiptsLruCache<L> = MultiConsumerLruCache<B256, Vec<Receipt>, L, ReceiptsResponseSender>;
 
@@ -142,8 +139,15 @@ impl EthStateCache {
     /// Returns `None` if the block does not exist.
     pub(crate) async fn get_block(&self, block_hash: B256) -> RethResult<Option<Block>> {
         let (response_tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(CacheAction::GetBlock { block_hash, response_tx });
-        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+        let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
+        let block_with_senders_res = rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?;
+         
+         if let Ok(Some(block_with_senders)) = block_with_senders_res{
+            Ok(Some(block_with_senders.block))
+         }
+           else{
+            Ok(None)
+         }
     }
 
     /// Requests the [Block] for the block hash, sealed with the given block hash.
@@ -281,22 +285,16 @@ where
             // send the response to queued senders
             for tx in queued {
                 match tx {
-                    ResponseSender::Block(block_tx) => {
-                        if let Ok(Some(BlockData::Block(ref block))) = res {
-                            let block_clone = block.clone();
-                            let _ = block_tx.send(Ok(Some(block_clone)));
-                        }
-                    }
-                    ResponseSender::BlockTransactions(transaction_tx) => {
-                        if let Ok(Some(BlockData::Block(ref block))) = res {
-                            let block_clone = block.clone();
-                            let _ = transaction_tx.send(Ok(Some(block_clone.body)));
-                        }
-                    }
-                    ResponseSender::BlockWithSenders(block_with_senders) => {
+                    Either::Left(block_with_senders) => {
                         if let Ok(Some(BlockData::BlockWithSenders(ref block))) = res {
                             let block_clone = block.clone();
                             let _ = block_with_senders.send(Ok(Some(block_clone)));
+                        }
+                    }
+                    Either::Right(transaction_tx) => {
+                        if let Ok(Some(BlockData::Block(ref block))) = res {
+                            let block_clone = block.clone();
+                            let _ = transaction_tx.send(Ok(Some(block_clone.body)));
                         }
                     }
                 }
@@ -347,34 +345,7 @@ where
                 }
                 Some(action) => {
                     match action {
-                        CacheAction::GetBlock { block_hash, response_tx } => {
-                            // check if block is cached
-                            if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
-                                let _ = response_tx.send(Ok(Some(block.block)));
-                                continue
-                            }
-
-                            // block is not in the cache, request it if this is the first consumer
-                            if this
-                                .full_block_cache
-                                .queue(block_hash, ResponseSender::Block(response_tx))
-                            {
-                                let provider = this.provider.clone();
-                                let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
-                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
-                                    // Only look in the database to prevent situations where we
-                                    // looking up the tree is blocking
-                                    let res = provider
-                                        .find_block_by_hash(block_hash, BlockSource::Database);
-
-                                    let _ = action_tx
-                                        .send(CacheAction::BlockResult { block_hash, res });
-                                }));
-                            }
-                        }
+                        
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
                             if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(block)));
@@ -384,7 +355,7 @@ where
                             // block is not in the cache, request it if this is the first consumer
                             if this
                                 .full_block_cache
-                                .queue(block_hash, ResponseSender::BlockWithSenders(response_tx))
+                                .queue(block_hash, Either::Left(response_tx))
                             {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
@@ -394,23 +365,17 @@ where
                                     let _permit = rate_limiter.acquire().await;
                                     // Only look in the database to prevent situations where we
                                     // looking up the tree is blocking
-                                    let res = provider
-                                        .find_block_by_hash(block_hash, BlockSource::Database);
-                                    if let Ok(Some(block)) = res {
-                                        let block_number = block.header.number;
-                                        let block_sender = provider.block_with_senders(
-                                            block_number,
-                                            TransactionVariant::WithHash,
-                                        );
-                                        let _ = action_tx.send(
-                                            CacheAction::BlockWithSendersResult {
-                                                block_hash,
-                                                res: block_sender,
-                                            },
-                                        );
-                                    } else if let Err(e) = res {
-                                        // Handle error
-                                    }
+                                    let block_sender = provider.block_with_senders(
+                                        BlockHashOrNumber::Hash(block_hash),
+                                        TransactionVariant::WithHash,
+                                    );
+                                    let _ = action_tx.send(
+                                        CacheAction::BlockWithSendersResult {
+                                            block_hash,
+                                            res: block_sender,
+                                        },
+                                    );
+                                   
                                 }));
                             }
                         }
@@ -424,7 +389,7 @@ where
                             // block is not in the cache, request it if this is the first consumer
                             if this
                                 .full_block_cache
-                                .queue(block_hash, ResponseSender::BlockTransactions(response_tx))
+                                .queue(block_hash, Either::Right(response_tx))
                             {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
@@ -434,10 +399,12 @@ where
                                     let _permit = rate_limiter.acquire().await;
                                     // Only look in the database to prevent situations where we
                                     // looking up the tree is blocking
-                                    let res = provider
-                                        .find_block_by_hash(block_hash, BlockSource::Database);
+                                    let res = provider.block_with_senders(
+                                        BlockHashOrNumber::Hash(block_hash),
+                                        TransactionVariant::WithHash,
+                                    );
                                     let _ = action_tx
-                                        .send(CacheAction::BlockResult { block_hash, res });
+                                        .send(CacheAction::BlockWithSendersResult { block_hash, res});
                                 }));
                             }
                         }
@@ -490,19 +457,6 @@ where
                                 }));
                             }
                         }
-                        CacheAction::BlockResult { block_hash, res } => {
-                            match res {
-                                Ok(Some(block)) => {
-                                    // Convert `reth_primitives::Block` to `BlockData`
-                                    this.on_new_block(
-                                        block_hash,
-                                        Ok(Some(BlockData::Block(block))),
-                                    );
-                                }
-                                Ok(None) => this.on_new_block(block_hash, Ok(None)),
-                                Err(e) => this.on_new_block(block_hash, Err(e)),
-                            }
-                        }
                         CacheAction::ReceiptsResult { block_hash, res } => {
                             this.on_new_receipts(block_hash, res);
                         }
@@ -510,7 +464,7 @@ where
                             Ok(Some(block_with_senders)) => {
                                 this.on_new_block(
                                     block_hash,
-                                    Ok(Some(BlockData::Block(block_with_senders.block))),
+                                    Ok(Some(BlockData::BlockWithSenders(block_with_senders))),
                                 );
                             }
                             Ok(None) => {
@@ -562,11 +516,9 @@ where
 /// All message variants sent through the channel
 enum CacheAction {
     GetBlockWithSenders { block_hash: B256, response_tx: BlockWithSendersResponseSender },
-    GetBlock { block_hash: B256, response_tx: BlockResponseSender },
     GetBlockTransactions { block_hash: B256, response_tx: BlockTransactionsResponseSender },
     GetEnv { block_hash: B256, response_tx: EnvResponseSender },
     GetReceipts { block_hash: B256, response_tx: ReceiptsResponseSender },
-    BlockResult { block_hash: B256, res: RethResult<Option<Block>> },
     BlockWithSendersResult { block_hash: B256, res: RethResult<Option<BlockWithSenders>> },
     ReceiptsResult { block_hash: B256, res: RethResult<Option<Vec<Receipt>>> },
     EnvResult { block_hash: B256, res: Box<RethResult<(CfgEnv, BlockEnv)>> },
