@@ -412,7 +412,7 @@ impl From<u64> for BlockId {
 
 impl From<U64> for BlockId {
     fn from(value: U64) -> Self {
-        BlockNumberOrTag::Number(value.into_limbs()[0]).into()
+        BlockNumberOrTag::Number(value.to()).into()
     }
 }
 
@@ -630,7 +630,7 @@ impl From<u64> for BlockHashOrNumber {
 
 impl From<U64> for BlockHashOrNumber {
     fn from(value: U64) -> Self {
-        value.into_limbs()[0].into()
+        value.to::<u64>().into()
     }
 }
 
