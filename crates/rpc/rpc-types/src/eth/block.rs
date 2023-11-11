@@ -622,6 +622,12 @@ impl From<u64> for BlockHashOrNumber {
     }
 }
 
+impl From<U64> for BlockHashOrNumber {
+    fn from(value: U64) -> Self {
+        value.into_limbs()[0].into()
+    }
+}
+
 /// Allows for RLP encoding of either a block hash or block number
 impl Encodable for BlockHashOrNumber {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
