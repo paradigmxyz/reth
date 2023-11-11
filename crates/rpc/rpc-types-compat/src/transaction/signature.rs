@@ -13,11 +13,21 @@ pub(crate) fn from_legacy_primitive_signature(
     Signature {
         r: signature.r,
         s: signature.s,
-        v: U256::from(signature.v(chain_id)),
+        v: U256::from(signature.v(validate_ethereum_chain_id(chain_id))),
         y_parity: None,
     }
 }
-
+/// Checks if the provided `chain_id` (if given) is a recognized Ethereum network ID.
+/// Ref : [EIP-155](https://eips.ethereum.org/EIPS/eip-155).
+fn validate_ethereum_chain_id(chain_id: Option<u64>) -> Option<u64> {
+    match chain_id {
+        Some(id) => match id {
+            1 | 2 | 3 | 4 | 5 | 42 | 1337 => Some(id),
+            _ => None,
+        },
+        None => None,
+    }
+}
 /// Creates a new rpc signature from a non-legacy [primitive
 /// signature](reth_primitives::Signature). This sets the `v` value to `0` or `1` depending on
 /// the signature's `odd_y_parity`.
