@@ -42,7 +42,10 @@ impl DiskFileBlobStore {
 
 impl BlobStore for DiskFileBlobStore {
     fn insert(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
-        todo!()
+        let file_path = self.inner.blob_dir.join(tx.to_string());
+        let mut file = File::create(file_path).unwrap();
+
+        Ok(())
     }
 
     fn insert_all(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
