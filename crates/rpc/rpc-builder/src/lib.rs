@@ -135,7 +135,10 @@
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics};
+use crate::{
+    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
+    RpcModuleSelection::Selection,
+};
 use constants::*;
 use error::{RpcError, ServerKind};
 use hyper::{header::AUTHORIZATION, HeaderMap};
@@ -511,8 +514,6 @@ pub enum RpcModuleSelection {
     Standard,
     /// Only use the configured modules.
     Selection(Vec<RethRpcModule>),
-    /// None modules are configured.
-    None,
 }
 
 // === impl RpcModuleSelection ===
@@ -639,7 +640,6 @@ impl RpcModuleSelection {
             RpcModuleSelection::All => Box::new(Self::all_modules().into_iter()),
             RpcModuleSelection::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
             RpcModuleSelection::Selection(s) => Box::new(s.iter().copied()),
-            RpcModuleSelection::None => Box::new(std::iter::empty()),
         }
     }
 
@@ -649,7 +649,6 @@ impl RpcModuleSelection {
             RpcModuleSelection::All => Self::all_modules(),
             RpcModuleSelection::Selection(s) => s,
             RpcModuleSelection::Standard => Self::STANDARD_MODULES.to_vec(),
-            RpcModuleSelection::None => Vec::new(),
         }
     }
 
@@ -684,13 +683,13 @@ impl FromStr for RpcModuleSelection {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Ok(RpcModuleSelection::None)
+            return Ok(Selection(vec![]))
         }
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
         match first {
             "all" | "All" => Ok(RpcModuleSelection::All),
-            "none" | "None" => Ok(RpcModuleSelection::None),
+            "none" | "None" => Ok(Selection(vec![])),
             _ => RpcModuleSelection::try_from_selection(modules),
         }
     }
@@ -2046,7 +2045,7 @@ mod tests {
     #[test]
     fn parse_rpc_module_selection_none() {
         let selection = "none".parse::<RpcModuleSelection>().unwrap();
-        assert_eq!(selection, RpcModuleSelection::None);
+        assert_eq!(selection, Selection(vec![]));
     }
 
     #[test]
