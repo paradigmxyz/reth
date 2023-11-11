@@ -502,6 +502,7 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
 mod tests {
     use super::*;
     use clap::Parser;
+    use reth_rpc_builder::RpcModuleSelection::Selection;
     use std::net::SocketAddrV4;
 
     /// A helper type to parse Args more easily
@@ -535,6 +536,14 @@ mod tests {
         let apis = args.http_api.unwrap();
         let expected = RpcModuleSelection::try_from_selection(["eth", "admin", "debug"]).unwrap();
 
+        assert_eq!(apis, expected);
+    }
+
+    #[test]
+    fn test_rpc_server_args_parser_none() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "none"]).args;
+        let apis = args.http_api.unwrap();
+        let expected = Selection(vec![]);
         assert_eq!(apis, expected);
     }
 
