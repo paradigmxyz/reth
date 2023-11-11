@@ -2,39 +2,45 @@
 
 use std::{fmt, num::ParseIntError, str::FromStr};
 
-/// A helper type that maps `0` to `None` when parsing CLI arguments.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ZeroAsNone(pub Option<u64>);
+macro_rules! zero_as_none {
+    ($type_name:ident, $inner_type:ty) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        /// A helper type that maps `0` to `None` when parsing CLI arguments.
+        pub struct $type_name(pub Option<$inner_type>);
 
-impl ZeroAsNone {
-    /// Returns the inner value.
-    pub const fn new(value: u64) -> Self {
-        Self(Some(value))
-    }
+        impl $type_name {
+            /// Returns the inner value.
+            pub const fn new(value: $inner_type) -> Self {
+                Self(Some(value))
+            }
 
-    /// Returns the inner value or `u64::MAX` if `None`.
-    pub fn unwrap_or_max(self) -> u64 {
-        self.0.unwrap_or(u64::MAX)
-    }
-}
-
-impl fmt::Display for ZeroAsNone {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            Some(value) => write!(f, "{}", value),
-            None => write!(f, "0"),
+            /// Returns the inner value or `$inner_type::MAX` if `None`.
+            pub fn unwrap_or_max(self) -> $inner_type {
+                self.0.unwrap_or(<$inner_type>::MAX)
+            }
         }
-    }
+
+        impl std::fmt::Display for $type_name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self.0 {
+                    Some(value) => write!(f, "{}", value),
+                    None => write!(f, "0"),
+                }
+            }
+        }
+
+        impl std::str::FromStr for $type_name {
+            type Err = std::num::ParseIntError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                let value = s.parse::<$inner_type>()?;
+                Ok(Self(if value == 0 { None } else { Some(value) }))
+            }
+        }
+    };
 }
 
-impl FromStr for ZeroAsNone {
-    type Err = std::num::ParseIntError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let value = s.parse::<u64>()?;
-        Ok(Self(if value == 0 { None } else { Some(value) }))
-    }
-}
+zero_as_none!(ZeroAsNone, u64);
 
 macro_rules! max_values {
     ($name:ident, $ty:ident) => {
