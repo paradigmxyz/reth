@@ -199,6 +199,8 @@ impl Command {
             self.chain.clone(),
             Arc::new(TransitionQueueStore::new(self.out.clone())),
             database,
+            0,
+            0,
             None,
         )?;
         parallel_executor.execute_range(range.clone(), true)?;

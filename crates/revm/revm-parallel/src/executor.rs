@@ -150,6 +150,14 @@ pub struct ParallelExecutor<'a, Provider> {
     executed: BTreeMap<BlockNumber, LoadedBlock>,
     /// The block number of the next block pending validation.
     next_block_pending_validation: Option<BlockNumber>,
+    /// The gas threshold for executing in parallel.
+    gas_threshold: u64,
+    /// The batch size threshold for executing in parallel.
+    batch_size_threshold: u64,
+    /// The number of batches executed in parallel.
+    batches_executed_in_parallel: u64,
+    /// The number of batches executed in sequence.
+    batches_executed_in_sequence: u64,
 }
 
 impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
@@ -159,6 +167,8 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         chain_spec: Arc<ChainSpec>,
         store: Arc<TransitionQueueStore>,
         database: DatabaseRefBox<'a, RethError>,
+        gas_threshold: u64,
+        batch_size_threshold: u64,
         _num_threads: Option<usize>, // TODO:
     ) -> RethResult<Self> {
         Ok(Self {
@@ -169,6 +179,10 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
             loaded: HashMap::default(),
             executed: BTreeMap::default(),
             next_block_pending_validation: None,
+            gas_threshold,
+            batch_size_threshold,
+            batches_executed_in_parallel: 0,
+            batches_executed_in_sequence: 0,
         })
     }
 
@@ -250,18 +264,21 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
 
         let gas_per_transition = batch.gas_used / transitions.len() as u128;
         tracing::debug!(target: "evm::parallel", ?batch, "Executing block batch");
-        let transition_results: Vec<_> =
-            if transitions.len() > 100 || gas_per_transition > 1_000_000 {
-                transitions
-                    .into_par_iter()
-                    .map(|transition| self.execute_state_transition(transition))
-                    .collect()
-            } else {
-                transitions
-                    .into_iter()
-                    .map(|transition| self.execute_state_transition(transition))
-                    .collect()
-            };
+        let transition_results: Vec<_> = if transitions.len() > self.batch_size_threshold as usize ||
+            gas_per_transition > self.gas_threshold as u128
+        {
+            self.batches_executed_in_parallel += 1;
+            transitions
+                .into_par_iter()
+                .map(|transition| self.execute_state_transition(transition))
+                .collect()
+        } else {
+            self.batches_executed_in_sequence += 1;
+            transitions
+                .into_iter()
+                .map(|transition| self.execute_state_transition(transition))
+                .collect()
+        };
 
         let mut states =
             revm::primitives::HashMap::<Address, Vec<(TransitionId, Account)>>::default();
@@ -408,6 +425,16 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
                 ParallelExecutionError::InconsistentTransitionQueue { unvalidated_block }.into()
             )
         }
+
+        tracing::info!(
+            target: "evm::parallel",
+            ?range,
+            parallel = self.batches_executed_in_parallel,
+            sequential = self.batches_executed_in_sequence,
+            "Executed batches in range"
+        );
+        self.batches_executed_in_parallel = 0;
+        self.batches_executed_in_sequence = 0;
 
         Ok(())
     }

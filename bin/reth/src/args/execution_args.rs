@@ -20,6 +20,14 @@ pub struct ExecutionArgs {
     /// Path to the block queues for parallel execution.
     #[arg(long = "execution.parallel-queue-store", required_if_eq("parallel", "true"))]
     pub queue_store: Option<PathBuf>,
+
+    /// Gas threshold for executing in parallel.
+    #[arg(long = "execution.gas-threshold", default_value_t = 1_000_000)]
+    pub gas_threshold: u64,
+
+    /// Batch size threshold for executing in parallel.
+    #[arg(long = "execution.batch-size-threshold", default_value_t = 100)]
+    pub batch_size_threshold: u64,
 }
 
 impl ExecutionArgs {
@@ -32,6 +40,8 @@ impl ExecutionArgs {
             EitherExecutorFactory::Right(ParallelExecutorFactory::new(
                 chain_spec,
                 Arc::new(TransitionQueueStore::new(self.queue_store.clone().expect("is set"))),
+                self.gas_threshold,
+                self.batch_size_threshold,
             ))
         } else {
             EitherExecutorFactory::Left(EVMProcessorFactory::new(chain_spec))

@@ -10,12 +10,19 @@ use std::sync::Arc;
 pub struct ParallelExecutorFactory {
     chain_spec: Arc<ChainSpec>,
     queue_store: Arc<TransitionQueueStore>,
+    gas_threshold: u64,
+    batch_size_threshold: u64,
 }
 
 impl ParallelExecutorFactory {
     /// Create new factory
-    pub fn new(chain_spec: Arc<ChainSpec>, queue_store: Arc<TransitionQueueStore>) -> Self {
-        Self { chain_spec, queue_store }
+    pub fn new(
+        chain_spec: Arc<ChainSpec>,
+        queue_store: Arc<TransitionQueueStore>,
+        gas_threshold: u64,
+        batch_size_threshold: u64,
+    ) -> Self {
+        Self { chain_spec, queue_store, gas_threshold, batch_size_threshold }
     }
 }
 
@@ -35,6 +42,8 @@ impl RangeExecutorFactory for ParallelExecutorFactory {
                 Arc::clone(&self.chain_spec),
                 Arc::clone(&self.queue_store),
                 Box::new(StateProviderDatabase::new(sp)),
+                self.gas_threshold,
+                self.batch_size_threshold,
                 None,
             )
             .expect("success"), // TODO:
