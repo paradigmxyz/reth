@@ -11,7 +11,7 @@ use reth_primitives::{
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::BlobExcessGasAndPrice;
+use revm_primitives::calc_blob_gasprice;
 use tracing::debug;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
@@ -40,8 +40,7 @@ where
                 .unwrap_or_default()
                 .excess_blob_gas
                 .ok_or(EthApiError::ExcessBlobGasNotSet)
-                .map(BlobExcessGasAndPrice::new)?
-                .blob_gasprice,
+                .map(calc_blob_gasprice)?
         ))
     }
 
