@@ -2,6 +2,8 @@
 
 use std::{fmt, num::ParseIntError, str::FromStr};
 
+/// A macro that generates types that maps "0" to "None" when parsing CLI arguments.
+
 macro_rules! zero_as_none {
     ($type_name:ident, $inner_type:ty) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,8 +42,10 @@ macro_rules! zero_as_none {
     };
 }
 
-zero_as_none!(ZeroAsNone, u64);
+zero_as_none!(ZeroAsNoneU64, u64);
+zero_as_none!(ZeroAsNoneU32, u32);
 
+/// A macro that generates types that map "max" to "MAX" when parsing CLI arguments.
 macro_rules! max_values {
     ($name:ident, $ty:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,14 +88,15 @@ macro_rules! max_values {
 }
 max_values!(MaxU32, u32);
 max_values!(MaxU64, u64);
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_zero_parse() {
-        let val = "0".parse::<ZeroAsNone>().unwrap();
-        assert_eq!(val, ZeroAsNone(None));
+        let val = "0".parse::<ZeroAsNoneU64>().unwrap();
+        assert_eq!(val, ZeroAsNoneU64(None));
         assert_eq!(val.unwrap_or_max(), u64::MAX);
     }
 }
