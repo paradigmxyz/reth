@@ -35,11 +35,14 @@ where
     /// Returns a suggestion for a gas price for blob transactions.
     pub(crate) async fn blob_gas_price(&self) -> EthResult<U256> {
         let header = self.block(BlockNumberOrTag::Latest).await?;
-        let blob_gas_price =
-            header.map(|h| BlobExcessGasAndPrice::new(h.excess_blob_gas.unwrap_or_default()));
-
-        // unwrap() will never panic since h.excess_blob_gas used unwrap_or_default().
-        Ok(U256::from(blob_gas_price.unwrap().blob_gasprice))
+        Ok(U256::from(
+            header
+                .unwrap_or_default()
+                .excess_blob_gas
+                .ok_or(EthApiError::ExcessBlobGasNotSet)
+                .map(|gas| BlobExcessGasAndPrice::new(gas))?
+                .excess_blob_gas,
+        ))
     }
 
     /// Returns a suggestion for the priority fee (the tip)
