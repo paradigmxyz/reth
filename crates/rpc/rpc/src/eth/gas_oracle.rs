@@ -26,7 +26,7 @@ pub const DEFAULT_IGNORE_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GasPriceOracleConfig {
-    /// The number of populated blocks to produce the gas price estimate
+    /// The number of opulated blocks to produce the gas price estimate
     pub blocks: u32,
 
     /// The percentile of gas prices to use for the estimate

@@ -25,9 +25,6 @@ pub type EthResult<T> = Result<T, EthApiError>;
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum EthApiError {
-    /// Unimplemetned
-    #[error("unimplemented method")]
-    Unimplemented,
     /// When a raw transaction is empty
     #[error("empty transaction data")]
     EmptyRawTransactionData,
@@ -125,7 +122,6 @@ pub enum OptimismEthApiError {
 impl From<EthApiError> for ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
-            EthApiError::Unimplemented |
             EthApiError::FailedToDecodeSignedTransaction |
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
