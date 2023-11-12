@@ -31,6 +31,11 @@ where
         Ok(suggested_tip + U256::from(base_fee))
     }
 
+    /// Returns a suggestion for a gas price for blob transactions.
+    pub(crate) async fn blob_gas_price(&self) -> EthResult<U256> {
+        Err(EthApiError::Unimplemented)
+    }
+
     /// Returns a suggestion for the priority fee (the tip)
     pub(crate) async fn suggested_priority_fee(&self) -> EthResult<U256> {
         self.gas_oracle().suggest_tip_cap().await

@@ -281,12 +281,19 @@ where
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
         return Ok(EthApi::gas_price(self).await?)
     }
-
+    
+    /// Handler for: `eth_blobGasPrice` 
+    async fn blob_gas_price(&self) -> Result<U256> {
+        trace!(target: "rpc::eth", "Serving eth_blobGasPrice");
+        return Ok(EthApi::blob_gas_price(self).await?)
+    }
+    
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
         return Ok(EthApi::suggested_priority_fee(self).await?)
     }
+
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
     // caching of it in the LRU cache.
