@@ -294,7 +294,6 @@ where
         return Ok(EthApi::suggested_priority_fee(self).await?)
     }
 
-
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
     // caching of it in the LRU cache.
     // When new RPC call is executed, the cache gets locked, we check it for the historical fees
