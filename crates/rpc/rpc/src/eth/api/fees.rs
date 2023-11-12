@@ -11,7 +11,7 @@ use reth_primitives::{
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::calc_blob_gasprice;
+use revm_primitives::BlobExcessGasAndPrice;
 use tracing::debug;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
@@ -34,14 +34,12 @@ where
 
     /// Returns a suggestion for a gas price for blob transactions.
     pub(crate) async fn blob_gas_price(&self) -> EthResult<U256> {
-        let header = self.block(BlockNumberOrTag::Latest).await?;
-        Ok(U256::from(
-            header
-                .unwrap_or_default()
-                .excess_blob_gas
-                .ok_or(EthApiError::ExcessBlobGasNotSet)
-                .map(calc_blob_gasprice)?
-        ))
+        self.block(BlockNumberOrTag::Latest)
+            .await?
+            .unwrap_or_default()
+            .next_block_blob_fee()
+            .ok_or(EthApiError::ExcessBlobGasNotSet)
+            .map(U256::from)
     }
 
     /// Returns a suggestion for the priority fee (the tip)
