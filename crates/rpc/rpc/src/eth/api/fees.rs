@@ -11,7 +11,6 @@ use reth_primitives::{
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::BlobExcessGasAndPrice;
 use tracing::debug;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
