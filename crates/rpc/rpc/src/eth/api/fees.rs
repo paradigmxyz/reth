@@ -38,6 +38,8 @@ where
         let blob_gas_price = header.and_then(|h | Some(
             BlobExcessGasAndPrice::new(h.excess_blob_gas.unwrap_or_default())),
         );
+
+        // unwrap() will never panic since h.excess_blob_gas used unwrap_or_default(). 
         Ok(U256::from(blob_gas_price.unwrap().blob_gasprice))
     }
 
