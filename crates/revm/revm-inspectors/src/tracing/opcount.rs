@@ -13,6 +13,7 @@ pub struct OpcodeCountInspector {
 
 impl OpcodeCountInspector {
     /// Returns the opcode counter
+    #[inline]
     pub fn count(&self) -> usize {
         self.count
     }
