@@ -608,7 +608,6 @@ mod tests {
     async fn can_create_trace_call_stream() {
         let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
 
-        
         let trace_call_request = TraceCallRequest::default();
 
         let mut stream = client.trace_call_stream(trace_call_request);
