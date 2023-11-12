@@ -41,7 +41,7 @@ where
                 .excess_blob_gas
                 .ok_or(EthApiError::ExcessBlobGasNotSet)
                 .map(BlobExcessGasAndPrice::new)?
-                .excess_blob_gas,
+                .blob_gasprice,
         ))
     }
 
