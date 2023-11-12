@@ -467,6 +467,41 @@ where
             }
         }
     }
+    /// Compares the `replay_transactions` responses from the two RPC clients.
+    pub async fn compare_replay_transaction_responses(
+        &self,
+        transaction_hashes: Vec<TxHash>,
+        trace_types: HashSet<TraceType>,
+    ) {
+        let stream1 =
+            self.client1.replay_transactions(transaction_hashes.clone(), trace_types.clone());
+        let stream2 = self.client2.replay_transactions(transaction_hashes, trace_types);
+
+        let mut zipped_streams = stream1.zip(stream2);
+
+        while let Some((result1, result2)) = zipped_streams.next().await {
+            match (result1, result2) {
+                (Ok((ref trace1_data, ref tx_hash1)), Ok((ref trace2_data, ref tx_hash2))) => {
+                    assert_eq!(
+                        trace1_data, trace2_data,
+                        "Mismatch in trace results for transaction: {:?}",
+                        tx_hash1
+                    );
+                    assert_eq!(tx_hash1, tx_hash2, "Mismatch in transaction hashes.");
+                }
+                (Err((ref err1, ref tx_hash1)), Err((ref err2, ref tx_hash2))) => {
+                    assert_eq!(
+                        format!("{:?}", err1),
+                        format!("{:?}", err2),
+                        "Different errors for transaction: {:?}",
+                        tx_hash1
+                    );
+                    assert_eq!(tx_hash1, tx_hash2, "Mismatch in transaction hashes.");
+                }
+                _ => panic!("One client returned Ok while the other returned Err."),
+            }
+        }
+    }
 }
 #[cfg(test)]
 mod tests {
