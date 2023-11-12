@@ -363,7 +363,7 @@ mod tests {
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
         assert!(log_dir.as_ref().ends_with(end), "{:?}", log_dir);
 
-        let mut iter = SUPPORTED_CHAINS.into_iter();
+        let mut iter = SUPPORTED_CHAINS.iter();
         iter.next();
         for chain in iter {
             let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--chain", chain]).unwrap();

@@ -2,7 +2,7 @@
 
 use crate::{
     args::{
-        types::{MaxU32, ZeroAsNone},
+        types::{MaxU32, ZeroAsNoneU64},
         GasPriceOracleArgs,
     },
     cli::{
@@ -157,12 +157,12 @@ pub struct RpcServerArgs {
     pub rpc_max_tracing_requests: u32,
 
     /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
-    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNone::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
-    pub rpc_max_blocks_per_filter: ZeroAsNone,
+    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
+    pub rpc_max_blocks_per_filter: ZeroAsNoneU64,
 
     /// Maximum number of logs that can be returned in a single response. (0 = no limit)
-    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNone::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
-    pub rpc_max_logs_per_response: ZeroAsNone,
+    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
+    pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     #[arg(
