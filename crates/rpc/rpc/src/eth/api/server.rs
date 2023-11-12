@@ -291,7 +291,7 @@ where
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        return Ok(EthApi::suggested_priority_fee(self).await?);
+        return Ok(EthApi::suggested_priority_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -312,7 +312,7 @@ where
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
         return Ok(
             EthApi::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
-        );
+        )
     }
 
     /// Handler for: `eth_mining`
