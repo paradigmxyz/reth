@@ -9,6 +9,7 @@ pub use compression::Compression;
 pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
 pub use segment::{SegmentConfig, SegmentHeader, SnapshotSegment};
 
+use crate::fs::FsPathError;
 use std::{ops::RangeInclusive, path::Path};
 
 /// Default snapshot block count.
@@ -45,11 +46,11 @@ pub fn iter_snapshots(
     path: impl AsRef<Path>,
 ) -> Result<
     impl Iterator<Item = (SnapshotSegment, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>,
-    std::io::Error,
+    FsPathError,
 > {
-    let entries = std::fs::read_dir(path.as_ref())?.filter_map(Result::ok);
+    let entries = crate::fs::read_dir(path.as_ref())?.filter_map(Result::ok);
     Ok(entries.filter_map(|entry| {
-        if let Ok(true) = entry.metadata().map(|metadata| metadata.is_file()) {
+        if entry.metadata().map_or(false, |metadata| metadata.is_file()) {
             return SnapshotSegment::parse_filename(&entry.file_name().to_string_lossy())
         }
         None

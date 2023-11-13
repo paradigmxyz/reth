@@ -27,7 +27,7 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let range = self.from..=(self.from + self.block_interval - 1);
+        let range = self.block_range();
         let filters = if self.with_filters {
             Filters::WithFilters(inclusion_filter, phf)
         } else {
@@ -65,7 +65,7 @@ impl Command {
             Filters::WithoutFilters
         };
 
-        let block_range = self.from..=(self.from + self.block_interval - 1);
+        let block_range = self.block_range();
 
         let mut row_indexes = block_range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();

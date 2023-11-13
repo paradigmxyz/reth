@@ -59,7 +59,7 @@ impl SnapshotSegment {
         tx_range: &RangeInclusive<TxNumber>,
     ) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
-        // [`Self::parse_filename`.]
+        // [`Self::parse_filename`].
         format!(
             "snapshot_{}_{}_{}_{}_{}",
             self.as_ref(),

@@ -40,7 +40,7 @@ pub struct SnapshotProvider {
     snapshots_block_index: RwLock<SegmentRanges>,
     /// Available snapshot ranges on disk indexed by max transactions.
     snapshots_tx_index: RwLock<SegmentRanges>,
-    /// Tracks the latest and highest snapshot of every segment.
+    /// Tracks the highest snapshot of every segment.
     highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
     /// Directory where snapshots are located
     path: PathBuf,
