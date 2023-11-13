@@ -5,11 +5,11 @@ use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{BlockId, TxHash, B256};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 use reth_rpc_types::trace::geth::{GethDebugTracerType, GethDebugTracingOptions};
+use reth_rpc_types::CallRequest;
 use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
 const JS_TRACER_TEMPLATE: &str = include_str!("../assets/tracer-template.js");
 
@@ -37,6 +37,13 @@ pub trait DebugApiExt {
     ) -> Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>
     where
         B: Into<BlockId> + Send;
+
+    /// method for tracing a call
+    async fn debug_trace_call_json(
+        &self,
+        request: CallRequest,
+        opts: GethDebugTracingOptions,
+    ) -> Result<serde_json::Value, jsonrpsee::core::Error>;
 }
 
 #[async_trait::async_trait]
@@ -80,6 +87,17 @@ where
         .buffered(10);
 
         Ok(DebugTraceTransactionsStream { stream: Box::pin(stream) })
+    }
+
+    async fn debug_trace_call_json(
+        &self,
+        request: CallRequest,
+        opts: GethDebugTracingOptions,
+    ) -> Result<serde_json::Value, jsonrpsee::core::Error> {
+        let mut params = jsonrpsee::core::params::ArrayParams::new();
+        params.insert(request).unwrap();
+        params.insert(opts).unwrap();
+        self.request("debug_traceCall", params).await
     }
 }
 
