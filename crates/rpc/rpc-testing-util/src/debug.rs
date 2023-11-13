@@ -4,8 +4,10 @@ use futures::{Stream, StreamExt};
 use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{BlockId, TxHash, B256};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
-use reth_rpc_types::trace::geth::{GethDebugTracerType, GethDebugTracingOptions};
-use reth_rpc_types::CallRequest;
+use reth_rpc_types::{
+    trace::geth::{GethDebugTracerType, GethDebugTracingOptions},
+    CallRequest,
+};
 use std::{
     pin::Pin,
     task::{Context, Poll},
