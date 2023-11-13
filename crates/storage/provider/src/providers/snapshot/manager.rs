@@ -18,7 +18,7 @@ pub struct SnapshotProvider {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
-    /// Tracks the latest and highest snapshot of every segment.
+    /// Tracks the highest snapshot of every segment.
     highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
     /// Directory where snapshots are located
     path: PathBuf,

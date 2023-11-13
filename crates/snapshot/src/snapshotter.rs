@@ -28,9 +28,9 @@ pub struct Snapshotter<DB> {
     provider_factory: ProviderFactory<DB>,
     /// Directory where snapshots are located
     snapshots_path: PathBuf,
-    /// Highest snapshot block number for each
+    /// Highest snapshotted block numbers for each segment
     highest_snapshots: HighestSnapshots,
-    /// Channel sender to notify other components of the new highest snapshot values
+    /// Channel sender to notify other components of the new highest snapshots
     highest_snapshots_notifier: watch::Sender<Option<HighestSnapshots>>,
     /// Channel receiver to be cloned and shared that already comes with the newest value
     highest_snapshots_tracker: HighestSnapshotsTracker,
@@ -121,15 +121,14 @@ impl<DB: Database> Snapshotter<DB> {
     /// moved to their final location within `datadir/snapshots`.
     fn create_directory(&self) -> RethResult<()> {
         let temporary_path = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
-        let err = |e: std::io::Error| RethError::Custom(e.to_string());
 
         if !self.snapshots_path.exists() {
-            std::fs::create_dir_all(&self.snapshots_path).map_err(err)?;
+            reth_primitives::fs::create_dir_all(&self.snapshots_path)?;
         } else if temporary_path.exists() {
-            std::fs::remove_dir_all(&temporary_path).map_err(err)?;
+            reth_primitives::fs::remove_dir_all(&temporary_path)?;
         }
 
-        std::fs::create_dir_all(temporary_path).map_err(err)?;
+        reth_primitives::fs::create_dir_all(temporary_path)?;
 
         Ok(())
     }
@@ -150,11 +149,10 @@ impl<DB: Database> Snapshotter<DB> {
     /// Looks into the snapshot directory to find the highest snapshotted block of each segment, and
     /// notifies every tracker.
     fn update_highest_snapshots_tracker(&mut self) -> RethResult<()> {
-        // It walks over the directory and parses the snapshot filenames extracing `SnapshotSegment`
-        // and their inclusive range. It then takes the maximum block number for each specific
-        // segment.
-        for (segment, range) in std::fs::read_dir(&self.snapshots_path)
-            .map_err(|err| RethError::Custom(err.to_string()))?
+        // It walks over the directory and parses the snapshot filenames extracting
+        // `SnapshotSegment` and their inclusive range. It then takes the maximum block
+        // number for each specific segment.
+        for (segment, range) in reth_primitives::fs::read_dir(&self.snapshots_path)?
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 if let Ok(true) = entry.metadata().map(|metadata| metadata.is_file()) {
