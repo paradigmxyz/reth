@@ -279,7 +279,7 @@ where
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        return Ok(EthApi::gas_price(self).await?);
+        return Ok(EthApi::gas_price(self).await?)
     }
 
     /// Handler for: `eth_blobGasPrice`
