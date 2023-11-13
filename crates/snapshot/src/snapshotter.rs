@@ -154,12 +154,7 @@ impl<DB: Database> Snapshotter<DB> {
         // and their inclusive range. It then takes the maximum block number for each specific
         // segment.
         for (segment, block_range, _) in iter_snapshots(&self.snapshots_path)? {
-            let max_segment_block = match segment {
-                SnapshotSegment::Headers => &mut self.highest_snapshots.headers,
-                SnapshotSegment::Transactions => &mut self.highest_snapshots.transactions,
-                SnapshotSegment::Receipts => &mut self.highest_snapshots.receipts,
-            };
-
+            let max_segment_block = self.highest_snapshots.as_mut(segment);
             if max_segment_block.map_or(true, |block| block < *block_range.end()) {
                 *max_segment_block = Some(*block_range.end());
             }
