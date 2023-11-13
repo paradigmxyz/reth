@@ -2,12 +2,12 @@ use crate::{
     bundle_state::BundleStateWithReceipts,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BundleStateDataProvider, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    BundleStateDataProvider, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,
     ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
-use reth_db::models::StoredBlockBodyIndices;
+use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
@@ -636,5 +636,14 @@ impl WithdrawalsProvider for MockEthProvider {
         _timestamp: u64,
     ) -> RethResult<Option<Vec<reth_primitives::Withdrawal>>> {
         unimplemented!()
+    }
+}
+
+impl ChangeSetReader for MockEthProvider {
+    fn account_block_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> RethResult<Vec<AccountBeforeTx>> {
+        Ok(Vec::default())
     }
 }
