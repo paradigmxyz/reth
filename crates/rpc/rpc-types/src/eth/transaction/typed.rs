@@ -3,10 +3,12 @@
 //! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
-use crate::eth::transaction::AccessList;
+use crate::{
+    eth::transaction::AccessList,
+    kzg::{Blob, Bytes48},
+};
 use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError};
-use c_kzg::{Blob, Bytes48};
 use serde::{Deserialize, Serialize};
 
 /// Container type for various Ethereum transaction requests
@@ -136,6 +138,7 @@ impl Decodable for TransactionKind {
 
 /// This represents a set of blobs, and its corresponding commitments and proofs.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(C)]
 pub struct BlobTransactionSidecar {
     /// The blob data.
     pub blobs: Vec<Blob>,
