@@ -52,7 +52,7 @@ impl SnapshotSegment {
     /// Returns the default file name for the provided segment and range.
     pub fn filename(&self, range: &RangeInclusive<BlockNumber>) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
-        // [`Self::parse_filename`.]
+        // [`Self::parse_filename`].
         format!("snapshot_{}_{}_{}", self.as_ref(), range.start(), range.end(),)
     }
 
