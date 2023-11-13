@@ -75,7 +75,7 @@ where
         }
 
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
-            return Err(EthApiError::UnknownBlockNumber);
+            return Err(EthApiError::UnknownBlockNumber)
         };
 
         // need to add 1 to the end block to get the correct (inclusive) range
