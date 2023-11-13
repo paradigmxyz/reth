@@ -39,6 +39,12 @@ impl From<reth_nippy_jar::NippyJarError> for RethError {
     }
 }
 
+impl From<reth_primitives::fs::FsPathError> for RethError {
+    fn from(err: reth_primitives::fs::FsPathError) -> Self {
+        RethError::Custom(err.to_string())
+    }
+}
+
 // We don't want these types to be too large because they're used in a lot of places.
 const _SIZE_ASSERTIONS: () = {
     // Main error.

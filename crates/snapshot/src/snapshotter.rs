@@ -91,12 +91,7 @@ impl<DB: Database> Snapshotter<DB> {
     ) -> RethResult<Self> {
         // Create directory for snapshots if it doesn't exist.
         if !snapshots_path.exists() {
-            std::fs::create_dir_all(&snapshots_path).map_err(|e| {
-                RethError::Custom(format!(
-                    "Could not create snapshots directory {}: {e}",
-                    snapshots_path.display()
-                ))
-            })?;
+            reth_primitives::fs::create_dir_all(&snapshots_path)?;
         }
 
         let (highest_snapshots_notifier, highest_snapshots_tracker) = watch::channel(None);
@@ -135,8 +130,7 @@ impl<DB: Database> Snapshotter<DB> {
         // It walks over the directory and parses the snapshot filenames extracting
         // `SnapshotSegment` and their inclusive range. It then takes the maximum block
         // number for each specific segment.
-        for (segment, range) in std::fs::read_dir(&self.snapshots_path)
-            .map_err(|err| RethError::Custom(err.to_string()))?
+        for (segment, range) in reth_primitives::fs::read_dir(&self.snapshots_path)?
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 if let Ok(true) = entry.metadata().map(|metadata| metadata.is_file()) {
