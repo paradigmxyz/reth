@@ -8,7 +8,12 @@ use reth_primitives::{
     BlockNumber, ChainSpec, TxNumber,
 };
 use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt};
-use std::{collections::HashMap, ops::RangeInclusive, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    ops::RangeInclusive,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::sync::watch;
 use tracing::warn;
 
@@ -90,7 +95,7 @@ impl<DB: Database> Snapshotter<DB> {
     /// Creates a new [Snapshotter].
     pub fn new(
         db: DB,
-        snapshots_path: PathBuf,
+        snapshots_path: impl AsRef<Path>,
         chain_spec: Arc<ChainSpec>,
         block_interval: u64,
     ) -> RethResult<Self> {
@@ -98,7 +103,7 @@ impl<DB: Database> Snapshotter<DB> {
 
         let mut snapshotter = Self {
             provider_factory: ProviderFactory::new(db, chain_spec),
-            snapshots_path,
+            snapshots_path: snapshots_path.as_ref().into(),
             // TODO(alexey): fill from on-disk snapshot data
             highest_snapshots: HighestSnapshots::default(),
             highest_snapshots_notifier,

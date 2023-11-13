@@ -74,14 +74,14 @@ impl Command {
             .provider()?
             .transaction_range_by_block_range(block_range.clone())?;
 
-        let path = SnapshotSegment::Headers
+        let path: PathBuf = SnapshotSegment::Headers
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
         let provider = SnapshotProvider::default();
         let jar_provider = provider.get_segment_provider_from_block(
             SnapshotSegment::Headers,
             self.from,
-            Some(path),
+            Some(&path),
         )?;
         let mut cursor = jar_provider.cursor()?;
 

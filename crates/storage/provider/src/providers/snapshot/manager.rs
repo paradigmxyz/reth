@@ -17,7 +17,7 @@ use revm::primitives::HashMap;
 use std::{
     collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 use tokio::sync::watch;
 
@@ -48,13 +48,13 @@ pub struct SnapshotProvider {
 
 impl SnapshotProvider {
     /// Creates a new [`SnapshotProvider`].
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             map: Default::default(),
             snapshots_block_index: Default::default(),
             snapshots_tx_index: Default::default(),
             highest_tracker: None,
-            path,
+            path: path.as_ref().to_path_buf(),
         }
     }
 
@@ -72,7 +72,7 @@ impl SnapshotProvider {
         &self,
         segment: SnapshotSegment,
         block: BlockNumber,
-        path: Option<PathBuf>,
+        path: Option<&Path>,
     ) -> RethResult<SnapshotJarProvider<'_>> {
         self.get_segment_provider(
             segment,
@@ -86,7 +86,7 @@ impl SnapshotProvider {
         &self,
         segment: SnapshotSegment,
         tx: TxNumber,
-        path: Option<PathBuf>,
+        path: Option<&Path>,
     ) -> RethResult<SnapshotJarProvider<'_>> {
         self.get_segment_provider(
             segment,
@@ -100,7 +100,7 @@ impl SnapshotProvider {
         &self,
         segment: SnapshotSegment,
         fn_ranges: impl Fn() -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>,
-        path: Option<PathBuf>,
+        path: Option<&Path>,
     ) -> RethResult<SnapshotJarProvider<'_>> {
         // If we have a path, then get the block range and transaction range from its name.
         // Otherwise, check `self.available_snapshots`

@@ -75,7 +75,7 @@ impl Command {
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
-        let path = SnapshotSegment::Receipts
+        let path: PathBuf = SnapshotSegment::Receipts
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
 
@@ -83,7 +83,7 @@ impl Command {
         let jar_provider = provider.get_segment_provider_from_block(
             SnapshotSegment::Receipts,
             self.from,
-            Some(path),
+            Some(&path),
         )?;
         let mut cursor = jar_provider.cursor()?;
 
