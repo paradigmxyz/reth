@@ -55,7 +55,7 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> EthResult<FeeHistory> {
         if block_count == 0 {
-            return Ok(FeeHistory::default());
+            return Ok(FeeHistory::default())
         }
 
         // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
