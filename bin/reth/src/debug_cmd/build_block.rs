@@ -152,7 +152,6 @@ impl Command {
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
-        let _tree_config = BlockchainTreeConfig::default();
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = ShareableBlockchainTree::new(tree);
 
@@ -198,27 +197,21 @@ impl Command {
                         "encountered a blob tx. `--blobs-bundle-path` must be provided"
                     ))?;
 
-                    let (commitments, proofs, blobs) =
-                        blobs_bundle.take(blob_versioned_hashes.len());
+                    let sidecar: BlobTransactionSidecar =
+                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len()).into();
 
                     // first construct the tx, calculating the length of the tx with sidecar before
                     // insertion
-                    let sidecar = BlobTransactionSidecar::new(
-                        blobs.clone(),
-                        commitments.clone(),
-                        proofs.clone(),
-                    );
-                    let tx =
-                        BlobTransaction::try_from_signed(transaction.as_ref().clone(), sidecar)
-                            .expect("should not fail to convert blob tx if it is already eip4844");
+                    let tx = BlobTransaction::try_from_signed(
+                        transaction.as_ref().clone(),
+                        sidecar.clone(),
+                    )
+                    .expect("should not fail to convert blob tx if it is already eip4844");
                     let pooled = PooledTransactionsElement::BlobTransaction(tx);
                     let encoded_length = pooled.length_without_header();
 
                     // insert the blob into the store
-                    blob_store.insert(
-                        transaction.hash,
-                        BlobTransactionSidecar { blobs, commitments, proofs },
-                    )?;
+                    blob_store.insert(transaction.hash, sidecar)?;
 
                     encoded_length
                 }

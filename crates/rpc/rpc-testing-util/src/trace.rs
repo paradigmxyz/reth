@@ -602,4 +602,37 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn can_create_trace_call_stream() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+
+        let trace_call_request = TraceCallRequest::default();
+
+        let mut stream = client.trace_call_stream(trace_call_request);
+        let mut successes = 0;
+        let mut failures = 0;
+        let mut all_results = Vec::new();
+
+        assert_is_stream(&stream);
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(trace_result) => {
+                    println!("Success: {:?}", trace_result);
+                    successes += 1;
+                    all_results.push(Ok(trace_result));
+                }
+                Err((error, request)) => {
+                    println!("Error for request {:?}: {:?}", request, error);
+                    failures += 1;
+                    all_results.push(Err((error, request)));
+                }
+            }
+        }
+
+        println!("Total successes: {}", successes);
+        println!("Total failures: {}", failures);
+    }
 }

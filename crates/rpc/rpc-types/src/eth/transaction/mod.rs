@@ -11,6 +11,7 @@ pub use typed::*;
 
 mod access_list;
 mod common;
+pub mod kzg;
 mod receipt;
 mod request;
 mod signature;
