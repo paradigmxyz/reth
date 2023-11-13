@@ -27,7 +27,7 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let range = self.from..=(self.from + self.block_interval - 1);
+        let range = self.block_range();
         let filters = if self.with_filters {
             Filters::WithFilters(inclusion_filter, phf)
         } else {

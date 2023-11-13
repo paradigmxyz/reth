@@ -132,9 +132,9 @@ impl<DB: Database> Snapshotter<DB> {
     /// Looks into the snapshot directory to find the highest snapshotted block of each segment, and
     /// notifies every tracker.
     fn update_highest_snapshots_tracker(&mut self) -> RethResult<()> {
-        // It walks over the directory and parses the snapshot filenames extracting `SnapshotSegment`
-        // and their inclusive range. It then takes the maximum block number for each specific
-        // segment.
+        // It walks over the directory and parses the snapshot filenames extracting
+        // `SnapshotSegment` and their inclusive range. It then takes the maximum block
+        // number for each specific segment.
         for (segment, range) in std::fs::read_dir(&self.snapshots_path)
             .map_err(|err| RethError::Custom(err.to_string()))?
             .filter_map(Result::ok)
