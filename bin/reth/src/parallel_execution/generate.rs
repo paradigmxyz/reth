@@ -119,7 +119,7 @@ impl Command {
         let mut start_block = self.from;
         let transition_store = TransitionQueueStore::new(self.out.clone());
         while start_block <= self.to {
-            let end_block = self.to.min(start_block + self.interval);
+            let end_block = self.to.min(start_block + self.interval - 1);
             let range = start_block..=end_block;
             let mut block_rw_sets = HashMap::default();
 
