@@ -5,7 +5,7 @@ use reth_db::database::Database;
 use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{
     snapshot::{iter_snapshots, HighestSnapshots},
-    BlockNumber, ChainSpec, SnapshotSegment, TxNumber,
+    BlockNumber, ChainSpec, TxNumber,
 };
 use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt};
 use std::{collections::HashMap, ops::RangeInclusive, path::PathBuf, sync::Arc};
