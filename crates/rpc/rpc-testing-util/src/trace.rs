@@ -447,7 +447,7 @@ where
         while let Some((result1, result2)) = zipped_streams.next().await {
             match (result1, result2) {
                 (Ok((ref traces1_data, ref block1)), Ok((ref traces2_data, ref block2))) => {
-                    pretty_assertions::assert_eq!(
+                    similar_asserts::assert_eq!(
                         traces1_data,
                         traces2_data,
                         "Mismatch in traces for block: {:?}",
@@ -484,7 +484,7 @@ where
         while let Some((result1, result2)) = zipped_streams.next().await {
             match (result1, result2) {
                 (Ok((ref trace1_data, ref tx_hash1)), Ok((ref trace2_data, ref tx_hash2))) => {
-                    pretty_assertions::assert_eq!(
+                    similar_asserts::assert_eq!(
                         trace1_data,
                         trace2_data,
                         "Mismatch in trace results for transaction: {:?}",
