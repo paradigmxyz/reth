@@ -60,7 +60,7 @@ pub fn iter_snapshots(
     let entries = crate::fs::read_dir(path.as_ref())?.filter_map(Result::ok);
     Ok(entries.filter_map(|entry| {
         if entry.metadata().map_or(false, |metadata| metadata.is_file()) {
-            return SnapshotSegment::parse_filename(&entry.file_name().to_string_lossy())
+            return SnapshotSegment::parse_filename(&entry.file_name())
         }
         None
     }))

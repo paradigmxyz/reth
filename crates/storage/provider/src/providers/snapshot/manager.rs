@@ -106,7 +106,7 @@ impl SnapshotProvider {
         // Otherwise, check `self.available_snapshots`
         let snapshot_ranges = match path {
             Some(path) => SnapshotSegment::parse_filename(
-                &path.file_name().ok_or_else(|| ProviderError::MissingSnapshot)?.to_string_lossy(),
+                path.file_name().ok_or_else(|| ProviderError::MissingSnapshot)?,
             )
             .and_then(|(parsed_segment, block_range, tx_range)| {
                 if parsed_segment == segment {

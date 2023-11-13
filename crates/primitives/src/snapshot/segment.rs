@@ -3,7 +3,7 @@ use crate::{
     BlockNumber, TxNumber,
 };
 use serde::{Deserialize, Serialize};
-use std::{ops::RangeInclusive, str::FromStr};
+use std::{ffi::OsStr, ops::RangeInclusive, str::FromStr};
 use strum::{AsRefStr, EnumString};
 
 #[derive(
@@ -92,23 +92,28 @@ impl SnapshotSegment {
         format!("{prefix}_{}_{}", filters_name, compression.as_ref())
     }
 
-    /// Parses a filename into a `SnapshotSegment` and its corresponding block and transaction ranges.
+    /// Parses a filename into a `SnapshotSegment` and its corresponding block and transaction
+    /// ranges.
     ///
-    /// The filename is expected to follow the format: "snapshot_{segment}_{block_start}_{block_end}_{tx_start}_{tx_end}".
-    /// This function checks for the correct prefix ("snapshot"), and then parses the segment and the inclusive
-    /// ranges for blocks and transactions. It ensures that the start of each range is less than the end.
-    /// 
+    /// The filename is expected to follow the format:
+    /// "snapshot_{segment}_{block_start}_{block_end}_{tx_start}_{tx_end}". This function checks
+    /// for the correct prefix ("snapshot"), and then parses the segment and the inclusive
+    /// ranges for blocks and transactions. It ensures that the start of each range is less than the
+    /// end.
+    ///
     /// # Returns
-    /// - `Some((segment, block_range, tx_range))` if parsing is successful and all conditions are met.
-    /// - `None` if any condition fails, such as an incorrect prefix, parsing error, or invalid range.
-    /// 
+    /// - `Some((segment, block_range, tx_range))` if parsing is successful and all conditions are
+    ///   met.
+    /// - `None` if any condition fails, such as an incorrect prefix, parsing error, or invalid
+    ///   range.
+    ///
     /// # Note
     /// This function is tightly coupled with the naming convention defined in [`Self::filename`].
     /// Any changes in the filename format in `filename` should be reflected here.
     pub fn parse_filename(
-        name: &str,
+        name: &OsStr,
     ) -> Option<(Self, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
-        let mut parts = name.split('_');
+        let mut parts = name.to_str()?.split('_');
         if parts.next() != Some("snapshot") {
             return None;
         }
@@ -253,12 +258,12 @@ mod tests {
             }
 
             assert_eq!(
-                SnapshotSegment::parse_filename(filename),
+                SnapshotSegment::parse_filename(OsStr::new(filename)),
                 Some((segment, block_range, tx_range))
             );
         }
 
-        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_2_30_3_2"), None);
-        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_2_30_1"), None);
+        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_2_30_3_2")), None);
+        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_2_30_1")), None);
     }
 }
