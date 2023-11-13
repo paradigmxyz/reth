@@ -15,6 +15,7 @@ use std::{
 };
 
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use reth_eth_wire::multiplex::ProtocolConnection;
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
@@ -79,22 +80,6 @@ pub enum OnNotSupported {
     KeepAlive,
     /// Disconnect the connection.
     Disconnect,
-}
-
-/// A connection channel to receive messages for the negotiated protocol.
-///
-/// This is a [Stream] that returns raw bytes of the received messages for this protocol.
-#[derive(Debug)]
-pub struct ProtocolConnection {
-    from_wire: UnboundedReceiverStream<BytesMut>,
-}
-
-impl Stream for ProtocolConnection {
-    type Item = BytesMut;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.from_wire.poll_next_unpin(cx)
-    }
 }
 
 /// A wrapper type for a RLPx sub-protocol.
