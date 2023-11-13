@@ -806,6 +806,9 @@ where
             let state_at = block.parent_hash;
             let block_hash = block.hash;
 
+            let block_number = block_env.number.saturating_to::<u64>();
+            let base_fee = block_env.basefee.saturating_to::<u64>();
+
             // prepare transactions, we do everything upfront to reduce time spent with open state
             let max_transactions =
                 highest_index.map_or(block.body.len(), |highest| highest as usize);
@@ -820,8 +823,8 @@ where
                         hash: Some(tx.hash()),
                         index: Some(idx as u64),
                         block_hash: Some(block_hash),
-                        block_number: Some(block_env.number.try_into().unwrap_or(u64::MAX)),
-                        base_fee: Some(block_env.basefee.try_into().unwrap_or(u64::MAX)),
+                        block_number: Some(block_number),
+                        base_fee: Some(base_fee),
                     };
                     let tx_env = tx_env_with_recovered(&tx);
 
