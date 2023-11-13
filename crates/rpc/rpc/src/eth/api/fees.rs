@@ -91,7 +91,7 @@ where
         // Note: The types used ensure that the percentiles are never < 0
         if let Some(percentiles) = &reward_percentiles {
             if percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.) {
-                return Err(EthApiError::InvalidRewardPercentiles);
+                return Err(EthApiError::InvalidRewardPercentiles)
             }
         }
 
