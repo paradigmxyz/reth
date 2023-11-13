@@ -200,7 +200,7 @@ impl<DB: Database> Snapshotter<DB> {
     /// this block range and segment.
     ///
     /// If it succeeds, then we move the snapshot file from the temporary directory to its main one.
-    fn run_segment<S: Segment + Default>(
+    fn run_segment<S: Segment>(
         &self,
         block_range: Option<RangeInclusive<BlockNumber>>,
     ) -> RethResult<()> {

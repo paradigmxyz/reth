@@ -26,7 +26,7 @@ use std::{ops::RangeInclusive, path::Path};
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
 /// A segment represents a snapshotting of some portion of the data.
-pub trait Segment {
+pub trait Segment: Default {
     /// Snapshot data using the provided range. The `directory` parameter determines the snapshot
     /// file's save location.
     fn snapshot<DB: Database>(
