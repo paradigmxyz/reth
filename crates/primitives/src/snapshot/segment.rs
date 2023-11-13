@@ -96,25 +96,20 @@ impl SnapshotSegment {
     pub fn parse_filename(
         name: &str,
     ) -> Option<(Self, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
-        let parts: Vec<&str> = name.split('_').collect();
-        if let (Ok(segment), true) = (Self::from_str(parts[1]), parts.len() >= 6) {
-            let block_start: u64 = parts[2].parse().unwrap_or(0);
-            let block_end: u64 = parts[3].parse().unwrap_or(0);
-
-            if block_start >= block_end || parts[0] != "snapshot" {
-                return None
-            }
-
-            let tx_start: u64 = parts[4].parse().unwrap_or(0);
-            let tx_end: u64 = parts[5].parse().unwrap_or(0);
-
-            if tx_start >= tx_end {
-                return None
-            }
-
-            return Some((segment, block_start..=block_end, tx_start..=tx_end))
+        let mut parts = name.split('_');
+        if parts.next() != Some("snapshot") {
+            return None;
         }
-        None
+
+        let segment = Self::from_str(parts.next()?).ok()?;
+        let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
+        let (tx_start, tx_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
+
+        if block_start >= block_end || tx_start >= tx_end {
+            return None;
+        }
+
+        Some((segment, block_start..=block_end, tx_start..=tx_end))
     }
 }
 
@@ -250,5 +245,7 @@ mod tests {
                 Some((segment, block_range, tx_range))
             );
         }
+
+        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_2_30_1_1"), None);
     }
 }
