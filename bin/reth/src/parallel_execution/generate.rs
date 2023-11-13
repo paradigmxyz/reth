@@ -81,10 +81,6 @@ pub struct Command {
     #[arg(long, default_value = "100000")]
     interval: u64,
 
-    /// Maximum batch size for the queue.
-    #[arg(long, default_value = "10000")]
-    max_batch_size: usize,
-
     /// Flag indicating whether results should be validated.
     #[arg(long)]
     validate: bool,
@@ -164,7 +160,7 @@ impl Command {
             }
 
             tracing::debug!(target: "reth::cli", ?range, "Resolving range dependencies");
-            let queue = TransitionQueue::resolve(range.clone(), block_rw_sets, self.max_batch_size);
+            let queue = TransitionQueue::resolve(range.clone(), block_rw_sets);
             transition_store.save(queue.clone())?;
 
             if self.validate {

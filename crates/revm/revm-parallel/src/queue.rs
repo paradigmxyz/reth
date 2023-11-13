@@ -64,7 +64,6 @@ impl TransitionQueue {
     pub fn resolve(
         range: RangeInclusive<BlockNumber>,
         sets: HashMap<BlockNumber, BlockRWSet>,
-        max_batch_size: usize,
     ) -> Self {
         let mut this = Self::new(range);
         let mut batch_rw_sets = HashMap::<usize, TransitionRWSet>::default();
@@ -74,24 +73,15 @@ impl TransitionQueue {
         {
             tracing::trace!(target: "evm::parallel::resolve", block_number, "Resolving dependencies");
             for (id, rw_set) in block_rw_set.into_transitions(block_number) {
-                let mut depth = this
-                    .find_highest_dependency(&rw_set, &batch_rw_sets, max_batch_size)
-                    .map_or(0, |dep| dep + 1);
+                let depth =
+                    this.find_highest_dependency(&rw_set, &batch_rw_sets).map_or(0, |dep| dep + 1);
 
-                loop {
-                    if depth >= this.batches.len() {
-                        this.append_transition(id, rw_set.gas_used);
-                        break
-                    }
-
+                if depth >= this.batches.len() {
+                    this.append_transition(id, rw_set.gas_used);
+                } else {
                     let batch = this.batches.index_mut(depth);
-                    if batch.len() < max_batch_size {
-                        batch.push(id);
-                        batch.gas_used += rw_set.gas_used as u128;
-                        break
-                    }
-
-                    depth += 1;
+                    batch.push(id);
+                    batch.gas_used += rw_set.gas_used as u128;
                 }
 
                 batch_rw_sets.entry(depth).or_default().extend(rw_set);
@@ -117,17 +107,9 @@ impl TransitionQueue {
         &self,
         target: &TransitionRWSet,
         batch_rw_sets: &HashMap<usize, TransitionRWSet>,
-        max_batch_size: usize,
     ) -> Option<usize> {
         // Iterate over the list in reverse to find dependency with the highest index.
-        for (queue_depth, transition_list) in self.batches.iter().enumerate().rev() {
-            // If the list already reached the max batch size, return early.
-            // Since there are more dependents than independents, we can assume that the transition
-            // will be pushed higher anyway due to the `max_batch_size`.
-            if transition_list.len() == max_batch_size {
-                return Some(queue_depth)
-            }
-
+        for (queue_depth, _transition_list) in self.batches.iter().enumerate().rev() {
             let batch_set = batch_rw_sets.get(&queue_depth).unwrap();
             // The dependency check has to be bidirectional since the target
             // transition might modify the state in a way that affects the reads
