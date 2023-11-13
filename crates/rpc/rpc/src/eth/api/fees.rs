@@ -103,7 +103,7 @@ where
         let start_block = end_block_plus - block_count;
         let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
         if headers.len() != block_count as usize {
-            return Err(EthApiError::InvalidBlockRange);
+            return Err(EthApiError::InvalidBlockRange)
         }
 
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
