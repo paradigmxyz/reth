@@ -101,14 +101,14 @@ impl SnapshotSegment {
             let block_start: u64 = parts[2].parse().unwrap_or(0);
             let block_end: u64 = parts[3].parse().unwrap_or(0);
 
-            if block_start <= block_end || parts[0] != "snapshot" {
+            if block_start >= block_end || parts[0] != "snapshot" {
                 return None
             }
 
             let tx_start: u64 = parts[4].parse().unwrap_or(0);
             let tx_end: u64 = parts[5].parse().unwrap_or(0);
 
-            if tx_start <= tx_end {
+            if tx_start >= tx_end {
                 return None
             }
 
@@ -165,4 +165,90 @@ pub struct SegmentConfig {
     pub filters: Filters,
     /// Compression used on the segment
     pub compression: Compression,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_filename() {
+        let test_vectors = [
+            (SnapshotSegment::Headers, 2..=30, 0..=1, "snapshot_headers_2_30_0_1", None),
+            (
+                SnapshotSegment::Receipts,
+                30..=300,
+                110..=1000,
+                "snapshot_receipts_30_300_110_1000",
+                None,
+            ),
+            (
+                SnapshotSegment::Transactions,
+                1_123_233..=11_223_233,
+                1_123_233..=2_123_233,
+                "snapshot_transactions_1123233_11223233_1123233_2123233",
+                None,
+            ),
+            (
+                SnapshotSegment::Headers,
+                2..=30,
+                0..=1,
+                "snapshot_headers_2_30_0_1_cuckoo-fmph_lz4",
+                Some((
+                    Compression::Lz4,
+                    Filters::WithFilters(
+                        InclusionFilter::Cuckoo,
+                        crate::snapshot::PerfectHashingFunction::Fmph,
+                    ),
+                )),
+            ),
+            (
+                SnapshotSegment::Headers,
+                2..=30,
+                0..=1,
+                "snapshot_headers_2_30_0_1_cuckoo-fmph_zstd",
+                Some((
+                    Compression::Zstd,
+                    Filters::WithFilters(
+                        InclusionFilter::Cuckoo,
+                        crate::snapshot::PerfectHashingFunction::Fmph,
+                    ),
+                )),
+            ),
+            (
+                SnapshotSegment::Headers,
+                2..=30,
+                0..=1,
+                "snapshot_headers_2_30_0_1_cuckoo-fmph_zstd-dict",
+                Some((
+                    Compression::ZstdWithDictionary,
+                    Filters::WithFilters(
+                        InclusionFilter::Cuckoo,
+                        crate::snapshot::PerfectHashingFunction::Fmph,
+                    ),
+                )),
+            ),
+        ];
+
+        for (segment, block_range, tx_range, filename, configuration) in test_vectors {
+            if let Some((compression, filters)) = configuration {
+                assert_eq!(
+                    segment.filename_with_configuration(
+                        filters,
+                        compression,
+                        &block_range,
+                        &tx_range
+                    ),
+                    filename
+                );
+            } else {
+                assert_eq!(segment.filename(&block_range, &tx_range), filename);
+            }
+
+            assert_eq!(
+                SnapshotSegment::parse_filename(filename),
+                Some((segment, block_range, tx_range))
+            );
+        }
+    }
 }
