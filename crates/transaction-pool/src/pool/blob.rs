@@ -4,8 +4,8 @@ use crate::{
     PoolTransaction, ValidPoolTransaction,
 };
 use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
+    cmp::{Ordering, Reverse},
+    collections::{BTreeMap, BTreeSet, BinaryHeap, HashSet},
     sync::Arc,
 };
 
@@ -26,7 +26,7 @@ pub(crate) struct BlobTransactions<T: PoolTransaction> {
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: BTreeMap<TransactionId, BlobTransaction<T>>,
     /// _All_ transactions sorted by blob priority.
-    all: BTreeSet<BlobTransaction<T>>,
+    all: BinaryHeap<Reverse<BlobTransaction<T>>>,
     /// Keeps track of the current fees, so transaction priority can be calculated on insertion.
     pending_fees: PendingFees,
     /// Keeps track of the size of this pool.
@@ -61,13 +61,40 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         let transaction = BlobTransaction::new(tx, submission_id, &self.pending_fees);
 
         self.by_id.insert(id, transaction.clone());
-        self.all.insert(transaction);
+        self.all.push(Reverse(transaction));
     }
 
     fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
+    }
+
+    /// Removes multiple transactions from the pool.
+    pub(crate) fn remove_transactions(
+        &mut self,
+        ids: &[TransactionId],
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        // set up removal set
+        let mut to_remove = BTreeSet::new();
+
+        // remove from queues
+        let mut total_size = 0;
+        for id in ids {
+            if let Some(tx) = self.by_id.remove(id) {
+                total_size += tx.transaction.size();
+                to_remove.insert(tx);
+            }
+        }
+
+        // remove from all
+        self.all.retain(|tx| !to_remove.contains(&tx.0));
+
+        // keep track of size
+        self.size_of -= total_size;
+
+        // return transactions
+        to_remove.into_iter().map(|tx| tx.transaction).collect()
     }
 
     /// Removes the transaction from the pool
@@ -78,7 +105,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         // remove from queues
         let tx = self.by_id.remove(id)?;
 
-        self.all.remove(&tx);
+        self.all.retain(|other| other.0 != tx);
 
         // keep track of size
         self.size_of -= tx.transaction.size();
@@ -144,7 +171,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         self.all = std::mem::take(&mut self.all)
             .into_iter()
             .map(|mut tx| {
-                tx.update_priority(&self.pending_fees);
+                tx.0.update_priority(&self.pending_fees);
                 tx
             })
             .collect();
@@ -170,10 +197,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let to_remove = self.satisfy_pending_fee_ids(pending_fees);
 
-        let mut removed = Vec::with_capacity(to_remove.len());
-        for id in to_remove {
-            removed.push(self.remove_transaction(&id).expect("transaction exists"));
-        }
+        let removed = self.remove_transactions(&to_remove);
 
         // set pending fees and reprioritize / resort
         self.pending_fees = pending_fees.clone();
@@ -553,9 +577,9 @@ mod tests {
                 .all
                 .iter()
                 .map(|tx| TransactionFees {
-                    max_blob_fee: tx.transaction.max_fee_per_blob_gas().unwrap_or_default(),
-                    max_priority_fee_per_gas: tx.transaction.priority_fee_or_price(),
-                    max_fee_per_gas: tx.transaction.max_fee_per_gas(),
+                    max_blob_fee: tx.0.transaction.max_fee_per_blob_gas().unwrap_or_default(),
+                    max_priority_fee_per_gas: tx.0.transaction.priority_fee_or_price(),
+                    max_fee_per_gas: tx.0.transaction.max_fee_per_gas(),
                 })
                 .collect::<Vec<_>>();
             assert_eq!(
