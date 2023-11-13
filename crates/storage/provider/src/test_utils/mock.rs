@@ -523,7 +523,7 @@ impl EvmEnvProvider for MockEthProvider {
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
     ) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_env_with_header(
