@@ -2,9 +2,11 @@
 //! Types for trace module.
 //!
 //! See <https://openethereum.github.io/JSONRPC-trace-module>
-
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
-use serde::{Deserialize, Serialize};
+use serde::{
+    ser::{SerializeStruct, Serializer},
+    Deserialize, Serialize,
+};
 use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},
@@ -327,7 +329,7 @@ pub struct TransactionTrace {
     pub trace_address: Vec<usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalizedTransactionTrace {
     #[serde(flatten)]
@@ -348,6 +350,37 @@ pub struct LocalizedTransactionTrace {
     /// Transaction index within the block, None if pending.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_position: Option<u64>,
+}
+
+impl Serialize for LocalizedTransactionTrace {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("LocalizedTransactionTrace", 5)?;
+
+        // Serialize 'block_hash', if present
+        if let Some(ref block_hash) = self.block_hash {
+            state.serialize_field("blockHash", block_hash)?;
+        }
+
+        // Serialize 'block_number', if present
+        if let Some(block_number) = self.block_number {
+            state.serialize_field("blockNumber", &block_number)?;
+        }
+
+        // Serialize 'transaction_hash', if present
+        if let Some(ref transaction_hash) = self.transaction_hash {
+            state.serialize_field("transactionHash", transaction_hash)?;
+        }
+
+        // Serialize 'transaction_position', if present
+        if let Some(transaction_position) = self.transaction_position {
+            state.serialize_field("transactionPosition", &transaction_position)?;
+        }
+
+        state.end()
+    }
 }
 
 /// A record of a full VM trace for a CALL/CREATE.
