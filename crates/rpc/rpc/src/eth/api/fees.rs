@@ -11,6 +11,7 @@ use reth_primitives::{
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
+
 use tracing::debug;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
@@ -35,8 +36,7 @@ where
     pub(crate) async fn blob_gas_price(&self) -> EthResult<U256> {
         self.block(BlockNumberOrTag::Latest)
             .await?
-            .unwrap_or_default()
-            .next_block_blob_fee()
+            .and_then(|h| h.next_block_blob_fee())
             .ok_or(EthApiError::ExcessBlobGasNotSet)
             .map(U256::from)
     }
@@ -55,7 +55,7 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> EthResult<FeeHistory> {
         if block_count == 0 {
-            return Ok(FeeHistory::default())
+            return Ok(FeeHistory::default());
         }
 
         // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
@@ -75,7 +75,7 @@ where
         }
 
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
-            return Err(EthApiError::UnknownBlockNumber)
+            return Err(EthApiError::UnknownBlockNumber);
         };
 
         // need to add 1 to the end block to get the correct (inclusive) range
@@ -91,7 +91,7 @@ where
         // Note: The types used ensure that the percentiles are never < 0
         if let Some(percentiles) = &reward_percentiles {
             if percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.) {
-                return Err(EthApiError::InvalidRewardPercentiles)
+                return Err(EthApiError::InvalidRewardPercentiles);
             }
         }
 
@@ -103,7 +103,7 @@ where
         let start_block = end_block_plus - block_count;
         let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
         if headers.len() != block_count as usize {
-            return Err(EthApiError::InvalidBlockRange)
+            return Err(EthApiError::InvalidBlockRange);
         }
 
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
@@ -193,7 +193,7 @@ where
             // Empty blocks should return in a zero row
             if transactions.is_empty() {
                 rewards_in_block.push(U256::ZERO);
-                continue
+                continue;
             }
 
             let threshold = (header.gas_used as f64 * percentile / 100.) as u64;
