@@ -542,6 +542,7 @@ mod tests {
                 pool.add_transaction(factory.validated_arc(tx.clone()));
             }
 
+            // update fees and resort the pool
             pool.pending_fees = ordering.network_fees.clone();
             pool.reprioritize();
 
