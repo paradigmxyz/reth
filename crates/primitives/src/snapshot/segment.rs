@@ -105,7 +105,7 @@ impl SnapshotSegment {
         let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
         let (tx_start, tx_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
-        if block_start >= block_end || tx_start >= tx_end {
+        if block_start >= block_end || tx_start > tx_end {
             return None;
         }
 
@@ -246,6 +246,7 @@ mod tests {
             );
         }
 
-        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_2_30_1_1"), None);
+        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_2_30_3_2"), None);
+        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_2_30_1"), None);
     }
 }
