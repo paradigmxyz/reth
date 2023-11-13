@@ -92,7 +92,19 @@ impl SnapshotSegment {
         format!("{prefix}_{}_{}", filters_name, compression.as_ref())
     }
 
-    /// Takes a filename and parses the [`SnapshotSegment`] and its inclusive range.
+    /// Parses a filename into a `SnapshotSegment` and its corresponding block and transaction ranges.
+    ///
+    /// The filename is expected to follow the format: "snapshot_{segment}_{block_start}_{block_end}_{tx_start}_{tx_end}".
+    /// This function checks for the correct prefix ("snapshot"), and then parses the segment and the inclusive
+    /// ranges for blocks and transactions. It ensures that the start of each range is less than the end.
+    /// 
+    /// # Returns
+    /// - `Some((segment, block_range, tx_range))` if parsing is successful and all conditions are met.
+    /// - `None` if any condition fails, such as an incorrect prefix, parsing error, or invalid range.
+    /// 
+    /// # Note
+    /// This function is tightly coupled with the naming convention defined in [`Self::filename`].
+    /// Any changes in the filename format in `filename` should be reflected here.
     pub fn parse_filename(
         name: &str,
     ) -> Option<(Self, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
