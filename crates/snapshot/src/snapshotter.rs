@@ -24,9 +24,9 @@ pub struct Snapshotter<DB> {
     provider_factory: ProviderFactory<DB>,
     /// Directory where snapshots are located
     snapshots_path: PathBuf,
-    /// Highest snapshot block number for each
+    /// Highest snapshotted block numbers for each segment
     highest_snapshots: HighestSnapshots,
-    /// Channel sender to notify other components of the new highest snapshot values
+    /// Channel sender to notify other components of the new highest snapshots
     highest_snapshots_notifier: watch::Sender<Option<HighestSnapshots>>,
     /// Channel receiver to be cloned and shared that already comes with the newest value
     highest_snapshots_tracker: HighestSnapshotsTracker,
