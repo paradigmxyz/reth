@@ -156,17 +156,17 @@ impl SnapshotProvider {
         block: u64,
     ) -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
         let snapshots = self.snapshots_block_index.read();
-        if let Some(segment_snapshots) = snapshots.get(&segment) {
-            // It's more probable that the request comes from a newer block height, so we iterate
-            // the snapshots in reverse.
-            let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
+        let segment_snapshots = snapshots.get(&segment)?;
 
-            while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
-                let block_start =
-                    snapshots_rev_iter.peek().map(|(block_end, _)| *block_end + 1).unwrap_or(0);
-                if block_start <= block {
-                    return Some((block_start..=*block_end, tx_range.clone()));
-                }
+        // It's more probable that the request comes from a newer block height, so we iterate
+        // the snapshots in reverse.
+        let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
+
+        while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
+            let block_start =
+                snapshots_rev_iter.peek().map(|(block_end, _)| *block_end + 1).unwrap_or(0);
+            if block_start <= block {
+                return Some((block_start..=*block_end, tx_range.clone()));
             }
         }
         None
@@ -180,17 +180,16 @@ impl SnapshotProvider {
         tx: u64,
     ) -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
         let snapshots = self.snapshots_tx_index.read();
-        if let Some(segment_snapshots) = snapshots.get(&segment) {
-            // It's more probable that the request comes from a newer tx height, so we iterate
-            // the snapshots in reverse.
-            let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
+        let segment_snapshots = snapshots.get(&segment)?;
 
-            while let Some((tx_end, block_range)) = snapshots_rev_iter.next() {
-                let tx_start =
-                    snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
-                if tx_start <= tx {
-                    return Some((block_range.clone(), tx_start..=*tx_end));
-                }
+        // It's more probable that the request comes from a newer tx height, so we iterate
+        // the snapshots in reverse.
+        let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
+
+        while let Some((tx_end, block_range)) = snapshots_rev_iter.next() {
+            let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
+            if tx_start <= tx {
+                return Some((block_range.clone(), tx_start..=*tx_end));
             }
         }
         None
