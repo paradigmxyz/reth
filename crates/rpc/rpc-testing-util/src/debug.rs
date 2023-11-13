@@ -39,13 +39,19 @@ pub trait DebugApiExt {
     ) -> Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>
     where
         B: Into<BlockId> + Send;
-
-    /// method for tracing a call
+    ///  method  for debug_traceCall
     async fn debug_trace_call_json(
         &self,
         request: CallRequest,
         opts: GethDebugTracingOptions,
     ) -> Result<serde_json::Value, jsonrpsee::core::Error>;
+
+    ///  method for debug_traceCall using raw JSON strings for the request and options.
+    async fn debug_trace_call_raw_json(
+        &self,
+        request_json: String,
+        opts_json: String,
+    ) -> Result<serde_json::Value, RpcError>;
 }
 
 #[async_trait::async_trait]
@@ -90,7 +96,6 @@ where
 
         Ok(DebugTraceTransactionsStream { stream: Box::pin(stream) })
     }
-
     async fn debug_trace_call_json(
         &self,
         request: CallRequest,
@@ -100,6 +105,19 @@ where
         params.insert(request).unwrap();
         params.insert(opts).unwrap();
         self.request("debug_traceCall", params).await
+    }
+
+    async fn debug_trace_call_raw_json(
+        &self,
+        request_json: String,
+        opts_json: String,
+    ) -> Result<serde_json::Value, RpcError> {
+        let request = serde_json::from_str::<CallRequest>(&request_json)
+            .map_err(|e| RpcError::Custom(e.to_string()))?;
+        let opts = serde_json::from_str::<GethDebugTracingOptions>(&opts_json)
+            .map_err(|e| RpcError::Custom(e.to_string()))?;
+
+        self.debug_trace_call_json(request, opts).await
     }
 }
 
