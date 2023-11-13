@@ -350,10 +350,11 @@ pub enum ChainSplit {
     /// Chain is split into two.
     /// Given block split is contained in first chain.
     Split {
-        /// Left contains lower block numbers that get are considered canonicalized. It ends with
-        /// the [SplitAt] block. The substate of this chain is now empty and not usable.
+        /// Left contains lower block numbers that are considered canonicalized. It ends with
+        /// the [ChainSplitTarget] block. The substate of this chain is now empty and not usable.
         canonical: Chain,
-        /// Right contains all subsequent blocks after the [SplitAt], that are still pending.
+        /// Right contains all subsequent blocks after the [ChainSplitTarget] that are still
+        /// pending.
         ///
         /// The substate of the original chain is moved here.
         pending: Chain,
