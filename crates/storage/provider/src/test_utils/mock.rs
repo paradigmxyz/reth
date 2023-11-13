@@ -523,7 +523,7 @@ impl EvmEnvProvider for MockEthProvider {
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
     ) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_env_with_header(
@@ -532,7 +532,7 @@ impl EvmEnvProvider for MockEthProvider {
         _block_env: &mut BlockEnv,
         _header: &Header,
     ) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_block_env_at(
@@ -540,7 +540,7 @@ impl EvmEnvProvider for MockEthProvider {
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
     ) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_block_env_with_header(
@@ -548,15 +548,15 @@ impl EvmEnvProvider for MockEthProvider {
         _block_env: &mut BlockEnv,
         _header: &Header,
     ) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockHashOrNumber) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &Header) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 }
 
@@ -628,14 +628,14 @@ impl StateProviderFactory for Arc<MockEthProvider> {
 
 impl WithdrawalsProvider for MockEthProvider {
     fn latest_withdrawal(&self) -> RethResult<Option<reth_primitives::Withdrawal>> {
-        unimplemented!()
+        Ok(None)
     }
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> RethResult<Option<Vec<reth_primitives::Withdrawal>>> {
-        unimplemented!()
+        Ok(None)
     }
 }
 
