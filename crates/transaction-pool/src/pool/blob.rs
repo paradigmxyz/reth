@@ -140,19 +140,20 @@ impl<T: PoolTransaction> BlobTransactions<T> {
 
     /// Resorts the transactions in the pool based on the pool's current [PendingFees].
     pub(crate) fn reprioritize(&mut self) {
-        let mut new_all_transactions: Vec<_> = Default::default();
-        while let Some(mut tx) = self.all.pop_last() {
-            tx.update_priority(&self.pending_fees);
-            new_all_transactions.push(tx);
-        }
+        // mem::take to modify without allocating, then collect to rebuild the BTreeSet
+        self.all = std::mem::take(&mut self.all)
+            .into_iter()
+            .map(|mut tx| {
+                tx.update_priority(&self.pending_fees);
+                tx
+            })
+            .collect();
 
         // we need to update `by_id` as well because removal from `all` can only happen if the
         // `BlobTransaction`s in each struct are consistent
         for tx in self.by_id.values_mut() {
             tx.update_priority(&self.pending_fees);
         }
-
-        self.all = new_all_transactions.into_iter().collect();
     }
 
     /// Removes all transactions (and their descendants) which:
