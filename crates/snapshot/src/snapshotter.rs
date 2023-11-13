@@ -20,7 +20,7 @@ pub type SnapshotterWithResult<DB> = (Snapshotter<DB>, SnapshotterResult);
 pub struct Snapshotter<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
-    /// Highest snapshot block number for each
+    /// Highest snapshotted block numbers for each segment
     highest_snapshots: HighestSnapshots,
     /// Channel sender to notify other components of the new highest snapshot values
     highest_snapshots_notifier: watch::Sender<Option<HighestSnapshots>>,
