@@ -3,8 +3,8 @@
 use crate::bundle_state::BundleStateWithReceipts;
 use reth_interfaces::{executor::BlockExecutionError, RethResult};
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionSigned, TxHash,
+    Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, TxHash,
 };
 use std::{borrow::Cow, collections::BTreeMap, fmt};
 
@@ -276,11 +276,13 @@ impl<'a> ChainBlocks<'a> {
     /// Creates a consuming iterator over all blocks in the chain with increasing block number.
     ///
     /// Note: this always yields at least one block.
+    #[inline]
     pub fn into_blocks(self) -> impl Iterator<Item = SealedBlockWithSenders> {
         self.blocks.into_owned().into_values()
     }
 
     /// Creates an iterator over all blocks in the chain with increasing block number.
+    #[inline]
     pub fn iter(&self) -> impl Iterator<Item = (&BlockNumber, &SealedBlockWithSenders)> {
         self.blocks.iter()
     }
@@ -290,6 +292,7 @@ impl<'a> ChainBlocks<'a> {
     /// # Note
     ///
     /// Chains always have at least one block.
+    #[inline]
     pub fn tip(&self) -> &SealedBlockWithSenders {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
     }
@@ -299,13 +302,39 @@ impl<'a> ChainBlocks<'a> {
     /// # Note
     ///
     /// Chains always have at least one block.
+    #[inline]
     pub fn first(&self) -> &SealedBlockWithSenders {
         self.blocks.first_key_value().expect("Chain should have at least one block").1
     }
 
     /// Returns an iterator over all transactions in the chain.
+    #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
         self.blocks.values().flat_map(|block| block.body.iter())
+    }
+
+    /// Returns an iterator over all transactions and their senders.
+    #[inline]
+    pub fn transactions_with_sender(
+        &self,
+    ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
+        self.blocks.values().flat_map(|block| block.transactions_with_sender())
+    }
+
+    /// Returns an iterator over all [TransactionSignedEcRecovered] in the blocks
+    ///
+    /// Note: This clones the transactions since it is assumed this is part of a shared [Chain].
+    #[inline]
+    pub fn transactions_ecrecovered(
+        &self,
+    ) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
+        self.transactions_with_sender().map(|(signer, tx)| tx.clone().with_signer(*signer))
+    }
+
+    /// Returns an iterator over all transaction hashes in the block
+    #[inline]
+    pub fn transaction_hashes(&self) -> impl Iterator<Item = TxHash> + '_ {
+        self.blocks.values().flat_map(|block| block.transactions().map(|tx| tx.hash))
     }
 }
 
