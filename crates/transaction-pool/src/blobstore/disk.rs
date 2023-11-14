@@ -361,14 +361,14 @@ impl fmt::Debug for DiskFileBlobStoreInner {
 #[allow(missing_docs)]
 pub enum DiskFileBlobStoreError {
     /// Thrown during [DiskFileBlobStore::open] if the blob store directory cannot be opened.
-    #[error("failed to blobstore at {0:?}: {1:?}")]
-    FailedToOpen(PathBuf, io::Error),
-    #[error("[0] failed to read blob file at {1:?}: {2:?}")]
-    FailedToReadBlobFile(TxHash, PathBuf, io::Error),
-    #[error("[0] failed to write blob file at {1:?}: {2:?}")]
-    FailedToWriteBlobFile(TxHash, PathBuf, io::Error),
-    #[error("[0] failed to delete blob file at {1:?}: {2:?}")]
-    FailedToDeleteBlobFile(TxHash, PathBuf, io::Error),
+    #[error("failed to open blobstore at {0}: {1}")]
+    Open(PathBuf, io::Error),
+    #[error("[{0}] failed to read blob file at {1}: {2}")]
+    ReadFile(TxHash, PathBuf, io::Error),
+    #[error("[{0}] failed to write blob file at {1}: {2}")]
+    WriteFile(TxHash, PathBuf, io::Error),
+    #[error("[{0}] failed to delete blob file at {1}: {2}")]
+    DeleteFile(TxHash, PathBuf, io::Error),
 }
 
 impl From<DiskFileBlobStoreError> for BlobStoreError {
