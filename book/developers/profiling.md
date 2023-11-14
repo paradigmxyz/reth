@@ -65,11 +65,22 @@ RUSTFLAGS="-C target-cpu=native" cargo build --features jemalloc-prof --profile 
 
 ### Monitoring memory usage
 
- * Reth's dashboard
-  * Jemalloc metrics
-  * Component memory metrics
+Reth's dashboard has a few metrics that are important when monitoring memory usage. The **Jemalloc memory** graph shows reth's memory usage. The *allocated* label shows the memory used by the reth process which cannot be reclaimed unless reth frees that memory. This metric exceeding the available system memory would cause reth to be killed by the OOM killer.
+<img width="749" alt="Jemalloc memory" src="https://github.com/paradigmxyz/reth/assets/6798349/2653c5a2-bd7c-46a6-a593-23809389628e">
+
+Some of reth's internal components also have metrics for the memory usage of certain data structures, usually data structures that are likely to contain many elements or may consume a lot of memory at peak load.
+
+**The bodies downloader buffer**:
+<img width="749" alt="The bodies downloader buffer graph" src="https://github.com/paradigmxyz/reth/assets/6798349/75383724-24ae-4f4f-98a9-72d01731a5f9">
+
+**The blockchain tree block buffer**:
+<img width="749" alt="The blockchain tree block buffer graph" src="https://github.com/paradigmxyz/reth/assets/6798349/7162c6d4-ed18-48c1-a327-50a245dabc95">
+
+**The transaction pool subpools**:
+<img width="749" alt="The transaction pool subpool size graph" src="https://github.com/paradigmxyz/reth/assets/6798349/c5066fd6-7ff7-4e62-9226-89327c7a802c">
 
 ### Limiting process memory
+
 
 Memory leaks that cause OOMs can be difficult to trigger sometimes, and highly depend on the testing hardware. A testing machine with 128GB of RAM is not going to encounter OOMs caused by
 memory spikes or leaks as often as a machine with only 8GB of RAM. Development machines are powerful for a reason, so artificially limiting memory usage is often the best way to replicate a
