@@ -328,7 +328,7 @@ pub struct BlockReceipts {
     pub tx_receipts: Vec<(TxHash, Receipt)>,
 }
 
-/// The target block of the chain split.
+/// The target block where the chain should be split.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChainSplitTarget {
     /// Split at block number.
@@ -347,16 +347,17 @@ pub enum ChainSplit {
     /// Chain is not split. Canonical chain is returned.
     /// Given block split is lower than first block.
     NoSplitCanonical(Chain),
-    /// Chain is split into two.
-    /// Given block split is contained in first chain.
+    /// Chain is split into two: `[canonical]` and `[pending]`
+    /// The target of this chain split [ChainSplitTarget] belongs to the `canonical` chain.
     Split {
-        /// Left contains lower block numbers that are considered canonicalized. It ends with
-        /// the [ChainSplitTarget] block. The substate of this chain is now empty and not usable.
+        /// Contains lower block numbers that are considered canonicalized. It ends with
+        /// the [ChainSplitTarget] block. The state of this chain is now empty and no longer
+        /// usable.
         canonical: Chain,
-        /// Right contains all subsequent blocks after the [ChainSplitTarget] that are still
+        /// Right contains all subsequent blocks __after__ the [ChainSplitTarget] that are still
         /// pending.
         ///
-        /// The substate of the original chain is moved here.
+        /// The state of the original chain is moved here.
         pending: Chain,
     },
 }
