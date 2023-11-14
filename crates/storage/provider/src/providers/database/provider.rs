@@ -26,6 +26,7 @@ use reth_db::{
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
+    provider::RootMismatch,
     RethError, RethResult,
 };
 use reth_primitives::{
@@ -37,10 +38,10 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, Hardfork, Head, Header, PruneCheckpoint, PruneModes, PruneSegment,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, B256, U256,
+    ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
+    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
+    TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
@@ -51,7 +52,7 @@ use std::{
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<<DB as DatabaseGAT<'this>>::TX>;
@@ -1032,7 +1033,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
 
-    /// Returns the block with senders with matching number from database.
+    /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
     /// spot, and we want fast querying.**
@@ -1042,9 +1043,13 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     /// will return None.
     fn block_with_senders(
         &self,
-        block_number: BlockNumber,
+        id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
+        let Some(block_number) = self.convert_hash_or_number(id)? else {
+            return Ok(None);
+        };
+
         let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
 
         let ommers = self.ommers(block_number.into())?.unwrap_or_default();
@@ -1649,12 +1654,11 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                 .root_with_updates()
                 .map_err(Into::<reth_db::DatabaseError>::into)?;
             if state_root != expected_state_root {
-                return Err(ProviderError::StateRootMismatch {
-                    got: state_root,
-                    expected: expected_state_root,
+                return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
+                    root: GotExpected { got: state_root, expected: expected_state_root },
                     block_number: *range.end(),
                     block_hash: end_block_hash,
-                }
+                }))
                 .into())
             }
             trie_updates.flush(&self.tx)?;
@@ -2033,12 +2037,11 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                 let parent_hash = self
                     .block_hash(parent_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
-                return Err(ProviderError::UnwindStateRootMismatch {
-                    got: new_state_root,
-                    expected: parent_state_root,
+                return Err(ProviderError::UnwindStateRootMismatch(Box::new(RootMismatch {
+                    root: GotExpected { got: new_state_root, expected: parent_state_root },
                     block_number: parent_number,
                     block_hash: parent_hash,
-                }
+                }))
                 .into())
             }
             trie_updates.flush(&self.tx)?;
@@ -2149,7 +2152,18 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
             let start = Instant::now();
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
-            transactions_elapsed += start.elapsed();
+            let elapsed = start.elapsed();
+            if elapsed > Duration::from_secs(1) {
+                warn!(
+                    target: "providers::db",
+                    ?block_number,
+                    tx_num = %next_tx_num,
+                    hash = %hash,
+                    ?elapsed,
+                    "Transaction insertion took too long"
+                );
+            }
+            transactions_elapsed += elapsed;
 
             if prune_modes
                 .and_then(|modes| modes.transaction_lookup)

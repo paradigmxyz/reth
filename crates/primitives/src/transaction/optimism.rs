@@ -146,6 +146,7 @@ impl TxDeposit {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{Bytes, TransactionSigned};
     use alloy_rlp::Decodable;
     use bytes::BytesMut;
@@ -165,5 +166,66 @@ mod tests {
         let mut buf_b = BytesMut::default();
         tx_b.encode_enveloped(&mut buf_b);
         assert_eq!(&buf_b[..], &bytes[..]);
+    }
+
+    #[test]
+    fn test_encode_decode_fields() {
+        let original = TxDeposit {
+            source_hash: B256::default(),
+            from: Address::default(),
+            to: TransactionKind::default(),
+            mint: Some(100),
+            value: TxValue::default(),
+            gas_limit: 50000,
+            is_system_transaction: true,
+            input: Bytes::default(),
+        };
+
+        let mut buffer = BytesMut::new();
+        original.encode_fields(&mut buffer);
+        let decoded = TxDeposit::decode_inner(&mut &buffer[..]).expect("Failed to decode");
+
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_with_and_without_header() {
+        let tx_deposit = TxDeposit {
+            source_hash: B256::default(),
+            from: Address::default(),
+            to: TransactionKind::default(),
+            mint: Some(100),
+            value: TxValue::default(),
+            gas_limit: 50000,
+            is_system_transaction: true,
+            input: Bytes::default(),
+        };
+
+        let mut buffer_with_header = BytesMut::new();
+        tx_deposit.encode(&mut buffer_with_header, true);
+
+        let mut buffer_without_header = BytesMut::new();
+        tx_deposit.encode(&mut buffer_without_header, false);
+
+        assert!(buffer_with_header.len() > buffer_without_header.len());
+    }
+
+    #[test]
+    fn test_payload_length() {
+        let tx_deposit = TxDeposit {
+            source_hash: B256::default(),
+            from: Address::default(),
+            to: TransactionKind::default(),
+            mint: Some(100),
+            value: TxValue::default(),
+            gas_limit: 50000,
+            is_system_transaction: true,
+            input: Bytes::default(),
+        };
+
+        let total_len = tx_deposit.payload_len();
+        let len_without_header = tx_deposit.payload_len_without_header();
+
+        assert!(total_len > len_without_header);
     }
 }

@@ -1,10 +1,10 @@
-//! Substate for blockchain trees
+//! [BundleStateDataProvider] implementations used by the tree.
 
 use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
 use reth_provider::{BundleStateDataProvider, BundleStateWithReceipts};
 use std::collections::BTreeMap;
 
-/// Structure that bundles references of data needs to implement [`BundleStateDataProvider`]
+/// Structure that combines references of required data to be a [`BundleStateDataProvider`].
 #[derive(Clone, Debug)]
 pub struct BundleStateDataRef<'a> {
     /// The wrapped state after execution of one or more transactions and/or blocks.
@@ -36,7 +36,7 @@ impl<'a> BundleStateDataProvider for BundleStateDataRef<'a> {
     }
 }
 
-/// Structure that contains data needs to implement [`BundleStateDataProvider`]
+/// Structure that owns the relevant data needs to be a [`BundleStateDataProvider`]
 #[derive(Clone, Debug)]
 pub struct BundleStateData {
     /// Post state with changes

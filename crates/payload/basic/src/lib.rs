@@ -20,11 +20,11 @@ use reth_payload_builder::{
 };
 use reth_primitives::{
     bytes::BytesMut,
-    calculate_excess_blob_gas,
     constants::{
         eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
         EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION,
     },
+    eip4844::calculate_excess_blob_gas,
     proofs,
     revm::{compat::into_reth_log, env::tx_env_with_recovered},
     Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts,
@@ -62,9 +62,14 @@ mod optimism;
 #[cfg(feature = "optimism")]
 pub use optimism::OptimismPayloadBuilder;
 
+/// Ethereum payload builder
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
+pub struct EthereumPayloadBuilder;
+
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
-pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = ()> {
+pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder = EthereumPayloadBuilder> {
     /// The client that can interact with the chain.
     client: Client,
     /// txpool
@@ -94,7 +99,14 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         config: BasicPayloadJobGeneratorConfig,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
-        BasicPayloadJobGenerator::with_builder(client, pool, executor, config, chain_spec, ())
+        BasicPayloadJobGenerator::with_builder(
+            client,
+            pool,
+            executor,
+            config,
+            chain_spec,
+            EthereumPayloadBuilder,
+        )
     }
 }
 
@@ -722,7 +734,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
 }
 
 // Default implementation of [PayloadBuilder] for unit type
-impl<Pool, Client> PayloadBuilder<Pool, Client> for ()
+impl<Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,

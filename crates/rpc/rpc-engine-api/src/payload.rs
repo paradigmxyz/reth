@@ -36,7 +36,7 @@ impl<'a> PayloadOrAttributes<'a> {
     pub(crate) fn timestamp(&self) -> u64 {
         match self {
             Self::ExecutionPayload { payload, .. } => payload.timestamp(),
-            Self::PayloadAttributes(attributes) => attributes.timestamp.to(),
+            Self::PayloadAttributes(attributes) => attributes.timestamp,
         }
     }
 

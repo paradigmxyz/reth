@@ -147,7 +147,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // we need the block's transactions but we don't need the transaction hashes
             let block = provider
-                .block_with_senders(block_number, TransactionVariant::NoHash)?
+                .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             fetch_block_duration += time.elapsed();
@@ -162,7 +162,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             let (block, senders) = block.into_components();
             executor.execute_and_verify_receipt(&block, td, Some(senders)).map_err(|error| {
                 StageError::Block {
-                    block: block.header.clone().seal_slow(),
+                    block: Box::new(block.header.clone().seal_slow()),
                     error: BlockErrorKind::Execution(error),
                 }
             })?;

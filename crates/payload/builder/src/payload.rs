@@ -12,7 +12,7 @@ use reth_rpc_types::engine::{
 
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v3, convert_block_to_payload_field_v2,
-    convert_standalone_withdraw_to_withdrawal, from_primitive_sidecar, try_block_to_payload_v1,
+    convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
 };
 use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId};
 
@@ -116,11 +116,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars
-                .into_iter()
-                .map(from_primitive_sidecar)
-                .collect::<Vec<_>>()
-                .into(),
+            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
         }
     }
 }
@@ -194,7 +190,7 @@ impl PayloadBuilderAttributes {
         Ok(Self {
             id,
             parent,
-            timestamp: attributes.timestamp.to(),
+            timestamp: attributes.timestamp,
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
             withdrawals: withdraw.unwrap_or_default(),
@@ -281,7 +277,7 @@ pub(crate) fn payload_id(
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());
-    hasher.update(&attributes.timestamp.to::<u64>().to_be_bytes()[..]);
+    hasher.update(&attributes.timestamp.to_be_bytes()[..]);
     hasher.update(attributes.prev_randao.as_slice());
     hasher.update(attributes.suggested_fee_recipient.as_slice());
     if let Some(withdrawals) = &attributes.withdrawals {
