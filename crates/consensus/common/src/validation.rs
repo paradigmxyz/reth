@@ -71,7 +71,7 @@ pub fn validate_transaction_regarding_header(
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
-            if chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(at_block_number) &&
+            if !chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(at_block_number) &&
                 chain_id.is_some()
             {
                 return Err(InvalidTransactionError::OldLegacyChainId.into())
