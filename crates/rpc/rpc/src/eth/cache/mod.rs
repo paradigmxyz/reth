@@ -6,8 +6,7 @@ use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, TransactionSigned, B256,
 };
 use reth_provider::{
-    BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory,
-    TransactionVariant,
+    BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory, TransactionVariant,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
