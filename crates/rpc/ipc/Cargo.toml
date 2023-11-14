@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-IPC support for reth
-"""
+description = "IPC support for reth"
 
 [dependencies]
 

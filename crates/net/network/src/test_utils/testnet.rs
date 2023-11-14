@@ -10,7 +10,7 @@ use crate::{
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_eth_wire::{capability::Capability, DisconnectReason, HelloBuilder};
+use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{PeerId, MAINNET};
 use reth_provider::{
@@ -513,12 +513,12 @@ where
     }
 
     /// Initialize the network with a given capabilities.
-    pub fn with_capabilities(client: C, capabilities: Vec<Capability>) -> Self {
+    pub fn with_protocols(client: C, protocols: impl IntoIterator<Item = Protocol>) -> Self {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let builder = Self::network_config_builder(secret_key);
         let hello_message =
-            HelloBuilder::new(builder.get_peer_id()).capabilities(capabilities).build();
+            HelloMessageWithProtocols::builder(builder.get_peer_id()).protocols(protocols).build();
         let config = builder.hello_message(hello_message).build(client.clone());
 
         Self { config, client, secret_key }

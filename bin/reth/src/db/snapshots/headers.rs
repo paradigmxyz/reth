@@ -40,12 +40,15 @@ impl Command {
 
         // Default name doesn't have any configuration
         let tx_range = provider.transaction_range_by_block_range(range.clone())?;
-        let default_name: PathBuf = SnapshotSegment::Headers.filename(&range, &tx_range).into();
-        let new_name: PathBuf = SnapshotSegment::Headers
-            .filename_with_configuration(filters, compression, &range, &tx_range)
-            .into();
-
-        std::fs::rename(default_name, new_name)?;
+        reth_primitives::fs::rename(
+            SnapshotSegment::Headers.filename(&range, &tx_range),
+            SnapshotSegment::Headers.filename_with_configuration(
+                filters,
+                compression,
+                &range,
+                &tx_range,
+            ),
+        )?;
 
         Ok(())
     }

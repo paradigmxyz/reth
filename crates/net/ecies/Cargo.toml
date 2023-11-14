@@ -9,7 +9,7 @@ repository.workspace = true
 
 [dependencies]
 reth-primitives.workspace = true
-reth-net-common = { path = "../common" }
+reth-net-common.workspace = true
 
 alloy-rlp = { workspace = true, features = ["derive"] }
 futures.workspace = true

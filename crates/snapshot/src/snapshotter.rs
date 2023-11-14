@@ -216,8 +216,7 @@ impl<DB: Database> Snapshotter<DB> {
 
             S::default().snapshot::<DB>(&provider, temp.clone(), block_range)?;
 
-            std::fs::rename(temp.join(&filename), self.snapshots_path.join(filename))
-                .map_err(|err| RethError::Custom(err.to_string()))?;
+            reth_primitives::fs::rename(temp.join(&filename), self.snapshots_path.join(filename))?;
         }
         Ok(())
     }

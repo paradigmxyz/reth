@@ -197,10 +197,10 @@ impl Chain {
     /// it retains the up to date state as if the chains were one, i.e. the second chain is an
     /// extension of the first.
     #[track_caller]
-    pub fn split(mut self, split_at: SplitAt) -> ChainSplit {
+    pub fn split(mut self, split_at: ChainSplitTarget) -> ChainSplit {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
         let block_number = match split_at {
-            SplitAt::Hash(block_hash) => {
+            ChainSplitTarget::Hash(block_hash) => {
                 let Some(block_number) = self.block_number(block_hash) else {
                     return ChainSplit::NoSplitPending(self)
                 };
@@ -210,7 +210,7 @@ impl Chain {
                 }
                 block_number
             }
-            SplitAt::Number(block_number) => {
+            ChainSplitTarget::Number(block_number) => {
                 if block_number >= chain_tip {
                     return ChainSplit::NoSplitCanonical(self)
                 }
@@ -221,15 +221,18 @@ impl Chain {
             }
         };
 
-        let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
+        let split_at = block_number + 1;
+        let higher_number_blocks = self.blocks.split_off(&split_at);
 
-        let mut state = std::mem::take(&mut self.state);
-        let canonical_state =
-            state.split_at(block_number).expect("Detach block number to be in range");
+        let state = std::mem::take(&mut self.state);
+        let (canonical_state, pending_state) = state.split_at(split_at);
 
         ChainSplit::Split {
-            canonical: Chain { state: canonical_state, blocks: self.blocks },
-            pending: Chain { state, blocks: higher_number_blocks },
+            canonical: Chain {
+                state: canonical_state.expect("split in range"),
+                blocks: self.blocks,
+            },
+            pending: Chain { state: pending_state, blocks: higher_number_blocks },
         }
     }
 }
@@ -325,9 +328,9 @@ pub struct BlockReceipts {
     pub tx_receipts: Vec<(TxHash, Receipt)>,
 }
 
-/// Used in spliting the chain.
+/// The target block where the chain should be split.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SplitAt {
+pub enum ChainSplitTarget {
     /// Split at block number.
     Number(BlockNumber),
     /// Split at block hash.
@@ -344,15 +347,17 @@ pub enum ChainSplit {
     /// Chain is not split. Canonical chain is returned.
     /// Given block split is lower than first block.
     NoSplitCanonical(Chain),
-    /// Chain is split into two.
-    /// Given block split is contained in first chain.
+    /// Chain is split into two: `[canonical]` and `[pending]`
+    /// The target of this chain split [ChainSplitTarget] belongs to the `canonical` chain.
     Split {
-        /// Left contains lower block numbers that get are considered canonicalized. It ends with
-        /// the [SplitAt] block. The substate of this chain is now empty and not usable.
+        /// Contains lower block numbers that are considered canonicalized. It ends with
+        /// the [ChainSplitTarget] block. The state of this chain is now empty and no longer
+        /// usable.
         canonical: Chain,
-        /// Right contains all subsequent blocks after the [SplitAt], that are still pending.
+        /// Right contains all subsequent blocks __after__ the [ChainSplitTarget] that are still
+        /// pending.
         ///
-        /// The substate of the original chain is moved here.
+        /// The state of the original chain is moved here.
         pending: Chain,
     },
 }
@@ -447,11 +452,10 @@ mod tests {
 
         let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended);
 
-        let mut split2_state = chain.state.clone();
-        let split1_state = split2_state.split_at(1).unwrap();
+        let (split1_state, split2_state) = chain.state.clone().split_at(2);
 
         let chain_split1 =
-            Chain { state: split1_state, blocks: BTreeMap::from([(1, block1.clone())]) };
+            Chain { state: split1_state.unwrap(), blocks: BTreeMap::from([(1, block1.clone())]) };
 
         let chain_split2 =
             Chain { state: split2_state, blocks: BTreeMap::from([(2, block2.clone())]) };
@@ -464,23 +468,26 @@ mod tests {
 
         // split in two
         assert_eq!(
-            chain.clone().split(SplitAt::Hash(block1_hash)),
+            chain.clone().split(ChainSplitTarget::Hash(block1_hash)),
             ChainSplit::Split { canonical: chain_split1, pending: chain_split2 }
         );
 
         // split at unknown block hash
         assert_eq!(
-            chain.clone().split(SplitAt::Hash(B256::new([100; 32]))),
+            chain.clone().split(ChainSplitTarget::Hash(B256::new([100; 32]))),
             ChainSplit::NoSplitPending(chain.clone())
         );
 
         // split at higher number
         assert_eq!(
-            chain.clone().split(SplitAt::Number(10)),
+            chain.clone().split(ChainSplitTarget::Number(10)),
             ChainSplit::NoSplitCanonical(chain.clone())
         );
 
         // split at lower number
-        assert_eq!(chain.clone().split(SplitAt::Number(0)), ChainSplit::NoSplitPending(chain));
+        assert_eq!(
+            chain.clone().split(ChainSplitTarget::Number(0)),
+            ChainSplit::NoSplitPending(chain)
+        );
     }
 }

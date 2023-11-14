@@ -34,6 +34,9 @@ pub enum FsPathError {
     /// Provides additional path context for [`std::fs::read_dir`].
     #[error("failed to read dir {path:?}: {source}")]
     ReadDir { source: io::Error, path: PathBuf },
+    /// Provides additional context for [`std::fs::rename`].
+    #[error("failed to rename {from:?} to {to:?}: {source}")]
+    Rename { source: io::Error, from: PathBuf, to: PathBuf },
     /// Provides additional path context for [`std::fs::File::open`].
     #[error("failed to open file {path:?}: {source}")]
     Open { source: io::Error, path: PathBuf },
@@ -90,6 +93,11 @@ impl FsPathError {
     pub fn open(source: io::Error, path: impl Into<PathBuf>) -> Self {
         FsPathError::Open { source, path: path.into() }
     }
+
+    /// Returns the complementary error variant for [`std::fs::rename`].
+    pub fn rename(source: io::Error, from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> Self {
+        FsPathError::Rename { source, from: from.into(), to: to.into() }
+    }
 }
 
 type Result<T> = std::result::Result<T, FsPathError>;
@@ -122,4 +130,11 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> Result<()> {
 pub fn read_dir(path: impl AsRef<Path>) -> Result<ReadDir> {
     let path = path.as_ref();
     fs::read_dir(path).map_err(|err| FsPathError::read_dir(err, path))
+}
+
+/// Wrapper for `std::fs::rename`
+pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
+    let from = from.as_ref();
+    let to = to.as_ref();
+    fs::rename(from, to).map_err(|err| FsPathError::rename(err, from, to))
 }
