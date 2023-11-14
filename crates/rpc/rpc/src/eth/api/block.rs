@@ -184,7 +184,12 @@ where
             .provider()
             .header_td_by_number(block.number)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
-        let block = from_block(block.into(), total_difficulty, full.into(), Some(block_hash))?;
-        Ok(Some(block.into()))
+        let block_with_senders = self.cache().get_block_with_senders(block_hash).await?;
+        if let Some(block_with) = block_with_senders {
+            let block = from_block(block_with, total_difficulty, full.into(), Some(block_hash))?;
+            Ok(Some(block.into()))
+        } else {
+            return Ok(None);
+        }
     }
 }

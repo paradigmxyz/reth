@@ -2,7 +2,10 @@
 
 use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
-use reth_primitives::{Block as PrimitiveBlock, Header as PrimitiveHeader, B256, U256, U64};
+use reth_primitives::{
+    Block as PrimitiveBlock, BlockWithSenders as PrimitiveBlockWithSenders,
+    Header as PrimitiveHeader, B256, U256, U64,
+};
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
 /// Converts the given primitive block into a [Block] response with the given
@@ -10,7 +13,7 @@ use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind
 ///
 /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
 pub fn from_block(
-    block: PrimitiveBlock,
+    block: PrimitiveBlockWithSenders,
     total_difficulty: U256,
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
@@ -29,7 +32,7 @@ pub fn from_block(
 /// This will populate the `transactions` field with only the hashes of the transactions in the
 /// block: [BlockTransactions::Hashes]
 pub fn from_block_with_tx_hashes(
-    block: PrimitiveBlock,
+    block: PrimitiveBlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
 ) -> Block {
@@ -39,7 +42,7 @@ pub fn from_block_with_tx_hashes(
     from_block_with_transactions(
         block.length(),
         block_hash,
-        block,
+        block.block,
         total_difficulty,
         BlockTransactions::Hashes(transactions),
     )
@@ -51,7 +54,7 @@ pub fn from_block_with_tx_hashes(
 /// This will populate the `transactions` field with the _full_
 /// [Transaction](reth_rpc_types::Transaction) objects: [BlockTransactions::Full]
 pub fn from_block_full(
-    mut block: PrimitiveBlock,
+    mut block: PrimitiveBlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
 ) -> Result<Block, BlockError> {
@@ -62,9 +65,9 @@ pub fn from_block_full(
     // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
     // `from_block_with_transactions`, however we need to compute the length before
     let block_length = block.length();
-    let body = std::mem::take(&mut block.body);
+    let body = std::mem::take(&mut block.block.body);
 
-    let mut transactions = Vec::with_capacity(block.body.len());
+    let mut transactions = Vec::with_capacity(block.senders.length());
     for (idx, tx) in body.into_iter().enumerate() {
         let signed_tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
         transactions.push(from_recovered_with_block_context(
@@ -79,7 +82,7 @@ pub fn from_block_full(
     Ok(from_block_with_transactions(
         block_length,
         block_hash,
-        block,
+        block.block,
         total_difficulty,
         BlockTransactions::Full(transactions),
     ))

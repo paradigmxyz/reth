@@ -89,6 +89,7 @@ pub struct BlockWithSenders {
     pub senders: Vec<Address>,
 }
 
+
 impl BlockWithSenders {
     /// New block with senders. Return none if len of tx and senders does not match
     pub fn new(block: Block, senders: Vec<Address>) -> Option<Self> {

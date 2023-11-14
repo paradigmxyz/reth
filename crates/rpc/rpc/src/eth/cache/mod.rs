@@ -1,9 +1,11 @@
 //! Async caching support for eth RPC
 
-use futures::{future::Either,Stream, StreamExt};
+use futures::{future::Either, Stream, StreamExt};
 use http::Response;
 use reth_interfaces::{provider::ProviderError, RethResult};
-use reth_primitives::{Block, BlockWithSenders, Receipt, SealedBlock, TransactionSigned, B256,BlockHashOrNumber};
+use reth_primitives::{
+    Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, TransactionSigned, B256,
+};
 use reth_provider::{
     BlockReader, BlockSource, CanonStateNotification, EvmEnvProvider, StateProviderFactory,
     TransactionVariant,
@@ -43,7 +45,6 @@ enum BlockData {
     BlockWithSenders(BlockWithSenders),
 }
 
-
 /// The type that can send the response to a requested [Block]
 type BlockTransactionsResponseSender = oneshot::Sender<RethResult<Option<Vec<TransactionSigned>>>>;
 
@@ -56,7 +57,12 @@ type ReceiptsResponseSender = oneshot::Sender<RethResult<Option<Vec<Receipt>>>>;
 /// The type that can send the response to a requested env
 type EnvResponseSender = oneshot::Sender<RethResult<(CfgEnv, BlockEnv)>>;
 
-type BlockLruCache<L> = MultiConsumerLruCache<B256, BlockWithSenders, L, Either<BlockWithSendersResponseSender,BlockTransactionsResponseSender>>;
+type BlockLruCache<L> = MultiConsumerLruCache<
+    B256,
+    BlockWithSenders,
+    L,
+    Either<BlockWithSendersResponseSender, BlockTransactionsResponseSender>,
+>;
 
 type ReceiptsLruCache<L> = MultiConsumerLruCache<B256, Vec<Receipt>, L, ReceiptsResponseSender>;
 
@@ -140,14 +146,14 @@ impl EthStateCache {
     pub(crate) async fn get_block(&self, block_hash: B256) -> RethResult<Option<Block>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
-        let block_with_senders_res = rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?;
-         
-         if let Ok(Some(block_with_senders)) = block_with_senders_res{
+        let block_with_senders_res =
+            rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?;
+
+        if let Ok(Some(block_with_senders)) = block_with_senders_res {
             Ok(Some(block_with_senders.block))
-         }
-           else{
+        } else {
             Ok(None)
-         }
+        }
     }
 
     /// Requests the [Block] for the block hash, sealed with the given block hash.
@@ -345,7 +351,6 @@ where
                 }
                 Some(action) => {
                     match action {
-                        
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
                             if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(block)));
@@ -353,10 +358,7 @@ where
                             }
 
                             // block is not in the cache, request it if this is the first consumer
-                            if this
-                                .full_block_cache
-                                .queue(block_hash, Either::Left(response_tx))
-                            {
+                            if this.full_block_cache.queue(block_hash, Either::Left(response_tx)) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
@@ -369,13 +371,10 @@ where
                                         BlockHashOrNumber::Hash(block_hash),
                                         TransactionVariant::WithHash,
                                     );
-                                    let _ = action_tx.send(
-                                        CacheAction::BlockWithSendersResult {
-                                            block_hash,
-                                            res: block_sender,
-                                        },
-                                    );
-                                   
+                                    let _ = action_tx.send(CacheAction::BlockWithSendersResult {
+                                        block_hash,
+                                        res: block_sender,
+                                    });
                                 }));
                             }
                         }
@@ -387,10 +386,7 @@ where
                             }
 
                             // block is not in the cache, request it if this is the first consumer
-                            if this
-                                .full_block_cache
-                                .queue(block_hash, Either::Right(response_tx))
-                            {
+                            if this.full_block_cache.queue(block_hash, Either::Right(response_tx)) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
@@ -403,8 +399,10 @@ where
                                         BlockHashOrNumber::Hash(block_hash),
                                         TransactionVariant::WithHash,
                                     );
-                                    let _ = action_tx
-                                        .send(CacheAction::BlockWithSendersResult { block_hash, res});
+                                    let _ = action_tx.send(CacheAction::BlockWithSendersResult {
+                                        block_hash,
+                                        res,
+                                    });
                                 }));
                             }
                         }
