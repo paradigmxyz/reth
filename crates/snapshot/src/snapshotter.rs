@@ -104,7 +104,6 @@ impl<DB: Database> Snapshotter<DB> {
         let mut snapshotter = Self {
             provider_factory: ProviderFactory::new(db, chain_spec),
             snapshots_path: snapshots_path.as_ref().into(),
-            // TODO(alexey): fill from on-disk snapshot data
             highest_snapshots: HighestSnapshots::default(),
             highest_snapshots_notifier,
             highest_snapshots_tracker,
