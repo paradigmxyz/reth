@@ -7,6 +7,7 @@ use serde::{
     ser::{SerializeStruct, Serializer},
     Deserialize, Serialize,
 };
+
 use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},
@@ -358,7 +359,7 @@ impl Serialize for LocalizedTransactionTrace {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("LocalizedTransactionTrace", 5)?;
-
+        state.serialize_field("trace", &self.trace)?;
         // Serialize 'block_hash', if present
         if let Some(ref block_hash) = self.block_hash {
             state.serialize_field("blockHash", block_hash)?;
@@ -446,6 +447,80 @@ pub struct StorageDelta {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn test_serialization_of_actions() {
+        let call_action = CallAction {
+            from: Address::default(),
+            call_type: CallType::None,
+            gas: U64::from(21000),
+            input: Bytes::new(),
+            to: Address::default(),
+            value: U256::from(1000),
+        };
+
+        let create_action = CreateAction {
+            from: Address::default(),
+            value: U256::from(1000),
+            gas: U64::from(32000),
+            init: Bytes::new(),
+        };
+
+        let selfdestruct_action = SelfdestructAction {
+            address: Address::default(),
+            refund_address: Address::default(),
+            balance: U256::from(5000),
+        };
+
+        let reward_action = RewardAction {
+            author: Address::default(),
+            value: U256::from(2000),
+            reward_type: RewardType::Block,
+        };
+        let sample_block_hash = Some(B256::default());
+        let sample_block_number = Some(123u64);
+        let sample_transaction_hash = Some(B256::default());
+        let sample_transaction_position = Some(45u64);
+
+        let actions = vec![
+            Action::Call(call_action),
+            Action::Create(create_action),
+            Action::Selfdestruct(selfdestruct_action),
+            Action::Reward(reward_action),
+        ];
+
+        for action in actions {
+            let cloned_action = action.clone();
+            let trace = TransactionTrace {
+                action: cloned_action,
+                error: None,
+                result: None,
+                subtraces: 3,
+                trace_address: vec![],
+            };
+            let localized_trace = LocalizedTransactionTrace {
+                trace,
+                block_hash: sample_block_hash.clone(),
+                block_number: sample_block_number,
+                transaction_hash: sample_transaction_hash.clone(),
+                transaction_position: sample_transaction_position,
+            };
+            let serialized = serde_json::to_string(&localized_trace).unwrap();
+            println!("Serialized JSON: {}", serialized); // Print the serialized JSON
+
+            let value: Value = serde_json::from_str(&serialized).unwrap();
+
+            // Adjust the assertion to compare actual string values
+            let expected_json_value = serde_json::to_value(&action).unwrap();
+            let expected_type = expected_json_value["type"].as_str().unwrap();
+
+            let actual_type =
+                value["trace"].get("type").and_then(|v| v.as_str()).unwrap_or("type not found");
+
+            assert_eq!(actual_type, expected_type, "Mismatch in action type serialization");
+        }
+    }
 
     #[test]
     fn test_transaction_trace() {
