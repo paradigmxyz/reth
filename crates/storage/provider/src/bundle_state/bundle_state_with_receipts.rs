@@ -337,9 +337,12 @@ impl BundleStateWithReceipts {
 
         for (idx, receipts) in self.receipts.into_iter().enumerate() {
             if !receipts.is_empty() {
-                let (_, body_indices) = bodies_cursor
-                    .seek_exact(self.first_block + idx as u64)?
-                    .expect("body indices exist");
+                let block_number = self.first_block + idx as u64;
+                let (_, body_indices) =
+                    bodies_cursor.seek_exact(block_number)?.unwrap_or_else(|| {
+                        let last_available = bodies_cursor.last().ok().flatten().map(|(number, _)| number);
+                        panic!("body indices for block {block_number} must exist. last available block number: {last_available:?}");
+                    });
 
                 let first_tx_index = body_indices.first_tx_num();
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
