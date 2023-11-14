@@ -14,7 +14,10 @@ use reth_provider::{
     TransactionsProvider, TransactionsProviderExt,
 };
 use reth_snapshot::{segments, segments::Segment};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 impl Command {
     pub(crate) fn generate_transactions_snapshot<DB: Database>(
@@ -33,7 +36,7 @@ impl Command {
 
         let segment = segments::Transactions::new(compression, filters);
 
-        segment.snapshot::<DB>(provider, range.clone())?;
+        segment.snapshot::<DB>(provider, PathBuf::default(), range.clone())?;
 
         // Default name doesn't have any configuration
         reth_primitives::fs::rename(

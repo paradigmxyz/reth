@@ -13,7 +13,10 @@ use reth_provider::{
     providers::SnapshotProvider, DatabaseProviderRO, HeaderProvider, ProviderError, ProviderFactory,
 };
 use reth_snapshot::{segments, segments::Segment};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 impl Command {
     pub(crate) fn generate_headers_snapshot<DB: Database>(
@@ -32,7 +35,7 @@ impl Command {
 
         let segment = segments::Headers::new(compression, filters);
 
-        segment.snapshot::<DB>(provider, range.clone())?;
+        segment.snapshot::<DB>(provider, PathBuf::default(), range.clone())?;
 
         // Default name doesn't have any configuration
         reth_primitives::fs::rename(

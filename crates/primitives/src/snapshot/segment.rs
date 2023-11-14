@@ -36,11 +36,14 @@ pub enum SnapshotSegment {
 
 impl SnapshotSegment {
     /// Returns the default configuration of the segment.
-    pub const fn config(&self) -> (Filters, Compression) {
-        let default_config = (
-            Filters::WithFilters(InclusionFilter::Cuckoo, super::PerfectHashingFunction::Fmph),
-            Compression::Lz4,
-        );
+    pub const fn config(&self) -> SegmentConfig {
+        let default_config = SegmentConfig {
+            filters: Filters::WithFilters(
+                InclusionFilter::Cuckoo,
+                super::PerfectHashingFunction::Fmph,
+            ),
+            compression: Compression::Lz4,
+        };
 
         match self {
             SnapshotSegment::Headers => default_config,
@@ -132,4 +135,13 @@ impl SegmentHeader {
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => self.tx_start(),
         }
     }
+}
+
+/// Configuration used on the segment.
+#[derive(Debug, Clone, Copy)]
+pub struct SegmentConfig {
+    /// Inclusion filters used on the segment
+    pub filters: Filters,
+    /// Compression used on the segment
+    pub compression: Compression,
 }
