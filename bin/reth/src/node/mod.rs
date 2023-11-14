@@ -301,13 +301,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // configure snapshotter
         let snapshotter = reth_snapshot::Snapshotter::new(
             db.clone(),
+            data_dir.snapshots_path(),
             self.chain.clone(),
             self.chain.snapshot_block_interval,
-        );
+        )?;
 
         // setup the blockchain provider
         let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain))
-            .with_snapshots(snapshotter.highest_snapshot_receiver());
+            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))

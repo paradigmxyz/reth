@@ -21,6 +21,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     ops::{RangeBounds, RangeInclusive},
+    path::PathBuf,
     sync::Arc,
 };
 use tokio::sync::watch;
@@ -82,10 +83,12 @@ impl<DB> ProviderFactory<DB> {
     /// database provider comes with a shared snapshot provider
     pub fn with_snapshots(
         mut self,
+        snapshots_path: PathBuf,
         highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
     ) -> Self {
         self.snapshot_provider = Some(Arc::new(
-            SnapshotProvider::default().with_highest_tracker(Some(highest_snapshot_tracker)),
+            SnapshotProvider::new(snapshots_path)
+                .with_highest_tracker(Some(highest_snapshot_tracker)),
         ));
         self
     }
