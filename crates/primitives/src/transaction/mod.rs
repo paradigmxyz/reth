@@ -54,8 +54,6 @@ mod optimism;
 #[cfg(feature = "optimism")]
 pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
-use revm_primitives::U256;
-#[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
@@ -1357,7 +1355,7 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
 
                 #[cfg(feature = "optimism")]
                 let sig = if transaction.is_deposit() {
-                    Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+                    Signature { r: crate::U256::ZERO, s: crate::U256::ZERO, odd_y_parity: false }
                 } else {
                     sig
                 };
@@ -1386,7 +1384,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         #[cfg(feature = "optimism")]
         let signature = if transaction.is_deposit() {
-            Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+            Signature { r: crate::U256::ZERO, s: crate::U256::ZERO, odd_y_parity: false }
         } else {
             signature
         };

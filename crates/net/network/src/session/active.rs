@@ -773,7 +773,8 @@ mod tests {
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        GetBlockBodies, HelloMessage, Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        GetBlockBodies, HelloMessageWithProtocols, Status, StatusBuilder, UnauthedEthStream,
+        UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
@@ -782,8 +783,8 @@ mod tests {
     use tokio::{net::TcpListener, sync::mpsc};
 
     /// Returns a testing `HelloMessage` and new secretkey
-    fn eth_hello(server_key: &SecretKey) -> HelloMessage {
-        HelloMessage::builder(pk2id(&server_key.public_key(SECP256K1))).build()
+    fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
+        HelloMessageWithProtocols::builder(pk2id(&server_key.public_key(SECP256K1))).build()
     }
 
     struct SessionBuilder {
@@ -793,7 +794,7 @@ mod tests {
         to_sessions: Vec<mpsc::Sender<SessionCommand>>,
         secret_key: SecretKey,
         local_peer_id: PeerId,
-        hello: HelloMessage,
+        hello: HelloMessageWithProtocols,
         status: Status,
         fork_filter: ForkFilter,
         next_id: usize,
