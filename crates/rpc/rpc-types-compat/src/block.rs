@@ -4,7 +4,7 @@ use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
 use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders as PrimitiveBlockWithSenders,
-    Header as PrimitiveHeader, B256, U256, U64,
+    Header as PrimitiveHeader, TransactionSignedEcRecovered, B256, U256, U64,
 };
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
@@ -58,26 +58,29 @@ pub fn from_block_full(
     total_difficulty: U256,
     block_hash: Option<B256>,
 ) -> Result<Block, BlockError> {
-    let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-    let block_number = block.number;
-    let base_fee_per_gas = block.base_fee_per_gas;
+    let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
+    let block_number = block.block.number;
+    let base_fee_per_gas = block.block.base_fee_per_gas;
 
     // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
     // `from_block_with_transactions`, however we need to compute the length before
-    let block_length = block.length();
+    let block_length = block.block.length();
     let body = std::mem::take(&mut block.block.body);
-
-    let mut transactions = Vec::with_capacity(block.senders.length());
-    for (idx, tx) in body.into_iter().enumerate() {
-        let signed_tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-        transactions.push(from_recovered_with_block_context(
-            signed_tx,
-            block_hash,
-            block_number,
-            base_fee_per_gas,
-            U256::from(idx),
-        ))
-    }
+    let transactions_with_senders = body.into_iter().zip(block.senders);
+    let transactions = transactions_with_senders
+        .enumerate()
+        .map(|(idx, (tx, sender))| {
+            let signed_tx_ec_recovered =
+                TransactionSignedEcRecovered { signer: sender, signed_transaction: tx };
+            Ok(from_recovered_with_block_context(
+                signed_tx_ec_recovered,
+                block_hash,
+                block_number,
+                base_fee_per_gas,
+                U256::from(idx),
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(from_block_with_transactions(
         block_length,

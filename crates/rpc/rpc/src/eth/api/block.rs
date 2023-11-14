@@ -189,7 +189,7 @@ where
             let block = from_block(block_with, total_difficulty, full.into(), Some(block_hash))?;
             Ok(Some(block.into()))
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 }

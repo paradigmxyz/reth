@@ -1,13 +1,12 @@
 //! Async caching support for eth RPC
 
 use futures::{future::Either, Stream, StreamExt};
-use http::Response;
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, TransactionSigned, B256,
 };
 use reth_provider::{
-    BlockReader, BlockSource, CanonStateNotification, EvmEnvProvider, StateProviderFactory,
+    BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory,
     TransactionVariant,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -32,12 +31,6 @@ mod metrics;
 
 mod multi_consumer;
 pub use multi_consumer::MultiConsumerLruCache;
-
-#[derive(Debug)]
-pub enum ResponseSender {
-    BlockTransactions(BlockTransactionsResponseSender),
-    BlockWithSenders(BlockWithSendersResponseSender),
-}
 
 #[derive(Debug)]
 enum BlockData {
