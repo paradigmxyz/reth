@@ -10,7 +10,8 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthVersion, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
+    DisconnectReason, EthVersion, HelloMessageWithProtocols, Status, UnauthedEthStream,
+    UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::{
@@ -46,6 +47,8 @@ pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
 };
+
+use crate::protocol::RlpxSubProtocols;
 pub use reth_network_api::{Direction, PeerInfo};
 
 /// Internal identifier for active sessions.
@@ -71,7 +74,7 @@ pub struct SessionManager {
     /// The `Status` message to send to peers.
     status: Status,
     /// THe `HelloMessage` message to send to peers.
-    hello_message: HelloMessage,
+    hello_message: HelloMessageWithProtocols,
     /// The [`ForkFilter`] used to validate the peer's `Status` message.
     fork_filter: ForkFilter,
     /// Size of the command buffer per session.
@@ -99,6 +102,9 @@ pub struct SessionManager {
     active_session_tx: MeteredPollSender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
+    /// Additional RLPx sub-protocols to be used by the session manager.
+    #[allow(unused)]
+    extra_protocols: RlpxSubProtocols,
     /// Used to measure inbound & outbound bandwidth across all managed streams
     bandwidth_meter: BandwidthMeter,
     /// Metrics for the session manager.
@@ -109,13 +115,15 @@ pub struct SessionManager {
 
 impl SessionManager {
     /// Creates a new empty [`SessionManager`].
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         secret_key: SecretKey,
         config: SessionsConfig,
         executor: Box<dyn TaskSpawner>,
         status: Status,
-        hello_message: HelloMessage,
+        hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
+        extra_protocols: RlpxSubProtocols,
         bandwidth_meter: BandwidthMeter,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
@@ -140,6 +148,7 @@ impl SessionManager {
             active_session_tx: MeteredPollSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
             bandwidth_meter,
+            extra_protocols,
             metrics: Default::default(),
         }
     }
@@ -163,7 +172,7 @@ impl SessionManager {
     }
 
     /// Returns the session hello message.
-    pub fn hello_message(&self) -> HelloMessage {
+    pub fn hello_message(&self) -> HelloMessageWithProtocols {
         self.hello_message.clone()
     }
 
@@ -741,7 +750,7 @@ pub(crate) async fn start_pending_incoming_session(
     events: mpsc::Sender<PendingSessionEvent>,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
-    hello: HelloMessage,
+    hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
 ) {
@@ -770,7 +779,7 @@ async fn start_pending_outbound_session(
     remote_addr: SocketAddr,
     remote_peer_id: PeerId,
     secret_key: SecretKey,
-    hello: HelloMessage,
+    hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
     bandwidth_meter: BandwidthMeter,
@@ -819,7 +828,7 @@ async fn authenticate(
     remote_addr: SocketAddr,
     secret_key: SecretKey,
     direction: Direction,
-    hello: HelloMessage,
+    hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
 ) {
@@ -895,7 +904,7 @@ async fn authenticate_stream(
     remote_addr: SocketAddr,
     local_addr: Option<SocketAddr>,
     direction: Direction,
-    hello: HelloMessage,
+    hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
 ) -> PendingSessionEvent {
@@ -912,10 +921,23 @@ async fn authenticate_stream(
         }
     };
 
+    // Ensure we negotiated eth protocol
+    let version = match p2p_stream.shared_capabilities().eth_version() {
+        Ok(version) => version,
+        Err(err) => {
+            return PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction,
+                error: Some(err.into()),
+            }
+        }
+    };
+
     // if the hello handshake was successful we can try status handshake
     //
     // Before trying status handshake, set up the version to shared_capability
-    let status = Status { version: p2p_stream.shared_capability().version(), ..status };
+    let status = Status { version, ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,

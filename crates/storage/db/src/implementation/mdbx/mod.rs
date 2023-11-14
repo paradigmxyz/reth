@@ -76,7 +76,7 @@ impl<E: EnvironmentKind> Env<E> {
             EnvKind::RW => Mode::ReadWrite { sync_mode: SyncMode::Durable },
         };
 
-        let mut inner_env = Environment::new();
+        let mut inner_env = Environment::builder();
         inner_env.set_max_dbs(Tables::ALL.len());
         inner_env.set_geometry(Geometry {
             // Maximum database size of 4 terabytes

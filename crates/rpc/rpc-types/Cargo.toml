@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Reth RPC types
-"""
+description = "Reth RPC types"
 
 [dependencies]
 # # ethereum
@@ -22,7 +20,6 @@ serde_with = "3.3"
 serde_json.workspace = true
 jsonrpsee-types = { workspace = true, optional = true }
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde"] }
-c-kzg = { workspace = true, features = ["serde"] }
 url = "2.3"
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198

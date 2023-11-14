@@ -182,6 +182,7 @@ where
             status,
             fork_filter,
             dns_discovery_config,
+            extra_protocols,
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
                 optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
@@ -218,6 +219,7 @@ where
             status,
             hello_message,
             fork_filter,
+            extra_protocols,
             bandwidth_meter.clone(),
         );
 

@@ -11,7 +11,7 @@ description = "A basic payload builder for reth that uses the txpool API to buil
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-revm = { path = "../../revm" }
+reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-payload-builder.workspace = true

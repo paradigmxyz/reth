@@ -35,7 +35,7 @@ pub enum FsPathError {
     #[error("failed to read dir {path:?}: {source}")]
     ReadDir { source: io::Error, path: PathBuf },
     /// Provides additional context for [`std::fs::rename`].
-    #[error("failed to rename from {from:?} to {to:?}: {source}")]
+    #[error("failed to rename {from:?} to {to:?}: {source}")]
     Rename { source: io::Error, from: PathBuf, to: PathBuf },
     /// Provides additional path context for [`std::fs::File::open`].
     #[error("failed to open file {path:?}: {source}")]
