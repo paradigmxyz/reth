@@ -39,12 +39,10 @@ impl Command {
         segment.snapshot::<DB>(provider, range.clone())?;
 
         // Default name doesn't have any configuration
-        let default_name: PathBuf = SnapshotSegment::Receipts.filename(&range).into();
-        let new_name: PathBuf = SnapshotSegment::Receipts
-            .filename_with_configuration(filters, compression, &range)
-            .into();
-
-        std::fs::rename(default_name, new_name)?;
+        reth_primitives::fs::rename(
+            SnapshotSegment::Receipts.filename(&range),
+            SnapshotSegment::Receipts.filename_with_configuration(filters, compression, &range),
+        )?;
 
         Ok(())
     }
