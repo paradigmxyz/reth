@@ -7,7 +7,7 @@ mod segment;
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
 pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
-pub use segment::{SegmentHeader, SnapshotSegment};
+pub use segment::{SegmentConfig, SegmentHeader, SnapshotSegment};
 
 /// Default snapshot block count.
 pub const BLOCKS_PER_SNAPSHOT: u64 = 500_000;

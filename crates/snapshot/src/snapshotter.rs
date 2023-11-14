@@ -1,6 +1,6 @@
 //! Support for snapshotting.
 
-use crate::SnapshotterError;
+use crate::{segments, segments::Segment, SnapshotterError};
 use reth_db::database::Database;
 use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{
@@ -16,6 +16,10 @@ pub type SnapshotterResult = Result<SnapshotTargets, SnapshotterError>;
 
 /// The snapshotter type itself with the result of [Snapshotter::run]
 pub type SnapshotterWithResult<DB> = (Snapshotter<DB>, SnapshotterResult);
+
+/// Snapshots are initially created in `{...}/datadir/snapshots/temp` and moved once finished. This
+/// directory is cleaned up on every booting up of the node.
+const TEMPORARY_SUBDIRECTORY: &str = "temp";
 
 /// Snapshotting routine. Main snapshotting logic happens in [Snapshotter::run].
 #[derive(Debug)]
@@ -89,11 +93,6 @@ impl<DB: Database> Snapshotter<DB> {
         chain_spec: Arc<ChainSpec>,
         block_interval: u64,
     ) -> RethResult<Self> {
-        // Create directory for snapshots if it doesn't exist.
-        if !snapshots_path.exists() {
-            reth_primitives::fs::create_dir_all(&snapshots_path)?;
-        }
-
         let (highest_snapshots_notifier, highest_snapshots_tracker) = watch::channel(None);
 
         let mut snapshotter = Self {
@@ -106,9 +105,32 @@ impl<DB: Database> Snapshotter<DB> {
             block_interval,
         };
 
+        snapshotter.create_directory()?;
         snapshotter.update_highest_snapshots_tracker()?;
 
         Ok(snapshotter)
+    }
+
+    /// Ensures the snapshots directory and its temporary subdirectory are properly set up.
+    ///
+    /// This function performs the following actions:
+    /// 1. If `datadir/snapshots` does not exist, it creates it.
+    /// 2. Ensures `datadir/snapshots/temp` exists and is empty.
+    ///
+    /// The `temp` subdirectory is where snapshots are initially created before being
+    /// moved to their final location within `datadir/snapshots`.
+    fn create_directory(&self) -> RethResult<()> {
+        let temporary_path = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
+
+        if !self.snapshots_path.exists() {
+            reth_primitives::fs::create_dir_all(&self.snapshots_path)?;
+        } else if temporary_path.exists() {
+            reth_primitives::fs::remove_dir_all(&temporary_path)?;
+        }
+
+        reth_primitives::fs::create_dir_all(temporary_path)?;
+
+        Ok(())
     }
 
     #[cfg(test)]
@@ -167,11 +189,46 @@ impl<DB: Database> Snapshotter<DB> {
         debug_assert!(targets.is_multiple_of_block_interval(self.block_interval));
         debug_assert!(targets.is_contiguous_to_highest_snapshots(self.highest_snapshots));
 
-        // TODO(alexey): snapshot logic
+        self.run_segment::<segments::Receipts>(
+            targets.receipts.as_ref().map(|(range, _)| range.clone()),
+        )?;
+
+        self.run_segment::<segments::Transactions>(
+            targets.transactions.as_ref().map(|(range, _)| range.clone()),
+        )?;
+
+        self.run_segment::<segments::Headers>(targets.headers.clone())?;
 
         self.update_highest_snapshots_tracker()?;
 
         Ok(targets)
+    }
+
+    /// Run the snapshotter for one segment.
+    ///
+    /// It first builds the snapshot in a **temporary directory** inside the snapshots directory. If
+    /// for some reason the node is terminated during the snapshot process, it will be cleaned
+    /// up on boot (on [`Snapshotter::new`]) and the snapshot process restarted from scratch for
+    /// this block range and segment.
+    ///
+    /// If it succeeds, then we move the snapshot file from the temporary directory to its main one.
+    fn run_segment<S: Segment>(
+        &self,
+        block_range: Option<RangeInclusive<BlockNumber>>,
+    ) -> RethResult<()> {
+        if let Some(block_range) = block_range {
+            let temp = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
+            let filename = S::segment().filename(&block_range);
+
+            S::default().snapshot::<DB>(
+                &self.provider_factory.provider()?,
+                temp.clone(),
+                block_range.clone(),
+            )?;
+
+            reth_primitives::fs::rename(temp.join(&filename), self.snapshots_path.join(filename))?;
+        }
+        Ok(())
     }
 
     /// Returns a snapshot targets at the provided finalized block number, respecting the block
