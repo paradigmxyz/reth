@@ -21,7 +21,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    chain::{ChainSplit, SplitAt},
+    chain::{ChainSplit, ChainSplitTarget},
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     DatabaseProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider,
@@ -844,7 +844,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         &mut self,
         chain_id: BlockChainId,
         chain: AppendableChain,
-        split_at: SplitAt,
+        split_at: ChainSplitTarget,
     ) -> Chain {
         let chain = chain.into_inner();
         match chain.split(split_at) {
@@ -949,7 +949,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         trace!(target: "blockchain_tree", ?chain, "Found chain to make canonical");
 
         // we are splitting chain at the block hash that we want to make canonical
-        let canonical = self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash));
+        let canonical = self.split_chain(chain_id, chain, ChainSplitTarget::Hash(*block_hash));
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
         let mut block_fork = canonical.fork_block();
@@ -961,7 +961,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             let chain = self.state.chains.remove(&chain_id).expect("To fork to be present");
             block_fork = chain.fork_block();
             // canonical chain is lower part of the chain.
-            let canonical = self.split_chain(chain_id, chain, SplitAt::Number(block_fork_number));
+            let canonical =
+                self.split_chain(chain_id, chain, ChainSplitTarget::Number(block_fork_number));
             block_fork_number = canonical.fork_block_number();
             chains_to_promote.push(canonical);
         }
