@@ -2,12 +2,12 @@ use crate::{
     bundle_state::BundleStateWithReceipts,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BundleStateDataProvider, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    BundleStateDataProvider, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,
     ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
-use reth_db::models::StoredBlockBodyIndices;
+use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
@@ -523,7 +523,7 @@ impl EvmEnvProvider for MockEthProvider {
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
     ) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_env_with_header(
@@ -532,7 +532,7 @@ impl EvmEnvProvider for MockEthProvider {
         _block_env: &mut BlockEnv,
         _header: &Header,
     ) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_block_env_at(
@@ -540,7 +540,7 @@ impl EvmEnvProvider for MockEthProvider {
         _block_env: &mut BlockEnv,
         _at: BlockHashOrNumber,
     ) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_block_env_with_header(
@@ -548,15 +548,15 @@ impl EvmEnvProvider for MockEthProvider {
         _block_env: &mut BlockEnv,
         _header: &Header,
     ) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockHashOrNumber) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &Header) -> RethResult<()> {
-        unimplemented!()
+        Ok(())
     }
 }
 
@@ -628,13 +628,22 @@ impl StateProviderFactory for Arc<MockEthProvider> {
 
 impl WithdrawalsProvider for MockEthProvider {
     fn latest_withdrawal(&self) -> RethResult<Option<reth_primitives::Withdrawal>> {
-        unimplemented!()
+        Ok(None)
     }
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> RethResult<Option<Vec<reth_primitives::Withdrawal>>> {
-        unimplemented!()
+        Ok(None)
+    }
+}
+
+impl ChangeSetReader for MockEthProvider {
+    fn account_block_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> RethResult<Vec<AccountBeforeTx>> {
+        Ok(Vec::default())
     }
 }

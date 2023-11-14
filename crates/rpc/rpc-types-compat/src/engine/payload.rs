@@ -360,18 +360,6 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
     ExecutionPayloadBodyV1 { transactions: transactions.collect(), withdrawals: withdraw }
 }
 
-/// Transforms a [reth_primitives::BlobTransactionSidecar] into a
-/// [reth_rpc_types::BlobTransactionSidecar]
-pub fn from_primitive_sidecar(
-    sidecar: reth_primitives::BlobTransactionSidecar,
-) -> reth_rpc_types::BlobTransactionSidecar {
-    reth_rpc_types::BlobTransactionSidecar {
-        blobs: sidecar.blobs,
-        commitments: sidecar.commitments,
-        proofs: sidecar.proofs,
-    }
-}
-
 /// Transforms a [SealedBlock] into a [ExecutionPayloadV1]
 pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
     let transactions = value
@@ -403,10 +391,9 @@ pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPaylo
 
 #[cfg(test)]
 mod tests {
+    use super::{block_to_payload_v3, try_payload_v3_to_block};
     use reth_primitives::{hex, Bytes, U256};
     use reth_rpc_types::{engine::ExecutionPayloadV3, ExecutionPayloadV1, ExecutionPayloadV2};
-
-    use super::{block_to_payload_v3, try_payload_v3_to_block};
 
     #[test]
     fn roundtrip_payload_to_block() {
