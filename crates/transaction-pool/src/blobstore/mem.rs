@@ -1,10 +1,7 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use crate::blobstore::{BlobStore, BlobStoreError, BlobStoreSize, BlobTransactionSidecar};
 use parking_lot::RwLock;
 use reth_primitives::B256;
-use crate::blobstore::{BlobStore, BlobStoreError, BlobStoreSize, BlobTransactionSidecar};
+use std::{collections::HashMap, sync::Arc};
 
 /// An in-memory blob store.
 #[derive(Clone, Debug, Default)]
@@ -45,7 +42,7 @@ impl BlobStore for InMemoryBlobStore {
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
         let mut store = self.inner.store.write();
         let sub = remove_size(&mut store, &tx);
-        self.inner.size_tracker. sub_size(sub);
+        self.inner.size_tracker.sub_size(sub);
         self.inner.size_tracker.update_len(store.len());
         Ok(())
     }

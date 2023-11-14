@@ -6616,6 +6616,7 @@ dependencies = [
  "revm",
  "schnellru",
  "serde",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",

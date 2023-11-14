@@ -58,6 +58,7 @@ rand = "0.8"
 proptest.workspace = true
 criterion = "0.5"
 assert_matches.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["serde"]

@@ -38,13 +38,15 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     ///
     /// This only returns the blobs that were found in the store.
     /// If there's no blob it will not be returned.
+    ///
+    /// Note: this is not guaranteed to return the blobs in the same order as the input.
     fn get_all(
         &self,
         txs: Vec<B256>,
     ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError>;
 
-    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
-    /// they were requested.
+    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the exact
+    /// order they were requested.
     ///
     /// Returns an error if any of the blobs are not found in the blob store.
     fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
@@ -91,6 +93,11 @@ impl BlobStoreSize {
     #[inline]
     pub(crate) fn update_len(&self, len: usize) {
         self.num_blobs.store(len, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn inc_len(&self, add: usize) {
+        self.num_blobs.fetch_add(add, std::sync::atomic::Ordering::Relaxed);
     }
 
     #[inline]
