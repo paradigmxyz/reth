@@ -122,7 +122,7 @@ impl DiskFileBlobStoreInner {
     fn create_blob_dir(&self) -> Result<(), DiskFileBlobStoreError> {
         debug!(target:"txpool::blob", blob_dir = ?self.blob_dir, "Clearing blob store");
         fs::create_dir_all(&self.blob_dir)
-            .map_err(|e| DiskFileBlobStoreError::FailedToOpen(self.blob_dir.clone(), e))
+            .map_err(|e| DiskFileBlobStoreError::Open(self.blob_dir.clone(), e))
     }
 
     /// Deletes the entire blob store.
@@ -132,9 +132,7 @@ impl DiskFileBlobStoreInner {
                 debug!(target:"txpool::blob", blob_dir = ?self.blob_dir, "Removed blob store directory");
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => {
-                return Err(DiskFileBlobStoreError::FailedToOpen(self.blob_dir.clone(), err))
-            }
+            Err(err) => return Err(DiskFileBlobStoreError::Open(self.blob_dir.clone(), err)),
         }
         Ok(())
     }
@@ -213,9 +211,9 @@ impl DiskFileBlobStoreInner {
                 Ok(data) => data,
                 Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
                 Err(e) => {
-                    return Err(BlobStoreError::Other(Box::new(
-                        DiskFileBlobStoreError::FailedToReadBlobFile(tx, path, e),
-                    )))
+                    return Err(BlobStoreError::Other(Box::new(DiskFileBlobStoreError::ReadFile(
+                        tx, path, e,
+                    ))))
                 }
             }
         };
@@ -264,8 +262,7 @@ impl DiskFileBlobStoreInner {
         let path = self.blob_disk_file(tx);
         let _lock = self.file_lock.write();
 
-        fs::write(&path, data)
-            .map_err(|e| DiskFileBlobStoreError::FailedToWriteBlobFile(tx, path, e))?;
+        fs::write(&path, data).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
         Ok(data.len())
     }
 
@@ -276,8 +273,7 @@ impl DiskFileBlobStoreInner {
         let path = self.blob_disk_file(tx);
 
         let _lock = self.file_lock.write();
-        fs::remove_file(&path)
-            .map_err(|e| DiskFileBlobStoreError::FailedToWriteBlobFile(tx, path, e))?;
+        fs::remove_file(&path).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
 
         Ok(())
     }
@@ -294,7 +290,7 @@ impl DiskFileBlobStoreInner {
             let path = self.blob_disk_file(tx);
 
             let _ = fs::remove_file(&path).map_err(|e| {
-                let err = DiskFileBlobStoreError::FailedToWriteBlobFile(tx, path, e);
+                let err = DiskFileBlobStoreError::WriteFile(tx, path, e);
                 debug!( target:"txpool::blob", ?err);
             });
         }
