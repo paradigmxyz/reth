@@ -7,7 +7,7 @@ use reth_primitives::{
     BlockNumber, ChainSpec, SnapshotSegment,
 };
 use reth_provider::ProviderFactory;
-use std::{path::Path, sync::Arc};
+use std::{ops::RangeInclusive, path::Path, sync::Arc};
 
 mod bench;
 mod headers;
@@ -129,5 +129,10 @@ impl Command {
         }
 
         Ok(())
+    }
+
+    /// Gives out the inclusive block range for the snapshot requested by the user.
+    fn block_range(&self) -> RangeInclusive<BlockNumber> {
+        self.from..=(self.from + self.block_interval - 1)
     }
 }

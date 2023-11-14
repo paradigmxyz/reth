@@ -30,7 +30,7 @@ reth-db = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
 
 # misc
-
+tempfile.workspace = true
 assert_matches.workspace = true
 
 [features]
