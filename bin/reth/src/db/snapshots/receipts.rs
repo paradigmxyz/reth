@@ -14,7 +14,10 @@ use reth_provider::{
     ReceiptProvider, TransactionsProvider, TransactionsProviderExt,
 };
 use reth_snapshot::{segments, segments::Segment};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 impl Command {
     pub(crate) fn generate_receipts_snapshot<DB: Database>(
