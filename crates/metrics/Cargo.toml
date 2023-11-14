@@ -10,7 +10,7 @@ description = "reth metrics utilities"
 
 [dependencies]
 # reth
-reth-metrics-derive = { path = "./metrics-derive" }
+reth-metrics-derive.workspace = true
 
 # metrics
 metrics.workspace = true

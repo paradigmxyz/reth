@@ -1,11 +1,11 @@
 use crate::eth::transaction::{
     typed::{
-        EIP1559TransactionRequest, EIP2930TransactionRequest, LegacyTransactionRequest,
-        TransactionKind, TypedTransactionRequest,
+        BlobTransactionSidecar, EIP1559TransactionRequest, EIP2930TransactionRequest,
+        LegacyTransactionRequest, TransactionKind, TypedTransactionRequest,
     },
     AccessList,
 };
-use alloy_primitives::{Address, Bytes, U128, U256, U64, U8};
+use alloy_primitives::{Address, Bytes, B256, U128, U256, U64, U8};
 use serde::{Deserialize, Serialize};
 
 /// Represents _all_ transaction requests received from RPC
@@ -18,29 +18,31 @@ pub struct TransactionRequest {
     /// to address
     pub to: Option<Address>,
     /// legacy, gas Price
-    #[serde(default)]
     pub gas_price: Option<U128>,
     /// max base fee per gas sender is willing to pay
-    #[serde(default)]
     pub max_fee_per_gas: Option<U128>,
     /// miner tip
-    #[serde(default)]
     pub max_priority_fee_per_gas: Option<U128>,
     /// gas
     pub gas: Option<U256>,
     /// value of th tx in wei
     pub value: Option<U256>,
     /// Any additional data sent
-    #[serde(alias = "input")]
-    pub data: Option<Bytes>,
+    #[serde(alias = "data")]
+    pub input: Option<Bytes>,
     /// Transaction nonce
     pub nonce: Option<U64>,
     /// warm storage access pre-payment
-    #[serde(default)]
     pub access_list: Option<AccessList>,
     /// EIP-2718 type
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub transaction_type: Option<U8>,
+    /// max fee per blob gas for EIP-4844 transactions
+    pub max_fee_per_blob_gas: Option<U128>,
+    /// blob versioned hashes for EIP-4844 transactions.
+    pub blob_versioned_hashes: Option<Vec<B256>>,
+    /// sidecar for EIP-4844 transactions
+    pub sidecar: Option<BlobTransactionSidecar>,
 }
 
 // == impl TransactionRequest ==
@@ -58,14 +60,25 @@ impl TransactionRequest {
             max_priority_fee_per_gas,
             gas,
             value,
-            data,
+            input: data,
             nonce,
             mut access_list,
+            max_fee_per_blob_gas,
+            blob_versioned_hashes,
+            sidecar,
             ..
         } = self;
-        match (gas_price, max_fee_per_gas, access_list.take()) {
+        match (
+            gas_price,
+            max_fee_per_gas,
+            access_list.take(),
+            max_fee_per_blob_gas,
+            blob_versioned_hashes,
+            sidecar,
+        ) {
             // legacy transaction
-            (Some(_), None, None) => {
+            // gas price required
+            (Some(_), None, None, None, None, None) => {
                 Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
                     nonce: nonce.unwrap_or_default(),
                     gas_price: gas_price.unwrap_or_default(),
@@ -80,7 +93,8 @@ impl TransactionRequest {
                 }))
             }
             // EIP2930
-            (_, None, Some(access_list)) => {
+            // if only accesslist is set, and no eip1599 fees
+            (_, None, Some(access_list), None, None, None) => {
                 Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
                     nonce: nonce.unwrap_or_default(),
                     gas_price: gas_price.unwrap_or_default(),
@@ -96,7 +110,10 @@ impl TransactionRequest {
                 }))
             }
             // EIP1559
-            (None, Some(_), access_list) | (None, None, access_list @ None) => {
+            // if 4844 fields missing
+            // gas_price, max_fee_per_gas, access_list, max_fee_per_blob_gas, blob_versioned_hashes,
+            // sidecar,
+            (None, _, _, None, None, None) => {
                 // Empty fields fall back to the canonical transaction schema.
                 Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
                     nonce: nonce.unwrap_or_default(),
@@ -111,6 +128,37 @@ impl TransactionRequest {
                     },
                     chain_id: 0,
                     access_list: access_list.unwrap_or_default(),
+                }))
+            }
+            // EIP4884
+            // all blob fields required
+            (
+                None,
+                _,
+                _,
+                Some(max_fee_per_blob_gas),
+                Some(blob_versioned_hashes),
+                Some(sidecar),
+            ) => {
+                // As per the EIP, we follow the same semantics as EIP-1559.
+                Some(TypedTransactionRequest::EIP4844(crate::EIP4844TransactionRequest {
+                    chain_id: 0,
+                    nonce: nonce.unwrap_or_default(),
+                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
+                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
+                    gas_limit: gas.unwrap_or_default(),
+                    value: value.unwrap_or_default(),
+                    input: data.unwrap_or_default(),
+                    kind: match to {
+                        Some(to) => TransactionKind::Call(to),
+                        None => TransactionKind::Create,
+                    },
+                    access_list: access_list.unwrap_or_default(),
+
+                    // eip-4844 specific.
+                    max_fee_per_blob_gas,
+                    blob_versioned_hashes,
+                    sidecar,
                 }))
             }
 
@@ -161,8 +209,8 @@ impl TransactionRequest {
     }
 
     /// Sets the input data for the transaction.
-    pub fn input(mut self, input: Bytes) -> Self {
-        self.data = Some(input);
+    pub fn input(mut self, input: impl Into<Bytes>) -> Self {
+        self.input = Some(input.into());
         self
     }
 

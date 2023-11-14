@@ -129,6 +129,7 @@ mod message;
 mod metrics;
 mod network;
 pub mod peers;
+pub mod protocol;
 mod session;
 mod state;
 mod swarm;
@@ -140,7 +141,7 @@ pub use discovery::{Discovery, DiscoveryEvent};
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
-pub use network::NetworkHandle;
+pub use network::{NetworkEvents, NetworkHandle};
 pub use peers::PeersConfig;
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
@@ -148,4 +149,4 @@ pub use session::{
     SessionLimits, SessionManager, SessionsConfig,
 };
 
-pub use reth_eth_wire::{DisconnectReason, HelloBuilder, HelloMessage};
+pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};

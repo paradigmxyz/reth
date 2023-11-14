@@ -52,7 +52,7 @@ use std::{
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<<DB as DatabaseGAT<'this>>::TX>;
@@ -1033,7 +1033,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
 
-    /// Returns the block with senders with matching number from database.
+    /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
     /// spot, and we want fast querying.**
@@ -1043,9 +1043,13 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     /// will return None.
     fn block_with_senders(
         &self,
-        block_number: BlockNumber,
+        id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
+        let Some(block_number) = self.convert_hash_or_number(id)? else {
+            return Ok(None);
+        };
+
         let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
 
         let ommers = self.ommers(block_number.into())?.unwrap_or_default();
@@ -2148,7 +2152,18 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
             let start = Instant::now();
             self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
-            transactions_elapsed += start.elapsed();
+            let elapsed = start.elapsed();
+            if elapsed > Duration::from_secs(1) {
+                warn!(
+                    target: "providers::db",
+                    ?block_number,
+                    tx_num = %next_tx_num,
+                    hash = %hash,
+                    ?elapsed,
+                    "Transaction insertion took too long"
+                );
+            }
+            transactions_elapsed += elapsed;
 
             if prune_modes
                 .and_then(|modes| modes.transaction_lookup)

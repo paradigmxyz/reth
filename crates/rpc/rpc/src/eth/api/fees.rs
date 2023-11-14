@@ -10,6 +10,7 @@ use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, 
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
+
 use tracing::debug;
 
 use super::FeeHistoryEntry;
@@ -30,6 +31,15 @@ where
         let (header, suggested_tip) = futures::try_join!(header, suggested_tip)?;
         let base_fee = header.and_then(|h| h.base_fee_per_gas).unwrap_or_default();
         Ok(suggested_tip + U256::from(base_fee))
+    }
+
+    /// Returns a suggestion for a gas price for blob transactions.
+    pub(crate) async fn blob_gas_price(&self) -> EthResult<U256> {
+        self.block(BlockNumberOrTag::Latest)
+            .await?
+            .and_then(|h| h.next_block_blob_fee())
+            .ok_or(EthApiError::ExcessBlobGasNotSet)
+            .map(U256::from)
     }
 
     /// Returns a suggestion for the priority fee (the tip)

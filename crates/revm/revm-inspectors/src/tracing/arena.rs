@@ -68,6 +68,7 @@ pub(crate) enum PushTraceKind {
 }
 
 impl PushTraceKind {
+    #[inline]
     fn is_attach_to_parent(&self) -> bool {
         matches!(self, PushTraceKind::PushAndAttachToParent)
     }
