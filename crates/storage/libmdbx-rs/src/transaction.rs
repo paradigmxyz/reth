@@ -165,8 +165,7 @@ where
         } else {
             let (sender, rx) = sync_channel(0);
             self.env
-                .txn_manager
-                .as_ref()
+                .txn_manager()
                 .unwrap()
                 .send(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender })
                 .unwrap();
@@ -409,8 +408,7 @@ impl<'env> Transaction<'env, RW, NoWriteMap> {
         txn_execute(&self.txn, |txn| {
             let (tx, rx) = sync_channel(0);
             self.env
-                .txn_manager
-                .as_ref()
+                .txn_manager()
                 .unwrap()
                 .send(TxnManagerMessage::Begin {
                     parent: TxnPtr(txn),
@@ -449,8 +447,7 @@ where
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env
-                        .txn_manager
-                        .as_ref()
+                        .txn_manager()
                         .unwrap()
                         .send(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender })
                         .unwrap();
