@@ -28,6 +28,7 @@ mod diff;
 mod get;
 mod list;
 mod snapshots;
+mod comparer;
 /// DB List TUI
 mod tui;
 
