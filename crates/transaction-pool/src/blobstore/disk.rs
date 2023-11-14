@@ -1,11 +1,12 @@
+use crate::{
+    blobstore::{disk::fs::File, BlobStoreSize},
+    BlobStore, BlobStoreError,
+};
 use parking_lot::RwLock;
-use reth_primitives::{B256, BlobTransactionSidecar, TxHash};
+use reth_primitives::{BlobTransactionSidecar, TxHash, B256};
 use schnellru::{ByLength, LruMap};
 use std::{fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::debug;
-use crate::{BlobStore, BlobStoreError};
-use crate::blobstore::BlobStoreSize;
-
 /// A blob store that stores blob data on disk.
 #[derive(Clone, Debug)]
 pub struct DiskFileBlobStore {
@@ -41,7 +42,10 @@ impl DiskFileBlobStore {
 
 impl BlobStore for DiskFileBlobStore {
     fn insert(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
-        todo!()
+        let file_path = self.inner.blob_dir.join(tx.to_string());
+        let mut file = File::create(file_path).unwrap();
+
+        Ok(())
     }
 
     fn insert_all(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
@@ -49,29 +53,99 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
-        todo!()
+        let file_path = self.inner.blob_dir.join(tx.to_string());
+        if file_path.exists() {
+            let file_size = file_path.metadata().unwrap().len();
+            fs::remove_file(&file_path).unwrap();
+            // Decrement the size tracker by the size of the removed file
+            self.inner.size_tracker.sub_size(file_size as usize);
+            // Decrement the blob count by 1
+            self.inner.size_tracker.update_len(self.inner.size_tracker.blobs_len() - 1);
+            Ok(())
+        } else {
+            Err(BlobStoreError::MissingSidecar(tx))
+        }
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
-        todo!()
+        if txs.is_empty() {
+            return Ok(())
+        }
+
+        let mut total_sub = 0;
+        let mut count_removed = 0;
+
+        for tx in txs {
+            let file_path = self.inner.blob_dir.join(tx.to_string());
+            if file_path.exists() {
+                let file_size = file_path.metadata().unwrap().len() as usize;
+                fs::remove_file(&file_path).unwrap();
+                total_sub += file_size;
+                count_removed += 1;
+            }
+        }
+
+        self.inner.size_tracker.sub_size(total_sub);
+        self.inner.size_tracker.update_len(self.inner.size_tracker.blobs_len() - count_removed);
+        Ok(())
     }
 
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
-        todo!()
+        let file_path = self.inner.blob_dir.join(tx.to_string());
+        if file_path.exists() {
+            let mut data = fs::read(&file_path).unwrap();
+            let sidecar = BlobTransactionSidecar::decode_inner(&mut data.as_slice())
+                .map_err(|e| BlobStoreError::DecodeError(e))
+                .unwrap();
+
+            Ok(Some(sidecar))
+        } else {
+            Ok(None)
+        }
     }
 
-    fn get_all(&self, txs: Vec<B256>) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
-        todo!()
+    fn get_all(
+        &self,
+        txs: Vec<B256>,
+    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
+        let mut items = Vec::with_capacity(txs.len());
+
+        for tx in txs {
+            let file_path = self.inner.blob_dir.join(tx.to_string());
+            if file_path.exists() {
+                let mut data = fs::read(&file_path).unwrap();
+                let sidecar = BlobTransactionSidecar::decode_inner(&mut data.as_slice())
+                    .map_err(|e| BlobStoreError::DecodeError(e))?;
+
+                items.push((tx, sidecar));
+            }
+        }
+
+        Ok(items)
     }
 
     fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
-        todo!()
+        let mut items = Vec::with_capacity(txs.len());
+
+        for tx in txs {
+            let file_path = self.inner.blob_dir.join(tx.to_string());
+            if file_path.exists() {
+                let mut data = fs::read(&file_path).unwrap();
+                let sidecar = BlobTransactionSidecar::decode_inner(&mut data.as_slice())
+                    .map_err(|e| BlobStoreError::DecodeError(e))
+                    .unwrap();
+
+                items.push(sidecar);
+            } else {
+                return Err(BlobStoreError::MissingSidecar(tx))
+            }
+        }
+
+        Ok(items)
     }
 
     fn data_size_hint(&self) -> Option<usize> {
-        Some(
-            self.inner.size_tracker.data_size()
-        )
+        Some(self.inner.size_tracker.data_size())
     }
 
     fn blobs_len(&self) -> usize {
@@ -88,7 +162,11 @@ struct DiskFileBlobStoreInner {
 impl DiskFileBlobStoreInner {
     /// Creates a new empty disk file blob store with the given maximum length of the blob cache.
     fn new(blob_dir: PathBuf, max_length: u32) -> Self {
-        Self { blob_dir, blob_cache: RwLock::new(LruMap::new(ByLength::new(max_length))), size_tracker: Default::default() }
+        Self {
+            blob_dir,
+            blob_cache: RwLock::new(LruMap::new(ByLength::new(max_length))),
+            size_tracker: Default::default(),
+        }
     }
 
     /// Retrieves the blob for the given transaction hash from the blob cache or disk.
@@ -115,19 +193,22 @@ impl DiskFileBlobStoreInner {
         let data = match fs::read(&path) {
             Ok(data) => data,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(BlobStoreError::Other(Box::new(
-                DiskFileBlobStoreError::FailedToReadBlobFile(tx, path, e),
-            ))),
+            Err(e) => {
+                return Err(BlobStoreError::Other(Box::new(
+                    DiskFileBlobStoreError::FailedToReadBlobFile(tx, path, e),
+                )))
+            }
         };
-        BlobTransactionSidecar::decode(&data).map(Some).map_err(BlobStoreError::DecodeError)
+        BlobTransactionSidecar::decode(&data).map(Some).map_err(BlobStoreError::DecodeError);
         todo!()
     }
 
-
-    fn get_all(&self, txs: Vec<B256>) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
+    fn get_all(
+        &self,
+        txs: Vec<B256>,
+    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError> {
         todo!()
     }
-
 }
 
 impl fmt::Debug for DiskFileBlobStoreInner {
