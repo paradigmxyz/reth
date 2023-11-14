@@ -71,7 +71,7 @@ where
     E: EnvironmentKind,
 {
     env: *mut ffi::MDBX_env,
-    pub(crate) txn_manager: Option<SyncSender<TxnManagerMessage>>,
+    txn_manager: Option<SyncSender<TxnManagerMessage>>,
     _marker: PhantomData<E>,
 }
 
@@ -80,8 +80,7 @@ where
     E: EnvironmentKind,
 {
     /// Creates a new builder for specifying options for opening an MDBX environment.
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> EnvironmentBuilder<E> {
+    pub fn builder() -> EnvironmentBuilder<E> {
         EnvironmentBuilder {
             flags: EnvironmentFlags::default(),
             max_readers: None,
@@ -98,15 +97,25 @@ where
         }
     }
 
+    /// Returns the manager that handles transaction messages.
+    ///
+    /// Requires [Mode::ReadWrite] and returns None otherwise.
+    #[inline]
+    pub(crate) fn txn_manager(&self) -> Option<&SyncSender<TxnManagerMessage>> {
+        self.txn_manager.as_ref()
+    }
+
     /// Returns a raw pointer to the underlying MDBX environment.
     ///
     /// The caller **must** ensure that the pointer is not dereferenced after the lifetime of the
     /// environment.
+    #[inline]
     pub fn env(&self) -> *mut ffi::MDBX_env {
         self.env
     }
 
     /// Create a read-only transaction for use with the environment.
+    #[inline]
     pub fn begin_ro_txn(&self) -> Result<Transaction<'_, RO, E>> {
         Transaction::new(self)
     }
@@ -114,7 +123,7 @@ where
     /// Create a read-write transaction for use with the environment. This method will block while
     /// there are any other read-write transactions open on the environment.
     pub fn begin_rw_txn(&self) -> Result<Transaction<'_, RW, E>> {
-        let sender = self.txn_manager.as_ref().ok_or(Error::Access)?;
+        let sender = self.txn_manager().ok_or(Error::Access)?;
         let txn = loop {
             let (tx, rx) = sync_channel(0);
             sender
@@ -177,7 +186,7 @@ where
     /// # use reth_libmdbx::Environment;
     /// # use reth_libmdbx::NoWriteMap;
     /// let dir = tempfile::tempdir().unwrap();
-    /// let env = Environment::<NoWriteMap>::new().open(dir.path()).unwrap();
+    /// let env = Environment::<NoWriteMap>::builder().open(dir.path()).unwrap();
     /// let info = env.info().unwrap();
     /// let stat = env.stat().unwrap();
     /// let freelist = env.freelist().unwrap();

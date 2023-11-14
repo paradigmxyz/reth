@@ -52,7 +52,7 @@ mod test_utils {
         let dir = tempdir().unwrap();
 
         let env = {
-            let mut builder = Environment::new();
+            let mut builder = Environment::builder();
             builder.set_max_dbs(2);
             builder
                 .set_geometry(Geometry { size: Some(1_000_000..1_000_000), ..Default::default() });
