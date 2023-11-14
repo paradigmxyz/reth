@@ -120,7 +120,7 @@ impl DiskFileBlobStoreInner {
     }
 
     fn create_blob_dir(&self) -> Result<(), DiskFileBlobStoreError> {
-        debug!(target:"txpool::blob", blob_dir = ?self.blob_dir, "Clearing blob store");
+        debug!(target:"txpool::blob", blob_dir = ?self.blob_dir, "Creating blob store");
         fs::create_dir_all(&self.blob_dir)
             .map_err(|e| DiskFileBlobStoreError::Open(self.blob_dir.clone(), e))
     }
