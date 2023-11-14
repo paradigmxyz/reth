@@ -15,7 +15,7 @@ use reth_provider::{
 };
 use reth_snapshot::{segments, segments::Segment};
 use std::{
-    path::{Path, PathBuf},
+    path::{Path},
     sync::Arc,
 };
 
