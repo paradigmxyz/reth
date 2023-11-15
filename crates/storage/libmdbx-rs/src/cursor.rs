@@ -3,7 +3,7 @@ use crate::{
     flags::*,
     mdbx_try_optional,
     transaction::{TransactionKind, TransactionPtr, RW},
-    EnvironmentKind, TableObject, Transaction,
+    TableObject, Transaction,
 };
 use ffi::{
     MDBX_cursor_op, MDBX_FIRST, MDBX_FIRST_DUP, MDBX_GET_BOTH, MDBX_GET_BOTH_RANGE,
@@ -28,10 +28,7 @@ impl<'txn, K> Cursor<'txn, K>
 where
     K: TransactionKind,
 {
-    pub(crate) fn new<E: EnvironmentKind>(
-        txn: &'txn Transaction<'_, K, E>,
-        dbi: ffi::MDBX_dbi,
-    ) -> Result<Self> {
+    pub(crate) fn new(txn: &'txn Transaction<'_, K>, dbi: ffi::MDBX_dbi) -> Result<Self> {
         let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
         let txn = txn.txn_ptr();
         unsafe {
