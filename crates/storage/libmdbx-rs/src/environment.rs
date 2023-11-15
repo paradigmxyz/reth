@@ -98,13 +98,27 @@ impl Environment {
     }
 
     /// Returns true if the environment was opened as WRITEMAP.
+    #[inline]
     pub fn is_write_map(&self) -> bool {
         self.inner.env_kind.is_write_map()
     }
 
     /// Returns the kind of the environment.
+    #[inline]
     pub fn env_kind(&self) -> EnvironmentKind {
         self.inner.env_kind
+    }
+
+    /// Returns true if the environment was opened in [Mode::ReadWrite] mode.
+    #[inline]
+    pub fn is_read_write(&self) -> bool {
+        self.inner.txn_manager.is_some()
+    }
+
+    /// Returns true if the environment was opened in [Mode::ReadOnly] mode.
+    #[inline]
+    pub fn is_read_only(&self) -> bool {
+        self.inner.txn_manager.is_none()
     }
 
     /// Returns the manager that handles transaction messages.
@@ -113,15 +127,6 @@ impl Environment {
     #[inline]
     pub(crate) fn txn_manager(&self) -> Option<&SyncSender<TxnManagerMessage>> {
         self.inner.txn_manager.as_ref()
-    }
-
-    /// Returns a raw pointer to the underlying MDBX environment.
-    ///
-    /// The caller **must** ensure that the pointer is not dereferenced after the lifetime of the
-    /// environment.
-    #[inline]
-    pub fn env(&self) -> *mut ffi::MDBX_env {
-        self.inner.env
     }
 
     /// Create a read-only transaction for use with the environment.
@@ -133,7 +138,7 @@ impl Environment {
     /// Create a read-write transaction for use with the environment. This method will block while
     /// there are any other read-write transactions open on the environment.
     pub fn begin_rw_txn(&self) -> Result<Transaction<'_, RW>> {
-        let sender = self.txn_manager().ok_or(Error::Access)?;
+        let sender = self.txn_manager().ok_or(Error::WriteTransactionUnsupportedInReadOnlyMode)?;
         let txn = loop {
             let (tx, rx) = sync_channel(0);
             sender
@@ -154,9 +159,32 @@ impl Environment {
         Ok(Transaction::new_from_ptr(self, txn.0))
     }
 
+    /// Returns a raw pointer to the underlying MDBX environment.
+    ///
+    /// The caller **must** ensure that the pointer is never dereferenced after the environment has
+    /// been dropped.
+    #[inline]
+    pub(crate) fn env_ptr(&self) -> *mut ffi::MDBX_env {
+        self.inner.env
+    }
+
+    /// Executes the given closure once
+    ///
+    /// This is only intended to be used when accessing mdbx ffi functions directly is required.
+    ///
+    /// The caller **must** ensure that the pointer is only used within the closure.
+    #[inline]
+    #[doc(hidden)]
+    pub fn with_raw_env_ptr<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_env) -> T,
+    {
+        (f)(self.env_ptr())
+    }
+
     /// Flush the environment data buffers to disk.
     pub fn sync(&self, force: bool) -> Result<bool> {
-        mdbx_result(unsafe { ffi::mdbx_env_sync_ex(self.env(), force, false) })
+        mdbx_result(unsafe { ffi::mdbx_env_sync_ex(self.env_ptr(), force, false) })
     }
 
     /// Retrieves statistics about this environment.
@@ -164,7 +192,7 @@ impl Environment {
         unsafe {
             let mut stat = Stat::new();
             mdbx_result(ffi::mdbx_env_stat_ex(
-                self.env(),
+                self.env_ptr(),
                 ptr::null(),
                 stat.mdb_stat(),
                 size_of::<Stat>(),
@@ -178,7 +206,7 @@ impl Environment {
         unsafe {
             let mut info = Info(mem::zeroed());
             mdbx_result(ffi::mdbx_env_info_ex(
-                self.env(),
+                self.env_ptr(),
                 ptr::null(),
                 &mut info.0,
                 size_of::<Info>(),
@@ -237,8 +265,15 @@ impl Environment {
 /// This holds the raw pointer to the MDBX environment and the transaction manager.
 /// The env is opened via [mdbx_env_create](ffi::mdbx_env_create) and closed when this type drops.
 struct EnvironmentInner {
+    /// The raw pointer to the MDBX environment.
+    ///
+    /// Accessing the environment is thread-safe as long as long as this type exists.
     env: *mut ffi::MDBX_env,
+    /// Whether the environment was opened as WRITEMAP.
     env_kind: EnvironmentKind,
+    /// the sender half of the transaction manager channel
+    ///
+    /// Only set if the environment was opened in [Mode::ReadWrite] mode.
     txn_manager: Option<SyncSender<TxnManagerMessage>>,
 }
 
