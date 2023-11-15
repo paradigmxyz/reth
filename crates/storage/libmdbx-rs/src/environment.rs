@@ -221,9 +221,9 @@ where
     }
 }
 
-/// Container type for Environment internals
+/// Container type for Environment internals.
 ///
-/// This olds the the raw pointer to the MDBX environment and the transaction manager.
+/// This holds the raw pointer to the MDBX environment and the transaction manager.
 /// The env is opened via [mdbx_env_create](ffi::mdbx_env_create) and closed when this type drops.
 struct EnvironmentInner<E> {
     env: *mut ffi::MDBX_env,
