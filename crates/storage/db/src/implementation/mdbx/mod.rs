@@ -93,6 +93,7 @@ impl<E: EnvironmentKind> Env<E> {
             // worsens it for random access (which is our access pattern outside of sync)
             no_rdahead: true,
             coalesce: true,
+            liforeclaim: true,
             ..Default::default()
         });
         // configure more readers
