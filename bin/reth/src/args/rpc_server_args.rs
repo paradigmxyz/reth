@@ -10,6 +10,7 @@ use crate::{
         config::RethRpcConfig,
         ext::RethNodeCommandConfig,
     },
+    utils::get_or_create_jwt_secret_from_path,
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -449,15 +450,7 @@ impl RethRpcConfig for RpcServerArgs {
                 debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
                 JwtSecret::from_file(fpath)
             }
-            None => {
-                if default_jwt_path.exists() {
-                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
-                    JwtSecret::from_file(&default_jwt_path)
-                } else {
-                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
-                    JwtSecret::try_create(&default_jwt_path)
-                }
-            }
+            None => get_or_create_jwt_secret_from_path(&default_jwt_path),
         }
     }
 
