@@ -154,7 +154,7 @@ impl<DB: Database> Snapshotter<DB> {
     /// Looks into the snapshot directory to find the highest snapshotted block of each segment, and
     /// notifies every tracker.
     fn update_highest_snapshots_tracker(&mut self) -> RethResult<()> {
-        // It walks over the directory and parses the snapshot filenames extracing `SnapshotSegment`
+        // It walks over the directory and parses the snapshot filenames extracting `SnapshotSegment`
         // and their inclusive range. It then takes the maximum block number for each specific
         // segment.
         for (segment, block_range, _) in iter_snapshots(&self.snapshots_path)? {
