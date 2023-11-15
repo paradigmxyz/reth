@@ -5,6 +5,9 @@ use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
     revm::{compat::into_reth_log, env::tx_env_with_recovered},
+    revm_primitives::{
+        BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
+    },
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     Receipts, SealedBlock, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
@@ -15,9 +18,6 @@ use reth_revm::{
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
-use revm_primitives::{
-    BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
-};
 use std::time::Instant;
 
 /// Configured [BlockEnv] and [CfgEnv] for a pending block

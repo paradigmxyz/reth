@@ -14,8 +14,12 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    revm::env::tx_env_with_recovered, Account, Address, Block, BlockId, BlockNumberOrTag, Bytes,
-    TransactionSigned, B256,
+    revm::env::tx_env_with_recovered,
+    revm_primitives::{
+        db::{DatabaseCommit, DatabaseRef},
+        BlockEnv, CfgEnv,
+    },
+    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
@@ -37,10 +41,6 @@ use reth_tasks::TaskSpawner;
 use revm::{
     db::{CacheDB, EmptyDB},
     primitives::Env,
-};
-use revm_primitives::{
-    db::{DatabaseCommit, DatabaseRef},
-    BlockEnv, CfgEnv,
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};

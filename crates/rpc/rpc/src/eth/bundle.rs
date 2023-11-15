@@ -9,14 +9,17 @@ use crate::{
     },
     BlockingTaskGuard,
 };
-use reth_primitives::{keccak256, U256};
+use reth_primitives::{
+    keccak256,
+    revm_primitives::db::{DatabaseCommit, DatabaseRef},
+    U256,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use revm::{
     db::CacheDB,
     primitives::{Env, ResultAndState, TxEnv},
 };
-use revm_primitives::db::{DatabaseCommit, DatabaseRef};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
