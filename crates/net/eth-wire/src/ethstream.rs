@@ -242,9 +242,14 @@ where
         let msg = match ProtocolMessage::decode_message(*this.version, &mut bytes.as_ref()) {
             Ok(m) => m,
             Err(err) => {
+                let msg = if bytes.len() > 50 {
+                    format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
+                } else {
+                    format!("{:02x?}", bytes)
+                };
                 debug!(
                     version=?this.version,
-                    msg=format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..]),
+                    %msg,
                     "failed to decode protocol message"
                 );
                 return Poll::Ready(Some(Err(err)))
