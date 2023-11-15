@@ -31,11 +31,11 @@ pub enum DatabaseEnvKind {
     RW,
 }
 
-/// Wrapper for the libmdbx environment.
+/// Wrapper for the libmdbx environment: [Environment]
 #[derive(Debug)]
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
-    pub inner: Environment,
+    inner: Environment,
     /// Whether to record metrics or not.
     with_metrics: bool,
 }
