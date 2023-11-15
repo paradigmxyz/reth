@@ -4,7 +4,7 @@
 //! See <https://openethereum.github.io/JSONRPC-trace-module>
 
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
 use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},
@@ -211,11 +211,11 @@ pub enum CallType {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallAction {
+    pub call_type: CallType,
+    /// The gas available for executing the call.
     /// Address of the sending account.
     pub from: Address,
     /// The type of the call.
-    pub call_type: CallType,
-    /// The gas available for executing the call.
     pub gas: U64,
     /// The input data provided to the call.
     pub input: Bytes,
@@ -231,12 +231,12 @@ pub struct CallAction {
 pub struct CreateAction {
     /// The address of the creator.
     pub from: Address,
-    /// The value with which the new account is endowed.
-    pub value: U256,
     /// The gas available for the creation init code.
     pub gas: U64,
     /// The init code.
     pub init: Bytes,
+    /// The value with which the new account is endowed.
+    pub value: U256,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -251,10 +251,10 @@ pub enum RewardType {
 pub struct RewardAction {
     /// Author's address.
     pub author: Address,
-    /// Reward amount.
-    pub value: U256,
     /// Reward type.
     pub reward_type: RewardType,
+    /// Reward amount.
+    pub value: U256,
 }
 
 /// Represents a _selfdestruct_ action fka `suicide`.
@@ -263,10 +263,10 @@ pub struct RewardAction {
 pub struct SelfdestructAction {
     /// destroyed/suicided address.
     pub address: Address,
-    /// destroyed contract heir.
-    pub refund_address: Address,
     /// Balance of the contract just before it was destroyed.
     pub balance: U256,
+    /// destroyed contract heir.
+    pub refund_address: Address,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -279,9 +279,9 @@ pub struct CallOutput {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateOutput {
-    pub gas_used: U64,
-    pub code: Bytes,
     pub address: Address,
+    pub code: Bytes,
+    pub gas_used: U64,
 }
 
 /// Represents the output of a trace.
@@ -327,10 +327,9 @@ pub struct TransactionTrace {
     pub trace_address: Vec<usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalizedTransactionTrace {
-    #[serde(flatten)]
     pub trace: TransactionTrace,
     /// Hash of the block, if not pending
     ///
@@ -348,6 +347,70 @@ pub struct LocalizedTransactionTrace {
     /// Transaction index within the block, None if pending.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_position: Option<u64>,
+}
+
+impl Serialize for LocalizedTransactionTrace {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("LocalizedTransactionTrace", 8)?;
+
+        match &self.trace.action {
+            Action::Call(_call_action) => {
+                s.serialize_field("action", _call_action)?;
+            }
+            Action::Create(_create_action) => {
+                s.serialize_field("action", _create_action)?;
+            }
+            Action::Selfdestruct(_selfdestruct_action) => {
+                s.serialize_field("action", _selfdestruct_action)?;
+            }
+            Action::Reward(_reward_action) => {
+                s.serialize_field("action", _reward_action)?;
+            }
+        }
+        if let Some(block_hash) = self.block_hash {
+            s.serialize_field("blockHash", &block_hash)?;
+        }
+        if let Some(block_number) = self.block_number {
+            s.serialize_field("blockNumber", &block_number)?;
+        }
+        if let Some(transaction_hash) = self.transaction_hash {
+            s.serialize_field("transactionHash", &transaction_hash)?;
+        }
+        if let Some(transaction_position) = self.transaction_position {
+            s.serialize_field("transactionPosition", &transaction_position)?;
+        }
+        match &self.trace.result {
+            Some(TraceOutput::Call(_call)) => {
+                s.serialize_field("result", _call)?;
+            }
+            Some(TraceOutput::Create(_create)) => {
+                s.serialize_field("result", _create)?;
+            }
+            None => {}
+        }
+        s.serialize_field("subtraces", &self.trace.subtraces)?;
+        s.serialize_field("traceAddress", &self.trace.trace_address)?;
+
+        match &self.trace.action {
+            Action::Call(_call_action) => {
+                s.serialize_field("type", "call")?;
+            }
+            Action::Create(_create_action) => {
+                s.serialize_field("type", "create")?;
+            }
+            Action::Selfdestruct(_selfdestruct_action) => {
+                s.serialize_field("type", "selfdestruct")?;
+            }
+            Action::Reward(_reward_action) => {
+                s.serialize_field("type", "reward")?;
+            }
+        }
+
+        s.end()
+    }
 }
 
 /// A record of a full VM trace for a CALL/CREATE.
@@ -413,6 +476,8 @@ pub struct StorageDelta {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{json, Value};
+    use std::str::FromStr;
 
     #[test]
     fn test_transaction_trace() {
@@ -468,5 +533,165 @@ mod tests {
         let input = input.replace("suicide", "selfdestruct");
         let val = serde_json::from_str::<TransactionTrace>(&input).unwrap();
         assert!(val.action.is_selfdestruct());
+    }
+
+    #[derive(Debug)]
+    struct TraceTestCase {
+        trace: LocalizedTransactionTrace,
+        expected_json: Value,
+    }
+
+    #[test]
+    fn test_serialization_order() {
+        let test_cases = vec![
+            TraceTestCase {
+                trace: LocalizedTransactionTrace {
+                    trace: TransactionTrace {
+                        action: Action::Call(CallAction {
+                            from: "0x4f4495243837681061c4743b74b3eedf548d56a5".parse::<Address>().unwrap(),
+                            call_type: CallType::DelegateCall,
+                            gas: U64::from(3148955),
+                            input: Bytes::from_str("0x585a9fd40000000000000000000000000000000000000000000000000000000000000040a47c5ad9a4af285720eae6cc174a9c75c5bbaf973b00f1a0c191327445b6581000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000ce16f69375520ab01377ce7b88f5ba8c48f8d666f61490331372e432315cd97447e3bc452d6c73a6e0536260a88ddab46f85c88d00000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000aab8cf0fbfb038751339cb61161fa11789b41a78f1b7b0e12cf8e467d403590b7a5f26f0000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000646616e746f6d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a3078636531364636393337353532306162303133373763653742383866354241384334384638443636360000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000045553444300000000000000000000000000000000000000000000000000000000").unwrap(),
+                            to:  "0x99b5fa03a5ea4315725c43346e55a6a6fbd94098".parse::<Address>().unwrap(),
+                            value: U256::from(0),
+                        }),
+                        error: None,
+                        result: Some(TraceOutput::Call(CallOutput { gas_used: U64::from(32364), output: Bytes::new() })),
+                        subtraces: 0,
+                        trace_address: vec![0, 10, 0],
+                    },
+                    block_hash: Some(B256::ZERO),
+                    block_number: Some(18557272),
+                    transaction_hash: Some(B256::from_str("0x54160ddcdbfaf98a43a43c328ebd44aa99faa765e0daa93e61145b06815a4071").unwrap()),
+                    transaction_position: Some(102),
+                },
+                expected_json: json!({
+                    "action": {
+                        "from": "0x4f4495243837681061c4743b74b3eedf548d56a5",
+                        "callType": "delegatecall",
+                        "gas": "0x300c9b",
+                        "input": "0x585a9fd40000000000000000000000000000000000000000000000000000000000000040a47c5ad9a4af285720eae6cc174a9c75c5bbaf973b00f1a0c191327445b6581000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000ce16f69375520ab01377ce7b88f5ba8c48f8d666f61490331372e432315cd97447e3bc452d6c73a6e0536260a88ddab46f85c88d00000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000aab8cf0fbfb038751339cb61161fa11789b41a78f1b7b0e12cf8e467d403590b7a5f26f0000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000646616e746f6d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a3078636531364636393337353532306162303133373763653742383866354241384334384638443636360000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000045553444300000000000000000000000000000000000000000000000000000000",
+                        "to": "0x99b5fa03a5ea4315725c43346e55a6a6fbd94098",
+                        "value": "0x0"
+                    },
+                    "blockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    "blockNumber": 18557272,
+                    "result": {
+                        "gasUsed": "0x7e6c",
+                        "output": "0x"
+                    },
+                    "subtraces": 0,
+                    "traceAddress": [
+                        0,
+                        10,
+                        0
+                    ],
+                    "transactionHash": "0x54160ddcdbfaf98a43a43c328ebd44aa99faa765e0daa93e61145b06815a4071",
+                    "transactionPosition": 102,
+                    "type": "call"
+                }),
+            },
+            TraceTestCase {
+                trace: LocalizedTransactionTrace {
+                    trace: TransactionTrace {
+                        action: Action::Create(CreateAction{
+                            from: "0x4f4495243837681061c4743b74b3eedf548d56a5".parse::<Address>().unwrap(),
+                            gas: U64::from(3438907),
+                            init: Bytes::from_str("0x6080604052600160005534801561001557600080fd5b50610324806100256000396000f3fe608060405234801561001057600080fd5b50600436106100355760003560e01c8062f55d9d1461003a5780631cff79cd1461004f575b600080fd5b61004d6100483660046101da565b610079565b005b61006261005d3660046101fc565b6100bb565b60405161007092919061027f565b60405180910390f35b6002600054141561009d5760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff8116ff5b60006060600260005414156100e35760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff85163b610136576040517f6f7c43f100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b8473ffffffffffffffffffffffffffffffffffffffff16848460405161015d9291906102de565b6000604051808303816000865af19150503d806000811461019a576040519150601f19603f3d011682016040523d82523d6000602084013e61019f565b606091505b50600160005590969095509350505050565b803573ffffffffffffffffffffffffffffffffffffffff811681146101d557600080fd5b919050565b6000602082840312156101ec57600080fd5b6101f5826101b1565b9392505050565b60008060006040848603121561021157600080fd5b61021a846101b1565b9250602084013567ffffffffffffffff8082111561023757600080fd5b818601915086601f83011261024b57600080fd5b81358181111561025a57600080fd5b87602082850101111561026c57600080fd5b6020830194508093505050509250925092565b821515815260006020604081840152835180604085015260005b818110156102b557858101830151858201606001528201610299565b818111156102c7576000606083870101525b50601f01601f191692909201606001949350505050565b818382376000910190815291905056fea264697066735822122032cb5e746816b7fac95205c068b30da37bd40119a57265be331c162cae74712464736f6c63430008090033").unwrap(),
+                            value: U256::from(0),
+                        }),
+                        error: None,
+                        result: Some(TraceOutput::Call(CallOutput { gas_used: U64::from(183114), output: Bytes::new() })),
+                        subtraces: 0,
+                        trace_address: vec![0, 10, 0],
+                    },
+                    block_hash: Some(B256::ZERO),
+                    block_number: Some(18557272),
+                    transaction_hash: Some(B256::from_str("0x54160ddcdbfaf98a43a43c328ebd44aa99faa765e0daa93e61145b06815a4071").unwrap()),
+                    transaction_position: Some(102),
+                },
+                expected_json: json!({
+                    "action": {
+                        "from": "0x4f4495243837681061c4743b74b3eedf548d56a5",
+                        "gas": "0x34793b",
+                        "init": "0x6080604052600160005534801561001557600080fd5b50610324806100256000396000f3fe608060405234801561001057600080fd5b50600436106100355760003560e01c8062f55d9d1461003a5780631cff79cd1461004f575b600080fd5b61004d6100483660046101da565b610079565b005b61006261005d3660046101fc565b6100bb565b60405161007092919061027f565b60405180910390f35b6002600054141561009d5760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff8116ff5b60006060600260005414156100e35760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff85163b610136576040517f6f7c43f100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b8473ffffffffffffffffffffffffffffffffffffffff16848460405161015d9291906102de565b6000604051808303816000865af19150503d806000811461019a576040519150601f19603f3d011682016040523d82523d6000602084013e61019f565b606091505b50600160005590969095509350505050565b803573ffffffffffffffffffffffffffffffffffffffff811681146101d557600080fd5b919050565b6000602082840312156101ec57600080fd5b6101f5826101b1565b9392505050565b60008060006040848603121561021157600080fd5b61021a846101b1565b9250602084013567ffffffffffffffff8082111561023757600080fd5b818601915086601f83011261024b57600080fd5b81358181111561025a57600080fd5b87602082850101111561026c57600080fd5b6020830194508093505050509250925092565b821515815260006020604081840152835180604085015260005b818110156102b557858101830151858201606001528201610299565b818111156102c7576000606083870101525b50601f01601f191692909201606001949350505050565b818382376000910190815291905056fea264697066735822122032cb5e746816b7fac95205c068b30da37bd40119a57265be331c162cae74712464736f6c63430008090033",
+                        "value": "0x0"
+                    },
+                    "blockHash": "0xd5ac5043011d4f16dba7841fa760c4659644b78f663b901af4673b679605ed0d",
+                    "blockNumber": 18557272,
+                    "result": {
+                        "address": "0x7eb6c6c1db08c0b9459a68cfdcedab64f319c138",
+                        "code": "0x608060405234801561001057600080fd5b50600436106100355760003560e01c8062f55d9d1461003a5780631cff79cd1461004f575b600080fd5b61004d6100483660046101da565b610079565b005b61006261005d3660046101fc565b6100bb565b60405161007092919061027f565b60405180910390f35b6002600054141561009d5760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff8116ff5b60006060600260005414156100e35760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff85163b610136576040517f6f7c43f100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b8473ffffffffffffffffffffffffffffffffffffffff16848460405161015d9291906102de565b6000604051808303816000865af19150503d806000811461019a576040519150601f19603f3d011682016040523d82523d6000602084013e61019f565b606091505b50600160005590969095509350505050565b803573ffffffffffffffffffffffffffffffffffffffff811681146101d557600080fd5b919050565b6000602082840312156101ec57600080fd5b6101f5826101b1565b9392505050565b60008060006040848603121561021157600080fd5b61021a846101b1565b9250602084013567ffffffffffffffff8082111561023757600080fd5b818601915086601f83011261024b57600080fd5b81358181111561025a57600080fd5b87602082850101111561026c57600080fd5b6020830194508093505050509250925092565b821515815260006020604081840152835180604085015260005b818110156102b557858101830151858201606001528201610299565b818111156102c7576000606083870101525b50601f01601f191692909201606001949350505050565b818382376000910190815291905056fea264697066735822122032cb5e746816b7fac95205c068b30da37bd40119a57265be331c162cae74712464736f6c63430008090033",
+                        "gasUsed": "0x2cb4a"
+                    },
+                    "subtraces": 0,
+                    "traceAddress": [
+                        0,
+                        7,
+                        0,
+                        0
+                    ],
+                    "transactionHash": "0x54160ddcdbfaf98a43a43c328ebd44aa99faa765e0daa93e61145b06815a4071",
+                    "transactionPosition": 102,
+                    "type": "create"
+                }),
+            },
+            TraceTestCase {
+                trace: LocalizedTransactionTrace {
+                    trace: TransactionTrace {
+                        action: Action::Create(CreateAction{
+                            from: "0x4f4495243837681061c4743b74b3eedf548d56a5".parse::<Address>().unwrap(),
+                            gas: U64::from(3438907),
+                            init: Bytes::from_str("0x6080604052600160005534801561001557600080fd5b50610324806100256000396000f3fe608060405234801561001057600080fd5b50600436106100355760003560e01c8062f55d9d1461003a5780631cff79cd1461004f575b600080fd5b61004d6100483660046101da565b610079565b005b61006261005d3660046101fc565b6100bb565b60405161007092919061027f565b60405180910390f35b6002600054141561009d5760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff8116ff5b60006060600260005414156100e35760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff85163b610136576040517f6f7c43f100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b8473ffffffffffffffffffffffffffffffffffffffff16848460405161015d9291906102de565b6000604051808303816000865af19150503d806000811461019a576040519150601f19603f3d011682016040523d82523d6000602084013e61019f565b606091505b50600160005590969095509350505050565b803573ffffffffffffffffffffffffffffffffffffffff811681146101d557600080fd5b919050565b6000602082840312156101ec57600080fd5b6101f5826101b1565b9392505050565b60008060006040848603121561021157600080fd5b61021a846101b1565b9250602084013567ffffffffffffffff8082111561023757600080fd5b818601915086601f83011261024b57600080fd5b81358181111561025a57600080fd5b87602082850101111561026c57600080fd5b6020830194508093505050509250925092565b821515815260006020604081840152835180604085015260005b818110156102b557858101830151858201606001528201610299565b818111156102c7576000606083870101525b50601f01601f191692909201606001949350505050565b818382376000910190815291905056fea264697066735822122032cb5e746816b7fac95205c068b30da37bd40119a57265be331c162cae74712464736f6c63430008090033").unwrap(),
+                            value: U256::from(0),
+                        }),
+                        error: None,
+                        result: Some(TraceOutput::Call(CallOutput { gas_used: U64::from(183114), output: Bytes::new() })),
+                        subtraces: 0,
+                        trace_address: vec![0, 10, 0],
+                    },
+                    block_hash: Some(B256::ZERO),
+                    block_number: Some(18557272),
+                    transaction_hash: Some(B256::from_str("0x54160ddcdbfaf98a43a43c328ebd44aa99faa765e0daa93e61145b06815a4071").unwrap()),
+                    transaction_position: Some(102),
+                },
+                expected_json: json!({
+                    "action": {
+                        "from": "0x4f4495243837681061c4743b74b3eedf548d56a5",
+                        "gas": "0x34793b",
+                        "init": "0x6080604052600160005534801561001557600080fd5b50610324806100256000396000f3fe608060405234801561001057600080fd5b50600436106100355760003560e01c8062f55d9d1461003a5780631cff79cd1461004f575b600080fd5b61004d6100483660046101da565b610079565b005b61006261005d3660046101fc565b6100bb565b60405161007092919061027f565b60405180910390f35b6002600054141561009d5760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff8116ff5b60006060600260005414156100e35760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff85163b610136576040517f6f7c43f100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b8473ffffffffffffffffffffffffffffffffffffffff16848460405161015d9291906102de565b6000604051808303816000865af19150503d806000811461019a576040519150601f19603f3d011682016040523d82523d6000602084013e61019f565b606091505b50600160005590969095509350505050565b803573ffffffffffffffffffffffffffffffffffffffff811681146101d557600080fd5b919050565b6000602082840312156101ec57600080fd5b6101f5826101b1565b9392505050565b60008060006040848603121561021157600080fd5b61021a846101b1565b9250602084013567ffffffffffffffff8082111561023757600080fd5b818601915086601f83011261024b57600080fd5b81358181111561025a57600080fd5b87602082850101111561026c57600080fd5b6020830194508093505050509250925092565b821515815260006020604081840152835180604085015260005b818110156102b557858101830151858201606001528201610299565b818111156102c7576000606083870101525b50601f01601f191692909201606001949350505050565b818382376000910190815291905056fea264697066735822122032cb5e746816b7fac95205c068b30da37bd40119a57265be331c162cae74712464736f6c63430008090033",
+                        "value": "0x0"
+                    },
+                    "blockHash": "0xd5ac5043011d4f16dba7841fa760c4659644b78f663b901af4673b679605ed0d",
+                    "blockNumber": 18557272,
+                    "result": {
+                        "address": "0x7eb6c6c1db08c0b9459a68cfdcedab64f319c138",
+                        "code": "0x608060405234801561001057600080fd5b50600436106100355760003560e01c8062f55d9d1461003a5780631cff79cd1461004f575b600080fd5b61004d6100483660046101da565b610079565b005b61006261005d3660046101fc565b6100bb565b60405161007092919061027f565b60405180910390f35b6002600054141561009d5760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff8116ff5b60006060600260005414156100e35760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff85163b610136576040517f6f7c43f100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b8473ffffffffffffffffffffffffffffffffffffffff16848460405161015d9291906102de565b6000604051808303816000865af19150503d806000811461019a576040519150601f19603f3d011682016040523d82523d6000602084013e61019f565b606091505b50600160005590969095509350505050565b803573ffffffffffffffffffffffffffffffffffffffff811681146101d557600080fd5b919050565b6000602082840312156101ec57600080fd5b6101f5826101b1565b9392505050565b60008060006040848603121561021157600080fd5b61021a846101b1565b9250602084013567ffffffffffffffff8082111561023757600080fd5b818601915086601f83011261024b57600080fd5b81358181111561025a57600080fd5b87602082850101111561026c57600080fd5b6020830194508093505050509250925092565b821515815260006020604081840152835180604085015260005b818110156102b557858101830151858201606001528201610299565b818111156102c7576000606083870101525b50601f01601f191692909201606001949350505050565b818382376000910190815291905056fea264697066735822122032cb5e746816b7fac95205c068b30da37bd40119a57265be331c162cae74712464736f6c63430008090033",
+                        "gasUsed": "0x2cb4a"
+                    },
+                    "subtraces": 0,
+                    "traceAddress": [
+                        0,
+                        7,
+                        0,
+                        0
+                    ],
+                    "transactionHash": "0x54160ddcdbfaf98a43a43c328ebd44aa99faa765e0daa93e61145b06815a4071",
+                    "transactionPosition": 102,
+                    "type": "create"
+                }),
+            }
+        ];
+
+        for (i, test_case) in test_cases.iter().enumerate() {
+            let serialized = serde_json::to_string(&test_case.trace).unwrap();
+            let actual_json: Value = serde_json::from_str(&serialized).unwrap();
+
+            assert_eq!(
+                actual_json, test_case.expected_json,
+                "Test case {} failed; Trace: {:?}",
+                i, test_case.trace
+            );
+        }
     }
 }
