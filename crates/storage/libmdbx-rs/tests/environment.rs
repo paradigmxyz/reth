@@ -2,20 +2,18 @@ use byteorder::{ByteOrder, LittleEndian};
 use reth_libmdbx::*;
 use tempfile::tempdir;
 
-type Environment = reth_libmdbx::Environment<NoWriteMap>;
-
 #[test]
 fn test_open() {
     let dir = tempdir().unwrap();
 
     // opening non-existent env with read-only should fail
-    assert!(Environment::new().set_flags(Mode::ReadOnly.into()).open(dir.path()).is_err());
+    assert!(Environment::builder().set_flags(Mode::ReadOnly.into()).open(dir.path()).is_err());
 
     // opening non-existent env should succeed
-    assert!(Environment::new().open(dir.path()).is_ok());
+    assert!(Environment::builder().open(dir.path()).is_ok());
 
     // opening env with read-only should succeed
-    assert!(Environment::new().set_flags(Mode::ReadOnly.into()).open(dir.path()).is_ok());
+    assert!(Environment::builder().set_flags(Mode::ReadOnly.into()).open(dir.path()).is_ok());
 }
 
 #[test]
@@ -24,7 +22,7 @@ fn test_begin_txn() {
 
     {
         // writable environment
-        let env = Environment::new().open(dir.path()).unwrap();
+        let env = Environment::builder().open(dir.path()).unwrap();
 
         assert!(env.begin_rw_txn().is_ok());
         assert!(env.begin_ro_txn().is_ok());
@@ -32,7 +30,7 @@ fn test_begin_txn() {
 
     {
         // read-only environment
-        let env = Environment::new().set_flags(Mode::ReadOnly.into()).open(dir.path()).unwrap();
+        let env = Environment::builder().set_flags(Mode::ReadOnly.into()).open(dir.path()).unwrap();
 
         assert!(env.begin_rw_txn().is_err());
         assert!(env.begin_ro_txn().is_ok());
@@ -42,7 +40,7 @@ fn test_begin_txn() {
 #[test]
 fn test_open_db() {
     let dir = tempdir().unwrap();
-    let env = Environment::new().set_max_dbs(1).open(dir.path()).unwrap();
+    let env = Environment::builder().set_max_dbs(1).open(dir.path()).unwrap();
 
     let txn = env.begin_ro_txn().unwrap();
     assert!(txn.open_db(None).is_ok());
@@ -52,7 +50,7 @@ fn test_open_db() {
 #[test]
 fn test_create_db() {
     let dir = tempdir().unwrap();
-    let env = Environment::new().set_max_dbs(11).open(dir.path()).unwrap();
+    let env = Environment::builder().set_max_dbs(11).open(dir.path()).unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
     assert!(txn.open_db(Some("testdb")).is_err());
@@ -63,7 +61,7 @@ fn test_create_db() {
 #[test]
 fn test_close_database() {
     let dir = tempdir().unwrap();
-    let env = Environment::new().set_max_dbs(10).open(dir.path()).unwrap();
+    let env = Environment::builder().set_max_dbs(10).open(dir.path()).unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
     txn.create_db(Some("db"), DatabaseFlags::empty()).unwrap();
@@ -74,11 +72,11 @@ fn test_close_database() {
 fn test_sync() {
     let dir = tempdir().unwrap();
     {
-        let env = Environment::new().open(dir.path()).unwrap();
+        let env = Environment::builder().open(dir.path()).unwrap();
         env.sync(true).unwrap();
     }
     {
-        let env = Environment::new().set_flags(Mode::ReadOnly.into()).open(dir.path()).unwrap();
+        let env = Environment::builder().set_flags(Mode::ReadOnly.into()).open(dir.path()).unwrap();
         env.sync(true).unwrap_err();
     }
 }
@@ -86,7 +84,7 @@ fn test_sync() {
 #[test]
 fn test_stat() {
     let dir = tempdir().unwrap();
-    let env = Environment::new().open(dir.path()).unwrap();
+    let env = Environment::builder().open(dir.path()).unwrap();
 
     // Stats should be empty initially.
     let stat = env.stat().unwrap();
@@ -119,7 +117,7 @@ fn test_stat() {
 fn test_info() {
     let map_size = 1024 * 1024;
     let dir = tempdir().unwrap();
-    let env = Environment::new()
+    let env = Environment::builder()
         .set_geometry(Geometry { size: Some(map_size..), ..Default::default() })
         .open(dir.path())
         .unwrap();
@@ -134,7 +132,7 @@ fn test_info() {
 #[test]
 fn test_freelist() {
     let dir = tempdir().unwrap();
-    let env = Environment::new().open(dir.path()).unwrap();
+    let env = Environment::builder().open(dir.path()).unwrap();
 
     let mut freelist = env.freelist().unwrap();
     assert_eq!(freelist, 0);

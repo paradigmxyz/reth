@@ -402,7 +402,7 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
         basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
-        Block, BlockNumberOrTag, Header, TransactionSigned, U256,
+        Block, BlockNumberOrTag, Header, TransactionSigned, B256, U256,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
@@ -411,7 +411,6 @@ mod tests {
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-    use revm_primitives::B256;
 
     fn build_test_eth_api<
         P: BlockReaderIdExt

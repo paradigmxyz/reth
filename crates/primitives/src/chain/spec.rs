@@ -6,11 +6,11 @@ use crate::{
     forkid::ForkFilterKey,
     header::Head,
     proofs::genesis_state_root,
+    revm_primitives::{address, b256},
     Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
     SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use once_cell::sync::Lazy;
-use revm_primitives::{address, b256};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,

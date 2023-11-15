@@ -836,7 +836,7 @@ mod tests {
 
         let block = SealedBlock::new(header, body);
 
-        // 10 blobs times the blob gas per blob
+        // 10 blobs times the blob gas per blob.
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
 
         // validate blob, it should fail blob gas used validation
@@ -846,6 +846,87 @@ mod tests {
                 got: 1,
                 expected: expected_blob_gas_used
             }))
+        );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_increase() {
+        let parent = SealedHeader {
+            header: Header { gas_limit: 1024 * 10, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit + 5, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_increase_exceeding_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header {
+                gas_limit: parent.header.gas_limit + parent.header.gas_limit / 1024 + 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            check_gas_limit(&parent, &child, &chain_spec),
+            Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
+            })
+        );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_decrease_within_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit - 5, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_decrease_exceeding_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header {
+                gas_limit: parent.header.gas_limit - parent.header.gas_limit / 1024 - 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            check_gas_limit(&parent, &child, &chain_spec),
+            Err(ConsensusError::GasLimitInvalidDecrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
+            })
         );
     }
 }

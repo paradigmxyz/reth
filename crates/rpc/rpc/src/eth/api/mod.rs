@@ -8,13 +8,17 @@ use crate::eth::{
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
+
 use async_trait::async_trait;
 use metrics::atomics::AtomicU64;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
+    revm_primitives::{BlockEnv, CfgEnv},
     Address, Block, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
 };
+use serde::{Deserialize, Serialize};
+
 use reth_provider::{
     BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, EvmEnvProvider, StateProviderBox,
     StateProviderFactory,
@@ -22,8 +26,6 @@ use reth_provider::{
 use reth_rpc_types::{SyncInfo, SyncStatus, TxGasAndReward};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{BlockEnv, CfgEnv};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fmt::Debug,

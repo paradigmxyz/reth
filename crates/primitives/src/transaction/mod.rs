@@ -1006,6 +1006,12 @@ impl TransactionSigned {
         }
     }
 
+    /// Returns the [TransactionSignedEcRecovered] transaction with the given sender.
+    #[inline]
+    pub const fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered {
+        TransactionSignedEcRecovered::from_signed_transaction(self, signer)
+    }
+
     /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
@@ -1424,7 +1430,11 @@ impl TransactionSignedEcRecovered {
 
     /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`] of the
     /// signer.
-    pub fn from_signed_transaction(signed_transaction: TransactionSigned, signer: Address) -> Self {
+    #[inline]
+    pub const fn from_signed_transaction(
+        signed_transaction: TransactionSigned,
+        signer: Address,
+    ) -> Self {
         Self { signed_transaction, signer }
     }
 }

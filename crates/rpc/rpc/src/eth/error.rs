@@ -7,7 +7,7 @@ use jsonrpsee::{
     types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
 };
 use reth_interfaces::RethError;
-use reth_primitives::{Address, Bytes, U256};
+use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
 use reth_transaction_pool::error::{
@@ -15,7 +15,6 @@ use reth_transaction_pool::error::{
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
-use revm_primitives::InvalidHeader;
 use std::time::Duration;
 
 /// Result alias

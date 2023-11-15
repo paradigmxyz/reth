@@ -1,3 +1,5 @@
+use strum::AsRefStr;
+
 #[derive(Debug, Copy, Clone)]
 /// Snapshot filters.
 pub enum Filters {
@@ -14,20 +16,23 @@ impl Filters {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, AsRefStr)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Snapshot inclusion filter. Also see [Filters].
 pub enum InclusionFilter {
+    #[strum(serialize = "cuckoo")]
     /// Cuckoo filter
     Cuckoo,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, AsRefStr)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Snapshot perfect hashing  function. Also see [Filters].
 pub enum PerfectHashingFunction {
+    #[strum(serialize = "fmph")]
     /// Fingerprint-Based Minimal Perfect Hash Function
     Fmph,
+    #[strum(serialize = "gofmph")]
     /// Fingerprint-Based Minimal Perfect Hash Function with Group Optimization
     GoFmph,
 }

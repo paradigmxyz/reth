@@ -18,7 +18,6 @@ pub(crate) enum TestRunnerError {
 }
 
 /// A generic test runner for stages.
-#[async_trait::async_trait]
 pub(crate) trait StageTestRunner {
     type S: Stage<DatabaseEnv> + 'static;
 

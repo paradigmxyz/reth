@@ -282,7 +282,6 @@ impl TestConsensus {
     }
 }
 
-#[async_trait::async_trait]
 impl Consensus for TestConsensus {
     fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
         if self.fail_validation() {

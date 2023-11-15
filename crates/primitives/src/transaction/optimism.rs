@@ -147,10 +147,9 @@ impl TxDeposit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Bytes, TransactionSigned};
+    use crate::{revm_primitives::hex_literal::hex, Bytes, TransactionSigned};
     use alloy_rlp::Decodable;
     use bytes::BytesMut;
-    use revm_primitives::hex_literal::hex;
 
     #[test]
     fn test_rlp_roundtrip() {
