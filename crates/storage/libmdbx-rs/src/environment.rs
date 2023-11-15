@@ -70,8 +70,7 @@ pub struct Environment<E>
 where
     E: EnvironmentKind,
 {
-    env: *mut ffi::MDBX_env,
-    txn_manager: Option<SyncSender<TxnManagerMessage>>,
+    inner: EnvironmentInner,
     _marker: PhantomData<E>,
 }
 
@@ -102,7 +101,7 @@ where
     /// Requires [Mode::ReadWrite] and returns None otherwise.
     #[inline]
     pub(crate) fn txn_manager(&self) -> Option<&SyncSender<TxnManagerMessage>> {
-        self.txn_manager.as_ref()
+        self.inner.txn_manager.as_ref()
     }
 
     /// Returns a raw pointer to the underlying MDBX environment.
@@ -111,7 +110,7 @@ where
     /// environment.
     #[inline]
     pub fn env(&self) -> *mut ffi::MDBX_env {
-        self.env
+        self.inner.env
     }
 
     /// Create a read-only transaction for use with the environment.
@@ -220,6 +219,24 @@ where
         }
 
         Ok(freelist)
+    }
+}
+
+/// Container type for Environment internals.
+///
+/// This holds the raw pointer to the MDBX environment and the transaction manager.
+/// The env is opened via [mdbx_env_create](ffi::mdbx_env_create) and closed when this type drops.
+struct EnvironmentInner {
+    env: *mut ffi::MDBX_env,
+    txn_manager: Option<SyncSender<TxnManagerMessage>>,
+}
+
+impl Drop for EnvironmentInner {
+    fn drop(&mut self) {
+        // Close open mdbx environment on drop
+        unsafe {
+            ffi::mdbx_env_close_ex(self.env, false);
+        }
     }
 }
 
@@ -338,18 +355,7 @@ where
     E: EnvironmentKind,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Environment").finish()
-    }
-}
-
-impl<E> Drop for Environment<E>
-where
-    E: EnvironmentKind,
-{
-    fn drop(&mut self) {
-        unsafe {
-            ffi::mdbx_env_close_ex(self.env, false);
-        }
+        f.debug_struct("Environment").finish_non_exhaustive()
     }
 }
 
@@ -511,7 +517,7 @@ where
             }
         }
 
-        let mut env = Environment { env, txn_manager: None, _marker: PhantomData };
+        let mut env = EnvironmentInner { env, txn_manager: None };
 
         if let Mode::ReadWrite { .. } = self.flags.mode {
             let (tx, rx) = std::sync::mpsc::sync_channel(0);
@@ -556,7 +562,7 @@ where
             env.txn_manager = Some(tx);
         }
 
-        Ok(env)
+        Ok(Environment { inner: env, _marker: Default::default() })
     }
 
     /// Sets the provided options in the environment.
