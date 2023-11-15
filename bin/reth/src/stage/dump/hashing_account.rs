@@ -68,10 +68,10 @@ async fn dry_run<DB: Database>(
 
     let factory = ProviderFactory::new(&output_db, chain);
     let provider = factory.provider_rw()?;
-    let mut exec_stage: Box<dyn Stage<DB>> = Box::new(AccountHashingStage {
+    let mut exec_stage = AccountHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()
-    });
+    };
 
     let mut done = false;
     while !done {

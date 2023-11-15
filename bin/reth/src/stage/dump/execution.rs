@@ -129,8 +129,7 @@ async fn dry_run<DB: Database>(
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
     let factory = ProviderFactory::new(&output_db, chain.clone());
-    let mut exec_stage: Box<dyn Stage<DB>> =
-        Box::new(ExecutionStage::new_with_factory(Factory::new(chain.clone())));
+    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(chain.clone()));
 
     let input =
         reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
