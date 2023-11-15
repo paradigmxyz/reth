@@ -348,8 +348,8 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         // let state_clear_enabled = self.data.state_clear_enabled(block.number);
         // self.state.write().set_state_clear_flag(state_clear_enabled);
 
-        for batch in queue.batches() {
-            self.execute_batch(&batch)?;
+        for batch in queue.batches().iter().filter(|b| !b.is_empty()) {
+            self.execute_batch(batch)?;
 
             'validation: while self.next_block_pending_validation.as_ref() ==
                 self.executed.keys().next()
