@@ -2,8 +2,6 @@ use reth_libmdbx::*;
 use std::borrow::Cow;
 use tempfile::tempdir;
 
-type Environment = reth_libmdbx::Environment<NoWriteMap>;
-
 #[test]
 fn test_get() {
     let dir = tempdir().unwrap();

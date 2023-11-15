@@ -55,6 +55,7 @@ pub enum Error {
     Access,
     TooLarge,
     DecodeErrorLenDiff,
+    NestedTransactionsUnsupportedWithWriteMap,
     Other(i32),
 }
 
