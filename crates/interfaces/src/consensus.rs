@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use reth_primitives::{
     BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, InvalidTransactionError,
     SealedBlock, SealedHeader, B256, U256,
@@ -9,7 +8,6 @@ use std::fmt::Debug;
 pub use reth_rpc_types::engine::ForkchoiceState;
 
 /// Consensus is a protocol that chooses canonical chain.
-#[async_trait]
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
