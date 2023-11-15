@@ -1073,7 +1073,6 @@ where
             let new_canonical_blocks = self.events.canonical_state_stream();
             let c = cache.clone();
 
-            let fee_history_cache = FeeHistoryCache::new(self.config.eth.fee_history_cache.clone());
             self.executor.spawn_critical(
                 "cache canonical blocks task",
                 Box::pin(async move {
@@ -1081,6 +1080,9 @@ where
                 }),
             );
 
+            let c = cache.clone();
+            let fee_history_cache =
+                FeeHistoryCache::new(c, self.config.eth.fee_history_cache.clone());
             let new_canonical_blocks = self.events.canonical_state_stream();
             let fhc = fee_history_cache.clone();
             let provider_clone = self.provider.clone();

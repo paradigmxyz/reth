@@ -8,7 +8,7 @@ use crate::{
 use reth_network_api::NetworkInfo;
 use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{FeeHistory, TxGasAndReward};
+use reth_rpc_types::FeeHistory;
 use reth_transaction_pool::TransactionPool;
 
 use tracing::debug;
@@ -108,10 +108,11 @@ where
         if fee_entries.is_empty() {
             fee_entries = self
                 .provider()
-                .sealed_headers_range(start_block..=end_block)?
-                .into_iter()
-                .map(|header| FeeHistoryEntry::from(&header))
+                .block_range(start_block..=end_block)?
+                .iter()
+                .map(|block| FeeHistoryEntry::new(&block, block.clone().seal_slow().hash))
                 .collect();
+            // calculate rewards on the fly
         }
 
         if fee_entries.len() != block_count as usize {
@@ -125,8 +126,14 @@ where
         for entry in &fee_entries {
             base_fee_per_gas.push(U256::try_from(entry.base_fee_per_gas).unwrap());
             gas_used_ratio.push(entry.gas_used_ratio);
+
             if let Some(percentiles) = &reward_percentiles {
-                rewards.push(self.calculate_reward_percentiles(percentiles, entry).await?);
+                let mut block_rewards = Vec::new();
+
+                for &percentile in percentiles.iter() {
+                    block_rewards.push(self.fetch_reward_for_percentile(entry, percentile));
+                }
+                rewards.push(block_rewards);
             }
         }
 
@@ -150,74 +157,22 @@ where
             base_fee_per_gas,
             gas_used_ratio,
             oldest_block: U256::from(start_block),
-            reward: reward_percentiles.map(|_| rewards),
+            reward: Some(rewards),
         })
     }
 
-    /// Calculates reward percentiles for transactions in a block header.
-    /// Given a list of percentiles and a sealed block header, this function computes
-    /// the corresponding rewards for the transactions at each percentile.
-    ///
-    /// The results are returned as a vector of U256 values.
-    async fn calculate_reward_percentiles(
+    fn fetch_reward_for_percentile(
         &self,
-        percentiles: &[f64],
-        fee_entry: &FeeHistoryEntry,
-    ) -> Result<Vec<U256>, EthApiError> {
-        let (transactions, receipts) = self
-            .cache()
-            .get_transactions_and_receipts(fee_entry.header_hash)
-            .await?
-            .ok_or(EthApiError::InvalidBlockRange)?;
+        entry: &FeeHistoryEntry,
+        requested_percentile: f64,
+    ) -> U256 {
+        let rounded_percentile = (requested_percentile / 0.25).round() * 0.25;
+        let rounded_percentile = rounded_percentile.clamp(0.0, 100.0);
 
-        let mut transactions = transactions
-            .into_iter()
-            .zip(receipts)
-            .scan(0, |previous_gas, (tx, receipt)| {
-                // Convert the cumulative gas used in the receipts
-                // to the gas usage by the transaction
-                //
-                // While we will sum up the gas again later, it is worth
-                // noting that the order of the transactions will be different,
-                // so the sum will also be different for each receipt.
-                let gas_used = receipt.cumulative_gas_used - *previous_gas;
-                *previous_gas = receipt.cumulative_gas_used;
+        // Calculate the index in the precomputed rewards array
+        let index = (rounded_percentile / 0.25) as usize;
 
-                Some(TxGasAndReward {
-                    gas_used,
-                    reward: tx
-                        .effective_tip_per_gas(Some(fee_entry.base_fee_per_gas))
-                        .unwrap_or_default(),
-                })
-            })
-            .collect::<Vec<_>>();
-
-        // Sort the transactions by their rewards in ascending order
-        transactions.sort_by_key(|tx| tx.reward);
-
-        // Find the transaction that corresponds to the given percentile
-        //
-        // We use a `tx_index` here that is shared across all percentiles, since we know
-        // the percentiles are monotonically increasing.
-        let mut tx_index = 0;
-        let mut cumulative_gas_used =
-            transactions.first().map(|tx| tx.gas_used).unwrap_or_default();
-        let mut rewards_in_block = Vec::new();
-        for percentile in percentiles {
-            // Empty blocks should return in a zero row
-            if transactions.is_empty() {
-                rewards_in_block.push(U256::ZERO);
-                continue
-            }
-
-            let threshold = (fee_entry.gas_used as f64 * percentile / 100.) as u64;
-            while cumulative_gas_used < threshold && tx_index < transactions.len() - 1 {
-                tx_index += 1;
-                cumulative_gas_used += transactions[tx_index].gas_used;
-            }
-            rewards_in_block.push(U256::from(transactions[tx_index].reward));
-        }
-
-        Ok(rewards_in_block)
+        // Fetch the reward from the FeeHistoryEntry
+        entry.rewards.get(index).cloned().unwrap_or(U256::ZERO)
     }
 }

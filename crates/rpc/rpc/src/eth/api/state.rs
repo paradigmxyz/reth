@@ -150,7 +150,7 @@ mod tests {
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -173,7 +173,7 @@ mod tests {
             GasPriceOracle::new(mock_provider.clone(), Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
         );
 
         let storage_key: U256 = storage_key.into();

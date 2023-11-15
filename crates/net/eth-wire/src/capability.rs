@@ -254,7 +254,7 @@ impl SharedCapability {
     /// Returns an error if the offset is equal or less than [`MAX_RESERVED_MESSAGE_ID`].
     pub(crate) fn new(name: &str, version: u8, offset: u8) -> Result<Self, SharedCapabilityError> {
         if offset <= MAX_RESERVED_MESSAGE_ID {
-            return Err(SharedCapabilityError::ReservedMessageIdOffset(offset));
+            return Err(SharedCapabilityError::ReservedMessageIdOffset(offset))
         }
 
         match name {

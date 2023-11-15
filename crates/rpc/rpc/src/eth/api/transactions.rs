@@ -1286,7 +1286,8 @@ mod tests {
         let pool = testing_pool();
 
         let cache = EthStateCache::spawn(noop_provider, Default::default());
-        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
+        let fee_history_cache =
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),

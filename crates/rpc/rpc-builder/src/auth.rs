@@ -61,7 +61,8 @@ where
     let eth_cache =
         EthStateCache::spawn_with(provider.clone(), Default::default(), executor.clone());
     let gas_oracle = GasPriceOracle::new(provider.clone(), Default::default(), eth_cache.clone());
-    let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
+    let fee_history_cache =
+        FeeHistoryCache::new(eth_cache.clone(), FeeHistoryCacheConfig::default());
     let eth_api = EthApi::with_spawner(
         provider.clone(),
         pool.clone(),

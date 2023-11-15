@@ -13,13 +13,13 @@ use metrics::atomics::AtomicU64;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, SealedHeader, B256, U256, U64,
+    Address, Block, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, EvmEnvProvider, StateProviderBox,
     StateProviderFactory,
 };
-use reth_rpc_types::{SyncInfo, SyncStatus};
+use reth_rpc_types::{SyncInfo, SyncStatus, TxGasAndReward};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{BlockEnv, CfgEnv};
@@ -471,7 +471,7 @@ struct EthApiInner<Provider, Pool, Network> {
     http_client: reqwest::Client,
 }
 
-/// Settings for the [EthStateCache](crate::eth::cache::EthStateCache).
+/// Settings for the [FeeHistoryCache](crate::eth::FeeHistoryCache).
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeeHistoryCacheConfig {
@@ -494,11 +494,12 @@ pub struct FeeHistoryCache {
     upper_bound: Arc<AtomicU64>,
     config: FeeHistoryCacheConfig,
     entries: Arc<tokio::sync::RwLock<BTreeMap<u64, FeeHistoryEntry>>>,
+    eth_cache: EthStateCache,
 }
 
 impl FeeHistoryCache {
     /// Creates new FeeHistoryCache instance, initialize it with the mose recent data, set bounds
-    pub fn new(config: FeeHistoryCacheConfig) -> Self {
+    pub fn new(eth_cache: EthStateCache, config: FeeHistoryCacheConfig) -> Self {
         let init_tree_map = BTreeMap::new();
 
         let entries = Arc::new(tokio::sync::RwLock::new(init_tree_map));
@@ -506,18 +507,33 @@ impl FeeHistoryCache {
         let upper_bound = Arc::new(AtomicU64::new(0));
         let lower_bound = Arc::new(AtomicU64::new(0));
 
-        FeeHistoryCache { config, entries, upper_bound, lower_bound }
+        FeeHistoryCache { config, entries, upper_bound, lower_bound, eth_cache }
     }
 
     /// Processing of the arriving blocks
-    pub async fn on_new_block<'a, I>(&self, headers: I)
+    pub async fn on_new_block<'a, I>(&self, blocks: I)
     where
-        I: Iterator<Item = &'a SealedHeader>,
+        I: Iterator<Item = &'a Block>,
     {
         let mut entries = self.entries.write().await;
-        for header in headers {
-            entries.insert(header.number, FeeHistoryEntry::from(header));
+
+        for block in blocks {
+            let mut fee_history_entry = FeeHistoryEntry::new(block, block.clone().seal_slow().hash);
+
+            let percentiles = predefined_percentiles();
+
+            fee_history_entry.rewards = calculate_reward_percentiles_for_block(
+                &percentiles,
+                &fee_history_entry,
+                self.eth_cache.clone(),
+            )
+            .await
+            .unwrap_or_default();
+
+            // calculate rewards
+            entries.insert(block.number, fee_history_entry);
         }
+
         while entries.len() > self.config.max_blocks as usize {
             entries.pop_first();
         }
@@ -585,10 +601,9 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
             0
         };
 
-        let headers =
-            provider.sealed_headers_range(start_block..=last_block_number).unwrap_or_default();
+        let blocks = provider.block_range(start_block..=last_block_number).unwrap_or_default();
 
-        fee_history_cache.on_new_block(headers.iter()).await;
+        fee_history_cache.on_new_block(blocks.iter()).await;
     }
 
     while let Some(event) = events.next().await {
@@ -596,11 +611,84 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
             // we're only interested in new committed blocks
             let (blocks, _) = committed.inner();
 
-            let headers = blocks.iter().map(|(_, block)| block.header.clone()).collect::<Vec<_>>();
+            let blocks = blocks
+                .iter()
+                .map(|(_, block)| block.block.clone().unseal().clone())
+                .collect::<Vec<_>>();
 
-            fee_history_cache.on_new_block(headers.iter()).await;
+            fee_history_cache.on_new_block(blocks.iter()).await;
         }
     }
+}
+
+/// Generates predefined set of percentiles
+fn predefined_percentiles() -> Vec<f64> {
+    (0..=400).map(|p| p as f64 * 0.25).collect()
+}
+
+/// Calculates reward percentiles for transactions in a block header.
+/// Given a list of percentiles and a sealed block header, this function computes
+/// the corresponding rewards for the transactions at each percentile.
+///
+/// The results are returned as a vector of U256 values.
+async fn calculate_reward_percentiles_for_block(
+    percentiles: &[f64],
+    fee_entry: &FeeHistoryEntry,
+    cache: EthStateCache,
+) -> Result<Vec<U256>, EthApiError> {
+    let (transactions, receipts) = cache
+        .get_transactions_and_receipts(fee_entry.header_hash)
+        .await?
+        .ok_or(EthApiError::InvalidBlockRange)?;
+
+    let mut transactions = transactions
+        .into_iter()
+        .zip(receipts)
+        .scan(0, |previous_gas, (tx, receipt)| {
+            // Convert the cumulative gas used in the receipts
+            // to the gas usage by the transaction
+            //
+            // While we will sum up the gas again later, it is worth
+            // noting that the order of the transactions will be different,
+            // so the sum will also be different for each receipt.
+            let gas_used = receipt.cumulative_gas_used - *previous_gas;
+            *previous_gas = receipt.cumulative_gas_used;
+
+            Some(TxGasAndReward {
+                gas_used,
+                reward: tx
+                    .effective_tip_per_gas(Some(fee_entry.base_fee_per_gas))
+                    .unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    // Sort the transactions by their rewards in ascending order
+    transactions.sort_by_key(|tx| tx.reward);
+
+    // Find the transaction that corresponds to the given percentile
+    //
+    // We use a `tx_index` here that is shared across all percentiles, since we know
+    // the percentiles are monotonically increasing.
+    let mut tx_index = 0;
+    let mut cumulative_gas_used = transactions.first().map(|tx| tx.gas_used).unwrap_or_default();
+    let mut rewards_in_block = Vec::new();
+    for percentile in percentiles {
+        // Empty blocks should return in a zero row
+        if transactions.is_empty() {
+            rewards_in_block.push(U256::ZERO);
+            continue
+        }
+
+        let threshold = (fee_entry.gas_used as f64 * percentile / 100.) as u64;
+        while cumulative_gas_used < threshold && tx_index < transactions.len() - 1 {
+            tx_index += 1;
+            cumulative_gas_used += transactions[tx_index].gas_used;
+        }
+        rewards_in_block.push(U256::from(transactions[tx_index].reward));
+    }
+
+    Ok(rewards_in_block)
 }
 
 #[derive(Debug, Clone)]
@@ -610,16 +698,18 @@ pub struct FeeHistoryEntry {
     gas_used: u64,
     gas_limit: u64,
     header_hash: B256,
+    rewards: Vec<U256>,
 }
 
-impl From<&SealedHeader> for FeeHistoryEntry {
-    fn from(header: &SealedHeader) -> Self {
+impl FeeHistoryEntry {
+    fn new(block: &Block, hash: B256) -> Self {
         FeeHistoryEntry {
-            base_fee_per_gas: header.base_fee_per_gas.unwrap_or_default(),
-            gas_used_ratio: header.gas_used as f64 / header.gas_limit as f64,
-            gas_used: header.gas_used,
-            header_hash: header.hash,
-            gas_limit: header.gas_limit,
+            base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
+            gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
+            gas_used: block.gas_used,
+            header_hash: hash,
+            gas_limit: block.gas_limit,
+            rewards: Vec::new(),
         }
     }
 }
