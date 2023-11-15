@@ -60,29 +60,29 @@ impl From<alloy_rlp::Error> for EthStreamError {
 #[derive(thiserror::Error, Debug)]
 
 pub enum EthHandshakeError {
-    /// Error indicating a status message was received or sent outside of the handshake process.
+    /// Status message received or sent outside of the handshake process.
     #[error("status message can only be recv/sent in handshake")]
     StatusNotInHandshake,
-    /// Error for receiving a non-status message during the handshake phase.
+    /// Receiving a non-status message during the handshake phase.
     #[error("received non-status message when trying to handshake")]
     NonStatusMessageInHandshake,
     #[error("no response received when sending out handshake")]
-    /// Error when no response is received during the handshake process.
+    /// No response received during the handshake process.
     NoResponse,
     #[error(transparent)]
-    /// Error due to invalid fork data.
+    /// Invalid fork data.
     InvalidFork(#[from] ValidationError),
     #[error("mismatched genesis in status message: {0}")]
-    /// Error indicating a mismatch in the genesis block during status exchange.
+    /// Mismatch in the genesis block during status exchange.
     MismatchedGenesis(GotExpectedBoxed<B256>),
     #[error("mismatched protocol version in status message: {0}")]
-    /// Error for mismatched protocol versions in status messages.
+    /// Mismatched protocol versions in status messages.
     MismatchedProtocolVersion(GotExpected<u8>),
     #[error("mismatched chain in status message: {0}")]
-    /// Error denoting a mismatch in chain details in status messages.
+    /// Mismatch in chain details in status messages.
     MismatchedChain(GotExpected<Chain>),
     #[error("total difficulty bitlen is too large: got {got}, maximum {maximum}")]
-    /// Error for excessively large total difficulty bit lengths.
+    /// Excessively large total difficulty bit lengths.
     TotalDifficultyBitLenTooLarge {
         /// The actual bit length of the total difficulty.
         got: usize,
