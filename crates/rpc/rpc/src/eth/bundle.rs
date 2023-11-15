@@ -9,12 +9,14 @@ use crate::{
     },
     BlockingTaskGuard,
 };
+use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     keccak256,
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
     U256,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_rpc_api::EthCallBundleApiServer;
 use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use revm::{
     db::CacheDB,
@@ -172,6 +174,16 @@ where
                 Ok(res)
             })
             .await
+    }
+}
+
+#[async_trait::async_trait]
+impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
+where
+    Eth: EthTransactions + 'static,
+{
+    async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
+        Ok(EthBundle::call_bundle(self, request).await?)
     }
 }
 

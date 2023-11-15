@@ -38,7 +38,7 @@ pub use servers::*;
 pub mod servers {
     pub use crate::{
         admin::AdminApiServer,
-        bundle::EthBundleApiServer,
+        bundle::{EthBundleApiServer, EthCallBundleApiServer},
         debug::DebugApiServer,
         engine::{EngineApiServer, EngineEthApiServer},
         eth::EthApiServer,
@@ -64,7 +64,7 @@ pub use clients::*;
 pub mod clients {
     pub use crate::{
         admin::AdminApiClient,
-        bundle::EthBundleApiClient,
+        bundle::{EthBundleApiClient, EthCallBundleApiClient},
         debug::DebugApiClient,
         engine::{EngineApiClient, EngineEthApiClient},
         eth::EthApiClient,
