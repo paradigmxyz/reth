@@ -1,13 +1,16 @@
 # Running Reth on OP Stack chains
 
-`reth` ships with the `optimism` feature flag, enabling support for OP Stack chains out of the box. Optimism has a small diff from the [L1 EELS][l1-el-spec], comprising of the following key changes:
+`reth` ships with the `optimism` feature flag in several crates, including the binary, enabling support for OP Stack chains out of the box. Optimism has a small diff from the [L1 EELS][l1-el-spec],
+comprising of the following key changes:
 1. A new transaction type, [`0x7E (Deposit)`][deposit-spec], which is used to deposit funds from L1 to L2.
-1. Modifications to the `PayloadAttributes` that allow the [sequencer][sequencer] to submit transactions in-order to the EL through the Engine API.
+1. Modifications to the `PayloadAttributes` that allow the [sequencer][sequencer] to submit transactions to the EL through the Engine API. Payloads will be built with deposit transactions at the top of the block,
+   with the first deposit transaction always being the "L1 Info Transaction."
 1. EIP-1559 denominator and elasticity parameters have been adjusted to account for the lower block time (2s) on L2. Otherwise, the 1559 formula remains the same.
 1. Network fees are distributed to the various [fee vaults][l2-el-spec].
 1. ... and some other minor changes.
 
-For a more in-depth list of changes and their rationale, see the documented [`op-geth` diff][op-geth-forkdiff], the [L2 EL specification][l2-el-spec], and the [OP Stack specification][op-stack-spec].
+For a more in-depth list of changes and their rationale, as well as specifics about the OP Stack specification such as transaction ordering and more, see the documented [`op-geth` diff][op-geth-forkdiff],
+the [L2 EL specification][l2-el-spec], and the [OP Stack specification][op-stack-spec].
 
 ## Running on Optimism
 
@@ -21,6 +24,8 @@ You will need three things to run `op-reth`:
 1. An archival L1 node, synced to the settlement layer of the OP Stack chain you want to sync (e.g. `reth`, `geth`, `besu`, `nethermind`, etc.)
 1. A rollup node (e.g. `op-node`, `magi`, `hildr`, etc.)
 1. An instance of `op-reth`.
+
+For this example, we'll start a `Base Mainnet` node.
 
 ### Installing `op-reth`
 
@@ -63,8 +68,6 @@ The `optimism` feature flag in `op-reth` adds several new CLI flags to the `reth
 1. `--rollup.sequencer-http <uri>` - The sequencer endpoint to connect to. Transactions sent to the `op-reth` EL are also forwarded to this sequencer endpoint for inclusion, as the sequencer is the entity that builds blocks on OP Stack chains.
 1. `--rollup.disable-tx-pool-gossip` - Disables gossiping of transactions in the mempool to peers. This can be ommitted for personal nodes, though providers should always opt to enable this flag.
 1. `--rollup.enable-genesis-walkback` - Disables setting the forkchoice status to tip on startup, making the `op-node` walk back to genesis and verify the integrity of the chain before starting to sync. This can be ommitted unless a corruption of local chainstate is suspected.
-
-For this example, we'll start a `Base Mainnet` node.
 
 Base's `rollup.json` files, which contain various configuration fields for the rollup, can be found in their [node][base-node] repository, under the respective L1 settlement layer's directory (`mainnet`, `goerli`, & `sepolia`).
 
