@@ -75,6 +75,10 @@ impl BlobStore for DiskFileBlobStore {
         self.inner.get_one(tx)
     }
 
+    fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
+        self.inner.contains(tx)
+    }
+
     fn get_all(
         &self,
         txs: Vec<B256>,
@@ -181,6 +185,15 @@ impl DiskFileBlobStoreInner {
         self.size_tracker.inc_len(num);
 
         Ok(())
+    }
+
+    /// Returns true if the blob for the given transaction hash is in the blob cache or on disk.
+    fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
+        if self.blob_cache.lock().get(&tx).is_some() {
+            return Ok(true)
+        }
+        // we only check if the file exists and assume it's valid
+        Ok(self.blob_disk_file(tx).is_file())
     }
 
     /// Retrieves the blob for the given transaction hash from the blob cache or disk.
@@ -438,6 +451,7 @@ mod tests {
             assert!(blobs.contains(&(tx, blob)), "missing blob {:?}", tx);
         }
 
+        assert!(store.contains(all_hashes[0]).unwrap());
         store.delete_all(all_hashes.clone()).unwrap();
         store.clear_cache();
 
@@ -446,6 +460,7 @@ mod tests {
         let all = store.get_all(all_hashes.clone()).unwrap();
         assert!(all.is_empty());
 
+        assert!(!store.contains(all_hashes[0]).unwrap());
         assert!(store.get_exact(all_hashes).is_err());
     }
 }

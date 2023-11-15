@@ -67,6 +67,11 @@ impl BlobStore for InMemoryBlobStore {
         Ok(store.get(&tx).cloned())
     }
 
+    fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
+        let store = self.inner.store.read();
+        Ok(store.contains_key(&tx))
+    }
+
     fn get_all(
         &self,
         txs: Vec<B256>,

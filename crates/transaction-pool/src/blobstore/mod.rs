@@ -34,6 +34,9 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
 
+    /// Checks if the given transaction hash is in the blob store.
+    fn contains(&self, tx: B256) -> Result<bool, BlobStoreError>;
+
     /// Retrieves all decoded blob data for the given transaction hashes.
     ///
     /// This only returns the blobs that were found in the store.
