@@ -7,6 +7,7 @@ use crate::{
         config::RethRpcConfig,
         ext::RethNodeCommandConfig,
     },
+    utils::get_or_create_jwt_secret_from_path,
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -44,8 +45,6 @@ use std::{
     path::PathBuf,
 };
 use tracing::{debug, info};
-
-use super::utils::get_or_create_jwt_secret_from_path;
 
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
