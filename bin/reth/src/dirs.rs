@@ -285,6 +285,14 @@ impl<D> ChainPath<D> {
         self.0.join("known-peers.json").into()
     }
 
+    /// Returns the path to the blobstore directory for this chain where blobs of unfinalized
+    /// transactions are stored.
+    ///
+    /// `<DIR>/<CHAIN_ID>/blobstore`
+    pub fn blobstore_path(&self) -> PathBuf {
+        self.0.join("blobstore").into()
+    }
+
     /// Returns the path to the config file for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/reth.toml`
