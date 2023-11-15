@@ -2,12 +2,10 @@ use crate::utils::DbTool;
 use clap::Parser;
 
 use reth_db::{
-    RawKey, TableType, RawTable,
     database::Database,
     table::{DupSort, Table},
-    TableViewer, Tables,
+    RawKey, RawTable, TableViewer, Tables,
 };
-use reth_db::{database::Database, table::Table, , RawTable, TableType, TableViewer, Tables};
 use tracing::error;
 
 /// The arguments for the `reth db get` command

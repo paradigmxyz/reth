@@ -4,8 +4,8 @@ use clap::Parser;
 use eyre::WrapErr;
 use reth_db::{
     database::Database,
-    table::{DupSort, Table}, RawValue,
-    DatabaseEnvRO, TableViewer, Tables,
+    table::{DupSort, Table},
+    DatabaseEnvRO, RawValue, TableViewer, Tables,
 };
 use reth_primitives::hex;
 use std::cell::RefCell;
@@ -169,7 +169,7 @@ impl TableViewer<()> for ListTableViewer<'_> {
                 DbListTUI::<_, T>::new(|skip, len| {
                     list_filter.borrow_mut().update_page(skip, len);
                     self.tool.list::<T>(&list_filter.borrow()).unwrap().0
-                }, self.args.skip, self.args.len, total_entries).run()
+                }, self.args.skip, self.args.len, total_entries, self.args.raw).run()
             }
         })??;
 
