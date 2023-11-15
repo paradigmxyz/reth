@@ -1,7 +1,9 @@
 //! Ethereum protocol-related constants
 
-use crate::{Address, B256, U256};
-use revm_primitives::{address, b256};
+use crate::{
+    revm_primitives::{address, b256},
+    Address, B256, U256,
+};
 use std::time::Duration;
 
 /// [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) constants.

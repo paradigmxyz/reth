@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
+    revm_primitives::{BlockEnv, CfgEnv},
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
 };
 use reth_provider::{
@@ -22,7 +23,6 @@ use reth_provider::{
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{BlockEnv, CfgEnv};
 use std::{
     future::Future,
     sync::Arc,
