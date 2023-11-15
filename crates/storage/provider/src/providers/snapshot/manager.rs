@@ -163,6 +163,8 @@ impl SnapshotProvider {
         let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
 
         while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
+            // `unwrap_or(0) is safe here as it sets block_start to 0 if the iterator is empty,
+            // indicating the lowest height snapshot has been reached.
             let block_start =
                 snapshots_rev_iter.peek().map(|(block_end, _)| *block_end + 1).unwrap_or(0);
             if block_start <= block {
@@ -216,6 +218,8 @@ impl SnapshotProvider {
             let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
 
             while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
+                // `unwrap_or(0) is safe here as it sets block_start to 0 if the iterator
+                // is empty, indicating the lowest height snapshot has been reached.
                 let block_start =
                     snapshots_rev_iter.peek().map(|(block_end, _)| *block_end + 1).unwrap_or(0);
 
