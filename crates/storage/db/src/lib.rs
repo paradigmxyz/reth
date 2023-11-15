@@ -68,6 +68,7 @@
 pub mod abstraction;
 
 mod implementation;
+mod metrics;
 pub mod snapshot;
 pub mod tables;
 mod utils;
@@ -160,7 +161,8 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use std::sync::Arc;
+    use crate::database::{Database, DatabaseGAT};
+    use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
@@ -171,26 +173,74 @@ pub mod test_utils {
     /// Error during tempdir creation
     pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
 
-    /// Create read/write database for testing
-    pub fn create_test_rw_db() -> Arc<DatabaseEnv> {
-        Arc::new(
-            init_db(tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(), None)
-                .expect(ERROR_DB_CREATION),
-        )
+    /// A database will delete the db dir when dropped.
+    #[derive(Debug)]
+    pub struct TempDatabase<DB> {
+        db: Option<DB>,
+        path: PathBuf,
+    }
+
+    impl<DB> Drop for TempDatabase<DB> {
+        fn drop(&mut self) {
+            if let Some(db) = self.db.take() {
+                drop(db);
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
+        }
+    }
+
+    impl<DB> TempDatabase<DB> {
+        /// returns the ref of inner db
+        pub fn db(&self) -> &DB {
+            self.db.as_ref().unwrap()
+        }
+
+        /// returns the inner db
+        pub fn into_inner_db(mut self) -> DB {
+            self.db.take().unwrap() // take out db to avoid clean path in drop fn
+        }
+    }
+
+    impl<'a, DB: Database> DatabaseGAT<'a> for TempDatabase<DB> {
+        type TX = <DB as DatabaseGAT<'a>>::TX;
+        type TXMut = <DB as DatabaseGAT<'a>>::TXMut;
+    }
+
+    impl<DB: Database> Database for TempDatabase<DB> {
+        fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
+            self.db().tx()
+        }
+
+        fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
+            self.db().tx_mut()
+        }
     }
 
     /// Create read/write database for testing
-    pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<DatabaseEnv> {
-        Arc::new(init_db(path.as_ref(), None).expect(ERROR_DB_CREATION))
+    pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
+        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
+
+        let db = init_db(&path, None).expect(&emsg);
+
+        Arc::new(TempDatabase { db: Some(db), path })
+    }
+
+    /// Create read/write database for testing
+    pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
+        let path = path.as_ref().to_path_buf();
+        let db = init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
+        Arc::new(TempDatabase { db: Some(db), path })
     }
 
     /// Create read only database for testing
-    pub fn create_test_ro_db() -> Arc<DatabaseEnvRO> {
+    pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnvRO>> {
         let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
         {
             init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
         }
-        Arc::new(open_db_read_only(path.as_path(), None).expect(ERROR_DB_OPEN))
+        let db = open_db_read_only(path.as_path(), None).expect(ERROR_DB_OPEN);
+        Arc::new(TempDatabase { db: Some(db), path })
     }
 }
 

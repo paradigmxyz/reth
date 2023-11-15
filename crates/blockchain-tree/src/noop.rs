@@ -1,7 +1,8 @@
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, InsertBlockError},
-        BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome, InsertPayloadOk,
+        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+        InsertPayloadOk,
     },
     RethResult,
 };
@@ -30,6 +31,7 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
+        _validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         Err(InsertBlockError::tree_error(
             BlockchainTreeError::BlockHashNotFoundInChain { block_hash: block.hash },

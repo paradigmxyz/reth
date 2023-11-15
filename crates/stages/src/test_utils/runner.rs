@@ -9,16 +9,15 @@ use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum TestRunnerError {
-    #[error("Database error occurred.")]
+    #[error(transparent)]
     Database(#[from] DatabaseError),
-    #[error("Internal runner error occurred.")]
+    #[error(transparent)]
     Internal(#[from] Box<dyn std::error::Error>),
-    #[error("Internal interface error occurred.")]
+    #[error(transparent)]
     Interface(#[from] RethError),
 }
 
 /// A generic test runner for stages.
-#[async_trait::async_trait]
 pub(crate) trait StageTestRunner {
     type S: Stage<DatabaseEnv> + 'static;
 
@@ -48,7 +47,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+            let factory = ProviderFactory::new(db.db(), MAINNET.clone());
             let provider = factory.provider_rw().unwrap();
 
             let result = stage.execute(&provider, input).await;
@@ -74,7 +73,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
-            let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+            let factory = ProviderFactory::new(db.db(), MAINNET.clone());
             let provider = factory.provider_rw().unwrap();
 
             let result = stage.unwind(&provider, input).await;

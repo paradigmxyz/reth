@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// Contains the connectivity related state of the network.
 ///
@@ -137,7 +137,7 @@ where
                 self.state.on_session_activated(
                     peer_id,
                     capabilities.clone(),
-                    status,
+                    status.clone(),
                     messages.clone(),
                     timeout,
                 );
@@ -226,7 +226,7 @@ where
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
-                        debug!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
+                        trace!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
                         self.state_mut()
                             .peers_mut()
                             .on_incoming_pending_session_rejected_internally();
@@ -394,12 +394,12 @@ pub(crate) enum SwarmEvent {
     SessionEstablished {
         peer_id: PeerId,
         remote_addr: SocketAddr,
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,
         messages: PeerRequestSender,
-        status: Status,
+        status: Arc<Status>,
         direction: Direction,
     },
     SessionClosed {

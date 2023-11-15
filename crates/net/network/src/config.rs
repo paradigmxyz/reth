@@ -10,7 +10,7 @@ use crate::{
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
-use reth_eth_wire::{HelloMessage, Status};
+use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
     mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
 };
@@ -19,6 +19,7 @@ use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 // re-export for convenience
+use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
 pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
@@ -68,7 +69,22 @@ pub struct NetworkConfig<C> {
     /// The `Status` message to send to peers at the beginning.
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
-    pub hello_message: HelloMessage,
+    pub hello_message: HelloMessageWithProtocols,
+    /// Additional protocols to announce and handle in RLPx
+    pub extra_protocols: RlpxSubProtocols,
+    /// Whether to disable transaction gossip
+    pub tx_gossip_disabled: bool,
+    /// Optimism Network Config
+    #[cfg(feature = "optimism")]
+    pub optimism_network_config: OptimismNetworkConfig,
+}
+
+/// Optimmism Network Config
+#[cfg(feature = "optimism")]
+#[derive(Debug, Clone, Default)]
+pub struct OptimismNetworkConfig {
+    /// The sequencer HTTP endpoint, if provided via CLI flag
+    pub sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfig ===
@@ -145,9 +161,26 @@ pub struct NetworkConfigBuilder {
     #[serde(skip)]
     executor: Option<Box<dyn TaskSpawner>>,
     /// Sets the hello message for the p2p handshake in RLPx
-    hello_message: Option<HelloMessage>,
+    hello_message: Option<HelloMessageWithProtocols>,
+    /// The executor to use for spawning tasks.
+    #[serde(skip)]
+    extra_protocols: RlpxSubProtocols,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
+    /// Whether tx gossip is disabled
+    tx_gossip_disabled: bool,
+    /// Optimism Network Config Builder
+    #[cfg(feature = "optimism")]
+    optimism_network_config: OptimismNetworkConfigBuilder,
+}
+
+/// Optimism Network Config Builder
+#[cfg(feature = "optimism")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default)]
+pub struct OptimismNetworkConfigBuilder {
+    /// The sequencer HTTP endpoint, if provided via CLI flag
+    sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -168,7 +201,11 @@ impl NetworkConfigBuilder {
             network_mode: Default::default(),
             executor: None,
             hello_message: None,
+            extra_protocols: Default::default(),
             head: None,
+            tx_gossip_disabled: false,
+            #[cfg(feature = "optimism")]
+            optimism_network_config: OptimismNetworkConfigBuilder::default(),
         }
     }
 
@@ -205,13 +242,11 @@ impl NetworkConfigBuilder {
     /// # use reth_eth_wire::HelloMessage;
     /// # use reth_network::NetworkConfigBuilder;
     /// # fn builder(builder: NetworkConfigBuilder) {
-    ///    let peer_id = builder.get_peer_id();
-    ///     builder.hello_message(
-    ///         HelloMessage::builder(peer_id).build()
-    /// );
+    /// let peer_id = builder.get_peer_id();
+    /// builder.hello_message(HelloMessage::builder(peer_id).build());
     /// # }
     /// ```
-    pub fn hello_message(mut self, hello_message: HelloMessage) -> Self {
+    pub fn hello_message(mut self, hello_message: HelloMessageWithProtocols) -> Self {
         self.hello_message = Some(hello_message);
         self
     }
@@ -349,6 +384,25 @@ impl NetworkConfigBuilder {
         }
     }
 
+    /// Adds a new additional protocol to the RLPx sub-protocol list.
+    pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
+        self.extra_protocols.push(protocol);
+        self
+    }
+
+    /// Sets whether tx gossip is disabled.
+    pub fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
+        self.tx_gossip_disabled = disable_tx_gossip;
+        self
+    }
+
+    /// Sets the sequencer HTTP endpoint.
+    #[cfg(feature = "optimism")]
+    pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
+        self.optimism_network_config.sequencer_endpoint = endpoint;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///
@@ -370,7 +424,11 @@ impl NetworkConfigBuilder {
             network_mode,
             executor,
             hello_message,
+            extra_protocols,
             head,
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+                optimism_network_config: OptimismNetworkConfigBuilder { sequencer_endpoint },
         } = self;
 
         let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
@@ -420,7 +478,11 @@ impl NetworkConfigBuilder {
             executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
             status,
             hello_message,
+            extra_protocols,
             fork_filter,
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+            optimism_network_config: OptimismNetworkConfig { sequencer_endpoint },
         }
     }
 }

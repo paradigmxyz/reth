@@ -2,7 +2,7 @@
 use crate::{
     errors::P2PStreamError, version::ParseVersionError, DisconnectReason, EthMessageID, EthVersion,
 };
-use reth_primitives::{Chain, ValidationError, B256};
+use reth_primitives::{Chain, GotExpected, GotExpectedBoxed, ValidationError, B256};
 use std::io;
 
 /// Errors when sending/receiving messages
@@ -15,7 +15,7 @@ pub enum EthStreamError {
     ParseVersionError(#[from] ParseVersionError),
     #[error(transparent)]
     EthHandshakeError(#[from] EthHandshakeError),
-    #[error("For {0:?} version, message id({1:?}) is invalid")]
+    #[error("message id {1:?} is invalid for version {0:?}")]
     EthInvalidMessageError(EthVersion, EthMessageID),
     #[error("message size ({0}) exceeds max length (10MB)")]
     MessageTooBig(usize),
@@ -68,12 +68,12 @@ pub enum EthHandshakeError {
     NoResponse,
     #[error(transparent)]
     InvalidFork(#[from] ValidationError),
-    #[error("mismatched genesis in Status message. expected: {expected:?}, got: {got:?}")]
-    MismatchedGenesis { expected: B256, got: B256 },
-    #[error("mismatched protocol version in Status message. expected: {expected:?}, got: {got:?}")]
-    MismatchedProtocolVersion { expected: u8, got: u8 },
-    #[error("mismatched chain in Status message. expected: {expected:?}, got: {got:?}")]
-    MismatchedChain { expected: Chain, got: Chain },
-    #[error("total difficulty bitlen is too large. maximum: {maximum:?}, got: {got:?}")]
-    TotalDifficultyBitLenTooLarge { maximum: usize, got: usize },
+    #[error("mismatched genesis in status message: {0}")]
+    MismatchedGenesis(GotExpectedBoxed<B256>),
+    #[error("mismatched protocol version in status message: {0}")]
+    MismatchedProtocolVersion(GotExpected<u8>),
+    #[error("mismatched chain in status message: {0}")]
+    MismatchedChain(GotExpected<Chain>),
+    #[error("total difficulty bitlen is too large: got {got}, maximum {maximum}")]
+    TotalDifficultyBitLenTooLarge { got: usize, maximum: usize },
 }

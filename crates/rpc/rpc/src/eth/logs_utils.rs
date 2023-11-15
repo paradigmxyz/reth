@@ -1,5 +1,6 @@
 use reth_primitives::{BlockNumHash, ChainInfo, Receipt, TxHash, U256};
 use reth_rpc_types::{FilteredParams, Log};
+use reth_rpc_types_compat::log::from_primitive_log;
 
 /// Returns all matching logs of a block's receipts grouped with the hash of their transaction.
 pub(crate) fn matching_block_logs<I>(
@@ -60,8 +61,8 @@ pub(crate) fn log_matches_filter(
     if params.filter.is_some() &&
         (!params.filter_block_range(block.number) ||
             !params.filter_block_hash(block.hash) ||
-            !params.filter_address(log) ||
-            !params.filter_topics(log))
+            !params.filter_address(&from_primitive_log(log.clone())) ||
+            !params.filter_topics(&from_primitive_log(log.clone())))
     {
         return false
     }
@@ -97,7 +98,7 @@ pub(crate) fn get_filter_block_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::BlockNumberOrTag;
+
     use reth_rpc_types::Filter;
 
     #[test]
@@ -159,8 +160,8 @@ mod tests {
         let start_block = info.best_number;
 
         let (from_block_number, to_block_number) = get_filter_block_range(
-            from_block.and_then(BlockNumberOrTag::as_number),
-            to_block.and_then(BlockNumberOrTag::as_number),
+            from_block.and_then(reth_rpc_types::BlockNumberOrTag::as_number),
+            to_block.and_then(reth_rpc_types::BlockNumberOrTag::as_number),
             start_block,
             info,
         );

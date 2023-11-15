@@ -11,10 +11,10 @@ use reth_rpc_types::trace::{
     },
 };
 use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, SharedMemory, Stack,
+    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, Stack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 /// A unified representation of a call
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -157,24 +157,26 @@ pub(crate) struct CallTrace {
     /// The status of the trace's call
     pub(crate) status: InstructionResult,
     /// call context of the runtime
-    pub(crate) call_context: Option<CallContext>,
+    pub(crate) call_context: Option<Box<CallContext>>,
     /// Opcode-level execution steps
     pub(crate) steps: Vec<CallTraceStep>,
 }
 
 impl CallTrace {
     // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
+    #[inline]
     pub(crate) fn is_error(&self) -> bool {
-        self.status as u8 >= InstructionResult::Revert as u8
+        self.status.is_error()
     }
 
     // Returns true if the status code is a revert
+    #[inline]
     pub(crate) fn is_revert(&self) -> bool {
         self.status == InstructionResult::Revert
     }
 
     /// Returns the error message if it is an erroneous result.
-    pub(crate) fn as_error(&self, kind: TraceStyle) -> Option<String> {
+    pub(crate) fn as_error_msg(&self, kind: TraceStyle) -> Option<String> {
         // See also <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
         self.is_error().then(|| match self.status {
             InstructionResult::Revert => {
@@ -250,6 +252,28 @@ impl CallTraceNode {
         }
     }
 
+    /// Returns all storage slots touched by this trace and the value this storage.
+    ///
+    /// A touched slot is either a slot that was written to or read from.
+    ///
+    /// If the slot is accessed more than once, the result only includes the first time it was
+    /// accessed, in other words in only returns the original value of the slot.
+    pub(crate) fn touched_slots(&self) -> BTreeMap<U256, U256> {
+        let mut touched_slots = BTreeMap::new();
+        for change in self.trace.steps.iter().filter_map(|s| s.storage_change.as_ref()) {
+            match touched_slots.entry(change.key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(change.value);
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {
+                    // already touched
+                }
+            }
+        }
+
+        touched_slots
+    }
+
     /// Pushes all steps onto the stack in reverse order
     /// so that the first step is on top of the stack
     pub(crate) fn push_steps_on_stack<'a>(
@@ -289,12 +313,14 @@ impl CallTraceNode {
     }
 
     /// Returns the kind of call the trace belongs to
-    pub(crate) fn kind(&self) -> CallKind {
+    #[inline]
+    pub(crate) const fn kind(&self) -> CallKind {
         self.trace.kind
     }
 
     /// Returns the status of the call
-    pub(crate) fn status(&self) -> InstructionResult {
+    #[inline]
+    pub(crate) const fn status(&self) -> InstructionResult {
         self.trace.status
     }
 
@@ -313,7 +339,7 @@ impl CallTraceNode {
         } else {
             Some(self.parity_trace_output())
         };
-        let error = self.trace.as_error(TraceStyle::Parity);
+        let error = self.trace.as_error_msg(TraceStyle::Parity);
         TransactionTrace { action, error, result, trace_address, subtraces: self.children.len() }
     }
 
@@ -430,7 +456,7 @@ impl CallTraceNode {
         if !self.trace.success {
             call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref());
             // Note: the call tracer mimics parity's trace transaction and geth maps errors to parity style error messages, <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
-            call_frame.error = self.trace.as_error(TraceStyle::Parity);
+            call_frame.error = self.trace.as_error_msg(TraceStyle::Parity);
         }
 
         if include_logs && !self.logs.is_empty() {
@@ -496,7 +522,7 @@ pub(crate) struct CallTraceStep {
     /// All allocated memory in a step
     ///
     /// This will be empty if memory capture is disabled
-    pub(crate) memory: SharedMemory,
+    pub(crate) memory: RecordedMemory,
     /// Size of memory at the beginning of the step
     pub(crate) memory_size: usize,
     /// Remaining gas before step execution
@@ -546,7 +572,7 @@ impl CallTraceStep {
         }
 
         if opts.is_memory_enabled() {
-            log.memory = Some(convert_memory(self.memory.slice(0, self.memory.len())));
+            log.memory = Some(self.memory.memory_chunks());
         }
 
         log
@@ -574,11 +600,13 @@ impl CallTraceStep {
     }
 
     // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
+    #[inline]
     pub(crate) fn is_error(&self) -> bool {
         self.status as u8 >= InstructionResult::Revert as u8
     }
 
     /// Returns the error message if it is an erroneous result.
+    #[inline]
     pub(crate) fn as_error(&self) -> Option<String> {
         self.is_error().then(|| format!("{:?}", self.status))
     }
@@ -600,4 +628,43 @@ pub(crate) struct StorageChange {
     pub(crate) value: U256,
     pub(crate) had_value: Option<U256>,
     pub(crate) reason: StorageChangeReason,
+}
+
+/// Represents the memory captured during execution
+///
+/// This is a wrapper around the [SharedMemory](revm::interpreter::SharedMemory) context memory.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct RecordedMemory(pub(crate) Vec<u8>);
+
+impl RecordedMemory {
+    #[inline]
+    pub(crate) fn new(mem: Vec<u8>) -> Self {
+        Self(mem)
+    }
+
+    #[inline]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    #[inline]
+    pub(crate) fn resize(&mut self, size: usize) {
+        self.0.resize(size, 0);
+    }
+
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Converts the memory into 32byte hex chunks
+    #[inline]
+    pub(crate) fn memory_chunks(&self) -> Vec<String> {
+        convert_memory(self.as_bytes())
+    }
 }

@@ -102,13 +102,13 @@ pub enum EngineHookAction {}
 #[derive(Debug, thiserror::Error)]
 pub enum EngineHookError {
     /// Hook channel closed.
-    #[error("Hook channel closed")]
+    #[error("hook channel closed")]
     ChannelClosed,
     /// Common error. Wrapper around [RethError].
     #[error(transparent)]
     Common(#[from] RethError),
     /// An internal error occurred.
-    #[error("Internal hook error occurred.")]
+    #[error(transparent)]
     Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 

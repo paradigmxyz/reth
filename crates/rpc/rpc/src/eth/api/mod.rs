@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
+    revm_primitives::{BlockEnv, CfgEnv},
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
 };
 use reth_provider::{
@@ -22,7 +23,6 @@ use reth_provider::{
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{BlockEnv, CfgEnv};
 use std::{
     future::Future,
     sync::Arc,
@@ -33,6 +33,8 @@ use tokio::sync::{oneshot, Mutex};
 mod block;
 mod call;
 mod fees;
+#[cfg(feature = "optimism")]
+mod optimism;
 mod pending_block;
 mod server;
 mod sign;
@@ -137,6 +139,8 @@ where
             task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
+            #[cfg(feature = "optimism")]
+            http_client: reqwest::Client::new(),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -262,6 +266,12 @@ where
         };
 
         let mut cfg = CfgEnv::default();
+
+        #[cfg(feature = "optimism")]
+        {
+            cfg.optimism = self.provider().chain_spec().is_optimism();
+        }
+
         let mut block_env = BlockEnv::default();
         // Note: for the PENDING block we assume it is past the known merge block and thus this will
         // not fail when looking up the total difficulty value for the blockenv.
@@ -438,4 +448,7 @@ struct EthApiInner<Provider, Pool, Network> {
     pending_block: Mutex<Option<PendingBlock>>,
     /// A pool dedicated to blocking tasks.
     blocking_task_pool: BlockingTaskPool,
+    /// An http client for communicating with sequencers.
+    #[cfg(feature = "optimism")]
+    http_client: reqwest::Client,
 }

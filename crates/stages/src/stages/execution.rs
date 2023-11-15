@@ -1,6 +1,6 @@
 use crate::{
-    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, ExecInput, ExecOutput, MetricEvent,
-    MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
+    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, BlockErrorKind, ExecInput, ExecOutput,
+    MetricEvent, MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use num_traits::Zero;
 use reth_db::{
@@ -147,7 +147,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // we need the block's transactions but we don't need the transaction hashes
             let block = provider
-                .block_with_senders(block_number, TransactionVariant::NoHash)?
+                .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             fetch_block_duration += time.elapsed();
@@ -161,7 +161,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // Execute the block
             let (block, senders) = block.into_components();
             executor.execute_and_verify_receipt(&block, td, Some(senders)).map_err(|error| {
-                StageError::ExecutionError { block: block.header.clone().seal_slow(), error }
+                StageError::Block {
+                    block: Box::new(block.header.clone().seal_slow()),
+                    error: BlockErrorKind::Execution(error),
+                }
             })?;
 
             execution_duration += time.elapsed();

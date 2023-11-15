@@ -94,7 +94,7 @@ impl BlockReader for NoopProvider {
 
     fn block_with_senders(
         &self,
-        _number: BlockNumber,
+        _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> RethResult<Option<reth_primitives::BlockWithSenders>> {
         Ok(None)
@@ -264,7 +264,7 @@ impl ChangeSetReader for NoopProvider {
 
 impl StateRootProvider for NoopProvider {
     fn state_root(&self, _state: &BundleStateWithReceipts) -> RethResult<B256> {
-        todo!()
+        Ok(B256::default())
     }
 }
 

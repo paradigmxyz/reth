@@ -6,22 +6,20 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Reth RPC implementation
-"""
+description = "Reth RPC implementation"
 [dependencies]
 # reth
 reth-interfaces.workspace = true
 reth-primitives.workspace = true
-reth-rpc-api = { path = "../rpc-api" }
+reth-rpc-api.workspace = true
 reth-rpc-types.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
-reth-rpc-engine-api = { path = "../rpc-engine-api" }
-reth-revm = { path = "../../revm" }
+reth-rpc-engine-api.workspace = true
+reth-revm.workspace = true
 reth-tasks.workspace = true
-reth-consensus-common = { path = "../../consensus/common" }
+reth-consensus-common.workspace = true
 reth-rpc-types-compat.workspace = true
 lazy_static = "*"
 
@@ -42,6 +40,7 @@ jsonrpsee.workspace = true
 http = "0.2.8"
 http-body = "0.4.5"
 hyper = "0.14.24"
+reqwest = { version = "0.11.20", optional = true }
 jsonwebtoken = "8"
 
 # async
@@ -66,7 +65,7 @@ thiserror.workspace = true
 rand.workspace = true
 tracing.workspace = true
 tracing-futures = "0.2"
-schnellru = "0.2"
+schnellru.workspace = true
 futures.workspace = true
 derive_more = "0.99"
 
@@ -75,3 +74,13 @@ jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+
+[features]
+optimism = [
+    "dep:reqwest",
+    "reth-primitives/optimism",
+    "reth-rpc-types-compat/optimism",
+    "reth-network-api/optimism",
+    "reth-provider/optimism",
+    "reth-transaction-pool/optimism",
+]

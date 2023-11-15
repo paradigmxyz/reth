@@ -4,7 +4,7 @@ use reth_primitives::{
     ChainSpec, SnapshotSegment,
 };
 use reth_provider::{DatabaseProviderRO, ProviderFactory};
-use std::{sync::Arc, time::Instant};
+use std::{fmt::Debug, sync::Arc, time::Instant};
 
 #[derive(Debug)]
 pub(crate) enum BenchKind {
@@ -14,7 +14,7 @@ pub(crate) enum BenchKind {
     RandomHash,
 }
 
-pub(crate) fn bench<F1, F2>(
+pub(crate) fn bench<F1, F2, R>(
     bench_kind: BenchKind,
     db: (DatabaseEnvRO, Arc<ChainSpec>),
     segment: SnapshotSegment,
@@ -24,28 +24,34 @@ pub(crate) fn bench<F1, F2>(
     database_method: F2,
 ) -> eyre::Result<()>
 where
-    F1: FnMut() -> eyre::Result<()>,
-    F2: Fn(DatabaseProviderRO<'_, DatabaseEnvRO>) -> eyre::Result<()>,
+    F1: FnMut() -> eyre::Result<R>,
+    F2: Fn(DatabaseProviderRO<'_, DatabaseEnvRO>) -> eyre::Result<R>,
+    R: Debug + PartialEq,
 {
     let (db, chain) = db;
 
     println!();
     println!("############");
     println!("## [{segment:?}] [{compression:?}] [{filters:?}] [{bench_kind:?}]");
-    {
+    let snap_result = {
         let start = Instant::now();
-        snapshot_method()?;
+        let result = snapshot_method()?;
         let end = start.elapsed().as_micros();
         println!("# snapshot {bench_kind:?} | {end} μs");
-    }
-    {
+        result
+    };
+
+    let db_result = {
         let factory = ProviderFactory::new(db, chain);
         let provider = factory.provider()?;
         let start = Instant::now();
-        database_method(provider)?;
+        let result = database_method(provider)?;
         let end = start.elapsed().as_micros();
         println!("# database {bench_kind:?} | {end} μs");
-    }
+        result
+    };
+
+    assert_eq!(snap_result, db_result);
 
     Ok(())
 }

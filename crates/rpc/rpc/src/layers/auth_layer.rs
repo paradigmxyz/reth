@@ -17,25 +17,26 @@ use tower::{Layer, Service};
 /// # How to integrate
 /// ```rust
 /// async fn build_layered_rpc_server() {
-///    use jsonrpsee::server::ServerBuilder;
-///    use reth_rpc::{AuthLayer, JwtAuthValidator, JwtSecret};
-///    use std::net::SocketAddr;
+///     use jsonrpsee::server::ServerBuilder;
+///     use reth_rpc::{AuthLayer, JwtAuthValidator, JwtSecret};
+///     use std::net::SocketAddr;
 ///
-///    const AUTH_PORT: u32 = 8551;
-///    const AUTH_ADDR: &str = "0.0.0.0";
-///    const AUTH_SECRET: &str = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
+///     const AUTH_PORT: u32 = 8551;
+///     const AUTH_ADDR: &str = "0.0.0.0";
+///     const AUTH_SECRET: &str =
+///         "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
 ///
-///    let addr = format!("{AUTH_ADDR}:{AUTH_PORT}");
-///    let secret = JwtSecret::from_hex(AUTH_SECRET).unwrap();
-///    let validator = JwtAuthValidator::new(secret);
-///    let layer = AuthLayer::new(validator);
-///    let middleware = tower::ServiceBuilder::default().layer(layer);
+///     let addr = format!("{AUTH_ADDR}:{AUTH_PORT}");
+///     let secret = JwtSecret::from_hex(AUTH_SECRET).unwrap();
+///     let validator = JwtAuthValidator::new(secret);
+///     let layer = AuthLayer::new(validator);
+///     let middleware = tower::ServiceBuilder::default().layer(layer);
 ///
-///    let _server = ServerBuilder::default()
-///        .set_middleware(middleware)
-///        .build(addr.parse::<SocketAddr>().unwrap())
-///        .await
-///        .unwrap();
+///     let _server = ServerBuilder::default()
+///         .set_middleware(middleware)
+///         .build(addr.parse::<SocketAddr>().unwrap())
+///         .await
+///         .unwrap();
 /// }
 /// ```
 #[allow(missing_debug_implementations)]
@@ -233,7 +234,7 @@ mod tests {
         let jwt = "this jwt has serious encoding problems".to_string();
         let (status, body) = send_request(Some(jwt)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(body, "JWT decoding error Error(InvalidToken)".to_string());
+        assert_eq!(body, "JWT decoding error: Error(InvalidToken)".to_string());
     }
 
     async fn send_request(jwt: Option<String>) -> (StatusCode, String) {

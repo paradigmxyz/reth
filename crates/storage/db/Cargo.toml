@@ -12,9 +12,9 @@ description = "Staged syncing primitives used in reth."
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-codecs = { path = "../codecs" }
-reth-libmdbx = { path = "../libmdbx-rs", optional = true, features = ["return-borrowed"] }
-reth-nippy-jar = { path = "../nippy-jar" }
+reth-codecs.workspace = true
+reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed"] }
+reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
 
 # codecs
@@ -45,6 +45,8 @@ parking_lot.workspace = true
 derive_more = "0.99"
 eyre.workspace = true
 paste = "1.0"
+rayon.workspace = true
+itertools.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -54,7 +56,7 @@ proptest-derive = { workspace = true, optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-codecs = { path = "../codecs", features = ["arbitrary"] }
+reth-codecs = { workspace = true, features = ["arbitrary"] }
 reth-interfaces.workspace = true
 
 tempfile.workspace = true

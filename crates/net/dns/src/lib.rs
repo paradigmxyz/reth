@@ -118,11 +118,13 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     /// Creates a new instance of the [DnsDiscoveryService] using the given settings.
     ///
     /// ```
-    /// use std::sync::Arc;
     /// use reth_dns_discovery::{DnsDiscoveryService, DnsResolver};
+    /// use std::sync::Arc;
     /// # fn t() {
-    ///  let service =
-    ///             DnsDiscoveryService::new(Arc::new(DnsResolver::from_system_conf().unwrap()), Default::default());
+    /// let service = DnsDiscoveryService::new(
+    ///     Arc::new(DnsResolver::from_system_conf().unwrap()),
+    ///     Default::default(),
+    /// );
     /// # }
     /// ```
     pub fn new(resolver: Arc<R>, config: DnsDiscoveryConfig) -> Self {
@@ -156,7 +158,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             self.bootstrap();
 
             while let Some(event) = self.next().await {
-                trace!(target : "disc::dns", ?event,  "processed");
+                trace!(target: "disc::dns", ?event,  "processed");
             }
         })
     }

@@ -9,7 +9,6 @@ use crate::{
     blobstore::InMemoryBlobStore, noop::MockTransactionValidator, Pool, PoolTransaction,
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
 };
-use async_trait::async_trait;
 pub use gen::*;
 pub use mock::*;
 use std::{marker::PhantomData, sync::Arc};

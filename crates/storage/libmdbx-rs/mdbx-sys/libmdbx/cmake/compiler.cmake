@@ -1039,9 +1039,15 @@ macro(probe_libcxx_filesystem)
         #endif
 
         int main(int argc, const char*argv[]) {
-          fs::path probe(argv[0]);
+          std::string str(argv[0]);
+          fs::path probe(str);
           if (argc != 1) throw fs::filesystem_error(std::string("fake"), std::error_code());
-          return fs::is_directory(probe.relative_path());
+          int r = fs::is_directory(probe.relative_path());
+          for (auto const& i : fs::directory_iterator(probe)) {
+            ++r;
+            (void)i;
+          }
+          return r;
         }
         ]])
       set(LIBCXX_FILESYSTEM "")

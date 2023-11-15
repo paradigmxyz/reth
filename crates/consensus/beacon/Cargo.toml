@@ -9,17 +9,17 @@ repository.workspace = true
 
 [dependencies]
 # reth
-reth-consensus-common = { path = "../common" }
+reth-consensus-common.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-stages = { path = "../../stages" }
+reth-stages.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
-reth-prune = { path = "../../prune" }
-reth-snapshot = { path = "../../snapshot" }
+reth-prune.workspace = true
+reth-snapshot.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-tokio-util.workspace = true
 # async
@@ -34,18 +34,30 @@ metrics.workspace = true
 # misc
 tracing.workspace = true
 thiserror.workspace = true
-schnellru = "0.2"
+schnellru.workspace = true
+cfg-if = "1.0.0"
 
 [dev-dependencies]
 # reth
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-stages = { path = "../../stages", features = ["test-utils"] }
-reth-blockchain-tree = { path = "../../blockchain-tree", features = ["test-utils"] }
+reth-stages = { workspace = true, features = ["test-utils"] }
+reth-blockchain-tree = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
-reth-revm = { path = "../../revm" }
-reth-downloaders = { path = "../../net/downloaders" }
+reth-revm.workspace = true
+reth-downloaders.workspace = true
 
 assert_matches.workspace = true
+
+[features]
+optimism = [
+  "reth-consensus-common/optimism",
+  "reth-primitives/optimism",
+  "reth-interfaces/optimism",
+  "reth-provider/optimism",
+  "reth-rpc-types/optimism",
+  "reth-rpc-types-compat/optimism",
+  "reth-payload-builder/optimism",
+]

@@ -25,7 +25,7 @@ pub use traits::{
     PruneCheckpointWriter, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
     StageCheckpointWriter, StateProvider, StateProviderBox, StateProviderFactory,
     StateRootProvider, StorageReader, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+    TransactionsProviderExt, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.

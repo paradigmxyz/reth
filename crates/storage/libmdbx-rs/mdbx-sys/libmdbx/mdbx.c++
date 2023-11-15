@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define xMDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY a0e7c54f688eecaf45ddd7493b737f88a97e4e8b0fdaa55c9d3b00d69e0c8548_v0_12_6_0_gc019631a
+#define MDBX_BUILD_SOURCERY 30c8f70db1f021dc2bfb201ba04efdcc34fc7495127f517f9624f18c0100b8ab_v0_12_8_0_g02c7cf2a
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -3734,6 +3734,7 @@ struct MDBX_env {
   int me_valgrind_handle;
 #endif
 #if defined(MDBX_USE_VALGRIND) || defined(__SANITIZE_ADDRESS__)
+  MDBX_atomic_uint32_t me_ignore_EDEADLK;
   pgno_t me_poison_edge;
 #endif /* MDBX_USE_VALGRIND || __SANITIZE_ADDRESS__ */
 
@@ -4272,6 +4273,10 @@ namespace mdbx {
       "into an incompatible memory allocation scheme.");
 }
 
+[[noreturn]] __cold void throw_bad_value_size() {
+  throw bad_value_size(MDBX_BAD_VALSIZE);
+}
+
 __cold exception::exception(const ::mdbx::error &error) noexcept
     : base(error.what()), error_(error) {}
 
@@ -4520,6 +4525,109 @@ bool slice::is_printable(bool disable_utf8) const noexcept {
   } while (src < end);
 
   return true;
+}
+
+#ifdef MDBX_U128_TYPE
+MDBX_U128_TYPE slice::as_uint128() const {
+  static_assert(sizeof(MDBX_U128_TYPE) == 16, "WTF?");
+  if (size() == 16) {
+    MDBX_U128_TYPE r;
+    memcpy(&r, data(), sizeof(r));
+    return r;
+  } else
+    return as_uint64();
+}
+#endif /* MDBX_U128_TYPE */
+
+uint64_t slice::as_uint64() const {
+  static_assert(sizeof(uint64_t) == 8, "WTF?");
+  if (size() == 8) {
+    uint64_t r;
+    memcpy(&r, data(), sizeof(r));
+    return r;
+  } else
+    return as_uint32();
+}
+
+uint32_t slice::as_uint32() const {
+  static_assert(sizeof(uint32_t) == 4, "WTF?");
+  if (size() == 4) {
+    uint32_t r;
+    memcpy(&r, data(), sizeof(r));
+    return r;
+  } else
+    return as_uint16();
+}
+
+uint16_t slice::as_uint16() const {
+  static_assert(sizeof(uint16_t) == 2, "WTF?");
+  if (size() == 2) {
+    uint16_t r;
+    memcpy(&r, data(), sizeof(r));
+    return r;
+  } else
+    return as_uint8();
+}
+
+uint8_t slice::as_uint8() const {
+  static_assert(sizeof(uint8_t) == 1, "WTF?");
+  if (size() == 1)
+    return *static_cast<const uint8_t *>(data());
+  else if (size() == 0)
+    return 0;
+  else
+    MDBX_CXX20_UNLIKELY throw_bad_value_size();
+}
+
+#ifdef MDBX_I128_TYPE
+MDBX_I128_TYPE slice::as_int128() const {
+  static_assert(sizeof(MDBX_I128_TYPE) == 16, "WTF?");
+  if (size() == 16) {
+    MDBX_I128_TYPE r;
+    memcpy(&r, data(), sizeof(r));
+    return r;
+  } else
+    return as_int64();
+}
+#endif /* MDBX_I128_TYPE */
+
+int64_t slice::as_int64() const {
+  static_assert(sizeof(int64_t) == 8, "WTF?");
+  if (size() == 8) {
+    uint64_t r;
+    memcpy(&r, data(), sizeof(r));
+    return r;
+  } else
+    return as_int32();
+}
+
+int32_t slice::as_int32() const {
+  static_assert(sizeof(int32_t) == 4, "WTF?");
+  if (size() == 4) {
+    int32_t r;
+    memcpy(&r, data(), sizeof(r));
+    return r;
+  } else
+    return as_int16();
+}
+
+int16_t slice::as_int16() const {
+  static_assert(sizeof(int16_t) == 2, "WTF?");
+  if (size() == 2) {
+    int16_t r;
+    memcpy(&r, data(), sizeof(r));
+    return r;
+  } else
+    return as_int8();
+}
+
+int8_t slice::as_int8() const {
+  if (size() == 1)
+    return *static_cast<const int8_t *>(data());
+  else if (size() == 0)
+    return 0;
+  else
+    MDBX_CXX20_UNLIKELY throw_bad_value_size();
 }
 
 //------------------------------------------------------------------------------

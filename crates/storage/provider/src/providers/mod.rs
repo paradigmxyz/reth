@@ -37,14 +37,14 @@ mod bundle_state_provider;
 mod chain_info;
 mod database;
 mod snapshot;
-pub use snapshot::SnapshotProvider;
+pub use snapshot::{SnapshotJarProvider, SnapshotProvider};
 mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use bundle_state_provider::BundleStateProvider;
 pub use database::*;
 use reth_db::models::AccountBeforeTx;
 use reth_interfaces::blockchain_tree::{
-    error::InsertBlockError, CanonicalOutcome, InsertPayloadOk,
+    error::InsertBlockError, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
 };
 
 /// The main type for interacting with the blockchain.
@@ -260,7 +260,7 @@ where
         self.database.provider()?.block_body_indices(number)
     }
 
-    /// Returns the block with senders with matching number from database.
+    /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: If [TransactionVariant::NoHash] is provided then the transactions have invalid
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
@@ -268,10 +268,10 @@ where
     /// Returns `None` if block is not found.
     fn block_with_senders(
         &self,
-        number: BlockNumber,
+        id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
-        self.database.provider()?.block_with_senders(number, transaction_kind)
+        self.database.provider()?.block_with_senders(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
@@ -574,8 +574,9 @@ where
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
+        validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
-        self.tree.insert_block(block)
+        self.tree.insert_block(block, validation_kind)
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) {

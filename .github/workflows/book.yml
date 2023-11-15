@@ -1,4 +1,7 @@
+# Documentation and mdbook related jobs.
+
 name: book
+
 on:
   push:
     branches: [main]
@@ -13,7 +16,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install mdbook
         run: |
@@ -36,7 +39,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install mdbook-linkcheck
         run: |
@@ -53,9 +56,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-
       - name: Install mdbook
         run: |
           mkdir mdbook

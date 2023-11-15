@@ -90,12 +90,11 @@ impl IpcTransportClientBuilder {
     /// Try to establish the connection.
     ///
     /// ```
-    /// use jsonrpsee::rpc_params;
+    /// use jsonrpsee::{core::client::ClientT, rpc_params};
     /// use reth_ipc::client::IpcClientBuilder;
-    /// use jsonrpsee::core::client::ClientT;
     /// # async fn run_client() -> Result<(), Box<dyn std::error::Error +  Send + Sync>> {
-    ///     let client = IpcClientBuilder::default().build("/tmp/my-uds").await?;
-    ///     let response: String = client.request("say_hello", rpc_params![]).await?;
+    /// let client = IpcClientBuilder::default().build("/tmp/my-uds").await?;
+    /// let response: String = client.request("say_hello", rpc_params![]).await?;
     /// #   Ok(())
     /// # }
     /// ```
@@ -120,13 +119,13 @@ impl IpcTransportClientBuilder {
 #[allow(missing_docs)]
 pub enum IpcError {
     /// Operation not supported
-    #[error("Operation not supported")]
+    #[error("operation not supported")]
     NotSupported,
     /// Stream was closed
-    #[error("Stream closed")]
+    #[error("stream closed")]
     Closed,
     /// Thrown when failed to establish a socket connection.
-    #[error("Failed to connect to socket {path}: {err}")]
+    #[error("failed to connect to socket {path}: {err}")]
     FailedToConnect {
         /// The path of the socket.
         path: PathBuf,
