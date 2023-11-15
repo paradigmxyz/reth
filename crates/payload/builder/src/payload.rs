@@ -2,8 +2,9 @@
 
 use alloy_rlp::{Encodable, Error as DecodeError};
 use reth_primitives::{
-    revm::config::revm_spec_by_timestamp_after_merge, Address, BlobTransactionSidecar, ChainSpec,
-    Header, SealedBlock, Withdrawal, B256, U256,
+    revm::config::revm_spec_by_timestamp_after_merge,
+    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
+    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
@@ -14,7 +15,6 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v3, convert_block_to_payload_field_v2,
     convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
 };
-use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId};
 
 #[cfg(feature = "optimism")]
 use reth_primitives::TransactionSigned;

@@ -6,7 +6,9 @@ use crate::{constants::eip4844::VERSIONED_HASH_VERSION_KZG, B256};
 use sha2::{Digest, Sha256};
 
 // re-exports from revm for calculating blob fee
-pub use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas as calculate_excess_blob_gas};
+pub use crate::revm_primitives::{
+    calc_blob_gasprice, calc_excess_blob_gas as calculate_excess_blob_gas,
+};
 
 /// Calculates the versioned hash for a KzgCommitment
 ///
