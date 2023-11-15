@@ -130,8 +130,21 @@ impl Command {
         Ok(())
     }
 
-    /// Gives out the inclusive block range for the snapshot requested by the user.
-    fn block_range(&self) -> RangeInclusive<BlockNumber> {
-        self.from..=(self.from + self.block_interval - 1)
+    /// Generates successive inclusive block ranges up to the tip starting at `self.from`.
+    fn next_block_range(
+        &self,
+        from: &mut BlockNumber,
+        tip: BlockNumber,
+    ) -> Option<RangeInclusive<BlockNumber>> {
+        if *from > tip {
+            return None
+        }
+
+        let end_range = std::cmp::min(*from + self.block_interval - 1, tip);
+
+        let range = *from..=end_range;
+        *from = end_range + 1;
+
+        return Some(range)
     }
 }

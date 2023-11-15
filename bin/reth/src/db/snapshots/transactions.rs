@@ -10,8 +10,8 @@ use reth_primitives::{
     ChainSpec, SnapshotSegment, TransactionSignedNoHash,
 };
 use reth_provider::{
-    providers::SnapshotProvider, DatabaseProviderRO, ProviderError, ProviderFactory,
-    TransactionsProvider, TransactionsProviderExt,
+    providers::SnapshotProvider, BlockNumReader, DatabaseProviderRO, ProviderError,
+    ProviderFactory, TransactionsProvider, TransactionsProviderExt,
 };
 use reth_snapshot::{segments, segments::Segment};
 use std::{
@@ -27,28 +27,32 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let block_range = self.block_range();
-        let filters = if self.with_filters {
-            Filters::WithFilters(inclusion_filter, phf)
-        } else {
-            Filters::WithoutFilters
-        };
+        let tip = provider.last_block_number()?;
+        let mut from = self.from;
 
-        let segment = segments::Transactions::new(compression, filters);
+        while let Some(block_range) = self.next_block_range(&mut from, tip) {
+            let filters = if self.with_filters {
+                Filters::WithFilters(inclusion_filter, phf)
+            } else {
+                Filters::WithoutFilters
+            };
 
-        segment.snapshot::<DB>(provider, PathBuf::default(), block_range.clone())?;
+            let segment = segments::Transactions::new(compression, filters);
 
-        // Default name doesn't have any configuration
-        let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
-        reth_primitives::fs::rename(
-            SnapshotSegment::Transactions.filename(&block_range, &tx_range),
-            SnapshotSegment::Transactions.filename_with_configuration(
-                filters,
-                compression,
-                &block_range,
-                &tx_range,
-            ),
-        )?;
+            segment.snapshot::<DB>(provider, PathBuf::default(), block_range.clone())?;
+
+            // Default name doesn't have any configuration
+            let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
+            reth_primitives::fs::rename(
+                SnapshotSegment::Transactions.filename(&block_range, &tx_range),
+                SnapshotSegment::Transactions.filename_with_configuration(
+                    filters,
+                    compression,
+                    &block_range,
+                    &tx_range,
+                ),
+            )?;
+        }
 
         Ok(())
     }
@@ -62,19 +66,21 @@ impl Command {
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
+        let factory = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone());
+        let provider = factory.provider()?;
+        let tip = provider.last_block_number()?;
+        let mut from = self.from;
+        let block_range = self.next_block_range(&mut from, tip).expect("has been generated before");
+
         let filters = if self.with_filters {
             Filters::WithFilters(inclusion_filter, phf)
         } else {
             Filters::WithoutFilters
         };
 
-        let block_range = self.block_range();
-
         let mut rng = rand::thread_rng();
 
-        let tx_range = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
-            .provider()?
-            .transaction_range_by_block_range(block_range.clone())?;
+        let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
