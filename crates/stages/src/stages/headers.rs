@@ -125,6 +125,16 @@ where
     ) -> Poll<Result<(), StageError>> {
         let current_checkpoint = input.checkpoint();
 
+        // Return if buffer already has some items.
+        if !self.buffer.is_empty() {
+            trace!(
+                target: "sync::stages::headers",
+                checkpoint = %current_checkpoint.block_number,
+                "Buffer is not empty"
+            );
+            return Poll::Ready(Ok(()))
+        }
+
         // Lookup the head and tip of the sync range
         let gap = self.provider.sync_gap(self.mode.clone(), current_checkpoint.block_number)?;
         let tip = gap.target.tip();
@@ -173,7 +183,7 @@ where
             return Ok(ExecOutput::done(current_checkpoint))
         }
 
-        let gap = self.sync_gap.clone().unwrap(); // TODO:
+        let gap = self.sync_gap.clone().ok_or(StageError::MissingSyncGap)?;
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 

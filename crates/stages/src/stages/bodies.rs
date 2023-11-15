@@ -71,9 +71,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         cx: &mut Context<'_>,
         input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
-        // todo: short circuit if target is reached?
-        // todo: check if this is bad async code
-        // todo: prob should have some other condition (i.e. more than 1 body surely)
         if input.target_reached() || !self.buffer.is_empty() {
             return Poll::Ready(Ok(()))
         }

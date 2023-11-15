@@ -50,6 +50,9 @@ pub enum StageError {
         #[source]
         error: Box<consensus::ConsensusError>,
     },
+    /// The headers stage is missing sync gap.
+    #[error("missing sync gap")]
+    MissingSyncGap,
     /// The stage encountered a database error.
     #[error("internal database error occurred: {0}")]
     Database(#[from] DbError),
@@ -94,6 +97,7 @@ impl StageError {
                 StageError::Download(_) |
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageCheckpoint(_) |
+                StageError::MissingSyncGap |
                 StageError::ChannelClosed |
                 StageError::Fatal(_)
         )

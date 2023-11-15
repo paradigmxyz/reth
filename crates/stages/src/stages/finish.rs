@@ -11,7 +11,6 @@ use reth_provider::DatabaseProviderRW;
 #[non_exhaustive]
 pub struct FinishStage;
 
-// todo: re-eval if we need this stage
 impl<DB: Database> Stage<DB> for FinishStage {
     fn id(&self) -> StageId {
         StageId::Finish

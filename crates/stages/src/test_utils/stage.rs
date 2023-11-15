@@ -40,7 +40,6 @@ impl TestStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for TestStage {
     fn id(&self) -> StageId {
         self.id

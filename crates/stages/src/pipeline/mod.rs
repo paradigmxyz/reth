@@ -110,9 +110,6 @@ pub struct Pipeline<DB: Database> {
     metrics_tx: Option<MetricEventsSender>,
 }
 
-// TODO:
-unsafe impl<DB: Database> Send for Pipeline<DB> {}
-
 impl<DB> Pipeline<DB>
 where
     DB: Database + 'static,
@@ -162,11 +159,11 @@ where
     /// pipeline and its result as a future.
     #[track_caller]
     pub fn run_as_fut(mut self, tip: Option<B256>) -> PipelineFut<DB> {
-        // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
-        // updating metrics.
         // TODO(onbjerg): Do we need this if we make all of this stuff sync, or should it just be a
         // thread? If we still need it, why? Do we need more granular control over how the pipeline
         // is run?
+        // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
+        // updating metrics.
         let _ = self.register_metrics(); // ignore error
         Box::pin(async move {
             // NOTE: the tip should only be None if we are in continuous sync mode.
@@ -376,7 +373,7 @@ where
 
             let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
 
-            if let Err(err) = poll_fn(|cx| stage.poll_ready(cx, exec_input.clone())).await {
+            if let Err(err) = poll_fn(|cx| stage.poll_ready(cx, exec_input)).await {
                 self.listeners.notify(PipelineEvent::Error { stage_id });
                 match on_stage_error(&factory, stage_id, prev_checkpoint, err)? {
                     Some(ctrl) => return Ok(ctrl),
@@ -549,7 +546,7 @@ fn on_stage_error<DB: Database>(
     prev_checkpoint: Option<StageCheckpoint>,
     err: StageError,
 ) -> Result<Option<ControlFlow>, PipelineError> {
-    let out = if let StageError::DetachedHead { local_head, header, error } = err {
+    if let StageError::DetachedHead { local_head, header, error } = err {
         warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
 
         // We unwind because of a detached head.
@@ -616,8 +613,7 @@ fn on_stage_error<DB: Database>(
             "Stage encountered a non-fatal error: {err}. Retrying..."
         );
         Ok(None)
-    };
-    out
+    }
 }
 
 impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
