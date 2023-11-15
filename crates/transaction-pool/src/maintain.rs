@@ -304,11 +304,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // to be re-injected
                 //
                 // Note: we no longer know if the tx was local or external
+                // Because the transactions are not finalized, the corresponding blobs are still in
+                // blob store (if we previously received them from the network)
                 metrics.inc_reinserted_transactions(pruned_old_transactions.len());
                 let _ = pool.add_external_transactions(pruned_old_transactions).await;
 
-                // keep track of mined blob transactions
-                // TODO(mattsse): handle reorged transactions
+                // keep track of new mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&new_blocks);
             }
             CanonStateNotification::Commit { new } => {
