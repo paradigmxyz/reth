@@ -3,14 +3,11 @@
 use reth_primitives::{fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
     sync::Arc,
     time::Duration,
 };
-use tracing::{debug, info};
-
-use reth_rpc::{JwtError, JwtSecret};
 
 #[cfg(feature = "optimism")]
 use reth_primitives::{BASE_GOERLI, BASE_MAINNET};
