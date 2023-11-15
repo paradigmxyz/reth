@@ -5,7 +5,7 @@ The `eth-wire` crate provides abstractions over the [RLPx](https://github.com/et
 
 This crate can be thought of as having 2 components:
 
-1. Data structures that serialize and deserialize the eth protocol messages into Rust-compatible types.
+1. Data structures that serialize and deserialize the Ethereum protocol messages into Rust-compatible types.
 2. Abstractions over Tokio Streams that operate on these types.
 
 (Note that ECIES is implemented in a separate `reth-ecies` crate.)
