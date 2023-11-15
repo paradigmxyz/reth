@@ -30,17 +30,6 @@ pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::P
     let seconds = arg.parse()?;
     Ok(Duration::from_secs(seconds))
 }
-/// Attempts to retrieve or create a JWT secret from the specified path.
-
-pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtError> {
-    if path.exists() {
-        debug!(target: "reth::cli", ?path, "Reading JWT auth secret file");
-        JwtSecret::from_file(path)
-    } else {
-        info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
-        JwtSecret::try_create(path)
-    }
-}
 
 /// Clap value parser for [ChainSpec]s that takes either a built-in chainspec or the path
 /// to a custom one.
