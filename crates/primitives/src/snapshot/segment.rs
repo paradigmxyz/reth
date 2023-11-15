@@ -2,8 +2,9 @@ use crate::{
     snapshot::{Compression, Filters, InclusionFilter},
     BlockNumber, TxNumber,
 };
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::{ops::RangeInclusive, str::FromStr};
+use std::{ffi::OsStr, ops::RangeInclusive, str::FromStr};
 use strum::{AsRefStr, EnumString};
 
 #[derive(
@@ -19,6 +20,7 @@ use strum::{AsRefStr, EnumString};
     Serialize,
     EnumString,
     AsRefStr,
+    Display,
 )]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be snapshotted.
@@ -53,10 +55,21 @@ impl SnapshotSegment {
     }
 
     /// Returns the default file name for the provided segment and range.
-    pub fn filename(&self, range: &RangeInclusive<BlockNumber>) -> String {
+    pub fn filename(
+        &self,
+        block_range: &RangeInclusive<BlockNumber>,
+        tx_range: &RangeInclusive<TxNumber>,
+    ) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`].
-        format!("snapshot_{}_{}_{}", self.as_ref(), range.start(), range.end(),)
+        format!(
+            "snapshot_{}_{}_{}_{}_{}",
+            self.as_ref(),
+            block_range.start(),
+            block_range.end(),
+            tx_range.start(),
+            tx_range.end(),
+        )
     }
 
     /// Returns file name for the provided segment and range, alongisde filters, compression.
@@ -64,9 +77,10 @@ impl SnapshotSegment {
         &self,
         filters: Filters,
         compression: Compression,
-        range: &RangeInclusive<BlockNumber>,
+        block_range: &RangeInclusive<BlockNumber>,
+        tx_range: &RangeInclusive<TxNumber>,
     ) -> String {
-        let prefix = self.filename(range);
+        let prefix = self.filename(block_range, tx_range);
 
         let filters_name = match filters {
             Filters::WithFilters(inclusion_filter, phf) => {
@@ -80,20 +94,41 @@ impl SnapshotSegment {
         format!("{prefix}_{}_{}", filters_name, compression.as_ref())
     }
 
-    /// Takes a filename and parses the [`SnapshotSegment`] and its inclusive range.
-    pub fn parse_filename(name: &str) -> Option<(Self, RangeInclusive<BlockNumber>)> {
-        let parts: Vec<&str> = name.split('_').collect();
-        if let (Ok(segment), true) = (Self::from_str(parts[1]), parts.len() >= 4) {
-            let start: u64 = parts[2].parse().unwrap_or(0);
-            let end: u64 = parts[3].parse().unwrap_or(0);
-
-            if start <= end || parts[0] != "snapshot" {
-                return None
-            }
-
-            return Some((segment, start..=end))
+    /// Parses a filename into a `SnapshotSegment` and its corresponding block and transaction
+    /// ranges.
+    ///
+    /// The filename is expected to follow the format:
+    /// "snapshot_{segment}_{block_start}_{block_end}_{tx_start}_{tx_end}". This function checks
+    /// for the correct prefix ("snapshot"), and then parses the segment and the inclusive
+    /// ranges for blocks and transactions. It ensures that the start of each range is less than the
+    /// end.
+    ///
+    /// # Returns
+    /// - `Some((segment, block_range, tx_range))` if parsing is successful and all conditions are
+    ///   met.
+    /// - `None` if any condition fails, such as an incorrect prefix, parsing error, or invalid
+    ///   range.
+    ///
+    /// # Note
+    /// This function is tightly coupled with the naming convention defined in [`Self::filename`].
+    /// Any changes in the filename format in `filename` should be reflected here.
+    pub fn parse_filename(
+        name: &OsStr,
+    ) -> Option<(Self, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
+        let mut parts = name.to_str()?.split('_');
+        if parts.next() != Some("snapshot") {
+            return None;
         }
-        None
+
+        let segment = Self::from_str(parts.next()?).ok()?;
+        let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
+        let (tx_start, tx_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
+
+        if block_start >= block_end || tx_start > tx_end {
+            return None;
+        }
+
+        Some((segment, block_start..=block_end, tx_start..=tx_end))
     }
 }
 
@@ -144,4 +179,93 @@ pub struct SegmentConfig {
     pub filters: Filters,
     /// Compression used on the segment
     pub compression: Compression,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_filename() {
+        let test_vectors = [
+            (SnapshotSegment::Headers, 2..=30, 0..=1, "snapshot_headers_2_30_0_1", None),
+            (
+                SnapshotSegment::Receipts,
+                30..=300,
+                110..=1000,
+                "snapshot_receipts_30_300_110_1000",
+                None,
+            ),
+            (
+                SnapshotSegment::Transactions,
+                1_123_233..=11_223_233,
+                1_123_233..=2_123_233,
+                "snapshot_transactions_1123233_11223233_1123233_2123233",
+                None,
+            ),
+            (
+                SnapshotSegment::Headers,
+                2..=30,
+                0..=1,
+                "snapshot_headers_2_30_0_1_cuckoo-fmph_lz4",
+                Some((
+                    Compression::Lz4,
+                    Filters::WithFilters(
+                        InclusionFilter::Cuckoo,
+                        crate::snapshot::PerfectHashingFunction::Fmph,
+                    ),
+                )),
+            ),
+            (
+                SnapshotSegment::Headers,
+                2..=30,
+                0..=1,
+                "snapshot_headers_2_30_0_1_cuckoo-fmph_zstd",
+                Some((
+                    Compression::Zstd,
+                    Filters::WithFilters(
+                        InclusionFilter::Cuckoo,
+                        crate::snapshot::PerfectHashingFunction::Fmph,
+                    ),
+                )),
+            ),
+            (
+                SnapshotSegment::Headers,
+                2..=30,
+                0..=1,
+                "snapshot_headers_2_30_0_1_cuckoo-fmph_zstd-dict",
+                Some((
+                    Compression::ZstdWithDictionary,
+                    Filters::WithFilters(
+                        InclusionFilter::Cuckoo,
+                        crate::snapshot::PerfectHashingFunction::Fmph,
+                    ),
+                )),
+            ),
+        ];
+
+        for (segment, block_range, tx_range, filename, configuration) in test_vectors {
+            if let Some((compression, filters)) = configuration {
+                assert_eq!(
+                    segment.filename_with_configuration(
+                        filters,
+                        compression,
+                        &block_range,
+                        &tx_range
+                    ),
+                    filename
+                );
+            } else {
+                assert_eq!(segment.filename(&block_range, &tx_range), filename);
+            }
+
+            assert_eq!(
+                SnapshotSegment::parse_filename(OsStr::new(filename)),
+                Some((segment, block_range, tx_range))
+            );
+        }
+
+        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_2_30_3_2")), None);
+        assert_eq!(SnapshotSegment::parse_filename(OsStr::new("snapshot_headers_2_30_1")), None);
+    }
 }
