@@ -1,6 +1,6 @@
 use clap::Parser;
 use itertools::Itertools;
-use reth_db::{open_db_read_only, DatabaseEnvRO};
+use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_interfaces::db::LogLevel;
 use reth_primitives::{
     snapshot::{Compression, InclusionFilter, PerfectHashingFunction},
@@ -71,22 +71,21 @@ impl Command {
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
                     match mode {
-                        SnapshotSegment::Headers => self
-                            .generate_headers_snapshot::<DatabaseEnvRO>(
-                                &provider,
-                                *compression,
-                                InclusionFilter::Cuckoo,
-                                *phf,
-                            )?,
+                        SnapshotSegment::Headers => self.generate_headers_snapshot::<DatabaseEnv>(
+                            &provider,
+                            *compression,
+                            InclusionFilter::Cuckoo,
+                            *phf,
+                        )?,
                         SnapshotSegment::Transactions => self
-                            .generate_transactions_snapshot::<DatabaseEnvRO>(
+                            .generate_transactions_snapshot::<DatabaseEnv>(
                                 &provider,
                                 *compression,
                                 InclusionFilter::Cuckoo,
                                 *phf,
                             )?,
                         SnapshotSegment::Receipts => self
-                            .generate_receipts_snapshot::<DatabaseEnvRO>(
+                            .generate_receipts_snapshot::<DatabaseEnv>(
                                 &provider,
                                 *compression,
                                 InclusionFilter::Cuckoo,

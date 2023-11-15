@@ -489,8 +489,8 @@ mod tests {
     };
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
-        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, ForkCondition, Header,
-        Signature, TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
+        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
+        TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 

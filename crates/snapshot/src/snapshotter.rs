@@ -4,10 +4,16 @@ use crate::{segments, segments::Segment, SnapshotterError};
 use reth_db::database::Database;
 use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{
-    snapshot::HighestSnapshots, BlockNumber, ChainSpec, SnapshotSegment, TxNumber,
+    snapshot::{iter_snapshots, HighestSnapshots},
+    BlockNumber, ChainSpec, TxNumber,
 };
-use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory};
-use std::{collections::HashMap, ops::RangeInclusive, path::PathBuf, sync::Arc};
+use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt};
+use std::{
+    collections::HashMap,
+    ops::RangeInclusive,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::sync::watch;
 use tracing::warn;
 
@@ -89,7 +95,7 @@ impl<DB: Database> Snapshotter<DB> {
     /// Creates a new [Snapshotter].
     pub fn new(
         db: DB,
-        snapshots_path: PathBuf,
+        snapshots_path: impl AsRef<Path>,
         chain_spec: Arc<ChainSpec>,
         block_interval: u64,
     ) -> RethResult<Self> {
@@ -97,8 +103,7 @@ impl<DB: Database> Snapshotter<DB> {
 
         let mut snapshotter = Self {
             provider_factory: ProviderFactory::new(db, chain_spec),
-            snapshots_path,
-            // TODO(alexey): fill from on-disk snapshot data
+            snapshots_path: snapshots_path.as_ref().into(),
             highest_snapshots: HighestSnapshots::default(),
             highest_snapshots_notifier,
             highest_snapshots_tracker,
@@ -152,23 +157,10 @@ impl<DB: Database> Snapshotter<DB> {
         // It walks over the directory and parses the snapshot filenames extracting
         // `SnapshotSegment` and their inclusive range. It then takes the maximum block
         // number for each specific segment.
-        for (segment, range) in reth_primitives::fs::read_dir(&self.snapshots_path)?
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                if let Ok(true) = entry.metadata().map(|metadata| metadata.is_file()) {
-                    return SnapshotSegment::parse_filename(&entry.file_name().to_string_lossy())
-                }
-                None
-            })
-        {
-            let max_segment_block = match segment {
-                SnapshotSegment::Headers => &mut self.highest_snapshots.headers,
-                SnapshotSegment::Transactions => &mut self.highest_snapshots.transactions,
-                SnapshotSegment::Receipts => &mut self.highest_snapshots.receipts,
-            };
-
-            if max_segment_block.map_or(true, |block| block < *range.end()) {
-                *max_segment_block = Some(*range.end());
+        for (segment, block_range, _) in iter_snapshots(&self.snapshots_path)? {
+            let max_segment_block = self.highest_snapshots.as_mut(segment);
+            if max_segment_block.map_or(true, |block| block < *block_range.end()) {
+                *max_segment_block = Some(*block_range.end());
             }
         }
 
@@ -218,13 +210,11 @@ impl<DB: Database> Snapshotter<DB> {
     ) -> RethResult<()> {
         if let Some(block_range) = block_range {
             let temp = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
-            let filename = S::segment().filename(&block_range);
+            let provider = self.provider_factory.provider()?;
+            let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
+            let filename = S::segment().filename(&block_range, &tx_range);
 
-            S::default().snapshot::<DB>(
-                &self.provider_factory.provider()?,
-                temp.clone(),
-                block_range.clone(),
-            )?;
+            S::default().snapshot::<DB>(&provider, temp.clone(), block_range)?;
 
             reth_primitives::fs::rename(temp.join(&filename), self.snapshots_path.join(filename))?;
         }

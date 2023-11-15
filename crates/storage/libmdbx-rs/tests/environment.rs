@@ -2,8 +2,6 @@ use byteorder::{ByteOrder, LittleEndian};
 use reth_libmdbx::*;
 use tempfile::tempdir;
 
-type Environment = reth_libmdbx::Environment<NoWriteMap>;
-
 #[test]
 fn test_open() {
     let dir = tempdir().unwrap();
