@@ -187,7 +187,6 @@ impl Command {
                                     config.stages.bodies.downloader_max_concurrent_requests,
                             )
                             .build(fetch_client, consensus.clone(), db.clone()),
-                        consensus.clone(),
                     );
 
                     (Box::new(stage), None)
@@ -242,7 +241,7 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let unwind_output = unwind_stage.unwind(&provider_rw, unwind).await?;
+                let unwind_output = unwind_stage.unwind(&provider_rw, unwind)?;
                 unwind.checkpoint = unwind_output.checkpoint;
 
                 if self.commit {
@@ -258,7 +257,7 @@ impl Command {
         };
 
         while let ExecOutput { checkpoint: stage_progress, done: false } =
-            exec_stage.execute(&provider_rw, input).await?
+            exec_stage.execute(&provider_rw, input)?
         {
             input.checkpoint = Some(stage_progress);
 

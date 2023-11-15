@@ -108,6 +108,9 @@ pub struct Pipeline<DB: Database> {
     metrics_tx: Option<MetricEventsSender>,
 }
 
+// TODO:
+unsafe impl<DB: Database> Send for Pipeline<DB> {}
+
 impl<DB> Pipeline<DB>
 where
     DB: Database + 'static,
@@ -346,9 +349,9 @@ where
         let target = self.max_block.or(previous_stage);
 
         let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = factory.provider_rw()?;
 
         loop {
+            let provider_rw = factory.provider_rw()?;
             let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
 
             let stage_reached_max_block = prev_checkpoint
@@ -425,9 +428,7 @@ where
                         result: out.clone(),
                     });
 
-                    // TODO: Make the commit interval configurable
                     provider_rw.commit()?;
-                    provider_rw = factory.provider_rw()?;
 
                     if done {
                         let block_number = checkpoint.block_number;
@@ -465,7 +466,7 @@ where
                                 // stage not clearing its checkpoint, and
                                 // restarting from an invalid place.
                                 drop(provider_rw);
-                                provider_rw = factory.provider_rw()?;
+                                let provider_rw = factory.provider_rw()?;
                                 provider_rw.save_stage_checkpoint_progress(
                                     StageId::MerkleExecute,
                                     vec![],

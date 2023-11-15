@@ -27,14 +27,11 @@ use reth_interfaces::{
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
-use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
+use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,
-    stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
-    },
-    Pipeline, StageSet,
+    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
+    Pipeline, PipelineError, StageSet,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -118,6 +115,7 @@ impl Command {
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
+                    ProviderFactory::new(db.clone(), self.chain.clone()), // TODO:
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,

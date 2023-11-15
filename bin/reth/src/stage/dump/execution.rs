@@ -9,7 +9,7 @@ use reth_primitives::{stage::StageCheckpoint, ChainSpec};
 use reth_provider::ProviderFactory;
 use reth_revm::Factory;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
-use std::{future::poll_fn, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<DB: Database>(
@@ -100,16 +100,14 @@ async fn unwind_and_copy<DB: Database>(
 
     let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(db_tool.chain.clone()));
 
-    exec_stage
-        .unwind(
-            &provider,
-            UnwindInput {
-                unwind_to: from,
-                checkpoint: StageCheckpoint::new(tip_block_number),
-                bad_block: None,
-            },
-        )
-        .await?;
+    exec_stage.unwind(
+        &provider,
+        UnwindInput {
+            unwind_to: from,
+            checkpoint: StageCheckpoint::new(tip_block_number),
+            bad_block: None,
+        },
+    )?;
 
     let unwind_inner_tx = provider.into_tx();
 
@@ -131,16 +129,14 @@ async fn dry_run<DB: Database>(
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
     let factory = ProviderFactory::new(&output_db, chain.clone());
-    let provider = factory.provider_rw()?;
-    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(chain.clone()));
+    let mut exec_stage: Box<dyn Stage<DB>> =
+        Box::new(ExecutionStage::new_with_factory(Factory::new(chain.clone())));
 
     let input =
         reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
-    poll_fn(|cx| exec_stage.poll_ready(cx, input))
-        .await
-        .and_then(|_| exec_stage.execute(&provider, input))?;
+    exec_stage.execute(&factory.provider_rw()?, input)?;
 
-    info!(target: "reth::cli", "Success.");
+    info!(target: "reth::cli", "Success");
 
     Ok(())
 }

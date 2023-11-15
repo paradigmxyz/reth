@@ -5,8 +5,9 @@ use crate::{
     },
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
@@ -193,6 +194,16 @@ impl<DB: Database> ProviderFactory<DB> {
         let state_provider = self.state_provider_by_block_number(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block hash");
         Ok(state_provider)
+    }
+}
+
+impl<DB: Database> HeaderSyncGapProvider for ProviderFactory<DB> {
+    fn sync_gap(
+        &self,
+        mode: HeaderSyncMode,
+        last_uninterrupted_block: BlockNumber,
+    ) -> RethResult<HeaderSyncGap> {
+        self.provider()?.sync_gap(mode, last_uninterrupted_block)
     }
 }
 
@@ -477,19 +488,32 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 #[cfg(test)]
 mod tests {
     use super::ProviderFactory;
-    use crate::{BlockHashReader, BlockNumReader, BlockWriter, TransactionsProvider};
+    use crate::{
+        BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode,
+        TransactionsProvider,
+    };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
+    use rand::Rng;
     use reth_db::{
         tables,
         test_utils::{create_test_rw_db, ERROR_TEMPDIR},
+        transaction::DbTxMut,
         DatabaseEnv,
     };
-    use reth_interfaces::test_utils::{generators, generators::random_block};
+    use reth_interfaces::{
+        provider::ProviderError,
+        test_utils::{
+            generators,
+            generators::{random_block, random_header},
+        },
+        RethError,
+    };
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
     };
     use std::{ops::RangeInclusive, sync::Arc};
+    use tokio::sync::watch;
 
     #[test]
     fn common_history_provider() {
@@ -617,5 +641,74 @@ mod tests {
                 )])
             )
         }
+    }
+
+    #[test]
+    fn header_sync_gap_lookup() {
+        let mut rng = generators::rng();
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let db = create_test_rw_db();
+        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let provider = factory.provider_rw().unwrap();
+
+        let consensus_tip = rng.gen();
+        let (_tip_tx, tip_rx) = watch::channel(consensus_tip);
+        let mode = HeaderSyncMode::Tip(tip_rx);
+
+        // Genesis
+        let checkpoint = 0;
+        let head = random_header(&mut rng, 0, None);
+        let gap_fill = random_header(&mut rng, 1, Some(head.hash()));
+        let gap_tip = random_header(&mut rng, 2, Some(gap_fill.hash()));
+
+        // Empty database
+        assert_matches!(
+            provider.sync_gap(mode.clone(), checkpoint),
+            Err(RethError::Provider(ProviderError::HeaderNotFound(block_number)))
+                if block_number.as_number().unwrap() == checkpoint
+        );
+
+        // Checkpoint and no gap
+        provider
+            .tx_ref()
+            .put::<tables::CanonicalHeaders>(head.number, head.hash())
+            .expect("failed to write canonical");
+        provider
+            .tx_ref()
+            .put::<tables::Headers>(head.number, head.clone().unseal())
+            .expect("failed to write header");
+
+        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
+        assert_eq!(gap.local_head, head);
+        assert_eq!(gap.target.tip(), consensus_tip.into());
+
+        // Checkpoint and gap
+        provider
+            .tx_ref()
+            .put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
+            .expect("failed to write canonical");
+        provider
+            .tx_ref()
+            .put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
+            .expect("failed to write header");
+
+        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
+        assert_eq!(gap.local_head, head);
+        assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
+
+        // Checkpoint and gap closed
+        provider
+            .tx_ref()
+            .put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
+            .expect("failed to write canonical");
+        provider
+            .tx_ref()
+            .put::<tables::Headers>(gap_fill.number, gap_fill.clone().unseal())
+            .expect("failed to write header");
+
+        assert_matches!(
+            provider.sync_gap(mode, checkpoint),
+            Err(RethError::Provider(ProviderError::InconsistentHeaderGap))
+        );
     }
 }

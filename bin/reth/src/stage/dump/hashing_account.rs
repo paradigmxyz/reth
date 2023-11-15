@@ -5,7 +5,7 @@ use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, ChainSpec};
 use reth_provider::ProviderFactory;
 use reth_stages::{stages::AccountHashingStage, Stage, UnwindInput};
-use std::{future::poll_fn, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<DB: Database>(
@@ -68,10 +68,10 @@ async fn dry_run<DB: Database>(
 
     let factory = ProviderFactory::new(&output_db, chain);
     let provider = factory.provider_rw()?;
-    let mut exec_stage = AccountHashingStage {
+    let mut exec_stage: Box<dyn Stage<DB>> = Box::new(AccountHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()
-    };
+    });
 
     let mut done = false;
     while !done {
@@ -79,10 +79,7 @@ async fn dry_run<DB: Database>(
             target: Some(to),
             checkpoint: Some(StageCheckpoint::new(from)),
         };
-        done = poll_fn(|cx| exec_stage.poll_ready(cx, input))
-            .await
-            .and_then(|_| exec_stage.execute(&provider, input))?
-            .done;
+        done = exec_stage.execute(&provider, input)?.done;
     }
 
     info!(target: "reth::cli", "Success.");

@@ -8,13 +8,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
-};
+use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
 use reth_provider::DatabaseProviderRW;
-use std::{sync::Arc, task::Poll};
+use std::task::{ready, Context, Poll};
 use tracing::*;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
@@ -50,16 +47,16 @@ use tracing::*;
 /// - The [`Transactions`][reth_db::tables::Transactions] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader> {
-    buffer: Vec<BlockResponse>,
     /// The body downloader.
     downloader: D,
-    /// The consensus engine.
-    consensus: Arc<dyn Consensus>,
+    /// Block response buffer.
+    buffer: Vec<BlockResponse>,
 }
 
 impl<D: BodyDownloader> BodyStage<D> {
-    pub fn new(downloader: D, consensus: Arc<dyn Consensus>) -> Self {
-        Self { buffer: Vec::new(), downloader, consensus }
+    /// Create new bodies stage from downloader.
+    pub fn new(downloader: D) -> Self {
+        Self { downloader, buffer: Vec::new() }
     }
 }
 
@@ -71,9 +68,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
     fn poll_ready(
         &mut self,
-        cx: &mut std::task::Context<'_>,
+        cx: &mut Context<'_>,
+        // _provider: &DatabaseProviderRO<'_, &DB>,
         input: ExecInput,
-    ) -> std::task::Poll<Result<(), StageError>> {
+    ) -> Poll<Result<(), StageError>> {
         // todo: short circuit if target is reached?
         // todo: check if this is bad async code
         // todo: prob should have some other condition (i.e. more than 1 body surely)
@@ -84,19 +82,20 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Update the header range on the downloader
         self.downloader.set_download_range(input.next_block_range())?;
 
+        // Poll next downloader item.
+        let maybe_next_result = ready!(self.downloader.try_poll_next_unpin(cx));
+
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
-        match self.downloader.try_poll_next_unpin(cx) {
-            Poll::Ready(Some(res)) => match res {
-                Ok(downloaded) => {
-                    self.buffer.extend(downloaded);
-                    Poll::Ready(Ok(()))
-                }
-                Err(err) => Poll::Ready(Err(err.into())),
-            },
-            Poll::Ready(None) => Poll::Ready(Err(StageError::ChannelClosed)),
-            Poll::Pending => Poll::Pending,
-        }
+        let response = match maybe_next_result {
+            Some(Ok(downloaded)) => {
+                self.buffer.extend(downloaded);
+                Ok(())
+            }
+            Some(Err(err)) => Err(err.into()),
+            None => Err(StageError::ChannelClosed),
+        };
+        Poll::Ready(response)
     }
 
     /// Download block bodies from the last checkpoint for this stage up until the latest synced
@@ -501,7 +500,6 @@ mod tests {
             test_utils::{
                 generators,
                 generators::{random_block_range, random_signed_tx},
-                TestConsensus,
             },
         };
         use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, B256};
@@ -530,7 +528,6 @@ mod tests {
 
         /// A helper struct for running the [BodyStage].
         pub(crate) struct BodyTestRunner {
-            pub(crate) consensus: Arc<TestConsensus>,
             responses: HashMap<B256, BlockBody>,
             tx: TestTransaction,
             batch_size: u64,
@@ -539,7 +536,6 @@ mod tests {
         impl Default for BodyTestRunner {
             fn default() -> Self {
                 Self {
-                    consensus: Arc::new(TestConsensus::default()),
                     responses: HashMap::default(),
                     tx: TestTransaction::default(),
                     batch_size: 1000,
@@ -565,14 +561,11 @@ mod tests {
             }
 
             fn stage(&self) -> Self::S {
-                BodyStage::new(
-                    TestBodyDownloader::new(
-                        self.tx.inner_raw(),
-                        self.responses.clone(),
-                        self.batch_size,
-                    ),
-                    self.consensus.clone(),
-                )
+                BodyStage::new(TestBodyDownloader::new(
+                    self.tx.inner_raw(),
+                    self.responses.clone(),
+                    self.batch_size,
+                ))
             }
         }
 

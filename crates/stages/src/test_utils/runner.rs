@@ -48,12 +48,13 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
             let factory = ProviderFactory::new(db.db(), MAINNET.clone());
-            let provider = factory.provider_rw().unwrap();
 
-            let result = poll_fn(|cx| stage.poll_ready(cx, input))
-                .await
-                .and_then(|_| stage.execute(&provider, input));
-            provider.commit().expect("failed to commit");
+            let result = poll_fn(|cx| stage.poll_ready(cx, input)).await.and_then(|_| {
+                let provider_rw = factory.provider_rw().unwrap();
+                let result = stage.execute(&provider_rw, input);
+                provider_rw.commit().expect("failed to commit");
+                result
+            });
             tx.send(result).expect("failed to send message")
         });
         rx

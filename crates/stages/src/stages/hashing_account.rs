@@ -204,7 +204,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 let mut hashed_batch = Vec::with_capacity(self.commit_threshold as usize);
 
                 // Iterate over channels and append the hashed accounts.
-                for mut channel in channels {
+                for channel in channels {
                     while let Ok(hashed) = channel.recv() {
                         hashed_batch.push(hashed);
                     }

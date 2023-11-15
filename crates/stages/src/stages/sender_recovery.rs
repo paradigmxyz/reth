@@ -126,7 +126,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         }
 
         // Iterate over channels and append the sender in the order that they are received.
-        for mut channel in channels {
+        for channel in channels {
             while let Ok(recovered) = channel.recv() {
                 let (tx_id, sender) = match recovered {
                     Ok(result) => result,

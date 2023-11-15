@@ -177,17 +177,17 @@ mod tests {
         .unwrap()
     }
 
-    async fn run(tx: &TestTransaction, run_to: u64) {
+    fn run(tx: &TestTransaction, run_to: u64) {
         let input = ExecInput { target: Some(run_to), ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
-        let out = stage.execute(&provider, input).await.unwrap();
+        let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
         provider.commit().unwrap();
     }
 
-    async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
+    fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
         let input = UnwindInput {
             checkpoint: StageCheckpoint::new(unwind_from),
             unwind_to,
@@ -196,7 +196,7 @@ mod tests {
         let mut stage = IndexAccountHistoryStage::default();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
-        let out = stage.unwind(&provider, input).await.unwrap();
+        let out = stage.unwind(&provider, input).unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
         provider.commit().unwrap();
     }
@@ -210,14 +210,14 @@ mod tests {
         partial_setup(&tx);
 
         // run
-        run(&tx, 5).await;
+        run(&tx, 5);
 
         // verify
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![4, 5])]));
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, 5, 0);
 
         // verify initial state
         let table = tx.table::<tables::AccountHistory>().unwrap();
@@ -238,14 +238,14 @@ mod tests {
         .unwrap();
 
         // run
-        run(&tx, 5).await;
+        run(&tx, 5);
 
         // verify
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5]),]));
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, 5, 0);
 
         // verify initial state
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
@@ -267,7 +267,7 @@ mod tests {
         .unwrap();
 
         // run
-        run(&tx, 5).await;
+        run(&tx, 5);
 
         // verify
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
@@ -277,7 +277,7 @@ mod tests {
         );
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, 5, 0);
 
         // verify initial state
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
@@ -299,7 +299,7 @@ mod tests {
         .unwrap();
 
         // run
-        run(&tx, 5).await;
+        run(&tx, 5);
 
         // verify
         close_full_list.push(4);
@@ -308,7 +308,7 @@ mod tests {
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list.clone()),]));
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, 5, 0);
 
         // verify initial state
         close_full_list.pop();
@@ -334,7 +334,7 @@ mod tests {
         .unwrap();
 
         // run
-        run(&tx, 5).await;
+        run(&tx, 5);
 
         // verify
         close_full_list.push(4);
@@ -345,7 +345,7 @@ mod tests {
         );
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, 5, 0);
 
         // verify initial state
         close_full_list.pop();
@@ -369,7 +369,7 @@ mod tests {
         })
         .unwrap();
 
-        run(&tx, 5).await;
+        run(&tx, 5);
 
         // verify
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
@@ -383,7 +383,7 @@ mod tests {
         );
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, 5, 0);
 
         // verify initial state
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
@@ -433,7 +433,7 @@ mod tests {
         };
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
-        let out = stage.execute(&provider, input).await.unwrap();
+        let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
         provider.commit().unwrap();
 
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100])]));
 
         // unwind
-        unwind(&tx, 20000, 0).await;
+        unwind(&tx, 20000, 0);
 
         // verify initial state
         let table = tx.table::<tables::AccountHistory>().unwrap();

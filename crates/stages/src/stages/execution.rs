@@ -501,7 +501,7 @@ mod tests {
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::Factory;
-    use std::{future::poll_fn, sync::Arc};
+    use std::sync::Arc;
 
     fn stage() -> ExecutionStage<Factory> {
         let factory =
@@ -684,11 +684,8 @@ mod tests {
         provider.commit().unwrap();
 
         let provider = factory.provider_rw().unwrap();
-        let mut execution_stage = stage();
-        let output = poll_fn(|cx| stage.poll_ready(cx, input))
-            .await
-            .and_then(|_| stage.execute(&provider, input))
-            .unwrap();
+        let mut execution_stage: ExecutionStage<Factory> = stage();
+        let output = execution_stage.execute(&provider, input).unwrap();
         provider.commit().unwrap();
         assert_matches!(output, ExecOutput {
             checkpoint: StageCheckpoint {
@@ -789,7 +786,7 @@ mod tests {
         // execute
         let provider = factory.provider_rw().unwrap();
         let mut execution_stage = stage();
-        let result = execution_stage.execute(&provider, input).await.unwrap();
+        let result = execution_stage.execute(&provider, input).unwrap();
         provider.commit().unwrap();
 
         let provider = factory.provider_rw().unwrap();
@@ -799,7 +796,6 @@ mod tests {
                 &provider,
                 UnwindInput { checkpoint: result.checkpoint, unwind_to: 0, bad_block: None },
             )
-            .await
             .unwrap();
 
         assert_matches!(result, UnwindOutput {
@@ -888,7 +884,7 @@ mod tests {
         // execute
         let provider = factory.provider_rw().unwrap();
         let mut execution_stage = stage();
-        let _ = execution_stage.execute(&provider, input).await.unwrap();
+        let _ = execution_stage.execute(&provider, input).unwrap();
         provider.commit().unwrap();
 
         // assert unwind stage
