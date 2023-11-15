@@ -74,7 +74,7 @@ where
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
         unsafe {
             mdbx_result(ffi::mdbx_txn_begin_ex(
-                env.env(),
+                env.env_ptr(),
                 ptr::null_mut(),
                 K::OPEN_FLAGS,
                 &mut txn,
@@ -100,10 +100,14 @@ where
     /// The caller **must** ensure that the pointer is not used after the
     /// lifetime of the transaction.
     #[inline]
-    pub(crate) fn txn_execute<F: FnOnce(*mut ffi::MDBX_txn) -> T, T>(&self, f: F) -> T {
+    pub(crate) fn txn_execute<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
         self.inner.txn_execute(f)
     }
 
+    /// Returns a copy of the pointer to the underlying MDBX transaction.
     pub(crate) fn txn_ptr(&self) -> TransactionPtr {
         self.inner.txn.clone()
     }
@@ -112,6 +116,21 @@ where
     #[doc(hidden)]
     pub fn txn(&self) -> *mut ffi::MDBX_txn {
         self.inner.txn.txn
+    }
+
+    /// Executes the given closure once
+    ///
+    /// This is only intended to be used when accessing mdbx ffi functions directly is required.
+    ///
+    /// The caller **must** ensure that the pointer is only used within the closure.
+    #[inline]
+    #[doc(hidden)]
+    pub fn with_raw_tx_ptr<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        let _lock = self.inner.txn.lock.lock();
+        f(self.inner.txn.txn)
     }
 
     /// Returns a raw pointer to the MDBX environment.
@@ -278,7 +297,10 @@ where
     }
 
     #[inline]
-    fn txn_execute<F: FnOnce(*mut ffi::MDBX_txn) -> T, T>(&self, f: F) -> T {
+    fn txn_execute<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
         self.txn.txn_execute(f)
     }
 }
@@ -449,7 +471,7 @@ impl<'env> Transaction<'env, RO> {
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
     pub unsafe fn close_db(&self, db: Database<'_>) -> Result<()> {
-        mdbx_result(ffi::mdbx_dbi_close(self.env().env(), db.dbi()))?;
+        mdbx_result(ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()))?;
 
         Ok(())
     }
@@ -501,7 +523,10 @@ impl TransactionPtr {
 
     /// Executes the given closure once the lock on the transaction is acquired.
     #[inline]
-    pub(crate) fn txn_execute<F: FnOnce(*mut ffi::MDBX_txn) -> T, T>(&self, f: F) -> T {
+    pub(crate) fn txn_execute<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
         let _lck = self.lock.lock();
         (f)(self.txn)
     }
