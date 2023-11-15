@@ -1,6 +1,6 @@
 use crate::{
     database::Database,
-    environment::{Environment, EnvironmentKind, NoWriteMap, TxnManagerMessage, TxnPtr},
+    environment::{Environment, TxnManagerMessage, TxnPtr},
     error::{mdbx_result, Result},
     flags::{DatabaseFlags, WriteFlags},
     Cursor, Error, Stat, TableObject,
@@ -12,7 +12,6 @@ use parking_lot::Mutex;
 use std::{
     fmt,
     fmt::Debug,
-    marker::PhantomData,
     mem::size_of,
     ptr, slice,
     sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
@@ -60,20 +59,18 @@ impl TransactionKind for RW {
 /// An MDBX transaction.
 ///
 /// All database operations require a transaction.
-pub struct Transaction<'env, K, E>
+pub struct Transaction<'env, K>
 where
     K: TransactionKind,
-    E: EnvironmentKind,
 {
-    inner: Arc<TransactionInner<'env, K, E>>,
+    inner: Arc<TransactionInner<'env, K>>,
 }
 
-impl<'env, K, E> Transaction<'env, K, E>
+impl<'env, K> Transaction<'env, K>
 where
     K: TransactionKind,
-    E: EnvironmentKind,
 {
-    pub(crate) fn new(env: &'env Environment<E>) -> Result<Self> {
+    pub(crate) fn new(env: &'env Environment) -> Result<Self> {
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
         unsafe {
             mdbx_result(ffi::mdbx_txn_begin_ex(
@@ -87,13 +84,13 @@ where
         }
     }
 
-    pub(crate) fn new_from_ptr(env: &'env Environment<E>, txn: *mut ffi::MDBX_txn) -> Self {
+    pub(crate) fn new_from_ptr(env: &'env Environment, txn: *mut ffi::MDBX_txn) -> Self {
         let inner = TransactionInner {
             txn: TransactionPtr::new(txn),
             primed_dbis: Mutex::new(IndexSet::new()),
             committed: AtomicBool::new(false),
             env,
-            _marker: PhantomData,
+            _marker: Default::default(),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -118,7 +115,7 @@ where
     }
 
     /// Returns a raw pointer to the MDBX environment.
-    pub fn env(&self) -> &Environment<E> {
+    pub fn env(&self) -> &Environment {
         self.inner.env
     }
 
@@ -253,10 +250,9 @@ where
 }
 
 /// Internals of a transaction.
-struct TransactionInner<'env, K, E>
+struct TransactionInner<'env, K>
 where
     K: TransactionKind,
-    E: EnvironmentKind,
 {
     /// The transaction pointer itself.
     txn: TransactionPtr,
@@ -264,14 +260,13 @@ where
     primed_dbis: Mutex<IndexSet<ffi::MDBX_dbi>>,
     /// Whether the transaction has committed.
     committed: AtomicBool,
-    env: &'env Environment<E>,
-    _marker: PhantomData<fn(K)>,
+    env: &'env Environment,
+    _marker: std::marker::PhantomData<fn(K)>,
 }
 
-impl<'env, K, E> TransactionInner<'env, K, E>
+impl<'env, K> TransactionInner<'env, K>
 where
     K: TransactionKind,
-    E: EnvironmentKind,
 {
     /// Marks the transaction as committed.
     fn set_committed(&self) {
@@ -288,10 +283,9 @@ where
     }
 }
 
-impl<'env, K, E> Drop for TransactionInner<'env, K, E>
+impl<'env, K> Drop for TransactionInner<'env, K>
 where
     K: TransactionKind,
-    E: EnvironmentKind,
 {
     fn drop(&mut self) {
         self.txn_execute(|txn| {
@@ -314,10 +308,7 @@ where
     }
 }
 
-impl<'env, E> Transaction<'env, RW, E>
-where
-    E: EnvironmentKind,
-{
+impl<'env> Transaction<'env, RW> {
     fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database<'_>> {
         Database::new(self, name, flags.bits())
     }
@@ -451,10 +442,7 @@ where
     }
 }
 
-impl<'env, E> Transaction<'env, RO, E>
-where
-    E: EnvironmentKind,
-{
+impl<'env> Transaction<'env, RO> {
     /// Closes the database handle.
     ///
     /// # Safety
@@ -467,9 +455,12 @@ where
     }
 }
 
-impl<'env> Transaction<'env, RW, NoWriteMap> {
+impl<'env> Transaction<'env, RW> {
     /// Begins a new nested transaction inside of this transaction.
-    pub fn begin_nested_txn(&mut self) -> Result<Transaction<'_, RW, NoWriteMap>> {
+    pub fn begin_nested_txn(&mut self) -> Result<Transaction<'_, RW>> {
+        if self.inner.env.is_write_map() {
+            return Err(Error::NestedTransactionsUnsupportedWithWriteMap)
+        }
         self.txn_execute(|txn| {
             let (tx, rx) = sync_channel(0);
             self.env()
@@ -487,10 +478,9 @@ impl<'env> Transaction<'env, RW, NoWriteMap> {
     }
 }
 
-impl<'env, K, E> fmt::Debug for Transaction<'env, K, E>
+impl<'env, K> fmt::Debug for Transaction<'env, K>
 where
     K: TransactionKind,
-    E: EnvironmentKind,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RoTransaction").finish_non_exhaustive()
@@ -526,15 +516,12 @@ unsafe impl Sync for TransactionPtr {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::WriteMap;
 
     fn assert_send_sync<T: Send + Sync>() {}
 
     #[allow(dead_code)]
     fn test_txn_send_sync() {
-        assert_send_sync::<Transaction<'_, RO, NoWriteMap>>();
-        assert_send_sync::<Transaction<'_, RW, NoWriteMap>>();
-        assert_send_sync::<Transaction<'_, RO, WriteMap>>();
-        assert_send_sync::<Transaction<'_, RW, WriteMap>>();
+        assert_send_sync::<Transaction<'_, RO>>();
+        assert_send_sync::<Transaction<'_, RW>>();
     }
 }

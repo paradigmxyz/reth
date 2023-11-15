@@ -7,8 +7,6 @@ use std::{
 };
 use tempfile::tempdir;
 
-type Environment = reth_libmdbx::Environment<NoWriteMap>;
-
 #[test]
 fn test_put_get_del() {
     let dir = tempdir().unwrap();

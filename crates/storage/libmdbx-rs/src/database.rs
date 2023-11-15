@@ -1,5 +1,4 @@
 use crate::{
-    environment::EnvironmentKind,
     error::{mdbx_result, Result},
     transaction::TransactionKind,
     Transaction,
@@ -21,8 +20,8 @@ impl<'txn> Database<'txn> {
     ///
     /// Prefer using `Environment::open_db`, `Environment::create_db`, `TransactionExt::open_db`,
     /// or `RwTransaction::create_db`.
-    pub(crate) fn new<'env, K: TransactionKind, E: EnvironmentKind>(
-        txn: &'txn Transaction<'env, K, E>,
+    pub(crate) fn new<'env, K: TransactionKind>(
+        txn: &'txn Transaction<'env, K>,
         name: Option<&str>,
         flags: MDBX_db_flags_t,
     ) -> Result<Self> {
