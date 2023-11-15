@@ -21,6 +21,43 @@ use std::{
     time::Duration,
 };
 
+/// Determines how the environment is opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvironmentKind2 {
+    /// Open the environment in read-only mode.
+    ReadOnly,
+    /// Open the environment in read-write mode.
+    ReadWrite,
+}
+
+impl EnvironmentKind2 {
+
+    /// Returns true if the environment is read-only.
+    #[inline]
+    pub const fn is_read_only(&self) -> bool {
+        matches!(self, EnvironmentKind2::ReadOnly)
+    }
+
+    /// Returns true if the environment is read-write.
+    #[inline]
+    pub const fn is_write_only(&self) -> bool {
+        matches!(self, EnvironmentKind2::ReadWrite)
+    }
+
+    /// Additional flags required when opening the environment.
+    pub(crate) fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
+        match self {
+            EnvironmentKind2::ReadOnly => {
+                ffi::MDBX_ENV_DEFAULTS
+            }
+            EnvironmentKind2::ReadWrite => {
+                ffi::MDBX_WRITEMAP
+            }
+        }
+    }
+
+}
+
 mod private {
     use super::*;
 
