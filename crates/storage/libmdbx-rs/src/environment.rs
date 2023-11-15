@@ -70,7 +70,8 @@ pub struct Environment<E>
 where
     E: EnvironmentKind,
 {
-    inner: EnvironmentInner<E>,
+    inner: EnvironmentInner,
+    _marker: PhantomData<E>,
 }
 
 impl<E> Environment<E>
@@ -225,14 +226,12 @@ where
 ///
 /// This holds the raw pointer to the MDBX environment and the transaction manager.
 /// The env is opened via [mdbx_env_create](ffi::mdbx_env_create) and closed when this type drops.
-struct EnvironmentInner<E> {
+struct EnvironmentInner {
     env: *mut ffi::MDBX_env,
     txn_manager: Option<SyncSender<TxnManagerMessage>>,
-    _marker: PhantomData<E>,
 }
 
-impl<E> Drop for EnvironmentInner<E>
-{
+impl Drop for EnvironmentInner {
     fn drop(&mut self) {
         // Close open mdbx environment on drop
         unsafe {
@@ -518,7 +517,7 @@ where
             }
         }
 
-        let mut env = EnvironmentInner { env, txn_manager: None, _marker: PhantomData };
+        let mut env = EnvironmentInner { env, txn_manager: None };
 
         if let Mode::ReadWrite { .. } = self.flags.mode {
             let (tx, rx) = std::sync::mpsc::sync_channel(0);
@@ -563,7 +562,7 @@ where
             env.txn_manager = Some(tx);
         }
 
-        Ok(Environment { inner: env })
+        Ok(Environment { inner: env, _marker: Default::default() })
     }
 
     /// Sets the provided options in the environment.
