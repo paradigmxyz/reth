@@ -138,7 +138,7 @@ fn measure_stage_with_path<F, S>(
                 let mut stage = stage.clone();
                 let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
                 let provider = factory.provider_rw().unwrap();
-                poll_fn(|cx| stage.poll_ready(cx, input))
+                poll_fn(|cx| stage.poll_execute_ready(cx, input))
                     .await
                     .and_then(|_| stage.execute(&provider, input))
                     .unwrap();

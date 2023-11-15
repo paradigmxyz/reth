@@ -68,18 +68,19 @@ async fn dry_run<DB: Database>(
 
     let factory = ProviderFactory::new(&output_db, chain);
     let provider = factory.provider_rw()?;
-    let mut exec_stage = AccountHashingStage {
+    let mut stage = AccountHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()
     };
 
-    let mut done = false;
-    while !done {
+    loop {
         let input = reth_stages::ExecInput {
             target: Some(to),
             checkpoint: Some(StageCheckpoint::new(from)),
         };
-        done = exec_stage.execute(&provider, input)?.done;
+        if stage.execute(&provider, input)?.done {
+            break
+        }
     }
 
     info!(target: "reth::cli", "Success.");

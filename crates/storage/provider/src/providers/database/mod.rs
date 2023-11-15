@@ -201,9 +201,9 @@ impl<DB: Database> HeaderSyncGapProvider for ProviderFactory<DB> {
     fn sync_gap(
         &self,
         mode: HeaderSyncMode,
-        last_uninterrupted_block: BlockNumber,
+        highest_uninterrupted_block: BlockNumber,
     ) -> RethResult<HeaderSyncGap> {
-        self.provider()?.sync_gap(mode, last_uninterrupted_block)
+        self.provider()?.sync_gap(mode, highest_uninterrupted_block)
     }
 }
 

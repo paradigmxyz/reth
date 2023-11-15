@@ -66,7 +66,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         StageId::Bodies
     }
 
-    fn poll_ready(
+    fn poll_execute_ready(
         &mut self,
         cx: &mut Context<'_>,
         input: ExecInput,

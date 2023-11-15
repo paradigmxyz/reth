@@ -881,7 +881,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
     fn sync_gap(
         &self,
         mode: HeaderSyncMode,
-        last_uninterrupted_block: BlockNumber,
+        highest_uninterrupted_block: BlockNumber,
     ) -> RethResult<HeaderSyncGap> {
         // Create a cursor over canonical header hashes
         let mut cursor = self.tx.cursor_read::<tables::CanonicalHeaders>()?;
@@ -889,8 +889,8 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
 
         // Get head hash and reposition the cursor
         let (head_num, head_hash) = cursor
-            .seek_exact(last_uninterrupted_block)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(last_uninterrupted_block.into()))?;
+            .seek_exact(highest_uninterrupted_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(highest_uninterrupted_block.into()))?;
 
         // Construct head
         let (_, head) = header_cursor
@@ -914,7 +914,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
         // checkpoint, then there is a gap in the database and we should start downloading in
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let target = match next_header {
-            Some(header) if last_uninterrupted_block + 1 != header.number => {
+            Some(header) if highest_uninterrupted_block + 1 != header.number => {
                 SyncTarget::Gap(header)
             }
             None => match mode {

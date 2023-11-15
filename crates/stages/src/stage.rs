@@ -195,20 +195,6 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// Stage IDs must be unique.
     fn id(&self) -> StageId;
 
-    /// Execute the stage.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError>;
-
-    /// Unwind the stage.
-    fn unwind(
-        &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
-        input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError>;
-
     /// Returns `Poll::Ready(Ok(()))` when the stage is ready to execute the given range.
     ///
     /// This method is heavily inspired by [tower](https://crates.io/crates/tower)'s `Service` trait.
@@ -233,11 +219,27 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// unbounded growth on repeated calls to `poll_ready`.
     ///
     /// Unwinds may happen without consulting `poll_ready` first.
-    fn poll_ready(
+    fn poll_execute_ready(
         &mut self,
         _cx: &mut Context<'_>,
         _input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
         Poll::Ready(Ok(()))
     }
+
+    /// Execute the stage.
+    /// It is expected that the stage will write all necessary data to the database
+    /// upon invoking this method.
+    fn execute(
+        &mut self,
+        provider: &DatabaseProviderRW<'_, &DB>,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError>;
+
+    /// Unwind the stage.
+    fn unwind(
+        &mut self,
+        provider: &DatabaseProviderRW<'_, &DB>,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError>;
 }

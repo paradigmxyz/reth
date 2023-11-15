@@ -72,13 +72,14 @@ async fn dry_run<DB: Database>(
         ..Default::default()
     };
 
-    let mut done = false;
-    while !done {
+    loop {
         let input = reth_stages::ExecInput {
             target: Some(to),
             checkpoint: Some(StageCheckpoint::new(from)),
         };
-        done = stage.execute(&provider, input)?.done;
+        if stage.execute(&provider, input)?.done {
+            break
+        }
     }
 
     info!(target: "reth::cli", "Success.");

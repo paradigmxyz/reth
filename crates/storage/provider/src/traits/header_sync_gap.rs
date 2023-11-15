@@ -45,6 +45,6 @@ pub trait HeaderSyncGapProvider: Send + Sync {
     fn sync_gap(
         &self,
         mode: HeaderSyncMode,
-        last_uninterrupted_block: BlockNumber,
+        highest_uninterrupted_block: BlockNumber,
     ) -> RethResult<HeaderSyncGap>;
 }
