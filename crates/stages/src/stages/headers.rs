@@ -173,7 +173,7 @@ where
             return Ok(ExecOutput::done(current_checkpoint))
         }
 
-        let gap = self.sync_gap.clone().unwrap();
+        let gap = self.sync_gap.clone().unwrap(); // TODO:
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
@@ -270,9 +270,9 @@ where
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        // TODO: handle bad block
         self.buffer.clear();
         self.sync_gap.take();
+
         provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             input.unwind_to + 1,
         )?;

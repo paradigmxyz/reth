@@ -211,9 +211,9 @@ pub trait Stage<DB: Database>: Send + Sync {
 
     /// Returns `Poll::Ready(Ok(()))` when the stage is ready to execute the given range.
     ///
-    /// This method is heavily inspired by [tower]s `Service` trait. Any asynchronous tasks or
-    /// communication should be handled in `poll_ready`, e.g. moving downloaded items from
-    /// downloaders to an internal buffer in the stage.
+    /// This method is heavily inspired by [tower](https://crates.io/crates/tower)'s `Service` trait.
+    /// Any asynchronous tasks or communication should be handled in `poll_ready`, e.g. moving
+    /// downloaded items from downloaders to an internal buffer in the stage.
     ///
     /// If the stage has any pending external state, then `Poll::Pending` is returned.
     ///

@@ -69,7 +69,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     fn poll_ready(
         &mut self,
         cx: &mut Context<'_>,
-        // _provider: &DatabaseProviderRO<'_, &DB>,
         input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
         // todo: short circuit if target is reached?
@@ -190,6 +189,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        self.buffer.clear();
+
         let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;

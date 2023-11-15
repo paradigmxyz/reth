@@ -67,7 +67,7 @@ async fn dry_run<DB: Database>(
 
     let factory = ProviderFactory::new(&output_db, chain);
     let provider = factory.provider_rw()?;
-    let mut exec_stag = StorageHashingStage {
+    let mut stage = StorageHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()
     };
@@ -78,7 +78,7 @@ async fn dry_run<DB: Database>(
             target: Some(to),
             checkpoint: Some(StageCheckpoint::new(from)),
         };
-        done = exec_stage.execute(&provider, input)?.done;
+        done = stage.execute(&provider, input)?.done;
     }
 
     info!(target: "reth::cli", "Success.");

@@ -115,7 +115,7 @@ impl Command {
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
-                    ProviderFactory::new(db.clone(), self.chain.clone()), // TODO:
+                    ProviderFactory::new(db.clone(), self.chain.clone()),
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,

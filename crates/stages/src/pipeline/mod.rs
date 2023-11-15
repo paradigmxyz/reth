@@ -5,7 +5,9 @@ use crate::{
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_primitives::{
-    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, stage::StageId, BlockNumber, ChainSpec, B256,
+    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
+    stage::{StageCheckpoint, StageId},
+    BlockNumber, ChainSpec, B256,
 };
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use reth_tokio_util::EventListeners;
@@ -351,8 +353,7 @@ where
         let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
 
         loop {
-            let provider_rw = factory.provider_rw()?;
-            let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
+            let prev_checkpoint = factory.get_stage_checkpoint(stage_id)?;
 
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
@@ -373,8 +374,15 @@ where
                 })
             }
 
-            poll_fn(|cx| stage.poll_ready(cx, ExecInput { target, checkpoint: prev_checkpoint }))
-                .await?;
+            let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
+
+            if let Err(err) = poll_fn(|cx| stage.poll_ready(cx, exec_input.clone())).await {
+                self.listeners.notify(PipelineEvent::Error { stage_id });
+                match on_stage_error(&factory, stage_id, prev_checkpoint, err)? {
+                    Some(ctrl) => return Ok(ctrl),
+                    None => continue,
+                };
+            }
 
             self.listeners.notify(PipelineEvent::Running {
                 pipeline_stages_progress: event::PipelineStagesProgress {
@@ -385,7 +393,8 @@ where
                 checkpoint: prev_checkpoint,
             });
 
-            match stage.execute(&provider_rw, ExecInput { target, checkpoint: prev_checkpoint }) {
+            let provider_rw = factory.provider_rw()?;
+            match stage.execute(&provider_rw, exec_input) {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
@@ -441,6 +450,7 @@ where
                 }
                 Err(err) => {
                     self.listeners.notify(PipelineEvent::Error { stage_id });
+<<<<<<< HEAD
 
                     let out = if let StageError::DetachedHead { local_head, header, error } = err {
                         warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
@@ -522,10 +532,92 @@ where
                         continue
                     };
                     return out
+=======
+                    if let Some(ctrl) = on_stage_error(&factory, stage_id, prev_checkpoint, err)? {
+                        return Ok(ctrl)
+                    }
+>>>>>>> 55f1ec5e0 (fix poll error handling & docs)
                 }
             }
         }
     }
+}
+
+fn on_stage_error<DB: Database>(
+    factory: &ProviderFactory<DB>,
+    stage_id: StageId,
+    prev_checkpoint: Option<StageCheckpoint>,
+    err: StageError,
+) -> Result<Option<ControlFlow>, PipelineError> {
+    let out = if let StageError::DetachedHead { local_head, header, error } = err {
+        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
+
+        // We unwind because of a detached head.
+        let unwind_to =
+            local_head.number.saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH).max(1);
+        Ok(Some(ControlFlow::Unwind { target: unwind_to, bad_block: local_head }))
+    } else if let StageError::Block { block, error } = err {
+        match error {
+            BlockErrorKind::Validation(validation_error) => {
+                error!(
+                    target: "sync::pipeline",
+                    stage = %stage_id,
+                    bad_block = %block.number,
+                    "Stage encountered a validation error: {validation_error}"
+                );
+
+                // FIXME: When handling errors, we do not commit the database transaction. This
+                // leads to the Merkle stage not clearing its checkpoint, and restarting from an
+                // invalid place.
+                let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
+                provider_rw.save_stage_checkpoint(
+                    StageId::MerkleExecute,
+                    prev_checkpoint.unwrap_or_default(),
+                )?;
+                provider_rw.commit()?;
+
+                // We unwind because of a validation error. If the unwind itself
+                // fails, we bail entirely,
+                // otherwise we restart the execution loop from the
+                // beginning.
+                Ok(Some(ControlFlow::Unwind {
+                    target: prev_checkpoint.unwrap_or_default().block_number,
+                    bad_block: block,
+                }))
+            }
+            BlockErrorKind::Execution(execution_error) => {
+                error!(
+                    target: "sync::pipeline",
+                    stage = %stage_id,
+                    bad_block = %block.number,
+                    "Stage encountered an execution error: {execution_error}"
+                );
+
+                // We unwind because of an execution error. If the unwind itself
+                // fails, we bail entirely,
+                // otherwise we restart
+                // the execution loop from the beginning.
+                Ok(Some(ControlFlow::Unwind {
+                    target: prev_checkpoint.unwrap_or_default().block_number,
+                    bad_block: block,
+                }))
+            }
+        }
+    } else if err.is_fatal() {
+        error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
+        Err(err.into())
+    } else {
+        // On other errors we assume they are recoverable if we discard the
+        // transaction and run the stage again.
+        warn!(
+            target: "sync::pipeline",
+            stage = %stage_id,
+            "Stage encountered a non-fatal error: {err}. Retrying..."
+        );
+        Ok(None)
+    };
+    out
 }
 
 impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
