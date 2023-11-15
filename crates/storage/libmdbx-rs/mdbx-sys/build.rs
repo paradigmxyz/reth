@@ -55,6 +55,8 @@ fn main() {
     let mut mdbx = PathBuf::from(&env::var("CARGO_MANIFEST_DIR").unwrap());
     mdbx.push("libmdbx");
 
+    println!("cargo:rerun-if-changed={}", mdbx.display());
+
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     let bindings = bindgen::Builder::default()
