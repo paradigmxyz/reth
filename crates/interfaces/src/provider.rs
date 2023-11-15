@@ -1,6 +1,8 @@
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, TxHashOrNumber, TxNumber, B256,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, SnapshotSegment,
+    TxHashOrNumber, TxNumber, B256,
 };
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// Bundled errors variants thrown by various providers.
@@ -94,9 +96,15 @@ pub enum ProviderError {
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
-    /// Snapshot file is not found for block.
-    #[error("not able to find snapshot file")]
-    MissingSnapshot,
+    /// Snapshot file is not found at specified path.
+    #[error("not able to find {0} snapshot file at {1}")]
+    MissingSnapshotPath(SnapshotSegment, PathBuf),
+    /// Snapshot file is not found for requested block.
+    #[error("not able to find {0} snapshot file for block number {1}")]
+    MissingSnapshotBlock(SnapshotSegment, BlockNumber),
+    /// Snapshot file is not found for requested transaction.
+    #[error("not able to find {0} snapshot file for transaction id {1}")]
+    MissingSnapshotTx(SnapshotSegment, TxNumber),
 }
 
 /// A root mismatch error at a given block height.

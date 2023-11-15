@@ -78,7 +78,8 @@ impl SnapshotProvider {
             segment,
             || self.get_segment_ranges_from_block(segment, block),
             path,
-        )
+        )?
+        .ok_or_else(|| ProviderError::MissingSnapshotBlock(segment, block).into())
     }
 
     /// Gets the [`SnapshotJarProvider`] of the requested segment and transaction.
@@ -92,7 +93,8 @@ impl SnapshotProvider {
             segment,
             || self.get_segment_ranges_from_transaction(segment, tx),
             path,
-        )
+        )?
+        .ok_or_else(|| ProviderError::MissingSnapshotTx(segment, tx).into())
     }
 
     /// Gets the [`SnapshotJarProvider`] of the requested segment and block or transaction.
@@ -101,29 +103,30 @@ impl SnapshotProvider {
         segment: SnapshotSegment,
         fn_ranges: impl Fn() -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>,
         path: Option<&Path>,
-    ) -> RethResult<SnapshotJarProvider<'_>> {
+    ) -> RethResult<Option<SnapshotJarProvider<'_>>> {
         // If we have a path, then get the block range and transaction range from its name.
         // Otherwise, check `self.available_snapshots`
         let snapshot_ranges = match path {
-            Some(path) => SnapshotSegment::parse_filename(
-                path.file_name().ok_or_else(|| ProviderError::MissingSnapshot)?,
-            )
-            .and_then(|(parsed_segment, block_range, tx_range)| {
-                if parsed_segment == segment {
-                    return Some((block_range, tx_range));
-                }
-                None
-            }),
+            Some(path) => {
+                SnapshotSegment::parse_filename(path.file_name().ok_or_else(|| {
+                    ProviderError::MissingSnapshotPath(segment, path.to_path_buf())
+                })?)
+                .and_then(|(parsed_segment, block_range, tx_range)| {
+                    if parsed_segment == segment {
+                        return Some((block_range, tx_range));
+                    }
+                    None
+                })
+            }
             None => fn_ranges(),
         };
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
-        match snapshot_ranges {
-            Some((block_range, tx_range)) => {
-                self.get_or_create_jar_provider(segment, &block_range, &tx_range)
-            }
-            None => Err(ProviderError::MissingSnapshot.into()),
+        if let Some((block_range, tx_range)) = snapshot_ranges {
+            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range, &tx_range)?));
         }
+
+        Ok(None)
     }
 
     /// Given a segment, block range and transaction range it returns a cached

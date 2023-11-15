@@ -2,6 +2,7 @@ use crate::{
     snapshot::{Compression, Filters, InclusionFilter},
     BlockNumber, TxNumber,
 };
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::{ffi::OsStr, ops::RangeInclusive, str::FromStr};
 use strum::{AsRefStr, EnumString};
@@ -19,6 +20,7 @@ use strum::{AsRefStr, EnumString};
     Serialize,
     EnumString,
     AsRefStr,
+    Display,
 )]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be snapshotted.
