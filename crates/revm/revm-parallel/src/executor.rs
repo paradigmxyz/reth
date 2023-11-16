@@ -34,6 +34,7 @@ use std::{
     collections::{hash_map, BTreeMap, HashMap},
     ops::RangeInclusive,
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 /// Database boxed with a lifetime and Send.
@@ -158,6 +159,12 @@ pub struct ParallelExecutor<'a, Provider> {
     batches_executed_in_parallel: u64,
     /// The number of batches executed in sequence.
     batches_executed_in_sequence: u64,
+    /// Time spent executing.
+    time_executing: Duration,
+    /// Time spent aggregating state.
+    time_aggregating_state: Duration,
+    /// Time spent validating.
+    time_validating: Duration,
 }
 
 impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
@@ -183,6 +190,9 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
             batch_size_threshold,
             batches_executed_in_parallel: 0,
             batches_executed_in_sequence: 0,
+            time_executing: Duration::from_secs(0),
+            time_aggregating_state: Duration::from_secs(0),
+            time_validating: Duration::from_secs(0),
         })
     }
 
@@ -262,6 +272,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
             transitions.push(self.get_state_transition(*transition_id)?);
         }
 
+        let started_executing_at = Instant::now();
         let gas_per_transition = batch.gas_used / transitions.len() as u128;
         tracing::debug!(target: "evm::parallel", ?batch, "Executing block batch");
         let transition_results: Vec<_> = if transitions.len() > self.batch_size_threshold as usize ||
@@ -279,7 +290,9 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
                 .map(|transition| self.execute_state_transition(transition))
                 .collect()
         };
+        self.time_executing += started_executing_at.elapsed();
 
+        let started_aggregating_state_at = Instant::now();
         let mut states =
             revm::primitives::HashMap::<Address, Vec<(TransitionId, Account)>>::default();
         for transition_result in transition_results {
@@ -327,6 +340,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
 
         tracing::trace!(target: "evm::parallel", "Committing transition batch");
         self.state.write().commit(states);
+        self.time_aggregating_state += started_aggregating_state_at.elapsed();
 
         Ok(())
     }
@@ -351,6 +365,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         for batch in queue.batches().iter().filter(|b| !b.is_empty()) {
             self.execute_batch(batch)?;
 
+            let started_validation_at = Instant::now();
             'validation: while self.next_block_pending_validation.as_ref() ==
                 self.executed.keys().next()
             {
@@ -418,6 +433,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
 
                 self.next_block_pending_validation = Some(executed.block.number + 1);
             }
+            self.time_validating += started_validation_at.elapsed();
         }
 
         if let Some(unvalidated_block) = self.next_block_pending_validation {
@@ -431,10 +447,16 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
             ?range,
             parallel = self.batches_executed_in_parallel,
             sequential = self.batches_executed_in_sequence,
+            time_executing_ms = self.time_executing.as_millis(),
+            time_aggregating_state_ms = self.time_aggregating_state.as_millis(),
+            time_validating_ms = self.time_validating.as_millis(),
             "Executed batches in range"
         );
         self.batches_executed_in_parallel = 0;
         self.batches_executed_in_sequence = 0;
+        self.time_executing = Duration::from_secs(0);
+        self.time_aggregating_state = Duration::from_secs(0);
+        self.time_validating = Duration::from_secs(0);
 
         Ok(())
     }
