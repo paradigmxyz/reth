@@ -734,7 +734,7 @@ where
                     }
                     Entry::Vacant(entry) => {
                         // this is a new transaction that should be imported into the pool
-                        let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_transaction(tx);
+                        let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
 
                         let pool = self.pool.clone();
 

@@ -771,8 +771,9 @@ mod tests {
         let data = hex::decode(raw).unwrap();
         let tx = PooledTransactionsElement::decode_enveloped(data.into()).unwrap();
 
-        let transaction =
-            EthPooledTransaction::from_recovered_transaction(tx.try_into_ecrecovered().unwrap());
+        let transaction = EthPooledTransaction::from_recovered_pooled_transaction(
+            tx.try_into_ecrecovered().unwrap(),
+        );
         let res = ensure_intrinsic_gas(&transaction, false);
         assert!(res.is_ok());
         let res = ensure_intrinsic_gas(&transaction, true);

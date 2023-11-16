@@ -491,7 +491,7 @@ where
         self.forward_to_sequencer(&tx).await?;
 
         let recovered = recover_raw_transaction(tx)?;
-        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
+        let pool_transaction = <Pool::Transaction>::from_recovered_pooled_transaction(recovered);
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
@@ -578,7 +578,8 @@ where
         let recovered =
             signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered.into());
+        let pool_transaction =
+            <Pool::Transaction>::from_recovered_pooled_transaction(recovered.into());
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
