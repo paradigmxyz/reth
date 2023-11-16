@@ -543,6 +543,7 @@ mod tests {
         assert_eq!(pool.len(), 2);
 
         assert_eq!(pool.independent_transactions.len(), 1);
+        assert_eq!(pool.independent_descendants.len(), 1);
 
         let removed = pool.update_base_fee(0);
         assert!(removed.is_empty());
@@ -563,6 +564,7 @@ mod tests {
         let removed = pool.update_base_fee((root_tx.max_fee_per_gas() + 1) as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
+        pool.assert_invariants();
     }
 
     #[test]
@@ -581,6 +583,61 @@ mod tests {
             pool.independent_descendants.iter().next().map(|tx| *tx.transaction.hash()),
             Some(*t.hash())
         );
+
+        // truncate pool with max size = 1, ensure it's the same transaction
+        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 1, max_size: usize::MAX });
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), t.hash());
+    }
+
+    #[test]
+    fn correct_independent_descendants() {
+        // this test ensures that we set the right independent descendants
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        let a = address!("000000000000000000000000000000000000000a");
+        let b = address!("000000000000000000000000000000000000000b");
+        let c = address!("000000000000000000000000000000000000000c");
+        let d = address!("000000000000000000000000000000000000000d");
+
+        // create a chain of transactions by sender A, B, C
+        let a1 = MockTransaction::eip1559().with_sender(a);
+        let a2 = a1.clone().with_nonce(1);
+        let a3 = a1.clone().with_nonce(2);
+        let a4 = a1.clone().with_nonce(3);
+
+        let b1 = MockTransaction::eip1559().with_sender(b);
+        let b2 = b1.clone().with_nonce(1);
+        let b3 = b1.clone().with_nonce(2);
+
+        // C has the same number of txs as B
+        let c1 = MockTransaction::eip1559().with_sender(c);
+        let c2 = c1.clone().with_nonce(1);
+        let c3 = c1.clone().with_nonce(2);
+
+        let d1 = MockTransaction::eip1559().with_sender(d);
+
+        // add all the transactions to the pool
+        let all_txs =
+            vec![a1, a2, a3, a4.clone(), b1, b2, b3.clone(), c1, c2, c3.clone(), d1.clone()];
+        for tx in all_txs {
+            pool.add_transaction(f.validated_arc(tx), 0);
+        }
+
+        pool.assert_invariants();
+
+        // the independent set is the roots of each of these tx chains, independent descendants
+        // should be the highest nonce
+        let expected_independent_descendants =
+            vec![d1, c3, b3, a4].iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        let actual_independent_descendants = pool
+            .independent_descendants
+            .iter()
+            .map(|tx| (tx.transaction.sender(), tx.transaction.nonce()))
+            .collect::<HashSet<_>>();
+        assert_eq!(expected_independent_descendants, actual_independent_descendants);
+        pool.assert_invariants();
     }
 
     #[test]
@@ -610,22 +667,21 @@ mod tests {
         let c2 = c1.clone().with_nonce(1);
         let c3 = c1.clone().with_nonce(2);
 
-        // D is not a spammer, it has `max_account_slots` txs
         let d1 = MockTransaction::eip1559().with_sender(d);
 
         // just construct a list of all txs to add
-        let expected_pending = vec![a1.clone(), b1.clone(), c1.clone(), d1.clone()]
+        let expected_pending = vec![a1.clone(), b1.clone(), c1.clone(), a2.clone()]
             .into_iter()
             .map(|tx| (tx.sender(), tx.nonce()))
             .collect::<HashSet<_>>();
         let expected_removed = vec![
-            a2.clone(),
-            a3.clone(),
-            a4.clone(),
-            b2.clone(),
-            b3.clone(),
-            c2.clone(),
+            d1.clone(),
             c3.clone(),
+            b3.clone(),
+            a4.clone(),
+            c2.clone(),
+            b2.clone(),
+            a3.clone(),
         ]
         .into_iter()
         .map(|tx| (tx.sender(), tx.nonce()))
@@ -637,12 +693,23 @@ mod tests {
             pool.add_transaction(f.validated_arc(tx), 0);
         }
 
-        // let's set the max_account_slots to 2, and the max total txs to 4, we should end up with
-        // only the first transactions
+        // sanity check, make sure everything checks out
+        pool.assert_invariants();
+
+        // let's set the max total txs to 4, since we remove txs for each sender first, we remove
+        // in this order:
+        // * d1, c3, b3, a4
+        // * c2, b2, a3
+        //
+        // and we are left with:
+        // * a1, a2
+        // * b1
+        // * c1
         let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
 
         // truncate the pool
         let removed = pool.truncate_pool(pool_limit);
+        pool.assert_invariants();
         assert_eq!(removed.len(), expected_removed.len());
 
         // get the inner txs from the removed txs
