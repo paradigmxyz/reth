@@ -55,10 +55,12 @@ impl Command {
                 &tx_range,
             );
 
-            reth_primitives::fs::rename(
-                SnapshotSegment::Transactions.filename(&block_range, &tx_range),
-                &new_name,
-            )?;
+            if !self.only_stats {
+                reth_primitives::fs::rename(
+                    SnapshotSegment::Transactions.filename(&block_range, &tx_range),
+                    &new_name,
+                )?;
+            }
 
             created_snapshots.push(new_name);
         }
