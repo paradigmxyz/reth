@@ -2,8 +2,9 @@ use clap::Parser;
 use itertools::Itertools;
 use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_interfaces::db::LogLevel;
+use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{Compression, InclusionFilter, PerfectHashingFunction},
+    snapshot::{Compression, InclusionFilter, PerfectHashingFunction, SegmentHeader},
     BlockNumber, ChainSpec, SnapshotSegment,
 };
 use reth_provider::ProviderFactory;
@@ -27,6 +28,10 @@ pub struct Command {
     /// Number of blocks in the snapshot.
     #[arg(long, short, default_value = "500000")]
     block_interval: u64,
+
+    /// Flag to skip snapshot creation and print snapshot files stats.
+    #[arg(long, default_value = "false")]
+    only_stats: bool,
 
     /// Flag to enable database-to-snapshot benchmarking.
     #[arg(long, default_value = "false")]
@@ -71,33 +76,37 @@ impl Command {
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
                     match mode {
-                        SnapshotSegment::Headers => self.generate_headers_snapshot::<DatabaseEnv>(
-                            &provider,
-                            *compression,
-                            InclusionFilter::Cuckoo,
-                            *phf,
-                        )?,
-                        SnapshotSegment::Transactions => self
-                            .generate_transactions_snapshot::<DatabaseEnv>(
+                        SnapshotSegment::Headers => {
+                            self.stats(self.generate_headers_snapshot::<DatabaseEnv>(
                                 &provider,
                                 *compression,
                                 InclusionFilter::Cuckoo,
                                 *phf,
-                            )?,
-                        SnapshotSegment::Receipts => self
-                            .generate_receipts_snapshot::<DatabaseEnv>(
+                            )?)?
+                        }
+                        SnapshotSegment::Transactions => {
+                            self.stats(self.generate_transactions_snapshot::<DatabaseEnv>(
                                 &provider,
                                 *compression,
                                 InclusionFilter::Cuckoo,
                                 *phf,
-                            )?,
+                            )?)?
+                        }
+                        SnapshotSegment::Receipts => {
+                            self.stats(self.generate_receipts_snapshot::<DatabaseEnv>(
+                                &provider,
+                                *compression,
+                                InclusionFilter::Cuckoo,
+                                *phf,
+                            )?)?
+                        }
                     }
                 }
             }
         }
 
         if self.only_bench || self.bench {
-            for ((mode, compression), phf) in all_combinations {
+            for ((mode, compression), phf) in all_combinations.clone() {
                 match mode {
                     SnapshotSegment::Headers => self.bench_headers_snapshot(
                         db_path,
@@ -146,5 +155,19 @@ impl Command {
         *from = end_range + 1;
 
         return Some(range)
+    }
+
+    fn stats(&self, snapshots: Vec<impl AsRef<Path>>) -> eyre::Result<()> {
+        for snap in snapshots {
+            let jar = NippyJar::<SegmentHeader>::load(&snap.as_ref())?;
+            println!(
+                "jar: {:#?} | filters_size {} | offset_index_size {} | offsets_size {} ",
+                snap.as_ref().file_name(),
+                jar.offsets_index_size(),
+                jar.offsets_size(),
+                jar.filter_size()
+            );
+        }
+        Ok(())
     }
 }

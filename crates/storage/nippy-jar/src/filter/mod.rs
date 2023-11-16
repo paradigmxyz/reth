@@ -11,6 +11,8 @@ pub trait InclusionFilter {
 
     /// Checks if the element belongs to the inclusion list. **There might be false positives.**
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError>;
+
+    fn size(&self) -> usize;
 }
 
 /// Enum with different [`InclusionFilter`] types.
@@ -33,6 +35,13 @@ impl InclusionFilter for InclusionFilters {
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
         match self {
             InclusionFilters::Cuckoo(c) => c.contains(element),
+            InclusionFilters::Unused => todo!(),
+        }
+    }
+
+    fn size(&self) -> usize {
+        match self {
+            InclusionFilters::Cuckoo(c) => c.size(),
             InclusionFilters::Unused => todo!(),
         }
     }

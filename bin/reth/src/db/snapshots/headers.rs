@@ -26,35 +26,44 @@ impl Command {
         compression: Compression,
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
-    ) -> eyre::Result<()> {
+    ) -> eyre::Result<Vec<impl AsRef<Path>>> {
         let tip = provider.last_block_number()?;
         let mut from = self.from;
+        let mut created_snapshots = vec![];
 
-        while let Some(range) = self.next_block_range(&mut from, tip) {
-            let filters = if self.with_filters {
-                Filters::WithFilters(inclusion_filter, phf)
-            } else {
-                Filters::WithoutFilters
-            };
+        let filters = if self.with_filters {
+            Filters::WithFilters(inclusion_filter, phf)
+        } else {
+            Filters::WithoutFilters
+        };
 
-            let segment = segments::Headers::new(compression, filters);
-
-            segment.snapshot::<DB>(provider, PathBuf::default(), range.clone())?;
+        while let Some(block_range) = self.next_block_range(&mut from, tip) {
+            if !self.only_stats {
+                segments::Headers::new(compression, filters).snapshot::<DB>(
+                    provider,
+                    PathBuf::default(),
+                    block_range.clone(),
+                )?;
+            }
 
             // Default name doesn't have any configuration
-            let tx_range = provider.transaction_range_by_block_range(range.clone())?;
+            let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
+            let new_name = SnapshotSegment::Headers.filename_with_configuration(
+                filters,
+                compression,
+                &block_range,
+                &tx_range,
+            );
+
             reth_primitives::fs::rename(
-                SnapshotSegment::Headers.filename(&range, &tx_range),
-                SnapshotSegment::Headers.filename_with_configuration(
-                    filters,
-                    compression,
-                    &range,
-                    &tx_range,
-                ),
+                SnapshotSegment::Headers.filename(&block_range, &tx_range),
+                &new_name,
             )?;
+
+            created_snapshots.push(new_name);
         }
 
-        Ok(())
+        Ok(created_snapshots)
     }
 
     pub(crate) fn bench_headers_snapshot(
