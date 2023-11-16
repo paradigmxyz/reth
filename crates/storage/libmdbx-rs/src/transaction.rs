@@ -189,7 +189,7 @@ where
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env()
-                        .txn_manager()
+                        .ensure_txn_manager()
                         .unwrap()
                         .send(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender })
                         .unwrap();
@@ -319,7 +319,7 @@ where
                 } else {
                     let (sender, rx) = sync_channel(0);
                     self.env
-                        .txn_manager()
+                        .ensure_txn_manager()
                         .unwrap()
                         .send(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender })
                         .unwrap();
@@ -486,7 +486,7 @@ impl<'env> Transaction<'env, RW> {
         self.txn_execute(|txn| {
             let (tx, rx) = sync_channel(0);
             self.env()
-                .txn_manager()
+                .ensure_txn_manager()
                 .unwrap()
                 .send(TxnManagerMessage::Begin {
                     parent: TxnPtr(txn),
