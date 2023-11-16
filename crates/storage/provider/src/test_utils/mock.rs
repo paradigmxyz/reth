@@ -445,8 +445,14 @@ impl BlockReader for MockEthProvider {
         Ok(None)
     }
 
-    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
-        Ok(vec![])
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+        let lock = self.blocks.lock();
+
+        let mut blocks: Vec<_> =
+            lock.values().filter(|block| range.contains(&block.number)).cloned().collect();
+        blocks.sort_by_key(|block| block.number);
+
+        Ok(blocks)
     }
 }
 

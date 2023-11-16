@@ -1293,7 +1293,7 @@ mod tests {
             pool.clone(),
             noop_network_provider,
             cache.clone(),
-            GasPriceOracle::new(noop_provider, Default::default(), cache),
+            GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,

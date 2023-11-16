@@ -425,15 +425,19 @@ mod tests {
         provider: P,
     ) -> EthApi<P, TestPool, NoopNetwork> {
         let cache = EthStateCache::spawn(provider.clone(), Default::default());
+
+        let fee_history_cache =
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
+
         EthApi::new(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
             cache.clone(),
-            GasPriceOracle::new(provider.clone(), Default::default(), cache),
+            GasPriceOracle::new(provider.clone(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
+            fee_history_cache,
         )
     }
 
