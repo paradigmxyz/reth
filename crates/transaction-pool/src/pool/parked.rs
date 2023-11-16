@@ -136,7 +136,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
             .by_sender
             .iter()
             .map(|(addr, entries)| {
-                // SAFETY: TODO: just ensure that the entry is removed if the list is empty
+                // SAFETY: `entries` should never be empty
                 (addr, entries.last().unwrap().submission_id)
             })
             .collect::<Vec<_>>();
