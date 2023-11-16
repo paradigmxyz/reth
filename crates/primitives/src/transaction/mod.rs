@@ -1544,6 +1544,18 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_recover_mainnet_tx() {
+        // random mainnet tx <https://etherscan.io/tx/0x86718885c4b4218c6af87d3d0b0d83e3cc465df2a05c048aa4db9f1a6f9de91f>
+        let tx_bytes = hex!("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9");
+
+        let decoded = TransactionSigned::decode_enveloped(tx_bytes[..].to_vec().into()).unwrap();
+        assert_eq!(
+            decoded.recover_signer(),
+            Some(Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap())
+        );
+    }
+
+    #[test]
     fn decode_transaction_consumes_buffer() {
         let bytes = &mut &hex!("b87502f872041a8459682f008459682f0d8252089461815774383099e24810ab832a5b2a5425c154d58829a2241af62c000080c001a059e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafda0016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469")[..];
         let _transaction_res = TransactionSigned::decode(bytes).unwrap();
