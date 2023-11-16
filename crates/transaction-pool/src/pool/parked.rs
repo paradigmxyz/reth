@@ -28,6 +28,8 @@ pub(crate) struct ParkedPool<T: ParkedOrd> {
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: FnvHashMap<TransactionId, ParkedPoolTransaction<T>>,
+    /// A map between the sender, along with its [TransactionId]s and submission_ids
+    by_sender: FnvHashMap<Address, BTreeSet<EvictionEntry>>,
     /// All transactions sorted by their order function.
     ///
     /// The higher, the better.
@@ -58,6 +60,14 @@ impl<T: ParkedOrd> ParkedPool<T> {
         // keep track of size
         self.size_of += tx.size();
 
+        // update or create sender entry
+        self.by_sender
+            .entry(tx.sender())
+            .and_modify(|entries| {
+                entries.insert(EvictionEntry { id, submission_id });
+            })
+            .or_insert(BTreeSet::from([EvictionEntry { id, submission_id }]));
+
         let transaction = ParkedPoolTransaction { submission_id, transaction: tx.into() };
 
         self.by_id.insert(id, transaction.clone());
@@ -80,6 +90,14 @@ impl<T: ParkedOrd> ParkedPool<T> {
         let tx = self.by_id.remove(id)?;
         self.best.remove(&tx);
 
+        // remove from by_sender, if there are no more elements in btreeset
+        if let Some(entries) = self.by_sender.get_mut(&tx.transaction.sender()) {
+            entries.remove(&EvictionEntry { id: *id, submission_id: tx.submission_id });
+            if entries.is_empty() {
+                self.by_sender.remove(&tx.transaction.sender());
+            }
+        }
+
         // keep track of size
         self.size_of -= tx.transaction.size();
 
@@ -91,26 +109,19 @@ impl<T: ParkedOrd> ParkedPool<T> {
         &self,
         sender: &Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let Some(tx_ids) = self.by_sender.get(sender) else {
+            // no transactions for this sender
+            return Vec::new()
+        };
+
+        let tx_ids = tx_ids.iter().map(|entry| entry.id).collect::<HashSet<_>>();
+
         let mut txs = Vec::new();
-        for tx in self.by_id.values() {
-            if tx.transaction.sender() == *sender {
-                txs.push(tx.transaction.clone().into());
-            }
+        for tx_id in tx_ids {
+            let tx = self.by_id.get(&tx_id).expect("transaction exists");
+            txs.push(tx.transaction.clone().into());
         }
         txs
-    }
-
-    /// Get submission ids by sender, sorted by submission id. This means that the oldest
-    /// submission id will be first.
-    pub(crate) fn get_submission_ids_by_sender(&self, sender: &Address) -> Vec<u64> {
-        let mut ids = Vec::new();
-        for tx in self.by_id.values() {
-            if tx.transaction.sender() == *sender {
-                ids.push(tx.submission_id);
-            }
-        }
-        ids.sort();
-        ids
     }
 
     /// Returns addresses sorted by their last submission id. Addresses with older last submission
@@ -120,23 +131,20 @@ impl<T: ParkedOrd> ParkedPool<T> {
     ///
     /// Similar to `Heartbeat` in Geth
     pub(crate) fn get_senders_by_submission_id(&self) -> Vec<Address> {
-        let mut senders = HashSet::new();
-        for tx in self.by_id.values() {
-            senders.insert(tx.transaction.sender());
-        }
-
-        // collect into vec for sorting
-        let mut senders = senders.into_iter().collect::<Vec<_>>();
+        // iterate through by_values, and get the last submission id for each sender
+        let mut senders = self
+            .by_sender
+            .iter()
+            .map(|(addr, entries)| {
+                // SAFETY: TODO: just ensure that the entry is removed if the list is empty
+                (addr, entries.last().unwrap().submission_id)
+            })
+            .collect::<Vec<_>>();
 
         // sort s.t. senders with older submission ids are first
-        senders.sort_by(|a, b| {
-            let a_ids = self.get_submission_ids_by_sender(a);
-            let b_ids = self.get_submission_ids_by_sender(b);
-            // SAFETY: we just retrieved senders from by_id, and get_submission_ids_by_sender
-            // checks by_id, so these lists should not be empty.
-            b_ids.last().unwrap().cmp(a_ids.last().unwrap())
-        });
-        senders
+        senders.sort_by(|a, b| b.1.cmp(&a.1));
+
+        senders.into_iter().map(|(addr, _)| *addr).collect()
     }
 
     /// Truncates the pool by dropping transactions, first dropping transactions from senders that
@@ -275,6 +283,7 @@ impl<T: ParkedOrd> Default for ParkedPool<T> {
     fn default() -> Self {
         Self {
             submission_id: 0,
+            by_sender: Default::default(),
             by_id: Default::default(),
             best: Default::default(),
             size_of: Default::default(),
@@ -318,6 +327,25 @@ impl<T: ParkedOrd> Ord for ParkedPoolTransaction<T> {
         self.transaction
             .cmp(&other.transaction)
             .then_with(|| other.submission_id.cmp(&self.submission_id))
+    }
+}
+
+/// Includes a [TransactionId] and `submission_id`, used for eviction.
+#[derive(Debug, PartialEq, Eq, Clone)]
+struct EvictionEntry {
+    id: TransactionId,
+    submission_id: u64,
+}
+
+impl Ord for EvictionEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.submission_id.cmp(&other.submission_id)
+    }
+}
+
+impl PartialOrd for EvictionEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
