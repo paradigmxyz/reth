@@ -259,16 +259,18 @@ impl Command {
             checkpoint: Some(checkpoint.with_block_number(self.from)),
         };
 
-        while let ExecOutput { checkpoint, done: false } =
-            exec_stage.execute(&provider_rw, input).await?
-        {
+        loop {
+            let ExecOutput { checkpoint, done } = exec_stage.execute(&provider_rw, input).await?;
             input.checkpoint = Some(checkpoint);
 
             provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
-
             if self.commit {
                 provider_rw.commit()?;
                 provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+            }
+
+            if done {
+                break
             }
         }
 
