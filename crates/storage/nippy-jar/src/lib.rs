@@ -208,7 +208,7 @@ where
 
     /// Gets a reference to `self.offsets`.
     pub fn filter_size(&self) -> usize {
-        self.filter.as_ref().map(|f| f.size()).unwrap_or_default()
+        self.size()
     }
 
     /// Gets a reference to `self.offsets_index`.
@@ -494,6 +494,10 @@ where
 
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
         self.filter.as_ref().ok_or(NippyJarError::FilterMissing)?.contains(element)
+    }
+
+    fn size(&self) -> usize {
+        self.filter.as_ref().map(|f| f.size()).unwrap_or(0)
     }
 }
 
