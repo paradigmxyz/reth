@@ -594,6 +594,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 header_downloader,
                 body_downloader,
                 consensus,
+                task_executor.clone(),
                 max_block,
                 self.debug.continuous,
                 metrics_tx,
@@ -793,6 +794,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         header_downloader: H,
         body_downloader: B,
         consensus: Arc<dyn Consensus>,
+        task_executor: TaskExecutor,
         max_block: Option<u64>,
         continuous: bool,
         metrics_tx: MetricEventsSender,
@@ -814,7 +816,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
-        let factory = self.execution.pipeline_executor_factory(self.chain.clone())?;
+        let factory = self
+            .execution
+            .pipeline_executor_factory(self.chain.clone(), Box::new(task_executor))?;
 
         // TODO: reenable
         // let stack_config = InspectorStackConfig {

@@ -26,6 +26,7 @@ use reth_revm::{
     },
 };
 use reth_stages::PipelineError;
+use reth_tasks::TaskSpawner;
 use std::{
     collections::{BTreeMap, HashMap},
     ops::RangeInclusive,
@@ -96,7 +97,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `parallel-execution generate` command
-    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         if self.from > self.to {
             eyre::bail!("Invalid block range provided")
         }
@@ -165,8 +166,13 @@ impl Command {
 
             if self.validate {
                 tracing::debug!(target: "reth::cli", ?range, ?queue, "Validating parallel execution");
-                account_status_mismatches +=
-                    self.validate(&provider, sp_database, range.clone(), state)?;
+                account_status_mismatches += self.validate(
+                    &provider,
+                    Box::new(ctx.task_executor.clone()),
+                    sp_database,
+                    range.clone(),
+                    state,
+                )?;
                 tracing::debug!(target: "reth::cli", ?range, ?queue, "Successfully validated parallel execution");
             }
 
@@ -184,6 +190,7 @@ impl Command {
     fn validate<Provider: BlockReader>(
         &self,
         provider: Provider,
+        task_spawner: Box<dyn TaskSpawner>,
         database: DatabaseRefBox<'_, RethError>,
         range: RangeInclusive<BlockNumber>,
         mut expected: State<Box<dyn reth_revm::Database<Error = RethError> + Send + '_>>,
@@ -193,6 +200,7 @@ impl Command {
         let mut parallel_executor = ParallelExecutor::new(
             provider,
             self.chain.clone(),
+            task_spawner,
             Arc::new(TransitionQueueStore::new(self.out.clone())),
             database,
             0,

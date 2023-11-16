@@ -1,6 +1,8 @@
 //! `reth stage` command
 use clap::{Parser, Subcommand};
 
+use crate::runner::CliContext;
+
 pub mod drop;
 pub mod dump;
 pub mod run;
@@ -33,9 +35,9 @@ pub enum Subcommands {
 
 impl Command {
     /// Execute `stage` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         match self.command {
-            Subcommands::Run(command) => command.execute().await,
+            Subcommands::Run(command) => command.execute(ctx).await,
             Subcommands::Drop(command) => command.execute().await,
             Subcommands::Dump(command) => command.execute().await,
             Subcommands::Unwind(command) => command.execute().await,

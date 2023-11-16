@@ -24,6 +24,7 @@ use reth_provider::{
 use reth_revm_executor::{
     processor::verify_receipt, state_change::post_block_balance_increments, ExecutionData,
 };
+use reth_tasks::TaskSpawner;
 use revm::{
     primitives::{
         Account, AccountStatus, EVMError, Env, ExecutionResult, ResultAndState, State as EVMState,
@@ -36,6 +37,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use tokio::sync::mpsc;
 
 /// Database boxed with a lifetime and Send.
 pub type DatabaseRefBox<'a, E> = Box<dyn DatabaseRef<Error = E> + Send + Sync + 'a>;
@@ -141,6 +143,8 @@ pub struct ParallelExecutor<'a, Provider> {
     provider: Provider,
     /// EVM state database.
     state: Arc<SharedStateLock<DatabaseRefBox<'a, RethError>>>,
+    /// Task spawner.
+    task_spawner: Box<dyn TaskSpawner>,
     /// Store for transaction execution order.
     store: Arc<TransitionQueueStore>,
     /// Execution data.
@@ -174,6 +178,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
+        task_spawner: Box<dyn TaskSpawner>,
         store: Arc<TransitionQueueStore>,
         database: DatabaseRefBox<'a, RethError>,
         gas_threshold: u64,
@@ -183,6 +188,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         Ok(Self {
             provider,
             store,
+            task_spawner,
             data: ExecutionData::new(chain_spec),
             state: Arc::new(SharedStateLock::new(SharedState::new(database))),
             loaded: HashMap::default(),
@@ -287,10 +293,59 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
             gas_per_transition > self.gas_threshold as u128
         {
             self.batches_executed_in_parallel += 1;
-            transitions
-                .into_par_iter()
-                .map(|transition| self.execute_state_transition(transition))
-                .collect()
+
+            let len = transitions.len();
+            let (tx, rx) = std::sync::mpsc::channel();
+            for transition in transitions {
+                let state: Arc<SharedStateLock<DatabaseRefBox<'static, RethError>>> =
+                    unsafe { std::mem::transmute(self.state.clone()) };
+                let tx = tx.clone();
+                self.task_spawner.spawn(Box::pin(async move {
+                    let started_at = Instant::now();
+                    let transition = match transition {
+                        StateTransitionData::PreBlock(_) => {
+                            unimplemented!("pre block transition is not implemented")
+                        }
+                        StateTransitionData::Transaction(block_number, idx, env) => {
+                            let mut evm = EVM::with_env(env);
+                            evm.database(state);
+                            StateTransition::Transaction(block_number, idx, evm.transact_ref())
+                        }
+                        StateTransitionData::PostBlock(block_number, increments) => {
+                            // TODO: simplify
+                            let account_states_result = increments
+                                .into_iter()
+                                .map(|(address, increment)| {
+                                    let mut info = state
+                                        .basic_ref(address)
+                                        .map_err(EVMError::Database)?
+                                        .unwrap_or_default();
+                                    info.balance += U256::from(increment);
+                                    let status = AccountStatus::Loaded | AccountStatus::Touched;
+                                    Ok((
+                                        address,
+                                        Account { info, status, storage: Default::default() },
+                                    ))
+                                })
+                                .collect();
+                            StateTransition::PostBlock(block_number, account_states_result)
+                        }
+                    };
+                    tx.send((transition, started_at.elapsed())).unwrap();
+                }));
+            }
+
+            drop(tx);
+            let mut results = Vec::with_capacity(len);
+            while let Ok(result) = rx.recv() {
+                results.push(result);
+            }
+            results
+
+            // transitions
+            //     .into_par_iter()
+            //     .map(|transition| self.execute_state_transition(transition))
+            //     .collect()
         } else {
             self.batches_executed_in_sequence += 1;
             transitions

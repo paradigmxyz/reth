@@ -13,6 +13,7 @@ description = "revm parallel execution"
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
+reth-tasks.workspace = true
 reth-revm-database = { path = "../revm-database" }
 reth-revm-executor = { path = "../revm-executor" }
 
@@ -30,3 +31,4 @@ tracing.workspace = true
 async-trait.workspace = true
 parking_lot.workspace = true
 itertools.workspace = true
+tokio = { workspace = true, features = ["sync"] }

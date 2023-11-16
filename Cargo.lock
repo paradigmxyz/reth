@@ -6397,9 +6397,11 @@ dependencies = [
  "reth-provider",
  "reth-revm-database",
  "reth-revm-executor",
+ "reth-tasks",
  "revm",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
 ]
 

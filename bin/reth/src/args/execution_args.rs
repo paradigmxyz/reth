@@ -7,6 +7,7 @@ use reth_revm::{
     parallel::{factory::ParallelExecutorFactory, queue::TransitionQueueStore},
     EVMProcessorFactory,
 };
+use reth_tasks::TaskSpawner;
 use std::{path::PathBuf, sync::Arc};
 
 /// Parameters for EVM execution
@@ -35,10 +36,12 @@ impl ExecutionArgs {
     pub fn pipeline_executor_factory(
         &self,
         chain_spec: Arc<ChainSpec>,
+        task_spawner: Box<dyn TaskSpawner>,
     ) -> eyre::Result<EitherExecutorFactory<EVMProcessorFactory, ParallelExecutorFactory>> {
         let factory = if self.parallel {
             EitherExecutorFactory::Right(ParallelExecutorFactory::new(
                 chain_spec,
+                task_spawner,
                 Arc::new(TransitionQueueStore::new(self.queue_store.clone().expect("is set"))),
                 self.gas_threshold,
                 self.batch_size_threshold,
