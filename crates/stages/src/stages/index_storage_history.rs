@@ -148,17 +148,17 @@ mod tests {
         }
     }
 
-    fn list(list: &[usize]) -> BlockNumberList {
+    fn list(list: &[u64]) -> BlockNumberList {
         BlockNumberList::new(list).unwrap()
     }
 
     fn cast(
         table: Vec<(StorageShardedKey, BlockNumberList)>,
-    ) -> BTreeMap<StorageShardedKey, Vec<usize>> {
+    ) -> BTreeMap<StorageShardedKey, Vec<u64>> {
         table
             .into_iter()
             .map(|(k, v)| {
-                let v = v.iter(0).collect();
+                let v = v.iter().collect();
                 (k, v)
             })
             .collect()

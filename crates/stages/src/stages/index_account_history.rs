@@ -138,17 +138,17 @@ mod tests {
         ShardedKey { key: ADDRESS, highest_block_number: shard_index }
     }
 
-    fn list(list: &[usize]) -> BlockNumberList {
+    fn list(list: &[u64]) -> BlockNumberList {
         BlockNumberList::new(list).unwrap()
     }
 
     fn cast(
         table: Vec<(ShardedKey<Address>, BlockNumberList)>,
-    ) -> BTreeMap<ShardedKey<Address>, Vec<usize>> {
+    ) -> BTreeMap<ShardedKey<Address>, Vec<u64>> {
         table
             .into_iter()
             .map(|(k, v)| {
-                let v = v.iter(0).collect();
+                let v = v.iter().collect();
                 (k, v)
             })
             .collect()

@@ -217,8 +217,8 @@ mod tests {
                 .filter(|(key, _)| key.sharded_key.highest_block_number > last_pruned_block_number)
                 .map(|(key, blocks)| {
                     let new_blocks = blocks
-                        .iter(0)
-                        .skip_while(|block| *block <= last_pruned_block_number as usize)
+                        .iter()
+                        .skip_while(|block| *block <= last_pruned_block_number)
                         .collect::<Vec<_>>();
                     (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
                 })
