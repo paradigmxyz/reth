@@ -129,6 +129,14 @@ impl Environment {
         self.inner.txn_manager.as_ref()
     }
 
+    /// Returns the manager that handles transaction messages.
+    ///
+    /// Requires [Mode::ReadWrite] and returns None otherwise.
+    #[inline]
+    pub(crate) fn ensure_txn_manager(&self) -> Result<&SyncSender<TxnManagerMessage>> {
+        self.txn_manager().ok_or(Error::WriteTransactionUnsupportedInReadOnlyMode)
+    }
+
     /// Create a read-only transaction for use with the environment.
     #[inline]
     pub fn begin_ro_txn(&self) -> Result<Transaction<'_, RO>> {
@@ -138,7 +146,7 @@ impl Environment {
     /// Create a read-write transaction for use with the environment. This method will block while
     /// there are any other read-write transactions open on the environment.
     pub fn begin_rw_txn(&self) -> Result<Transaction<'_, RW>> {
-        let sender = self.txn_manager().ok_or(Error::WriteTransactionUnsupportedInReadOnlyMode)?;
+        let sender = self.ensure_txn_manager()?;
         let txn = loop {
             let (tx, rx) = sync_channel(0);
             sender
