@@ -287,79 +287,135 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         }
 
         let started_executing_at = Instant::now();
-        let gas_per_transition = batch.gas_used / transitions.len() as u128;
+        // let gas_per_transition = batch.gas_used / transitions.len() as u128;
         tracing::debug!(target: "evm::parallel", ?batch, "Executing block batch");
-        let transition_results: Vec<_> = if transitions.len() > self.batch_size_threshold as usize ||
-            gas_per_transition > self.gas_threshold as u128
-        {
-            self.batches_executed_in_parallel += 1;
 
-            let len = transitions.len();
-            let (tx, rx) = std::sync::mpsc::channel();
-            for transition in transitions {
-                let state: Arc<SharedStateLock<DatabaseRefBox<'static, RethError>>> =
-                    unsafe { std::mem::transmute(self.state.clone()) };
-                let tx = tx.clone();
-                self.task_spawner.spawn(Box::pin(async move {
-                    let started_at = Instant::now();
-                    let transition = match transition {
-                        StateTransitionData::PreBlock(_) => {
-                            unimplemented!("pre block transition is not implemented")
-                        }
-                        StateTransitionData::Transaction(block_number, idx, env) => {
+        let mut transition_results = Vec::with_capacity(transitions.len());
+        let (tx, rx) = std::sync::mpsc::channel();
+        for transition in transitions {
+            let state = self.state.clone();
+            let transition = match transition {
+                StateTransitionData::PreBlock(_) => {
+                    unimplemented!("pre block transition is not implemented")
+                }
+                StateTransitionData::Transaction(block_number, idx, env) => {
+                    if env.tx.gas_limit > self.gas_threshold {
+                        let mut evm = EVM::with_env(env);
+                        evm.database(state);
+                        transition_results.push(StateTransition::Transaction(
+                            block_number,
+                            idx,
+                            evm.transact_ref(),
+                        ));
+                    } else {
+                        let tx = tx.clone();
+                        let state: Arc<SharedStateLock<DatabaseRefBox<'static, RethError>>> =
+                            unsafe { std::mem::transmute(self.state.clone()) };
+                        self.task_spawner.spawn(Box::pin(async move {
                             let mut evm = EVM::with_env(env);
                             evm.database(state);
-                            StateTransition::Transaction(block_number, idx, evm.transact_ref())
-                        }
-                        StateTransitionData::PostBlock(block_number, increments) => {
-                            // TODO: simplify
-                            let account_states_result = increments
-                                .into_iter()
-                                .map(|(address, increment)| {
-                                    let mut info = state
-                                        .basic_ref(address)
-                                        .map_err(EVMError::Database)?
-                                        .unwrap_or_default();
-                                    info.balance += U256::from(increment);
-                                    let status = AccountStatus::Loaded | AccountStatus::Touched;
-                                    Ok((
-                                        address,
-                                        Account { info, status, storage: Default::default() },
-                                    ))
-                                })
-                                .collect();
-                            StateTransition::PostBlock(block_number, account_states_result)
-                        }
-                    };
-                    tx.send((transition, started_at.elapsed())).unwrap();
-                }));
-            }
+                            tx.send(StateTransition::Transaction(
+                                block_number,
+                                idx,
+                                evm.transact_ref(),
+                            ));
+                        }));
+                    }
+                }
+                StateTransitionData::PostBlock(block_number, increments) => {
+                    let account_states_result = increments
+                        .into_iter()
+                        .map(|(address, increment)| {
+                            let mut info = state
+                                .basic_ref(address)
+                                .map_err(EVMError::Database)?
+                                .unwrap_or_default();
+                            info.balance += U256::from(increment);
+                            let status = AccountStatus::Loaded | AccountStatus::Touched;
+                            Ok((address, Account { info, status, storage: Default::default() }))
+                        })
+                        .collect();
+                    transition_results
+                        .push(StateTransition::PostBlock(block_number, account_states_result));
+                }
+            };
+        }
 
-            drop(tx);
-            let mut results = Vec::with_capacity(len);
-            while let Ok(result) = rx.recv() {
-                results.push(result);
-            }
-            results
+        drop(tx);
+        while let Ok(result) = rx.recv() {
+            transition_results.push(result);
+        }
 
-            // transitions
-            //     .into_par_iter()
-            //     .map(|transition| self.execute_state_transition(transition))
-            //     .collect()
-        } else {
-            self.batches_executed_in_sequence += 1;
-            transitions
-                .into_iter()
-                .map(|transition| self.execute_state_transition(transition))
-                .collect()
-        };
+        // let transition_results: Vec<_> = if transitions.len() > self.batch_size_threshold as
+        // usize ||     gas_per_transition > self.gas_threshold as u128
+        // {
+        //     self.batches_executed_in_parallel += 1;
+
+        //     let len = transitions.len();
+        //     let (tx, rx) = std::sync::mpsc::channel();
+        //     for transition in transitions {
+        //         let state: Arc<SharedStateLock<DatabaseRefBox<'static, RethError>>> =
+        //             unsafe { std::mem::transmute(self.state.clone()) };
+        //         let tx = tx.clone();
+        //         self.task_spawner.spawn(Box::pin(async move {
+        //             let started_at = Instant::now();
+        //             let transition = match transition {
+        //                 StateTransitionData::PreBlock(_) => {
+        //                     unimplemented!("pre block transition is not implemented")
+        //                 }
+        //                 StateTransitionData::Transaction(block_number, idx, env) => {
+        //                     let mut evm = EVM::with_env(env);
+        //                     evm.database(state);
+        //                     StateTransition::Transaction(block_number, idx, evm.transact_ref())
+        //                 }
+        //                 StateTransitionData::PostBlock(block_number, increments) => {
+        //                     // TODO: simplify
+        //                     let account_states_result = increments
+        //                         .into_iter()
+        //                         .map(|(address, increment)| {
+        //                             let mut info = state
+        //                                 .basic_ref(address)
+        //                                 .map_err(EVMError::Database)?
+        //                                 .unwrap_or_default();
+        //                             info.balance += U256::from(increment);
+        //                             let status = AccountStatus::Loaded | AccountStatus::Touched;
+        //                             Ok((
+        //                                 address,
+        //                                 Account { info, status, storage: Default::default() },
+        //                             ))
+        //                         })
+        //                         .collect();
+        //                     StateTransition::PostBlock(block_number, account_states_result)
+        //                 }
+        //             };
+        //             tx.send((transition, started_at.elapsed())).unwrap();
+        //         }));
+        //     }
+
+        //     drop(tx);
+        //     let mut results = Vec::with_capacity(len);
+        //     while let Ok(result) = rx.recv() {
+        //         results.push(result);
+        //     }
+        //     results
+
+        //     // transitions
+        //     //     .into_par_iter()
+        //     //     .map(|transition| self.execute_state_transition(transition))
+        //     //     .collect()
+        // } else {
+        //     self.batches_executed_in_sequence += 1;
+        //     transitions
+        //         .into_iter()
+        //         .map(|transition| self.execute_state_transition(transition))
+        //         .collect()
+        // };
         self.time_executing += started_executing_at.elapsed();
 
         let started_aggregating_state_at = Instant::now();
         let mut states =
             revm::primitives::HashMap::<Address, Vec<(TransitionId, Account)>>::default();
-        for (transition_result, duration) in transition_results {
-            self.time_executing_state_transitions += duration;
+        for transition_result in transition_results {
             let transition_id = transition_result.id();
             let mut block = match self.loaded.entry(transition_result.block_number()) {
                 hash_map::Entry::Occupied(entry) => entry,
