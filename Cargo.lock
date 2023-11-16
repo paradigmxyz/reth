@@ -5574,6 +5574,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "retain_mut"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c31b5c4033f8fdde8700e4657be2c497e7288f01515be52168c631e2e4d4086"
+
+[[package]]
 name = "reth"
 version = "0.1.0-alpha.10"
 dependencies = [
@@ -6171,7 +6177,7 @@ dependencies = [
  "ph",
  "rand 0.8.5",
  "serde",
- "sucds 0.8.1",
+ "sucds",
  "tempfile",
  "thiserror",
  "tracing",
@@ -6231,13 +6237,13 @@ dependencies = [
  "reth-rpc-types",
  "revm",
  "revm-primitives",
+ "roaring",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "serde_with",
  "sha2",
  "strum",
- "sucds 0.6.0",
  "tempfile",
  "test-fuzz",
  "thiserror",
@@ -6779,6 +6785,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "roaring"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6106b5cf8587f5834158895e9715a3c6c9716c8aefab57f1f7680917191c7873"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "retain_mut",
 ]
 
 [[package]]
@@ -7631,15 +7648,6 @@ name = "subtle"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
-
-[[package]]
-name = "sucds"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64accd20141dfbef67ad83c51d588146cff7810616e1bda35a975be369059533"
-dependencies = [
- "anyhow",
-]
 
 [[package]]
 name = "sucds"

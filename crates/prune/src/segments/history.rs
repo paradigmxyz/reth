@@ -54,11 +54,11 @@ where
         // contain the target block number, as it's in this shard.
         else {
             let new_blocks =
-                blocks.iter(0).skip_while(|block| *block <= to_block as usize).collect::<Vec<_>>();
+                blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
 
             // If there were blocks less than or equal to the target one
             // (so the shard has changed), update the shard.
-            if blocks.len() != new_blocks.len() {
+            if blocks.len() as usize != new_blocks.len() {
                 // If there are no more blocks in this shard, we need to remove it, as empty
                 // shards are not allowed.
                 if new_blocks.is_empty() {

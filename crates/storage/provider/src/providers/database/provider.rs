@@ -129,7 +129,7 @@ fn unwind_history_shards<S, T, C>(
     start_key: T::Key,
     block_number: BlockNumber,
     mut shard_belongs_to_key: impl FnMut(&T::Key) -> bool,
-) -> RethResult<Vec<usize>>
+) -> RethResult<Vec<u64>>
 where
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<S>>,
@@ -145,15 +145,15 @@ where
 
         // Check the first item.
         // If it is greater or eq to the block number, delete it.
-        let first = list.iter(0).next().expect("List can't be empty");
-        if first >= block_number as usize {
+        let first = list.iter().next().expect("List can't be empty");
+        if first >= block_number {
             item = cursor.prev()?;
             continue
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
-            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
+            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
         } else {
-            return Ok(list.iter(0).collect::<Vec<_>>())
+            return Ok(list.iter().collect::<Vec<_>>())
         }
     }
 
@@ -755,7 +755,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         if let Some((shard_key, list)) = shard {
             // delete old shard so new one can be inserted.
             self.tx.delete::<T>(shard_key, None)?;
-            let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
+            let list = list.iter().collect::<Vec<_>>();
             return Ok(list)
         }
         Ok(Vec::new())
@@ -784,8 +784,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             let chunks = indices
                 .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
                 .into_iter()
-                .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
-                .collect::<Vec<_>>();
+                .map(|chunks| chunks.copied().collect())
+                .collect::<Vec<Vec<_>>>();
 
             let mut chunks = chunks.into_iter().peekable();
             while let Some(list) = chunks.next() {

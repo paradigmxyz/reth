@@ -109,10 +109,14 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         // index, the first chunk for the next key will be returned so we filter out chunks that
         // have a different key.
         if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
-            let chunk = chunk.enable_rank();
-
             // Get the rank of the first entry after our block.
-            let rank = chunk.rank(self.block_number as usize);
+            let rank = chunk.rank(self.block_number);
+
+            let Some(block_number) = chunk.select(rank) else {
+                // The chunk does not contain an entry for a write after our block. This can only
+                // happen if this is the last chunk and so we need to look in the plain state.
+                return Ok(HistoryInfo::InPlainState)
+            };
 
             // If our block is before the first entry in the index chunk and this first entry
             // doesn't equal to our block, it might be before the first write ever. To check, we
@@ -121,24 +125,20 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             // short-circuit) and when it passes we save a full seek into the changeset/plain state
             // table.
             if rank == 0 &&
-                chunk.select(rank) as u64 != self.block_number &&
+                block_number != self.block_number &&
                 !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
             {
                 if lowest_available_block_number.is_some() {
                     // The key may have been written, but due to pruning we may not have changesets
                     // and history, so we need to make a changeset lookup.
-                    Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
+                    Ok(HistoryInfo::InChangeset(block_number))
                 } else {
                     // The key is written to, but only after our block.
                     Ok(HistoryInfo::NotYetWritten)
                 }
-            } else if rank < chunk.len() {
-                // The chunk contains an entry for a write after our block, return it.
-                Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
             } else {
-                // The chunk does not contain an entry for a write after our block. This can only
-                // happen if this is the last chunk and so we need to look in the plain state.
-                Ok(HistoryInfo::InPlainState)
+                // The chunk contains an entry for a write after our block, return it.
+                Ok(HistoryInfo::InChangeset(block_number))
             }
         } else if lowest_available_block_number.is_some() {
             // The key may have been written, but due to pruning we may not have changesets and
