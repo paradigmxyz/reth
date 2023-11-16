@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{builder::RangedU64ValueParser, Parser};
 use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_db::{database::Database, open_db_read_only, DatabaseEnv};
@@ -36,8 +36,12 @@ pub struct Command {
     #[arg(long, short, default_value = "500000")]
     block_interval: u64,
 
-    /// Number of snapshots built in parallel.
-    #[arg(long, short, default_value = "1")]
+    /// Sets the number of snapshots built in parallel. Note: Each parallel build is memory-intensive.
+    #[arg(
+        long, short,
+        default_value = "1",
+        value_parser = RangedU64ValueParser::<u64>::new().range(1..)
+    )]
     parallel: u64,
 
     /// Flag to skip snapshot creation and print snapshot files stats.
