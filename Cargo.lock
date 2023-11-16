@@ -5604,6 +5604,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "rand 0.8.5",
+ "rayon",
  "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",

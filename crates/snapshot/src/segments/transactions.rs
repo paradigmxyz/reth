@@ -28,7 +28,7 @@ impl Default for Transactions {
 }
 
 impl Segment for Transactions {
-    fn segment() -> SnapshotSegment {
+    fn segment(&self) -> SnapshotSegment {
         SnapshotSegment::Transactions
     }
 
@@ -44,7 +44,7 @@ impl Segment for Transactions {
         let mut jar = prepare_jar::<DB, 1>(
             provider,
             directory,
-            Self::segment(),
+            self.segment(),
             self.config,
             block_range,
             tx_range_len,
