@@ -12,7 +12,8 @@ use futures_util::{
 };
 use reth_interfaces::RethError;
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredTransaction,
+    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredPooledTransaction,
+    FromRecoveredTransaction, PooledTransactionsElementEcRecovered,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
@@ -286,7 +287,31 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let pruned_old_transactions = old_blocks
                     .transactions_ecrecovered()
                     .filter(|tx| !new_mined_transactions.contains(&tx.hash))
-                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
+                    .filter_map(|tx| {
+                        if tx.is_eip4844() {
+                            // reorged blobs no longer include the blob, which is necessary for
+                            // validating the transaction. Even though the transaction could have
+                            // been validated previously, we still need the blob in order to
+                            // accurately set the transaction's
+                            // encoded-length which is propagated over the network.
+                            pool.get_blob(tx.hash)
+                                .ok()
+                                .flatten()
+                                .and_then(|sidecar| {
+                                    PooledTransactionsElementEcRecovered::try_from_blob_transaction(
+                                        tx, sidecar,
+                                    )
+                                    .ok()
+                                })
+                                .map(
+                                    <P as TransactionPool>::Transaction::from_recovered_pooled_transaction,
+                                )
+                        } else {
+                            Some(<P as TransactionPool>::Transaction::from_recovered_transaction(
+                                tx,
+                            ))
+                        }
+                    })
                     .collect::<Vec<_>>();
 
                 // update the pool first
