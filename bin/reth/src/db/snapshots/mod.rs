@@ -14,6 +14,7 @@ use std::{
     ops::RangeInclusive,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 
 mod bench;
@@ -192,15 +193,34 @@ impl Command {
         self.stats(created_snapshots)
     }
 
+    /// Prints detailed statistics for each snapshot, including loading time.
+    ///
+    /// This function loads each snapshot from the provided paths and prints
+    /// statistics about various aspects of each snapshot, such as filters size,
+    /// offset index size, offset list size, and loading time.
     fn stats(&self, snapshots: Vec<impl AsRef<Path>>) -> eyre::Result<()> {
-        for snap in snapshots {
+        for snap in &snapshots {
+            let start_time = Instant::now();
             let jar = NippyJar::<SegmentHeader>::load(snap.as_ref())?;
+            let duration = start_time.elapsed();
+
+            println!("Snapshot: {:?}", snap.as_ref().file_name());
             println!(
-                "jar: {:#?} | filters_size {} | offset_index_size {} | offsets_size {} ",
-                snap.as_ref().file_name(),
-                jar.offsets_index_size(),
-                jar.offsets_size(),
-                jar.filter_size()
+                "  Filters Size:        {:>7.2} MB",
+                jar.filter_size() as f64 / (1024.0 * 1024.0)
+            );
+            println!(
+                "  Offset Index Size:   {:>7.2} MB",
+                jar.offsets_index_size() as f64 / (1024.0 * 1024.0)
+            );
+            println!(
+                "  Offset List Size:    {:>7.2} MB",
+                jar.offsets_size() as f64 / (1024.0 * 1024.0)
+            );
+            println!(
+                "  Loading Time:        {:>7.2} ms | {:>7.2} µs",
+                duration.as_millis() as f64,
+                duration.as_micros() as f64
             );
         }
         Ok(())
