@@ -790,7 +790,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             let mut chunks = chunks.into_iter().peekable();
             while let Some(list) = chunks.next() {
                 let highest_block_number = if chunks.peek().is_some() {
-                    *list.last().expect("`chunks` does not return empty list") as u64
+                    *list.last().expect("`chunks` does not return empty list")
                 } else {
                     // Insert last list with u64::MAX
                     u64::MAX

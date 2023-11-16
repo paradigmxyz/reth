@@ -35,7 +35,7 @@ impl IntegerList {
     /// Returns an error if the list is empty or not pre-sorted.
     pub fn new<T: AsRef<[u64]>>(list: T) -> Result<Self, RoaringBitmapError> {
         Ok(Self(
-            RoaringTreemap::from_sorted_iter(list.as_ref().into_iter().copied())
+            RoaringTreemap::from_sorted_iter(list.as_ref().iter().copied())
                 .map_err(|_| RoaringBitmapError::InvalidInput)?,
         ))
     }
@@ -47,7 +47,7 @@ impl IntegerList {
     /// Panics if the list is empty or not pre-sorted.
     pub fn new_pre_sorted<T: AsRef<[u64]>>(list: T) -> Self {
         Self(
-            RoaringTreemap::from_sorted_iter(list.as_ref().into_iter().copied())
+            RoaringTreemap::from_sorted_iter(list.as_ref().iter().copied())
                 .expect("IntegerList must be pre-sorted and non-empty"),
         )
     }
@@ -139,7 +139,7 @@ impl<'a> Arbitrary<'a> for IntegerList {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
         let mut nums: Vec<u64> = Vec::arbitrary(u)?;
         nums.sort();
-        Ok(Self::new(nums).map_err(|_| arbitrary::Error::IncorrectFormat)?)
+        Self::new(nums).map_err(|_| arbitrary::Error::IncorrectFormat)
     }
 }
 
