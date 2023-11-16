@@ -23,7 +23,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
     let transactions = payload
         .transactions
         .into_iter()
-        .map(TransactionSigned::decode_enveloped)
+        .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
         .collect::<Result<Vec<_>, _>>()?;
     let transactions_root = proofs::calculate_transaction_root(&transactions);
 
