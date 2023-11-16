@@ -1484,7 +1484,7 @@ impl FromRecoveredTransaction for TransactionSignedEcRecovered {
 #[cfg(feature = "c-kzg")]
 pub trait FromRecoveredPooledTransaction {
     /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
-    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
+    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
 /// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
