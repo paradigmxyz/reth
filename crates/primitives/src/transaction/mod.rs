@@ -1241,9 +1241,7 @@ impl TransactionSigned {
     ///
     /// To decode EIP-4844 transactions in `eth_sendRawTransaction`, use
     /// [PooledTransactionsElement::decode_enveloped].
-    pub fn decode_enveloped(tx: Bytes) -> alloy_rlp::Result<Self> {
-        let mut data = tx.as_ref();
-
+    pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if data.is_empty() {
             return Err(RlpError::InputTooShort)
         }
@@ -1251,9 +1249,9 @@ impl TransactionSigned {
         // Check if the tx is a list
         if data[0] >= EMPTY_LIST_CODE {
             // decode as legacy transaction
-            TransactionSigned::decode_rlp_legacy_transaction(&mut data)
+            TransactionSigned::decode_rlp_legacy_transaction(data)
         } else {
-            TransactionSigned::decode_enveloped_typed_transaction(&mut data)
+            TransactionSigned::decode_enveloped_typed_transaction(data)
         }
     }
 
@@ -1484,7 +1482,7 @@ impl FromRecoveredTransaction for TransactionSignedEcRecovered {
 #[cfg(feature = "c-kzg")]
 pub trait FromRecoveredPooledTransaction {
     /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
-    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
+    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
 /// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
@@ -1548,7 +1546,7 @@ mod tests {
         // random mainnet tx <https://etherscan.io/tx/0x86718885c4b4218c6af87d3d0b0d83e3cc465df2a05c048aa4db9f1a6f9de91f>
         let tx_bytes = hex!("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d9");
 
-        let decoded = TransactionSigned::decode_enveloped(tx_bytes[..].to_vec().into()).unwrap();
+        let decoded = TransactionSigned::decode_enveloped(&mut &tx_bytes[..]).unwrap();
         assert_eq!(
             decoded.recover_signer(),
             Some(Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap())
@@ -1728,7 +1726,7 @@ mod tests {
     fn test_envelop_decode() {
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
         let input = bytes!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
-        let decoded = TransactionSigned::decode_enveloped(input.clone()).unwrap();
+        let decoded = TransactionSigned::decode_enveloped(&mut input.as_ref()).unwrap();
 
         let encoded = decoded.envelope_encoded();
         assert_eq!(encoded, input);

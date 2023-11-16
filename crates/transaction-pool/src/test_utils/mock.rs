@@ -778,7 +778,7 @@ impl FromRecoveredTransaction for MockTransaction {
 }
 
 impl FromRecoveredPooledTransaction for MockTransaction {
-    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
         FromRecoveredTransaction::from_recovered_transaction(tx.into_ecrecovered_transaction())
     }
 }

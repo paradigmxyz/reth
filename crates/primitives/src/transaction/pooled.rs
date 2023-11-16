@@ -4,8 +4,9 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
 use crate::{
-    Address, BlobTransaction, Bytes, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, B256, EIP4844_TX_TYPE_ID,
+    Address, BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction,
+    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, B256,
+    EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
@@ -69,6 +70,27 @@ impl PooledTransactionsElement {
             return Err(tx)
         }
         Ok(tx.into())
+    }
+
+    /// Converts from an EIP-4844 [TransactionSignedEcRecovered] to a
+    /// [PooledTransactionsElementEcRecovered] with the given sidecar.
+    ///
+    /// Returns the transaction is not an EIP-4844 transaction.
+    pub fn try_from_blob_transaction(
+        tx: TransactionSigned,
+        sidecar: BlobTransactionSidecar,
+    ) -> Result<Self, TransactionSigned> {
+        let TransactionSigned { transaction, signature, hash } = tx;
+        if let Transaction::Eip4844(tx) = transaction {
+            Ok(PooledTransactionsElement::BlobTransaction(BlobTransaction {
+                transaction: tx,
+                signature,
+                hash,
+                sidecar,
+            }))
+        } else {
+            Err(TransactionSigned { transaction, signature, hash })
+        }
     }
 
     /// Heavy operation that return signature hash over rlp encoded transaction.
@@ -574,6 +596,21 @@ impl PooledTransactionsElementEcRecovered {
         signer: Address,
     ) -> Self {
         Self { transaction, signer }
+    }
+
+    /// Converts from an EIP-4844 [TransactionSignedEcRecovered] to a
+    /// [PooledTransactionsElementEcRecovered] with the given sidecar.
+    ///
+    /// Returns the transaction is not an EIP-4844 transaction.
+    pub fn try_from_blob_transaction(
+        tx: TransactionSignedEcRecovered,
+        sidecar: BlobTransactionSidecar,
+    ) -> Result<Self, TransactionSignedEcRecovered> {
+        let TransactionSignedEcRecovered { signer, signed_transaction } = tx;
+        let transaction =
+            PooledTransactionsElement::try_from_blob_transaction(signed_transaction, sidecar)
+                .map_err(|tx| TransactionSignedEcRecovered { signer, signed_transaction: tx })?;
+        Ok(Self { transaction, signer })
     }
 }
 

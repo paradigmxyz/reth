@@ -135,19 +135,32 @@
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-use crate::{
-    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
-    RpcModuleSelection::Selection,
+
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    str::FromStr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use constants::*;
-use error::{RpcError, ServerKind};
+
 use hyper::{header::AUTHORIZATION, HeaderMap};
+pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
+use serde::{Deserialize, Serialize, Serializer};
+use strum::{AsRefStr, EnumVariantNames, ParseError, VariantNames};
+use tower::layer::util::{Identity, Stack};
+use tower_http::cors::CorsLayer;
+use tracing::{instrument, trace};
+
+use constants::*;
+use error::{RpcError, ServerKind};
 use reth_ipc::server::IpcServer;
-use reth_network_api::{NetworkInfo, Peers};
+pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -157,7 +170,7 @@ use reth_rpc::{
         cache::{cache_new_blocks_task, EthStateCache},
         fee_history_cache_new_blocks_task,
         gas_oracle::GasPriceOracle,
-        FeeHistoryCache,
+        EthBundle, FeeHistoryCache,
     },
     AdminApi, AuthLayer, BlockingTaskGuard, BlockingTaskPool, Claims, DebugApi, EngineEthApi,
     EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
@@ -165,19 +178,14 @@ use reth_rpc::{
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::TransactionPool;
-use serde::{Deserialize, Serialize, Serializer};
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    str::FromStr,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
+
+use crate::{
+    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
+    RpcModuleSelection::Selection,
 };
-use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
-use tower::layer::util::{Identity, Stack};
-use tower_http::cors::CorsLayer;
-use tracing::{instrument, trace};
+// re-export for convenience
+pub use crate::eth::{EthConfig, EthHandlers};
 
 /// Auth server utilities.
 pub mod auth;
@@ -196,14 +204,6 @@ pub mod constants;
 
 // Rpc server metrics
 mod metrics;
-
-// re-export for convenience
-pub use crate::eth::{EthConfig, EthHandlers};
-pub use jsonrpsee::server::ServerBuilder;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
-use reth_network_api::noop::NoopNetwork;
-use reth_rpc::eth::EthBundle;
-use reth_transaction_pool::noop::NoopTransactionPool;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Provider, Pool, Network, Tasks, Events>(
@@ -708,9 +708,7 @@ impl fmt::Display for RpcModuleSelection {
 }
 
 /// Represents RPC modules that are supported by reth
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, EnumString, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum RethRpcModule {
@@ -734,6 +732,11 @@ pub enum RethRpcModule {
     Reth,
     /// `ots_` module
     Ots,
+    /// For single non-standard `eth_` namespace call `eth_callBundle`
+    ///
+    /// This is separate from [RethRpcModule::Eth] because it is a non standardized call that
+    /// should be opt-in.
+    EthCallBundle,
 }
 
 // === impl RethRpcModule ===
@@ -742,6 +745,34 @@ impl RethRpcModule {
     /// Returns all variants of the enum
     pub const fn all_variants() -> &'static [&'static str] {
         Self::VARIANTS
+    }
+}
+
+impl FromStr for RethRpcModule {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "admin" => RethRpcModule::Admin,
+            "debug" => RethRpcModule::Debug,
+            "eth" => RethRpcModule::Eth,
+            "net" => RethRpcModule::Net,
+            "trace" => RethRpcModule::Trace,
+            "txpool" => RethRpcModule::Txpool,
+            "web3" => RethRpcModule::Web3,
+            "rpc" => RethRpcModule::Rpc,
+            "reth" => RethRpcModule::Reth,
+            "ots" => RethRpcModule::Ots,
+            "eth-call-bundle" | "eth_callBundle" => RethRpcModule::EthCallBundle,
+            _ => return Err(ParseError::VariantNotFound),
+        })
+    }
+}
+
+impl TryFrom<&str> for RethRpcModule {
+    type Error = ParseError;
+    fn try_from(s: &str) -> Result<RethRpcModule, <Self as TryFrom<&str>>::Error> {
+        FromStr::from_str(s)
     }
 }
 
@@ -1037,6 +1068,11 @@ where
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                         RethRpcModule::Reth => {
                             RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
+                                .into_rpc()
+                                .into()
+                        }
+                        RethRpcModule::EthCallBundle => {
+                            EthBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
                                 .into()
                         }
@@ -2053,6 +2089,14 @@ impl fmt::Debug for RpcServerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_eth_call_bundle() {
+        let selection = "eth-call-bundle".parse::<RethRpcModule>().unwrap();
+        assert_eq!(selection, RethRpcModule::EthCallBundle);
+        let selection = "eth_callBundle".parse::<RethRpcModule>().unwrap();
+        assert_eq!(selection, RethRpcModule::EthCallBundle);
+    }
 
     #[test]
     fn parse_rpc_module_selection() {

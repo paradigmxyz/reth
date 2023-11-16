@@ -921,6 +921,10 @@ impl PoolTransaction for EthPooledTransaction {
         }
     }
 
+    fn access_list(&self) -> Option<&AccessList> {
+        self.transaction.access_list()
+    }
+
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
     /// This will return `None` for non-EIP1559 transactions
@@ -937,10 +941,6 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
         self.transaction.max_fee_per_blob_gas()
-    }
-
-    fn access_list(&self) -> Option<&AccessList> {
-        self.transaction.access_list()
     }
 
     /// Returns the effective tip for this transaction.
@@ -1029,7 +1029,7 @@ impl FromRecoveredTransaction for EthPooledTransaction {
 }
 
 impl FromRecoveredPooledTransaction for EthPooledTransaction {
-    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
         EthPooledTransaction::from(tx)
     }
 }
