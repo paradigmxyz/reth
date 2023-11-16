@@ -5,10 +5,9 @@ use crate::{
 };
 
 use crate::pool::best::BestTransactionsWithBasefee;
-use reth_primitives::Address;
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
 use tokio::sync::broadcast;
@@ -35,6 +34,11 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
     /// _All_ transactions sorted by priority
     all: BTreeSet<PendingTransaction<T>>,
+    /// The highest nonce transactions for each sender - like the `independent` set, but the
+    /// highest instead of lowest nonce.
+    ///
+    /// Sorted by their scoring value.
+    independent_descendants: BTreeSet<PendingTransaction<T>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
     ///
@@ -61,6 +65,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             by_id: Default::default(),
             all: Default::default(),
             independent_transactions: Default::default(),
+            independent_descendants: Default::default(),
             size_of: Default::default(),
             new_transaction_notifier,
         }
@@ -74,6 +79,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns all transactions by id.
     fn clear_transactions(&mut self) -> BTreeMap<TransactionId, PendingTransaction<T>> {
         self.independent_transactions.clear();
+        self.independent_descendants.clear();
         self.all.clear();
         self.size_of.reset();
         std::mem::take(&mut self.by_id)
@@ -185,9 +191,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 }
             } else {
                 self.size_of += tx.transaction.size();
-                if self.ancestor(&id).is_none() {
-                    self.independent_transactions.insert(tx.clone());
-                }
+                self.update_independents(&tx, &id);
                 self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
@@ -233,15 +237,33 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 tx.priority = self.ordering.priority(&tx.transaction.transaction, base_fee);
 
                 self.size_of += tx.transaction.size();
-                if self.ancestor(&id).is_none() {
-                    self.independent_transactions.insert(tx.clone());
-                }
+                self.update_independents(&tx, &id);
                 self.all.insert(tx.clone());
                 self.by_id.insert(id, tx);
             }
         }
 
         removed
+    }
+
+    /// Updates the independent transaction and independent descendants set, assuming the given
+    /// transaction is being _added_ to the pool.
+    fn update_independents(&mut self, tx: &PendingTransaction<T>, tx_id: &TransactionId) {
+        let ancestor_id = tx_id.unchecked_ancestor();
+        if ancestor_id.and_then(|id| self.by_id.get(&id)).is_some() {
+            // the transaction already has an ancestor, so we only need to ensure that the
+            // descendants set includes the highest nonce for this transaction's sender
+            self.independent_descendants.retain(|d| {
+                d.transaction.sender() != tx.transaction.sender() ||
+                    d.transaction.nonce() >= tx.transaction.nonce()
+            });
+            self.independent_descendants.insert(tx.clone());
+        } else {
+            // If there's __no__ ancestor in the pool, then this transaction is independent, this is
+            // guaranteed because this pool is gapless.
+            self.independent_transactions.insert(tx.clone());
+            self.independent_descendants.insert(tx.clone());
+        }
     }
 
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
@@ -277,11 +299,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let priority = self.ordering.priority(&tx.transaction, base_fee);
         let tx = PendingTransaction { submission_id, transaction: tx, priority };
 
-        // If there's __no__ ancestor in the pool, then this transaction is independent, this is
-        // guaranteed because this pool is gapless.
-        if self.ancestor(&tx_id).is_none() {
-            self.independent_transactions.insert(tx.clone());
-        }
+        self.update_independents(&tx, &tx_id);
         self.all.insert(tx.clone());
 
         // send the new transaction to any existing pendingpool snapshot iterators
@@ -317,6 +335,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.size_of -= tx.transaction.size();
         self.all.remove(&tx);
         self.independent_transactions.remove(&tx);
+
+        // switch out for the next ancestor if there is one
+        self.independent_descendants.remove(&tx);
+        if let Some(ancestor) = self.ancestor(id) {
+            self.independent_descendants.insert(ancestor.clone());
+        }
         Some(tx.transaction)
     }
 
@@ -324,12 +348,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
-    }
-
-    /// Removes the worst transaction from this pool.
-    pub(crate) fn pop_worst(&mut self) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let worst = self.all.iter().next().map(|tx| *tx.transaction.id())?;
-        self.remove_transaction(&worst)
     }
 
     /// Truncates the pool to the given limit.
@@ -340,138 +358,50 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
-        max_account_slots: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        let mut spammers_map = self.get_spammers(max_account_slots);
-
-        let mut spammers =
-            spammers_map.iter().map(|(addr, txs)| (*addr, txs.len())).collect::<Vec<_>>();
-
-        // sort by number of txs, in ascending order
-        spammers.sort_by(|(_, txs1_len), (_, txs2_len)| txs1_len.cmp(txs2_len));
-
-        for (_, txs) in spammers_map.iter_mut() {
-            // sort txs by nonce so we can pop the highest nonce element if necessary
-            txs.sort_by(|tx1, tx2| tx1.transaction.nonce().cmp(&tx2.transaction.nonce()));
-        }
-
-        // penalize spammers first by equalizing txs count first
-        let mut offenders = Vec::new();
-
-        // The point of this loop is to iterate through the list of spammers, sorted by tx count,
-        // and find the sender where:
-        //
-        // If all senders with more transactions than the current sender were set to the same
-        // number of transactions as the current sender, the pool would be below the limit.
-        //
-        // If many transactions have around the same number of transactions, not many transactions
-        // will be removed.
-        while self.len() > limit.max_txs && !spammers.is_empty() {
-            // SAFETY: We know this will return Some due to `!spammers.is_empty()` above
-            let offender_pair = spammers.pop().unwrap();
-            offenders.push(offender_pair);
-
-            println!("offender_pair: {:?}", offender_pair);
-            if offenders.len() > 1 {
-                let threshold = offender_pair.1; // current spammer txs count
-
-                println!("threshold: {}", threshold);
-                // SAFETY: The above condition means that `offenders.len() > 1`, the len will be 2
-                // or greater, so offenders[offenders.len() - 2] will not panic.
-                //
-                // We also know that the inside loop decrements that element's tx_count (`.1`)
-                // until is is less than or equal to the `threshold`, so this loop should always
-                // terminate.
-                while self.len() > limit.max_txs && offenders[offenders.len() - 2].1 > threshold {
-                    for current_offender in offenders.iter_mut() {
-                        // txs are already sorted by nonce, this should pop the highest nonce
-                        // SAFETY: all addresses from offenders are in spammers_map
-                        let offender_txs =
-                            spammers_map.get_mut(&current_offender.0).unwrap().split_off(threshold);
-                        current_offender.1 -= offender_txs.len();
-
-                        // remove the txs exeeding the threshold
-                        for tx in offender_txs {
-                            if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
-                                removed.push(tx);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // If still above threshold, reduce to limit till each offenders tx count is below
-        // max_account_slots
-        while self.len() > limit.max_txs && !offenders.is_empty() {
-            let offender = offenders.pop().unwrap();
-
-            // we do not need to decrement the offender tx_count because we're popping it and these
-            // should be removed
-            //
-            // SAFETY: all addresses from offenders are in spammers_map
-            let offender_txs =
-                spammers_map.get_mut(&offender.0).unwrap().split_off(max_account_slots);
-
-            for tx in offender_txs {
-                if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
-                    removed.push(tx);
-                }
-            }
-        }
 
         // penalize non-local txs if limit is still exceeded
-        if self.size() > limit.max_size || self.len() > limit.max_txs {
-            for tx in self.all.clone().iter() {
-                if tx.transaction.is_local() {
-                    continue
+        while self.size() > limit.max_size || self.len() > limit.max_txs {
+            // flag to break out of the loop if all are local
+            let mut any_non_local = true;
+
+            // use descendants, so we pop a single tx per sender
+            for tx in self.independent_descendants.clone().iter() {
+                if !tx.transaction.is_local() {
+                    any_non_local = true;
+                    if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
+                        removed.push(tx)
+                    };
                 }
-                while self.size() > limit.max_size || self.len() > limit.max_txs {
-                    if let Some(tx) = self.pop_worst() {
-                        removed.push(tx);
-                    }
+
+                if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+                    break
                 }
+            }
+
+            // this means there are only local txs left as the highest nonce txs for each sender -
+            // we need to not start removing local txs
+            if !any_non_local {
+                break
             }
         }
 
-        // penalize local txs at last
+        // finally penalize txs whether or not they are local
         while self.size() > limit.max_size || self.len() > limit.max_txs {
-            if let Some(tx) = self.pop_worst() {
-                removed.push(tx);
+            // use descendants, so we pop a single tx per sender, starting with the worst txs
+            for tx in self.independent_descendants.clone().iter() {
+                if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
+                    removed.push(tx)
+                };
+
+                if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+                    break
+                }
             }
         }
 
         removed
-    }
-
-    /// Returns account address and their txs_count that are _not local_ and whose transaction
-    /// count > `max_account_slots` limit.
-    ///
-    /// This returns a map from address to pending transactions for addresses with over
-    /// `max_account_slots` transactions.
-    pub(crate) fn get_spammers(
-        &self,
-        max_account_slots: usize,
-    ) -> HashMap<Address, Vec<PendingTransaction<T>>> {
-        let mut spammers: HashMap<Address, Vec<PendingTransaction<T>>> = HashMap::new();
-        for tx in self.all.iter() {
-            if tx.transaction.is_local() {
-                continue
-            }
-
-            // push the tx or populate with the current tx
-            let sender = tx.transaction.sender();
-            spammers
-                .entry(sender)
-                .and_modify(|txs| txs.push(tx.clone()))
-                .or_insert(vec![tx.clone()]);
-        }
-
-        // filter out accounts that are below the threshold
-        spammers.retain(|_, txs| txs.len() > max_account_slots);
-
-        spammers
     }
 
     /// The reported size of all transactions in this pool.
@@ -503,6 +433,14 @@ impl<T: TransactionOrdering> PendingPool<T> {
         assert!(
             self.independent_transactions.len() <= self.all.len(),
             "independent.len() > all.len()"
+        );
+        assert!(
+            self.independent_descendants.len() <= self.all.len(),
+            "independent_descendants.len() > all.len()"
+        );
+        assert!(
+            self.independent_descendants.len() == self.independent_transactions.len(),
+            "independent.len() = independent_descendants.len()"
         );
     }
 }
@@ -639,7 +577,10 @@ mod tests {
         pool.add_transaction(f.validated_arc(t2), 0);
 
         // First transaction should be evicted.
-        assert_eq!(pool.pop_worst().map(|tx| *tx.hash()), Some(*t.hash()));
+        assert_eq!(
+            pool.independent_descendants.iter().next().map(|tx| *tx.transaction.hash()),
+            Some(*t.hash())
+        );
     }
 
     #[test]
@@ -698,19 +639,10 @@ mod tests {
 
         // let's set the max_account_slots to 2, and the max total txs to 4, we should end up with
         // only the first transactions
-        let max_account_slots = 1;
         let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
 
-        // find the spammers - this should be A, B, C, but not D
-        let spammers = pool.get_spammers(max_account_slots);
-        let spammers =
-            spammers.into_iter().map(|(addr, txs)| (addr, txs.len())).collect::<HashSet<_>>();
-        let expected_spammers = [(a, 4), (b, 3), (c, 3usize)];
-        let expected_spammers = expected_spammers.into_iter().collect::<HashSet<_>>();
-        assert_eq!(spammers, expected_spammers);
-
         // truncate the pool
-        let removed = pool.truncate_pool(pool_limit, max_account_slots);
+        let removed = pool.truncate_pool(pool_limit);
         assert_eq!(removed.len(), expected_removed.len());
 
         // get the inner txs from the removed txs

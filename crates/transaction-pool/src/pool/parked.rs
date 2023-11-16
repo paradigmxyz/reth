@@ -144,7 +144,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub(crate) fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
-        _max_account_slots: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
 
@@ -545,11 +544,10 @@ mod tests {
         }
 
         // we should end up with the most recently submitted transactions
-        let max_account_slots = 1;
         let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
 
         // truncate the pool
-        let removed = pool.truncate_pool(pool_limit, max_account_slots);
+        let removed = pool.truncate_pool(pool_limit);
         assert_eq!(removed.len(), expected_removed.len());
 
         // get the inner txs from the removed txs

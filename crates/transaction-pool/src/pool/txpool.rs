@@ -788,7 +788,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .$limit
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
-                        removed = $this.$pool.truncate_pool($this.config.$limit.clone(), $this.config.max_account_slots);
+                        removed = $this.$pool.truncate_pool($this.config.$limit.clone());
                         for tx in removed.clone().iter() {
                             $this.remove_descendants(tx.id(), &mut $removed);
                         }
