@@ -642,7 +642,6 @@ async fn calculate_reward_percentiles_for_block(
         .get_transactions_and_receipts(fee_entry.header_hash)
         .await?
         .ok_or(EthApiError::InvalidBlockRange)?;
-
     let mut transactions = transactions
         .into_iter()
         .zip(receipts)

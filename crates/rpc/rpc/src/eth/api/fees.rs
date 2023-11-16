@@ -13,7 +13,7 @@ use reth_transaction_pool::TransactionPool;
 
 use tracing::debug;
 
-use super::FeeHistoryEntry;
+use super::{calculate_reward_percentiles_for_block, predefined_percentiles, FeeHistoryEntry};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -56,7 +56,7 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> EthResult<FeeHistory> {
         if block_count == 0 {
-            return Ok(FeeHistory::default());
+            return Ok(FeeHistory::default())
         }
 
         // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
@@ -76,7 +76,7 @@ where
         }
 
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
-            return Err(EthApiError::UnknownBlockNumber);
+            return Err(EthApiError::UnknownBlockNumber)
         };
 
         // need to add 1 to the end block to get the correct (inclusive) range
@@ -92,7 +92,7 @@ where
         // Note: The types used ensure that the percentiles are never < 0
         if let Some(percentiles) = &reward_percentiles {
             if percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.) {
-                return Err(EthApiError::InvalidRewardPercentiles);
+                return Err(EthApiError::InvalidRewardPercentiles)
             }
         }
 
@@ -106,19 +106,23 @@ where
 
         let mut fee_entries = self.fee_history_cache().get_history(start_block, end_block).await?;
         if fee_entries.is_empty() {
-            fee_entries = self
-                .provider()
-                .block_range(start_block..=end_block)?
-                .iter()
-                .map(|block| FeeHistoryEntry::new(block, block.clone().seal_slow().hash))
-                .collect();
+            for block in self.provider().block_range(start_block..=end_block)?.iter() {
+                let mut entry = FeeHistoryEntry::new(block, block.clone().seal_slow().hash);
+                let percentiles = predefined_percentiles();
+
+                entry.rewards = calculate_reward_percentiles_for_block(
+                    &percentiles,
+                    &entry,
+                    self.cache().clone(),
+                )
+                .await?;
+                fee_entries.push(entry);
+            }
             // calculate rewards on the fly
-            println!("took fee entries from the db on the fly")
         }
 
-        println!("fee entries len: {}", fee_entries.len());
         if fee_entries.len() != block_count as usize {
-            return Err(EthApiError::InvalidBlockRange);
+            return Err(EthApiError::InvalidBlockRange)
         }
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
         let mut base_fee_per_gas: Vec<U256> = Vec::new();
@@ -173,7 +177,6 @@ where
 
         // Calculate the index in the precomputed rewards array
         let index = (rounded_percentile / 0.25) as usize;
-
         // Fetch the reward from the FeeHistoryEntry
         entry.rewards.get(index).cloned().unwrap_or(U256::ZERO)
     }

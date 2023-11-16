@@ -688,4 +688,45 @@ mod tests {
             "all: no percentiles were requested, so there should be no rewards result"
         );
     }
+
+    #[tokio::test]
+    /// Requesting all blocks + percentiles should be ok
+    async fn test_fee_history_all_blocks_with_percentiles() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, base_fees_per_gas, gas_used_ratios) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
+        let reward_percentiles: Option<Vec<f64>> = Some(vec![50.0, 75.0, 99.0]);
+
+        let fee_history = eth_api
+            .fee_history(block_count, (newest_block).into(), reward_percentiles)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            &fee_history.base_fee_per_gas, &base_fees_per_gas,
+            "all: base fee per gas is incorrect"
+        );
+        assert_eq!(
+            fee_history.base_fee_per_gas.len() as u64,
+            block_count + 1,
+            "all: should return base fee of the next block as well"
+        );
+        assert_eq!(
+            &fee_history.gas_used_ratio, &gas_used_ratios,
+            "all: gas used ratio is incorrect"
+        );
+        assert_eq!(
+            fee_history.oldest_block,
+            U256::from(newest_block - block_count + 1),
+            "all: oldest block is incorrect"
+        );
+        assert!(
+            !fee_history.reward.is_none(),
+            "all: percentiles were requested, so there should be rewards result"
+        );
+    }
 }
