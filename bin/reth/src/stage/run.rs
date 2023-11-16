@@ -17,14 +17,14 @@ use reth_config::Config;
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
-use reth_provider::{ProviderFactory, StageCheckpointReader};
+use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use reth_stages::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, ExecOutput, PipelineError, Stage, UnwindInput,
+    ExecInput, ExecOutput, PipelineError, Stage, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -242,8 +242,10 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let unwind_output = unwind_stage.unwind(&provider_rw, unwind).await?;
-                unwind.checkpoint = unwind_output.checkpoint;
+                let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind).await?;
+                unwind.checkpoint = checkpoint;
+
+                provider_rw.save_stage_checkpoint(unwind_stage.id(), checkpoint)?;
 
                 if self.commit {
                     provider_rw.commit()?;
@@ -257,10 +259,12 @@ impl Command {
             checkpoint: Some(checkpoint.with_block_number(self.from)),
         };
 
-        while let ExecOutput { checkpoint: stage_progress, done: false } =
+        while let ExecOutput { checkpoint, done: false } =
             exec_stage.execute(&provider_rw, input).await?
         {
-            input.checkpoint = Some(stage_progress);
+            input.checkpoint = Some(checkpoint);
+
+            provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
 
             if self.commit {
                 provider_rw.commit()?;
