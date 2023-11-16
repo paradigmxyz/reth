@@ -36,7 +36,8 @@ pub struct Command {
     #[arg(long, short, default_value = "500000")]
     block_interval: u64,
 
-    /// Sets the number of snapshots built in parallel. Note: Each parallel build is memory-intensive.
+    /// Sets the number of snapshots built in parallel. Note: Each parallel build is
+    /// memory-intensive.
     #[arg(
         long, short,
         default_value = "1",
