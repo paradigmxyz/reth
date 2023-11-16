@@ -288,15 +288,15 @@ fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
     // jumps = log1.125(txfee) - log1.125(basefee)
     let jumps = (max_tx_fee as f64).log(1.125) - (current_fee as f64).log(1.125);
 
-    // cast to int, so we can use ilog2
-    let jumps = jumps as i64;
-    if jumps == 0 {
-        // can't take ilog2 of 0
-        return 0;
-    }
-
     // delta = sign(jumps) * log(abs(jumps))
-    jumps.signum() * jumps.abs().ilog2() as i64
+    match (jumps as i64).cmp(&0) {
+        Ordering::Equal => {
+            // can't take ilog2 of 0
+            0
+        }
+        Ordering::Greater => (jumps.ceil() as i64).ilog2() as i64,
+        Ordering::Less => -((-jumps.floor() as i64).ilog2() as i64),
+    }
 }
 
 /// Returns the priority for the transaction, based on the "delta" blob fee and priority fee.
@@ -574,5 +574,25 @@ mod tests {
     }
 
     #[test]
-    fn priority_tests() {}
+    fn priority_tests() {
+        // Test vectors from:
+        // <https://github.com/ethereum/go-ethereum/blob/e91cdb49beb4b2a3872b5f2548bf2d6559e4f561/core/txpool/blobpool/priority_test.go#L27-L49>
+        let vectors = vec![
+            (7u128, 10u128, 2i64),
+            (17_200_000_000, 17_200_000_000, 0),
+            (9_853_941_692, 11_085_092_510, 0),
+            (11_544_106_391, 10_356_781_100, 0),
+            (17_200_000_000, 7, -7),
+            (7, 17_200_000_000, 7),
+        ];
+
+        for (base_fee, tx_fee, expected) in vectors {
+            let actual = fee_delta(tx_fee, base_fee);
+            assert_eq!(
+                actual, expected,
+                "fee_delta({}, {}) = {}, expected: {}",
+                tx_fee, base_fee, actual, expected
+            );
+        }
+    }
 }
