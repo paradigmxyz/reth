@@ -81,5 +81,5 @@ harness = false
 
 [[bench]]
 name = "priority"
-required-features = ["test-utils", "arbitrary"]
+required-features = ["arbitrary"]
 harness = false
