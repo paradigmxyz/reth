@@ -3,7 +3,8 @@
 use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::{provider::ProviderError, RethResult};
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, TransactionSigned, B256,
+    Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
+    TransactionSigned, B256,
 };
 use reth_provider::{
     BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory, TransactionVariant,
@@ -30,12 +31,6 @@ mod metrics;
 
 mod multi_consumer;
 pub use multi_consumer::MultiConsumerLruCache;
-
-#[derive(Debug)]
-enum BlockData {
-    Block(Block),
-    BlockWithSenders(BlockWithSenders),
-}
 
 /// The type that can send the response to a requested [Block]
 type BlockTransactionsResponseSender = oneshot::Sender<RethResult<Option<Vec<TransactionSigned>>>>;
@@ -278,21 +273,21 @@ where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
-    fn on_new_block(&mut self, block_hash: B256, res: RethResult<Option<BlockData>>) {
+    fn on_new_block(&mut self, block_hash: B256, res: RethResult<Option<BlockWithSenders>>) {
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
             // send the response to queued senders
             for tx in queued {
                 match tx {
                     Either::Left(block_with_senders) => {
-                        if let Ok(Some(BlockData::BlockWithSenders(ref block))) = res {
+                        if let Ok(Some(ref block)) = res {
                             let block_clone = block.clone();
                             let _ = block_with_senders.send(Ok(Some(block_clone)));
                         }
                     }
                     Either::Right(transaction_tx) => {
-                        if let Ok(Some(BlockData::Block(ref block))) = res {
+                        if let Ok(Some(ref block)) = res {
                             let block_clone = block.clone();
-                            let _ = transaction_tx.send(Ok(Some(block_clone.body)));
+                            let _ = transaction_tx.send(Ok(Some(block_clone.body.clone())));
                         }
                     }
                 }
@@ -300,7 +295,7 @@ where
         }
 
         // cache good block
-        if let Ok(Some(BlockData::BlockWithSenders(block))) = res {
+        if let Ok(Some(block)) = res {
             self.full_block_cache.insert(block_hash, block);
         }
     }
@@ -452,10 +447,7 @@ where
                         }
                         CacheAction::BlockWithSendersResult { block_hash, res } => match res {
                             Ok(Some(block_with_senders)) => {
-                                this.on_new_block(
-                                    block_hash,
-                                    Ok(Some(BlockData::BlockWithSenders(block_with_senders))),
-                                );
+                                this.on_new_block(block_hash, Ok(Some(block_with_senders)));
                             }
                             Ok(None) => {
                                 this.on_new_block(block_hash, Ok(None));
@@ -482,7 +474,7 @@ where
                             for block in blocks {
                                 this.on_new_block(
                                     block.hash,
-                                    Ok(Some(BlockData::Block(block.unseal()))),
+                                    Ok(Some(block.block.unseal().with_senders(block.senders))),
                                 );
                             }
 
@@ -512,7 +504,7 @@ enum CacheAction {
     BlockWithSendersResult { block_hash: B256, res: RethResult<Option<BlockWithSenders>> },
     ReceiptsResult { block_hash: B256, res: RethResult<Option<Vec<Receipt>>> },
     EnvResult { block_hash: B256, res: Box<RethResult<(CfgEnv, BlockEnv)>> },
-    CacheNewCanonicalChain { blocks: Vec<SealedBlock>, receipts: Vec<BlockReceipts> },
+    CacheNewCanonicalChain { blocks: Vec<SealedBlockWithSenders>, receipts: Vec<BlockReceipts> },
 }
 
 struct BlockReceipts {
@@ -531,13 +523,13 @@ where
             // we're only interested in new committed blocks
             let (blocks, state) = committed.inner();
 
-            let blocks = blocks.iter().map(|(_, block)| block.block.clone()).collect::<Vec<_>>();
+            let blocks = blocks.iter().map(|(_, block)| block.clone()).collect::<Vec<_>>();
 
             // also cache all receipts of the blocks
             let mut receipts = Vec::with_capacity(blocks.len());
             for block in &blocks {
                 let block_receipts = BlockReceipts {
-                    block_hash: block.hash,
+                    block_hash: block.block.hash,
                     receipts: state.receipts_by_block(block.number).to_vec(),
                 };
                 receipts.push(block_receipts);

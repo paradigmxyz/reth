@@ -71,7 +71,8 @@ pub fn from_block_full(
         .enumerate()
         .map(|(idx, (tx, sender))| {
             let signed_tx_ec_recovered =
-                TransactionSignedEcRecovered { signer: sender, signed_transaction: tx };
+                TransactionSignedEcRecovered::from_signed_transaction(tx, sender);
+
             Ok(from_recovered_with_block_context(
                 signed_tx_ec_recovered,
                 block_hash,
