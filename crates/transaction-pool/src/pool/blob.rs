@@ -284,7 +284,7 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
 ///
 /// This is supposed to get the number of fee jumps required to get from the current fee to the fee
 /// cap, or where the transaction would not be executable any more.
-fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
+pub fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
     // jumps = log1.125(txfee) - log1.125(basefee)
     let jumps = (max_tx_fee as f64).log(1.125) - (current_fee as f64).log(1.125);
 
@@ -300,7 +300,7 @@ fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
 }
 
 /// Returns the priority for the transaction, based on the "delta" blob fee and priority fee.
-fn blob_tx_priority(
+pub fn blob_tx_priority(
     blob_fee_cap: u128,
     blob_fee: u128,
     max_priority_fee: u128,
