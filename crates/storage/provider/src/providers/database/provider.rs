@@ -780,7 +780,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         for (partial_key, indices) in index_updates {
             let last_shard = self.take_shard::<T>(sharded_key_factory(partial_key, u64::MAX))?;
             // chunk indices and insert them in shards of N size.
-            let indices = last_shard.iter().chain(indices.iter());
+            let indices = last_shard.iter().chain(indices.iter()).dedup();
             let chunks = indices
                 .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
                 .into_iter()
