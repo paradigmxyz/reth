@@ -29,8 +29,8 @@ default = []
 return-borrowed = []
 
 [dev-dependencies]
-pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
-criterion = "0.5"
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+criterion.workspace = true
 rand.workspace = true
 rand_xorshift = "0.3"
 tempfile.workspace = true
