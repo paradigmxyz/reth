@@ -46,7 +46,7 @@ pub struct Command {
     compression: Vec<Compression>,
 
     /// Flag to enable inclusion list filters and PHFs.
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "false")]
     with_filters: bool,
 
     /// Specifies the perfect hashing function to use.

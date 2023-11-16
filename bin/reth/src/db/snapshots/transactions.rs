@@ -46,23 +46,8 @@ impl Command {
                 )?;
             }
 
-            // Default name doesn't have any configuration
             let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
-            let new_name = SnapshotSegment::Transactions.filename_with_configuration(
-                filters,
-                compression,
-                &block_range,
-                &tx_range,
-            );
-
-            if !self.only_stats {
-                reth_primitives::fs::rename(
-                    SnapshotSegment::Transactions.filename(&block_range, &tx_range),
-                    &new_name,
-                )?;
-            }
-
-            created_snapshots.push(new_name);
+            created_snapshots.push(SnapshotSegment::Transactions.filename(&block_range, &tx_range));
         }
 
         Ok(created_snapshots)
