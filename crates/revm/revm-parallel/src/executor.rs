@@ -161,6 +161,8 @@ pub struct ParallelExecutor<'a, Provider> {
     batches_executed_in_sequence: u64,
     /// Time spent executing.
     time_executing: Duration,
+    /// Time spent executing state transitions.
+    time_executing_state_transitions: Duration,
     /// Time spent aggregating state.
     time_aggregating_state: Duration,
     /// Time spent validating.
@@ -191,6 +193,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
             batches_executed_in_parallel: 0,
             batches_executed_in_sequence: 0,
             time_executing: Duration::from_secs(0),
+            time_executing_state_transitions: Duration::from_secs(0),
             time_aggregating_state: Duration::from_secs(0),
             time_validating: Duration::from_secs(0),
         })
@@ -235,9 +238,13 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         ))
     }
 
-    fn execute_state_transition(&self, transition: StateTransitionData) -> StateTransition {
+    fn execute_state_transition(
+        &self,
+        transition: StateTransitionData,
+    ) -> (StateTransition, Duration) {
         let state = self.state.clone();
-        match transition {
+        let started_at = Instant::now();
+        let transition = match transition {
             StateTransitionData::PreBlock(_) => {
                 unimplemented!("pre block transition is not implemented")
             }
@@ -262,7 +269,8 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
                     .collect();
                 StateTransition::PostBlock(block_number, account_states_result)
             }
-        }
+        };
+        (transition, started_at.elapsed())
     }
 
     /// Execute a batch of transactions in parallel.
@@ -295,7 +303,8 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         let started_aggregating_state_at = Instant::now();
         let mut states =
             revm::primitives::HashMap::<Address, Vec<(TransitionId, Account)>>::default();
-        for transition_result in transition_results {
+        for (transition_result, duration) in transition_results {
+            self.time_executing_state_transitions += duration;
             let transition_id = transition_result.id();
             let mut block = match self.loaded.entry(transition_result.block_number()) {
                 hash_map::Entry::Occupied(entry) => entry,
@@ -448,6 +457,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
             parallel = self.batches_executed_in_parallel,
             sequential = self.batches_executed_in_sequence,
             time_executing_ms = self.time_executing.as_millis(),
+            time_executing_state_transitions_ms = self.time_executing_state_transitions.as_millis(),
             time_aggregating_state_ms = self.time_aggregating_state.as_millis(),
             time_validating_ms = self.time_validating.as_millis(),
             "Executed batches in range"
