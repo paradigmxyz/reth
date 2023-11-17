@@ -1,6 +1,6 @@
 //! Command for comparing traces between regular and parallel execution.
 use crate::{
-    args::{utils::genesis_value_parser, DatabaseArgs},
+    args::{utils::genesis_value_parser, DatabaseArgs, ExecutionArgs},
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
@@ -11,7 +11,7 @@ use reth_primitives::{
     fs,
     revm::env::{fill_cfg_and_block_env, fill_tx_env},
     revm_primitives::Env,
-    ChainSpec, B256,
+    ChainSpec, TransitionId, B256,
 };
 use reth_provider::{
     BlockReader, HeaderProvider, HistoricalStateProvider, ProviderError, ProviderFactory,
@@ -25,13 +25,13 @@ use reth_revm::{
         queue::{TransitionQueue, TransitionQueueStore},
         resolve_block_dependencies,
     },
-    DatabaseRef, EVM,
+    DatabaseRef, State, EVM,
 };
 use reth_revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use reth_rpc::eth::revm_utils::replay_transactions_until;
 use reth_rpc_types::trace::geth::{DefaultFrame, GethDefaultTracingOptions};
 use reth_stages::PipelineError;
-use std::sync::Arc;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 /// `reth parallel-execution generate` command
 #[derive(Debug, Parser)]
@@ -67,13 +67,17 @@ pub struct Command {
     #[clap(flatten)]
     db: DatabaseArgs,
 
+    /// Path to the block queues for parallel execution.
+    #[arg(long = "parallel-queue-store")]
+    queue_store: PathBuf,
+
     #[arg()]
     transaction_hash: B256,
 }
 
 impl Command {
     /// Execute `parallel-execution trace-diff` command
-    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
@@ -132,33 +136,27 @@ impl Command {
         )?;
         let expected_trace = self.inspect_target(db, target_env.clone())?;
 
-        let (rw_sets, _) =
-            resolve_block_dependencies(&self.chain, sp_database.clone(), &block, &senders, td)?;
-
-        for (tx_idx, rw_set) in rw_sets.iter().enumerate() {
-            let hash = block.body.get(tx_idx).expect("exists").hash;
-            tracing::trace!(
-                target: "reth::cli",
-                block_number, tx_idx, %hash, ?rw_set,
-                "Generated transaction rw set"
-            );
-        }
-
-        let mut queue = TransitionQueue::resolve(&rw_sets);
-        tracing::trace!(target: "reth::cli", block_number, ?queue, "Generated block queue");
-
+        let queue_store = Arc::new(TransitionQueueStore::new(self.queue_store.clone()));
         let mut parallel_executor = ParallelExecutor::new(
+            factory.clone(),
             self.chain.clone(),
-            Arc::new(TransitionQueueStore::default()), /* store is unused */
+            Box::new(ctx.task_executor.clone()),
+            queue_store.clone(), // unused
             sp_database,
+            0,
+            0,
             None,
         )?;
 
         // Execute batches until the target tx
-        while !queue.first().expect("not empty").contains(&(target_tx_idx as u32)) {
-            let batch = queue.remove(0);
-            tracing::trace!(target: "reth::cli", block_number, ?batch, "Executing transaction batch");
-            parallel_executor.execute_batch(&target_env, &batch, &block.body, &senders).await?;
+        let queue = queue_store.load(1..=block_number)?.ok_or(eyre::eyre!("queue not found"))?;
+        for batch in queue.batches() {
+            if batch.contains(&TransitionId::transaction(block_number, target_tx_idx as u32)) {
+                break
+            }
+
+            tracing::trace!(target: "reth::cli", ?batch, "Executing transaction batch");
+            parallel_executor.execute_batch(&batch)?;
         }
 
         let parallel_trace = self.inspect_target(parallel_executor.state(), target_env)?;

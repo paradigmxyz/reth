@@ -318,7 +318,8 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
                                 block_number,
                                 idx,
                                 evm.transact_ref(),
-                            ));
+                            ))
+                            .unwrap();
                         }));
                     }
                 }

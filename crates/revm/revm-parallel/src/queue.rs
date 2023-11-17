@@ -200,10 +200,17 @@ impl TransitionQueueStore {
                 queue.batches.append(&mut loaded.batches);
             } else {
                 for batch in loaded.batches {
-                    queue.append_batch(TransitionBatch::new(
-                        batch.transitions.into_iter().filter(|id| range.contains(&id.0)).collect(),
-                        batch.gas_used, // TODO: invalid
-                    ));
+                    let transitions = batch
+                        .transitions
+                        .into_iter()
+                        .filter(|id| range.contains(&id.0))
+                        .collect::<Vec<_>>();
+                    if !transitions.is_empty() {
+                        queue.append_batch(TransitionBatch::new(
+                            transitions,
+                            batch.gas_used, // TODO: invalid
+                        ));
+                    }
                 }
             }
         }
