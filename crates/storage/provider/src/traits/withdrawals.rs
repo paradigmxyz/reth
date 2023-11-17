@@ -1,4 +1,4 @@
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockHashOrNumber, Withdrawal};
 
 ///  Client trait for fetching [Withdrawal] related data.
@@ -9,8 +9,8 @@ pub trait WithdrawalsProvider: Send + Sync {
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> RethResult<Option<Vec<Withdrawal>>>;
+    ) -> ProviderResult<Option<Vec<Withdrawal>>>;
 
     /// Get latest withdrawal from this block or earlier .
-    fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>>;
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>>;
 }

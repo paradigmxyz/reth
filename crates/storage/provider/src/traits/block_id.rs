@@ -1,5 +1,5 @@
 use super::BlockHashReader;
-use reth_interfaces::{provider::ProviderError, RethResult};
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, B256};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting
@@ -9,20 +9,20 @@ use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag,
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockNumReader: BlockHashReader + Send + Sync {
     /// Returns the current info for the chain.
-    fn chain_info(&self) -> RethResult<ChainInfo>;
+    fn chain_info(&self) -> ProviderResult<ChainInfo>;
 
     /// Returns the best block number in the chain.
-    fn best_block_number(&self) -> RethResult<BlockNumber>;
+    fn best_block_number(&self) -> ProviderResult<BlockNumber>;
 
     /// Returns the last block number associated with the last canonical header in the database.
-    fn last_block_number(&self) -> RethResult<BlockNumber>;
+    fn last_block_number(&self) -> ProviderResult<BlockNumber>;
 
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
-    fn block_number(&self, hash: B256) -> RethResult<Option<BlockNumber>>;
+    fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>>;
 
     /// Gets the block number for the given `BlockHashOrNumber`. Returns `None` if no block with
     /// this hash exists. If the `BlockHashOrNumber` is a `Number`, it is returned as is.
-    fn convert_hash_or_number(&self, id: BlockHashOrNumber) -> RethResult<Option<BlockNumber>> {
+    fn convert_hash_or_number(&self, id: BlockHashOrNumber) -> ProviderResult<Option<BlockNumber>> {
         match id {
             BlockHashOrNumber::Hash(hash) => self.block_number(hash),
             BlockHashOrNumber::Number(num) => Ok(Some(num)),
@@ -31,7 +31,7 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
 
     /// Gets the block hash for the given `BlockHashOrNumber`. Returns `None` if no block with this
     /// number exists. If the `BlockHashOrNumber` is a `Hash`, it is returned as is.
-    fn convert_number(&self, id: BlockHashOrNumber) -> RethResult<Option<B256>> {
+    fn convert_number(&self, id: BlockHashOrNumber) -> ProviderResult<Option<B256>> {
         match id {
             BlockHashOrNumber::Hash(hash) => Ok(Some(hash)),
             BlockHashOrNumber::Number(num) => self.block_hash(num),
@@ -51,7 +51,7 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockIdReader: BlockNumReader + Send + Sync {
     /// Converts the `BlockNumberOrTag` variants to a block number.
-    fn convert_block_number(&self, num: BlockNumberOrTag) -> RethResult<Option<BlockNumber>> {
+    fn convert_block_number(&self, num: BlockNumberOrTag) -> ProviderResult<Option<BlockNumber>> {
         let num = match num {
             BlockNumberOrTag::Latest => self.best_block_number()?,
             BlockNumberOrTag::Earliest => 0,
@@ -63,18 +63,18 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
             BlockNumberOrTag::Number(num) => num,
             BlockNumberOrTag::Finalized => match self.finalized_block_number()? {
                 Some(block_number) => block_number,
-                None => return Err(ProviderError::FinalizedBlockNotFound.into()),
+                None => return Err(ProviderError::FinalizedBlockNotFound),
             },
             BlockNumberOrTag::Safe => match self.safe_block_number()? {
                 Some(block_number) => block_number,
-                None => return Err(ProviderError::SafeBlockNotFound.into()),
+                None => return Err(ProviderError::SafeBlockNotFound),
             },
         };
         Ok(Some(num))
     }
 
     /// Get the hash of the block by matching the given id.
-    fn block_hash_for_id(&self, block_id: BlockId) -> RethResult<Option<B256>> {
+    fn block_hash_for_id(&self, block_id: BlockId) -> ProviderResult<Option<B256>> {
         match block_id {
             BlockId::Hash(hash) => Ok(Some(hash.into())),
             BlockId::Number(num) => {
@@ -97,7 +97,7 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     }
 
     /// Get the number of the block by matching the given id.
-    fn block_number_for_id(&self, block_id: BlockId) -> RethResult<Option<BlockNumber>> {
+    fn block_number_for_id(&self, block_id: BlockId) -> ProviderResult<Option<BlockNumber>> {
         match block_id {
             BlockId::Hash(hash) => self.block_number(hash.into()),
             BlockId::Number(num) => self.convert_block_number(num),
@@ -105,31 +105,31 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     }
 
     /// Get the current pending block number and hash.
-    fn pending_block_num_hash(&self) -> RethResult<Option<reth_primitives::BlockNumHash>>;
+    fn pending_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
 
     /// Get the current safe block number and hash.
-    fn safe_block_num_hash(&self) -> RethResult<Option<reth_primitives::BlockNumHash>>;
+    fn safe_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
 
     /// Get the current finalized block number and hash.
-    fn finalized_block_num_hash(&self) -> RethResult<Option<reth_primitives::BlockNumHash>>;
+    fn finalized_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
 
     /// Get the safe block number.
-    fn safe_block_number(&self) -> RethResult<Option<BlockNumber>> {
+    fn safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
         self.safe_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.number))
     }
 
     /// Get the finalized block number.
-    fn finalized_block_number(&self) -> RethResult<Option<BlockNumber>> {
+    fn finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
         self.finalized_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.number))
     }
 
     /// Get the safe block hash.
-    fn safe_block_hash(&self) -> RethResult<Option<B256>> {
+    fn safe_block_hash(&self) -> ProviderResult<Option<B256>> {
         self.safe_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
     }
 
     /// Get the finalized block hash.
-    fn finalized_block_hash(&self) -> RethResult<Option<B256>> {
+    fn finalized_block_hash(&self) -> ProviderResult<Option<B256>> {
         self.finalized_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
     }
 }

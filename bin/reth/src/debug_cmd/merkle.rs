@@ -28,7 +28,7 @@ use reth_stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
-    ExecInput, PipelineError, Stage,
+    ExecInput, Stage,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -121,7 +121,7 @@ impl Command {
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let provider_rw = factory.provider_rw()?;
 
         // Configure and build network
         let network_secret_path =

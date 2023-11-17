@@ -10,14 +10,13 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
-use reth_interfaces::RethError;
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredPooledTransaction,
     FromRecoveredTransaction, PooledTransactionsElementEcRecovered,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
-    StateProviderFactory,
+    ProviderError, StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use std::{
@@ -495,7 +494,7 @@ fn load_accounts<Client, I>(
     client: Client,
     at: BlockHash,
     addresses: I,
-) -> Result<LoadedAccounts, Box<(HashSet<Address>, RethError)>>
+) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
 where
     I: Iterator<Item = Address>,
 
