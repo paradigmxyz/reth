@@ -12,6 +12,7 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::Parser;
+use futures::future::poll_fn;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::init_db;
@@ -24,7 +25,7 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, ExecOutput, Stage, UnwindInput,
+    ExecInput, Stage, UnwindInput,
 };
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -175,8 +176,8 @@ impl Command {
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
-                    let stage = BodyStage {
-                        downloader: BodiesDownloaderBuilder::default()
+                    let stage = BodyStage::new(
+                        BodiesDownloaderBuilder::default()
                             .with_stream_batch_size(batch_size as usize)
                             .with_request_limit(config.stages.bodies.downloader_request_limit)
                             .with_max_buffered_blocks_size_bytes(
@@ -187,8 +188,7 @@ impl Command {
                                     config.stages.bodies.downloader_max_concurrent_requests,
                             )
                             .build(fetch_client, consensus.clone(), db.clone()),
-                        consensus: consensus.clone(),
-                    };
+                    );
 
                     (Box::new(stage), None)
                 }
@@ -242,7 +242,7 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let unwind_output = unwind_stage.unwind(&provider_rw, unwind).await?;
+                let unwind_output = unwind_stage.unwind(&provider_rw, unwind)?;
                 unwind.checkpoint = unwind_output.checkpoint;
 
                 if self.commit {
@@ -257,19 +257,20 @@ impl Command {
             checkpoint: Some(checkpoint.with_block_number(self.from)),
         };
 
-        while let ExecOutput { checkpoint: stage_progress, done: false } =
-            exec_stage.execute(&provider_rw, input).await?
-        {
-            input.checkpoint = Some(stage_progress);
+        loop {
+            poll_fn(|cx| exec_stage.poll_execute_ready(cx, input)).await?;
+            let output = exec_stage.execute(&provider_rw, input)?;
+
+            input.checkpoint = Some(output.checkpoint);
 
             if self.commit {
                 provider_rw.commit()?;
                 provider_rw = factory.provider_rw()?;
             }
-        }
 
-        if self.commit {
-            provider_rw.commit()?;
+            if output.done {
+                break
+            }
         }
 
         Ok(())

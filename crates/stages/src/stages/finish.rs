@@ -11,13 +11,12 @@ use reth_provider::DatabaseProviderRW;
 #[non_exhaustive]
 pub struct FinishStage;
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for FinishStage {
     fn id(&self) -> StageId {
         StageId::Finish
     }
 
-    async fn execute(
+    fn execute(
         &mut self,
         _provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
@@ -25,7 +24,7 @@ impl<DB: Database> Stage<DB> for FinishStage {
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
 
-    async fn unwind(
+    fn unwind(
         &mut self,
         _provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,

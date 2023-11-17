@@ -8,13 +8,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
-};
+use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
 use reth_provider::DatabaseProviderRW;
-use std::sync::Arc;
+use std::task::{ready, Context, Poll};
 use tracing::*;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
@@ -51,21 +48,55 @@ use tracing::*;
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
-    pub downloader: D,
-    /// The consensus engine.
-    pub consensus: Arc<dyn Consensus>,
+    downloader: D,
+    /// Block response buffer.
+    buffer: Vec<BlockResponse>,
 }
 
-#[async_trait::async_trait]
+impl<D: BodyDownloader> BodyStage<D> {
+    /// Create new bodies stage from downloader.
+    pub fn new(downloader: D) -> Self {
+        Self { downloader, buffer: Vec::new() }
+    }
+}
+
 impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Bodies
     }
 
+    fn poll_execute_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+        input: ExecInput,
+    ) -> Poll<Result<(), StageError>> {
+        if input.target_reached() || !self.buffer.is_empty() {
+            return Poll::Ready(Ok(()))
+        }
+
+        // Update the header range on the downloader
+        self.downloader.set_download_range(input.next_block_range())?;
+
+        // Poll next downloader item.
+        let maybe_next_result = ready!(self.downloader.try_poll_next_unpin(cx));
+
+        // Task downloader can return `None` only if the response relaying channel was closed. This
+        // is a fatal error to prevent the pipeline from running forever.
+        let response = match maybe_next_result {
+            Some(Ok(downloaded)) => {
+                self.buffer.extend(downloaded);
+                Ok(())
+            }
+            Some(Err(err)) => Err(err.into()),
+            None => Err(StageError::ChannelClosed),
+        };
+        Poll::Ready(response)
+    }
+
     /// Download block bodies from the last checkpoint for this stage up until the latest synced
     /// header, limited by the stage's batch size.
-    async fn execute(
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
@@ -73,11 +104,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
-
-        let range = input.next_block_range();
-        // Update the header range on the downloader
-        self.downloader.set_download_range(range.clone())?;
-        let (from_block, to_block) = range.into_inner();
+        let (from_block, to_block) = input.next_block_range().into_inner();
 
         // Cursors used to write bodies, ommers and transactions
         let tx = provider.tx_ref();
@@ -91,16 +118,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
-
-        // Task downloader can return `None` only if the response relaying channel was closed. This
-        // is a fatal error to prevent the pipeline from running forever.
-        let downloaded_bodies =
-            self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;
-
-        trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
-
+        trace!(target: "sync::stages::bodies", bodies_len = self.buffer.len(), "Writing blocks");
         let mut highest_block = from_block;
-        for response in downloaded_bodies {
+        for response in self.buffer.drain(..) {
             // Write block
             let block_number = response.block_number();
 
@@ -161,11 +181,13 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        self.buffer.clear();
+
         let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
@@ -476,7 +498,6 @@ mod tests {
             test_utils::{
                 generators,
                 generators::{random_block_range, random_signed_tx},
-                TestConsensus,
             },
         };
         use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, B256};
@@ -505,7 +526,6 @@ mod tests {
 
         /// A helper struct for running the [BodyStage].
         pub(crate) struct BodyTestRunner {
-            pub(crate) consensus: Arc<TestConsensus>,
             responses: HashMap<B256, BlockBody>,
             tx: TestTransaction,
             batch_size: u64,
@@ -514,7 +534,6 @@ mod tests {
         impl Default for BodyTestRunner {
             fn default() -> Self {
                 Self {
-                    consensus: Arc::new(TestConsensus::default()),
                     responses: HashMap::default(),
                     tx: TestTransaction::default(),
                     batch_size: 1000,
@@ -540,14 +559,11 @@ mod tests {
             }
 
             fn stage(&self) -> Self::S {
-                BodyStage {
-                    downloader: TestBodyDownloader::new(
-                        self.tx.inner_raw(),
-                        self.responses.clone(),
-                        self.batch_size,
-                    ),
-                    consensus: self.consensus.clone(),
-                }
+                BodyStage::new(TestBodyDownloader::new(
+                    self.tx.inner_raw(),
+                    self.responses.clone(),
+                    self.batch_size,
+                ))
             }
         }
 

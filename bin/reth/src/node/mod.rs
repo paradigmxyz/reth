@@ -61,7 +61,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
-    HeaderProvider, ProviderFactory, StageCheckpointReader,
+    HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::{segments::SegmentSet, Pruner};
 use reth_revm::Factory;
@@ -71,9 +71,9 @@ use reth_snapshot::HighestSnapshotsTracker;
 use reth_stages::{
     prelude::*,
     stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TotalDifficultyStage, TransactionLookupStage,
     },
 };
 use reth_tasks::TaskExecutor;
@@ -896,6 +896,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .with_metrics_tx(metrics_tx.clone())
             .add_stages(
                 DefaultStages::new(
+                    ProviderFactory::new(db.clone(), self.chain.clone()),
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,
