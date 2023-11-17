@@ -217,10 +217,10 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
                     .cursor_dup_read::<tables::StorageChangeSet>()?
                     .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
                     .filter(|entry| entry.key == storage_key)
-                    .ok_or(ProviderError::StorageChangesetNotFound {
+                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
                         block_number: changeset_block_number,
                         address,
-                        storage_key,
+                        storage_key: Box::new(storage_key),
                     })?
                     .value,
             )),
