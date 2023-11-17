@@ -106,24 +106,21 @@ where
         //         relevant if the range consists entirely of empty headers)
         let mut collected = 0;
         let mut non_empty_headers = 0;
-        let headers = self
-            .provider
-            .sealed_headers_while(range.clone(), |header| {
-                let should_take = range.contains(&header.number) &&
-                    non_empty_headers < max_non_empty &&
-                    collected < self.stream_batch_size;
+        let headers = self.provider.sealed_headers_while(range.clone(), |header| {
+            let should_take = range.contains(&header.number) &&
+                non_empty_headers < max_non_empty &&
+                collected < self.stream_batch_size;
 
-                if should_take {
-                    collected += 1;
-                    if !header.is_empty() {
-                        non_empty_headers += 1;
-                    }
-                    true
-                } else {
-                    false
+            if should_take {
+                collected += 1;
+                if !header.is_empty() {
+                    non_empty_headers += 1;
                 }
-            })
-            .unwrap(); // TODO: decide what to do with RethError 😡
+                true
+            } else {
+                false
+            }
+        })?;
 
         Ok(Some(headers).filter(|h| !h.is_empty()))
     }

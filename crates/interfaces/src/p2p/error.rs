@@ -1,5 +1,5 @@
 use super::headers::client::HeadersRequest;
-use crate::{consensus::ConsensusError, db};
+use crate::{consensus::ConsensusError, provider::ProviderError};
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{
     BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, WithPeerId, B256,
@@ -177,9 +177,9 @@ pub enum DownloadError {
     /// Error while executing the request.
     #[error(transparent)]
     RequestError(#[from] RequestError),
-    /// Error while reading data from database.
+    /// Provider error.
     #[error(transparent)]
-    DatabaseError(#[from] db::DatabaseError),
+    Provider(#[from] ProviderError),
 }
 
 #[cfg(test)]
