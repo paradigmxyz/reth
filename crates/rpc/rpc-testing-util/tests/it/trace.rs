@@ -1,7 +1,9 @@
 use futures::StreamExt;
 use jsonrpsee::http_client::HttpClientBuilder;
 use reth_rpc_api_testing_util::{trace::TraceApiExt, utils::parse_env_url};
-use reth_rpc_types::trace::{filter::TraceFilter, parity::TraceType};
+use reth_rpc_types::trace::{
+    filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest,
+};
 use std::{collections::HashSet, time::Instant};
 /// This is intended to be run locally against a running node.
 ///
