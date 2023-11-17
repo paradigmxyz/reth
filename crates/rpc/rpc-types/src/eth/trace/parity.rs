@@ -357,17 +357,17 @@ impl Serialize for LocalizedTransactionTrace {
         let mut s = serializer.serialize_struct("LocalizedTransactionTrace", 8)?;
 
         match &self.trace.action {
-            Action::Call(_call_action) => {
-                s.serialize_field("action", _call_action)?;
+            Action::Call(call_action) => {
+                s.serialize_field("action", call_action)?;
             }
-            Action::Create(_create_action) => {
-                s.serialize_field("action", _create_action)?;
+            Action::Create(create_action) => {
+                s.serialize_field("action", create_action)?;
             }
-            Action::Selfdestruct(_selfdestruct_action) => {
-                s.serialize_field("action", _selfdestruct_action)?;
+            Action::Selfdestruct(selfdestruct_action) => {
+                s.serialize_field("action", selfdestruct_action)?;
             }
-            Action::Reward(_reward_action) => {
-                s.serialize_field("action", _reward_action)?;
+            Action::Reward(reward_action) => {
+                s.serialize_field("action", reward_action)?;
             }
         }
         if let Some(block_hash) = self.block_hash {
