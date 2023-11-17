@@ -911,21 +911,6 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
             .collect::<RethResult<Vec<_>>>()
     }
 
-    fn sealed_headers_range(
-        &self,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<SealedHeader>> {
-        let mut headers = vec![];
-        for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
-            let (number, header) = entry?;
-            let hash = self
-                .block_hash(number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-            headers.push(header.seal(hash));
-        }
-        Ok(headers)
-    }
-
     fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
         if let Some(header) = self.header_by_number(number)? {
             let hash = self
@@ -935,6 +920,26 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         } else {
             Ok(None)
         }
+    }
+
+    fn sealed_headers_while(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> RethResult<Vec<SealedHeader>> {
+        let mut headers = vec![];
+        for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
+            let (number, header) = entry?;
+            let hash = self
+                .block_hash(number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+            let sealed = header.seal(hash);
+            if !predicate(&sealed) {
+                break
+            }
+            headers.push(sealed);
+        }
+        Ok(headers)
     }
 }
 
@@ -1055,9 +1060,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> RethResult<Option<BlockWithSenders>> {
-        let Some(block_number) = self.convert_hash_or_number(id)? else {
-            return Ok(None);
-        };
+        let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
 
         let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
 

@@ -162,15 +162,21 @@ impl HeaderProvider for MockEthProvider {
         Ok(headers)
     }
 
-    fn sealed_headers_range(
-        &self,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<SealedHeader>> {
-        Ok(self.headers_range(range)?.into_iter().map(|h| h.seal_slow()).collect())
-    }
-
     fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
         Ok(self.header_by_number(number)?.map(|h| h.seal_slow()))
+    }
+
+    fn sealed_headers_while(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> RethResult<Vec<SealedHeader>> {
+        Ok(self
+            .headers_range(range)?
+            .into_iter()
+            .map(|h| h.seal_slow())
+            .take_while(|h| predicate(h))
+            .collect())
     }
 }
 

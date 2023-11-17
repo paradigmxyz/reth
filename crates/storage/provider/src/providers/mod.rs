@@ -140,6 +140,10 @@ where
         self.database.provider()?.headers_range(range)
     }
 
+    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        self.database.provider()?.sealed_header(number)
+    }
+
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -147,8 +151,12 @@ where
         self.database.provider()?.sealed_headers_range(range)
     }
 
-    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
-        self.database.provider()?.sealed_header(number)
+    fn sealed_headers_while(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> RethResult<Vec<SealedHeader>> {
+        self.database.provider()?.sealed_headers_while(range, predicate)
     }
 }
 
