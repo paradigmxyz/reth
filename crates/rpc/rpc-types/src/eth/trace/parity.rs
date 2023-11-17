@@ -171,6 +171,15 @@ impl Action {
     pub fn is_reward(&self) -> bool {
         matches!(self, Action::Reward(_))
     }
+
+    pub fn kind(&self) -> ActionKind {
+        match self {
+            Action::Call(_) => ActionKind::Call,
+            Action::Create(_) => ActionKind::Create,
+            Action::Selfdestruct(_) => ActionKind::Selfdestruct,
+            Action::Reward(_) => ActionKind::Reward,
+        }
+    }
 }
 
 /// An external action type.
@@ -187,6 +196,14 @@ pub enum ActionType {
     #[serde(rename = "suicide", alias = "selfdestruct")]
     Selfdestruct,
     /// A block reward.
+    Reward,
+}
+
+#[derive(Debug)]
+pub enum ActionKind {
+    Call,
+    Create,
+    Selfdestruct,
     Reward,
 }
 
@@ -394,17 +411,17 @@ impl Serialize for LocalizedTransactionTrace {
         s.serialize_field("subtraces", &self.trace.subtraces)?;
         s.serialize_field("traceAddress", &self.trace.trace_address)?;
 
-        match &self.trace.action {
-            Action::Call(_call_action) => {
+        match &self.trace.action.kind() {
+            ActionKind::Call => {
                 s.serialize_field("type", "call")?;
             }
-            Action::Create(_create_action) => {
+            ActionKind::Create => {
                 s.serialize_field("type", "create")?;
             }
-            Action::Selfdestruct(_selfdestruct_action) => {
+            ActionKind::Selfdestruct => {
                 s.serialize_field("type", "selfdestruct")?;
             }
-            Action::Reward(_reward_action) => {
+            ActionKind::Reward => {
                 s.serialize_field("type", "reward")?;
             }
         }
