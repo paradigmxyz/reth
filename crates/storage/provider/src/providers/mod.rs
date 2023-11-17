@@ -154,7 +154,7 @@ where
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl Fn(&SealedHeader) -> bool,
+        predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> RethResult<Vec<SealedHeader>> {
         self.database.provider()?.sealed_headers_while(range, predicate)
     }

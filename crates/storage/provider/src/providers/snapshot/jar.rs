@@ -105,7 +105,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl Fn(&SealedHeader) -> bool,
+        mut predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> RethResult<Vec<SealedHeader>> {
         let range = to_range(range);
 

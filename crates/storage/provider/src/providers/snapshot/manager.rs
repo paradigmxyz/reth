@@ -286,7 +286,7 @@ impl HeaderProvider for SnapshotProvider {
     fn sealed_headers_while(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-        _predicate: impl Fn(&SealedHeader) -> bool,
+        _predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> RethResult<Vec<SealedHeader>> {
         todo!()
     }

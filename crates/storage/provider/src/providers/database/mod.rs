@@ -228,7 +228,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl Fn(&SealedHeader) -> bool,
+        predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> RethResult<Vec<SealedHeader>> {
         self.provider()?.sealed_headers_while(range, predicate)
     }

@@ -169,7 +169,7 @@ impl HeaderProvider for MockEthProvider {
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl Fn(&SealedHeader) -> bool,
+        mut predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> RethResult<Vec<SealedHeader>> {
         Ok(self
             .headers_range(range)?
