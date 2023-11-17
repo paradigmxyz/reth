@@ -307,7 +307,11 @@ where
                     )
                 }
                 EthBlobTransactionSidecar::Missing => {
-                    if let Ok(Some(_)) = self.blob_store.get(*transaction.hash()) {
+                    // This can happen for re-injected blob transactions (on re-org), since the blob
+                    // is stripped from the transaction and not included in a block.
+                    // check if the blob is in the store, if it's included we previously validated
+                    // it and inserted it
+                    if let Ok(true) = self.blob_store.contains(*transaction.hash()) {
                         // validated transaction is already in the store
                     } else {
                         return TransactionValidationOutcome::Invalid(
@@ -767,8 +771,9 @@ mod tests {
         let data = hex::decode(raw).unwrap();
         let tx = PooledTransactionsElement::decode_enveloped(data.into()).unwrap();
 
-        let transaction =
-            EthPooledTransaction::from_recovered_transaction(tx.try_into_ecrecovered().unwrap());
+        let transaction = EthPooledTransaction::from_recovered_pooled_transaction(
+            tx.try_into_ecrecovered().unwrap(),
+        );
         let res = ensure_intrinsic_gas(&transaction, false);
         assert!(res.is_ok());
         let res = ensure_intrinsic_gas(&transaction, true);

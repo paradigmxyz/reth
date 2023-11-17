@@ -1,5 +1,8 @@
 use crate::{
-    providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
+    providers::{
+        state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
+        SnapshotProvider,
+    },
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
     HeaderProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
@@ -8,6 +11,7 @@ use crate::{
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{db::LogLevel, RethError, RethResult};
 use reth_primitives::{
+    snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
     ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedHeader,
@@ -17,8 +21,10 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     ops::{RangeBounds, RangeInclusive},
+    path::PathBuf,
     sync::Arc,
 };
+use tokio::sync::watch;
 use tracing::trace;
 
 mod metrics;
@@ -35,6 +41,8 @@ pub struct ProviderFactory<DB> {
     db: DB,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
+    /// Snapshot Provider
+    snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
 impl<DB: Database> ProviderFactory<DB> {
@@ -42,7 +50,13 @@ impl<DB: Database> ProviderFactory<DB> {
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     pub fn provider(&self) -> RethResult<DatabaseProviderRO<'_, DB>> {
-        Ok(DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone()))
+        let mut provider = DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone());
+
+        if let Some(snapshot_provider) = &self.snapshot_provider {
+            provider = provider.with_snapshot_provider(snapshot_provider.clone());
+        }
+
+        Ok(provider)
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -50,14 +64,33 @@ impl<DB: Database> ProviderFactory<DB> {
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     pub fn provider_rw(&self) -> RethResult<DatabaseProviderRW<'_, DB>> {
-        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone())))
+        let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
+
+        if let Some(snapshot_provider) = &self.snapshot_provider {
+            provider = provider.with_snapshot_provider(snapshot_provider.clone());
+        }
+
+        Ok(DatabaseProviderRW(provider))
     }
 }
 
 impl<DB> ProviderFactory<DB> {
     /// create new database provider
     pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { db, chain_spec }
+        Self { db, chain_spec, snapshot_provider: None }
+    }
+
+    /// database provider comes with a shared snapshot provider
+    pub fn with_snapshots(
+        mut self,
+        snapshots_path: PathBuf,
+        highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
+    ) -> Self {
+        self.snapshot_provider = Some(Arc::new(
+            SnapshotProvider::new(snapshots_path)
+                .with_highest_tracker(Some(highest_snapshot_tracker)),
+        ));
+        self
     }
 }
 
@@ -72,13 +105,18 @@ impl<DB: Database> ProviderFactory<DB> {
         Ok(ProviderFactory::<DatabaseEnv> {
             db: init_db(path, log_level).map_err(|e| RethError::Custom(e.to_string()))?,
             chain_spec,
+            snapshot_provider: None,
         })
     }
 }
 
 impl<DB: Clone> Clone for ProviderFactory<DB> {
     fn clone(&self) -> Self {
-        Self { db: self.db.clone(), chain_spec: Arc::clone(&self.chain_spec) }
+        Self {
+            db: self.db.clone(),
+            chain_spec: Arc::clone(&self.chain_spec),
+            snapshot_provider: self.snapshot_provider.clone(),
+        }
     }
 }
 
@@ -176,6 +214,10 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         self.provider()?.headers_range(range)
     }
 
+    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        self.provider()?.sealed_header(number)
+    }
+
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -183,8 +225,12 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         self.provider()?.sealed_headers_range(range)
     }
 
-    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
-        self.provider()?.sealed_header(number)
+    fn sealed_headers_while(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> RethResult<Vec<SealedHeader>> {
+        self.provider()?.sealed_headers_while(range, predicate)
     }
 }
 

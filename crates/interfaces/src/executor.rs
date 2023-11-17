@@ -1,8 +1,8 @@
 use crate::RethError;
 use reth_primitives::{
-    BlockNumHash, Bloom, GotExpected, GotExpectedBoxed, PruneSegmentError, B256,
+    revm_primitives::EVMError, BlockNumHash, Bloom, GotExpected, GotExpectedBoxed,
+    PruneSegmentError, B256,
 };
-use revm_primitives::EVMError;
 use thiserror::Error;
 
 /// Transaction validation errors

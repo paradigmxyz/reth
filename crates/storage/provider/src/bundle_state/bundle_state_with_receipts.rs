@@ -261,16 +261,11 @@ impl BundleStateWithReceipts {
         self.first_block
     }
 
-    /// Return last block of the bundle.
-    pub fn last_block(&self) -> BlockNumber {
-        self.first_block + self.len() as BlockNumber
-    }
-
     /// Revert to given block number.
     ///
     /// If number is in future, or in the past return false
     ///
-    /// Note: Given Block number will stay inside the bundle state.
+    /// NOTE: Provided block number will stay inside the bundle state.
     pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
         let Some(index) = self.block_number_to_index(block_number) else { return false };
 
@@ -286,40 +281,31 @@ impl BundleStateWithReceipts {
         true
     }
 
-    /// This will detach lower part of the chain and return it back.
-    /// Specified block number will be included in detachment
+    /// Splits the block range state at a given block number.
+    /// Returns two split states ([..at], [at..]).
+    /// The plain state of the 2nd bundle state will contain extra changes
+    /// that were made in state transitions belonging to the lower state.
     ///
-    /// This plain state will contains some additional information that
-    /// are is a artifacts of the lower part state.
+    /// # Panics
     ///
-    /// If block number is in future, return None.
-    pub fn split_at(&mut self, block_number: BlockNumber) -> Option<Self> {
-        let last_block = self.last_block();
-        let first_block = self.first_block;
-        if block_number >= last_block {
-            return None
-        }
-        if block_number < first_block {
-            return Some(Self::default())
+    /// If the target block number is not included in the state block range.
+    pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self) {
+        if at == self.first_block {
+            return (None, self)
         }
 
-        // detached number should be included so we are adding +1 to it.
-        // for example if block number is same as first_block then
-        // number of detached block shoud be 1.
-        let num_of_detached_block = (block_number - first_block) + 1;
+        let (mut lower_state, mut higher_state) = (self.clone(), self);
 
-        let mut detached_bundle_state: BundleStateWithReceipts = self.clone();
-        detached_bundle_state.revert_to(block_number);
+        // Revert lower state to [..at].
+        lower_state.revert_to(at.checked_sub(1).unwrap());
 
-        // split is done as [0, num) and [num, len]
-        let (_, this) = self.receipts.split_at(num_of_detached_block as usize);
+        // Truncate higher state to [at..].
+        let at_idx = higher_state.block_number_to_index(at).unwrap();
+        higher_state.receipts = Receipts::from_vec(higher_state.receipts.split_off(at_idx));
+        higher_state.bundle.take_n_reverts(at_idx);
+        higher_state.first_block = at;
 
-        self.receipts = Receipts::from_vec(this.to_vec().clone());
-        self.bundle.take_n_reverts(num_of_detached_block as usize);
-
-        self.first_block = block_number + 1;
-
-        Some(detached_bundle_state)
+        (Some(lower_state), higher_state)
     }
 
     /// Extend one state from another
@@ -351,9 +337,12 @@ impl BundleStateWithReceipts {
 
         for (idx, receipts) in self.receipts.into_iter().enumerate() {
             if !receipts.is_empty() {
-                let (_, body_indices) = bodies_cursor
-                    .seek_exact(self.first_block + idx as u64)?
-                    .expect("body indices exist");
+                let block_number = self.first_block + idx as u64;
+                let (_, body_indices) =
+                    bodies_cursor.seek_exact(block_number)?.unwrap_or_else(|| {
+                        let last_available = bodies_cursor.last().ok().flatten().map(|(number, _)| number);
+                        panic!("body indices for block {block_number} must exist. last available block number: {last_available:?}");
+                    });
 
                 let first_tx_index = body_indices.first_tx_num();
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {

@@ -1,4 +1,4 @@
-use reth_libmdbx::{Environment, NoWriteMap, WriteFlags};
+use reth_libmdbx::{Environment, WriteFlags};
 use tempfile::{tempdir, TempDir};
 
 pub fn get_key(n: u32) -> String {
@@ -9,9 +9,9 @@ pub fn get_data(n: u32) -> String {
     format!("data{n}")
 }
 
-pub fn setup_bench_db(num_rows: u32) -> (TempDir, Environment<NoWriteMap>) {
+pub fn setup_bench_db(num_rows: u32) -> (TempDir, Environment) {
     let dir = tempdir().unwrap();
-    let env = Environment::new().open(dir.path()).unwrap();
+    let env = Environment::builder().open(dir.path()).unwrap();
 
     {
         let txn = env.begin_rw_txn().unwrap();

@@ -2,30 +2,40 @@ use crate::segments::{prepare_jar, Segment};
 use reth_db::{database::Database, snapshot::create_snapshot_T1, tables};
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    snapshot::{Compression, Filters, SegmentHeader},
+    snapshot::{Compression, Filters, SegmentConfig, SegmentHeader},
     BlockNumber, SnapshotSegment, TxNumber,
 };
 use reth_provider::{DatabaseProviderRO, TransactionsProviderExt};
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, path::Path};
 
 /// Snapshot segment responsible for [SnapshotSegment::Transactions] part of data.
 #[derive(Debug)]
 pub struct Transactions {
-    compression: Compression,
-    filters: Filters,
+    config: SegmentConfig,
 }
 
 impl Transactions {
     /// Creates new instance of [Transactions] snapshot segment.
     pub fn new(compression: Compression, filters: Filters) -> Self {
-        Self { compression, filters }
+        Self { config: SegmentConfig { compression, filters } }
+    }
+}
+
+impl Default for Transactions {
+    fn default() -> Self {
+        Self { config: SnapshotSegment::Transactions.config() }
     }
 }
 
 impl Segment for Transactions {
+    fn segment() -> SnapshotSegment {
+        SnapshotSegment::Transactions
+    }
+
     fn snapshot<DB: Database>(
         &self,
         provider: &DatabaseProviderRO<'_, DB>,
+        directory: impl AsRef<Path>,
         block_range: RangeInclusive<BlockNumber>,
     ) -> RethResult<()> {
         let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
@@ -33,9 +43,9 @@ impl Segment for Transactions {
 
         let mut jar = prepare_jar::<DB, 1>(
             provider,
-            SnapshotSegment::Transactions,
-            self.filters,
-            self.compression,
+            directory,
+            Self::segment(),
+            self.config,
             block_range,
             tx_range_len,
             || {
@@ -49,7 +59,7 @@ impl Segment for Transactions {
 
         // Generate list of hashes for filters & PHF
         let mut hashes = None;
-        if self.filters.has_filters() {
+        if self.config.filters.has_filters() {
             hashes = Some(
                 provider
                     .transaction_hashes_by_range(*tx_range.start()..(*tx_range.end() + 1))?

@@ -1,4 +1,7 @@
-use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, B256};
+use crate::{
+    Address, Header, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, Withdrawal,
+    B256,
+};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
 use serde::{Deserialize, Serialize};
@@ -98,6 +101,34 @@ impl BlockWithSenders {
     /// Split Structure to its components
     pub fn into_components(self) -> (Block, Vec<Address>) {
         (self.block, self.senders)
+    }
+
+    /// Returns an iterator over all transactions in the block.
+    #[inline]
+    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.block.body.iter()
+    }
+
+    /// Returns an iterator over all transactions and their sender.
+    #[inline]
+    pub fn transactions_with_sender(
+        &self,
+    ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
+        self.senders.iter().zip(self.block.body.iter())
+    }
+
+    /// Consumes the block and returns the transactions of the block.
+    #[inline]
+    pub fn into_transactions(self) -> Vec<TransactionSigned> {
+        self.block.body
+    }
+
+    /// Returns an iterator over all transactions in the chain.
+    #[inline]
+    pub fn into_transactions_ecrecovered(
+        self,
+    ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
+        self.block.body.into_iter().zip(self.senders).map(|(tx, sender)| tx.with_signer(sender))
     }
 }
 
@@ -252,6 +283,7 @@ impl SealedBlockWithSenders {
     }
 
     /// Split Structure to its components
+    #[inline]
     pub fn into_components(self) -> (SealedBlock, Vec<Address>) {
         (self.block, self.senders)
     }
@@ -259,6 +291,33 @@ impl SealedBlockWithSenders {
     /// Returns [BlockWithSenders]
     pub fn into_block_with_senders(self) -> Option<BlockWithSenders> {
         BlockWithSenders::new(self.block.into(), self.senders)
+      
+    /// Returns an iterator over all transactions in the block.
+    #[inline]
+    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.block.body.iter()
+    }
+
+    /// Returns an iterator over all transactions and their sender.
+    #[inline]
+    pub fn transactions_with_sender(
+        &self,
+    ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
+        self.senders.iter().zip(self.block.body.iter())
+    }
+
+    /// Consumes the block and returns the transactions of the block.
+    #[inline]
+    pub fn into_transactions(self) -> Vec<TransactionSigned> {
+        self.block.body
+    }
+
+    /// Returns an iterator over all transactions in the chain.
+    #[inline]
+    pub fn into_transactions_ecrecovered(
+        self,
+    ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
+        self.block.body.into_iter().zip(self.senders).map(|(tx, sender)| tx.with_signer(sender))
     }
 }
 

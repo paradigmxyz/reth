@@ -1,6 +1,9 @@
 use libc::c_int;
 use std::{ffi::CStr, fmt, result, str};
 
+/// An MDBX result.
+pub type Result<T> = result::Result<T, Error>;
+
 /// An MDBX error kind.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -55,6 +58,13 @@ pub enum Error {
     Access,
     TooLarge,
     DecodeErrorLenDiff,
+    /// If the [Environment](crate::Environment) was opened with
+    /// [EnvironmentKind::WriteMap](crate::EnvironmentKind::WriteMap) flag, nested transactions are
+    /// not supported.
+    NestedTransactionsUnsupportedWithWriteMap,
+    /// If the [Environment](crate::Environment) was opened with in read-only mode
+    /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened..
+    WriteTransactionUnsupportedInReadOnlyMode,
     Other(i32),
 }
 
@@ -123,12 +133,30 @@ impl Error {
             Error::Multival => ffi::MDBX_EMULTIVAL,
             Error::WannaRecovery => ffi::MDBX_WANNA_RECOVERY,
             Error::KeyMismatch => ffi::MDBX_EKEYMISMATCH,
-            Error::DecodeError => ffi::MDBX_EINVAL,
+            Error::DecodeErrorLenDiff | Error::DecodeError => ffi::MDBX_EINVAL,
             Error::Access => ffi::MDBX_EACCESS,
             Error::TooLarge => ffi::MDBX_TOO_LARGE,
             Error::BadSignature => ffi::MDBX_EBADSIGN,
+            Error::WriteTransactionUnsupportedInReadOnlyMode => ffi::MDBX_EACCESS,
+            Error::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
             Error::Other(err_code) => *err_code,
-            _ => unreachable!(),
+        }
+    }
+
+    /// Returns the message for this error
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::DecodeErrorLenDiff => "mismatched data length",
+            Self::NestedTransactionsUnsupportedWithWriteMap => {
+                "nested transactions are not supported on an environment with writemap"
+            }
+            Self::WriteTransactionUnsupportedInReadOnlyMode => {
+                "write transactions are not supported on an environment opened in read-only mode"
+            }
+            _ => unsafe {
+                let err = ffi::mdbx_strerror(self.to_err_code());
+                str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
+            },
         }
     }
 }
@@ -141,20 +169,11 @@ impl From<Error> for i32 {
 
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let value = match self {
-            Self::DecodeErrorLenDiff => "Mismatched data length",
-            _ => unsafe {
-                let err = ffi::mdbx_strerror(self.to_err_code());
-                str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
-            },
-        };
-        write!(fmt, "{value}")
+        write!(fmt, "{}", self.as_str())
     }
 }
 
-/// An MDBX result.
-pub type Result<T> = result::Result<T, Error>;
-
+#[inline]
 pub fn mdbx_result(err_code: c_int) -> Result<bool> {
     match err_code {
         ffi::MDBX_SUCCESS => Ok(false),
