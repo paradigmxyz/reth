@@ -50,13 +50,13 @@ pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     downloader: D,
     /// Block response buffer.
-    buffer: Vec<BlockResponse>,
+    buffer: Option<Vec<BlockResponse>>,
 }
 
 impl<D: BodyDownloader> BodyStage<D> {
     /// Create new bodies stage from downloader.
     pub fn new(downloader: D) -> Self {
-        Self { downloader, buffer: Vec::new() }
+        Self { downloader, buffer: None }
     }
 }
 
@@ -71,7 +71,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         cx: &mut Context<'_>,
         input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
-        if input.target_reached() || !self.buffer.is_empty() {
+        if input.target_reached() || self.buffer.is_some() {
             return Poll::Ready(Ok(()))
         }
 
@@ -85,7 +85,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // is a fatal error to prevent the pipeline from running forever.
         let response = match maybe_next_result {
             Some(Ok(downloaded)) => {
-                self.buffer.extend(downloaded);
+                self.buffer = Some(downloaded);
                 Ok(())
             }
             Some(Err(err)) => Err(err.into()),
@@ -118,9 +118,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
-        trace!(target: "sync::stages::bodies", bodies_len = self.buffer.len(), "Writing blocks");
+
+        let buffer = self.buffer.take().ok_or(StageError::MissingBuffer)?;
+        trace!(target: "sync::stages::bodies", bodies_len = buffer.len(), "Writing blocks");
         let mut highest_block = from_block;
-        for response in self.buffer.drain(..) {
+        for response in buffer {
             // Write block
             let block_number = response.block_number();
 
@@ -186,7 +188,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        self.buffer.clear();
+        self.buffer.take();
 
         let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers

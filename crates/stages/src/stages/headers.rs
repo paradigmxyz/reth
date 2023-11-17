@@ -44,7 +44,7 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     /// Current sync gap.
     sync_gap: Option<HeaderSyncGap>,
     /// Header buffer.
-    buffer: Vec<SealedHeader>,
+    buffer: Option<Vec<SealedHeader>>,
 }
 
 // === impl HeaderStage ===
@@ -55,7 +55,7 @@ where
 {
     /// Create a new header stage
     pub fn new(database: Provider, downloader: Downloader, mode: HeaderSyncMode) -> Self {
-        Self { provider: database, downloader, mode, sync_gap: None, buffer: Vec::new() }
+        Self { provider: database, downloader, mode, sync_gap: None, buffer: None }
     }
 
     fn is_stage_done<DB: Database>(
@@ -126,7 +126,8 @@ where
         let current_checkpoint = input.checkpoint();
 
         // Return if buffer already has some items.
-        if !self.buffer.is_empty() {
+        if self.buffer.is_some() {
+            // TODO: review
             trace!(
                 target: "sync::stages::headers",
                 checkpoint = %current_checkpoint.block_number,
@@ -159,7 +160,7 @@ where
         let result = match ready!(self.downloader.poll_next_unpin(cx)) {
             Some(Ok(headers)) => {
                 info!(target: "sync::stages::headers", len = headers.len(), "Received headers");
-                self.buffer.extend(headers);
+                self.buffer = Some(headers);
                 Ok(())
             }
             Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
@@ -179,15 +180,16 @@ where
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let current_checkpoint = input.checkpoint();
-        if self.buffer.is_empty() {
+
+        let gap = self.sync_gap.clone().ok_or(StageError::MissingSyncGap)?;
+        if gap.is_closed() {
             return Ok(ExecOutput::done(current_checkpoint))
         }
 
-        let gap = self.sync_gap.clone().ok_or(StageError::MissingSyncGap)?;
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
-        let downloaded_headers = std::mem::take(&mut self.buffer);
+        let downloaded_headers = self.buffer.take().ok_or(StageError::MissingBuffer)?;
         let tip_block_number = match tip {
             // If tip is hash and it equals to the first downloaded header's hash, we can use
             // the block number of this header as tip.
@@ -280,7 +282,7 @@ where
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        self.buffer.clear();
+        self.buffer.take();
         self.sync_gap.take();
 
         provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(

@@ -62,6 +62,10 @@ pub enum StageError {
     /// Invalid checkpoint passed to the stage
     #[error("invalid stage checkpoint: {0}")]
     StageCheckpoint(u64),
+    /// Missing buffer on stage execution.
+    /// Returned if stage execution was called without polling for readiness.
+    #[error("missing buffer")]
+    MissingBuffer,
     /// Download channel closed
     #[error("download channel closed")]
     ChannelClosed,
@@ -97,6 +101,7 @@ impl StageError {
                 StageError::Download(_) |
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageCheckpoint(_) |
+                StageError::MissingBuffer |
                 StageError::MissingSyncGap |
                 StageError::ChannelClosed |
                 StageError::Fatal(_)
