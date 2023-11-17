@@ -15,67 +15,21 @@ use std::{
     ops::{Bound, RangeBounds},
     path::Path,
     ptr,
-    sync::mpsc::{sync_channel, SyncSender},
+    sync::{
+        mpsc::{sync_channel, SyncSender},
+        Arc,
+    },
     thread::sleep,
     time::Duration,
 };
 
-/// Determines how data is mapped into memory
-///
-/// It only takes affect when the environment is opened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum EnvironmentKind {
-    /// Open the environment in default mode, without WRITEMAP.
-    #[default]
-    Default,
-    /// Open the environment as mdbx-WRITEMAP.
-    /// Use a writeable memory map unless the environment is opened as MDBX_RDONLY
-    /// ([Mode::ReadOnly]).
-    ///
-    /// All data will be mapped into memory in the read-write mode [Mode::ReadWrite]. This offers a
-    /// significant performance benefit, since the data will be modified directly in mapped
-    /// memory and then flushed to disk by single system call, without any memory management
-    /// nor copying.
-    ///
-    /// This mode is incompatible with nested transactions.
-    WriteMap,
-}
-
-impl EnvironmentKind {
-    /// Returns true if the environment was opened as WRITEMAP.
-    #[inline]
-    pub const fn is_write_map(&self) -> bool {
-        matches!(self, EnvironmentKind::WriteMap)
-    }
-
-    /// Additional flags required when opening the environment.
-    pub(crate) fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
-        match self {
-            EnvironmentKind::Default => ffi::MDBX_ENV_DEFAULTS,
-            EnvironmentKind::WriteMap => ffi::MDBX_WRITEMAP,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub(crate) struct TxnPtr(pub *mut ffi::MDBX_txn);
-unsafe impl Send for TxnPtr {}
-unsafe impl Sync for TxnPtr {}
-
-#[derive(Copy, Clone, Debug)]
-pub(crate) struct EnvPtr(pub *mut ffi::MDBX_env);
-unsafe impl Send for EnvPtr {}
-unsafe impl Sync for EnvPtr {}
-
-pub(crate) enum TxnManagerMessage {
-    Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
-    Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
-    Commit { tx: TxnPtr, sender: SyncSender<Result<bool>> },
-}
-
 /// An environment supports multiple databases, all residing in the same shared-memory map.
+///
+/// Accessing the environment is thread-safe.
+/// The environment will be closed when the last instance of this type is dropped.
+#[derive(Clone)]
 pub struct Environment {
-    inner: EnvironmentInner,
+    inner: Arc<EnvironmentInner>,
 }
 
 impl Environment {
@@ -139,13 +93,13 @@ impl Environment {
 
     /// Create a read-only transaction for use with the environment.
     #[inline]
-    pub fn begin_ro_txn(&self) -> Result<Transaction<'_, RO>> {
-        Transaction::new(self)
+    pub fn begin_ro_txn(&self) -> Result<Transaction<RO>> {
+        Transaction::new(self.clone())
     }
 
     /// Create a read-write transaction for use with the environment. This method will block while
     /// there are any other read-write transactions open on the environment.
-    pub fn begin_rw_txn(&self) -> Result<Transaction<'_, RW>> {
+    pub fn begin_rw_txn(&self) -> Result<Transaction<RW>> {
         let sender = self.ensure_txn_manager()?;
         let txn = loop {
             let (tx, rx) = sync_channel(0);
@@ -164,7 +118,7 @@ impl Environment {
 
             break res
         }?;
-        Ok(Transaction::new_from_ptr(self, txn.0))
+        Ok(Transaction::new_from_ptr(self.clone(), txn.0))
     }
 
     /// Returns a raw pointer to the underlying MDBX environment.
@@ -294,6 +248,64 @@ impl Drop for EnvironmentInner {
     }
 }
 
+// SAFETY: internal type, only used inside [Environment]. Accessing the environment pointer is
+// thread-safe
+unsafe impl Send for EnvironmentInner {}
+unsafe impl Sync for EnvironmentInner {}
+
+/// Determines how data is mapped into memory
+///
+/// It only takes affect when the environment is opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EnvironmentKind {
+    /// Open the environment in default mode, without WRITEMAP.
+    #[default]
+    Default,
+    /// Open the environment as mdbx-WRITEMAP.
+    /// Use a writeable memory map unless the environment is opened as MDBX_RDONLY
+    /// ([Mode::ReadOnly]).
+    ///
+    /// All data will be mapped into memory in the read-write mode [Mode::ReadWrite]. This offers a
+    /// significant performance benefit, since the data will be modified directly in mapped
+    /// memory and then flushed to disk by single system call, without any memory management
+    /// nor copying.
+    ///
+    /// This mode is incompatible with nested transactions.
+    WriteMap,
+}
+
+impl EnvironmentKind {
+    /// Returns true if the environment was opened as WRITEMAP.
+    #[inline]
+    pub const fn is_write_map(&self) -> bool {
+        matches!(self, EnvironmentKind::WriteMap)
+    }
+
+    /// Additional flags required when opening the environment.
+    pub(crate) fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
+        match self {
+            EnvironmentKind::Default => ffi::MDBX_ENV_DEFAULTS,
+            EnvironmentKind::WriteMap => ffi::MDBX_WRITEMAP,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct TxnPtr(pub *mut ffi::MDBX_txn);
+unsafe impl Send for TxnPtr {}
+unsafe impl Sync for TxnPtr {}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct EnvPtr(pub *mut ffi::MDBX_env);
+unsafe impl Send for EnvPtr {}
+unsafe impl Sync for EnvPtr {}
+
+pub(crate) enum TxnManagerMessage {
+    Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
+    Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
+    Commit { tx: TxnPtr, sender: SyncSender<Result<bool>> },
+}
+
 /// Environment statistics.
 ///
 /// Contains information about the size and layout of an MDBX environment or database.
@@ -400,9 +412,6 @@ impl Info {
         self.0.mi_numreaders as usize
     }
 }
-
-unsafe impl Send for Environment {}
-unsafe impl Sync for Environment {}
 
 impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -607,7 +616,7 @@ impl EnvironmentBuilder {
             env.txn_manager = Some(tx);
         }
 
-        Ok(Environment { inner: env })
+        Ok(Environment { inner: Arc::new(env) })
     }
 
     /// Configures how this environment will be opened.
