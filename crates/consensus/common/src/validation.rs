@@ -567,15 +567,16 @@ mod tests {
             Ok(vec![])
         }
 
-        fn sealed_headers_range(
-            &self,
-            _range: impl RangeBounds<BlockNumber>,
-        ) -> RethResult<Vec<SealedHeader>> {
-            Ok(vec![])
-        }
-
         fn sealed_header(&self, _block_number: BlockNumber) -> RethResult<Option<SealedHeader>> {
             Ok(None)
+        }
+
+        fn sealed_headers_while(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+            _predicate: impl Fn(&SealedHeader) -> bool,
+        ) -> RethResult<Vec<SealedHeader>> {
+            Ok(vec![])
         }
     }
 

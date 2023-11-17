@@ -37,12 +37,21 @@ pub trait HeaderProvider: Send + Sync {
     /// Get headers in range of block numbers
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>>;
 
-    /// Get headers in range of block numbers
+    /// Get a single sealed header by block number.
+    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>>;
+
+    /// Get headers in range of block numbers.
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<SealedHeader>>;
+    ) -> RethResult<Vec<SealedHeader>> {
+        self.sealed_headers_while(range, |_| true)
+    }
 
-    /// Get a single sealed header by block number
-    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>>;
+    /// Get sealed headers while `predicate` returns `true` or the range is exhausted.
+    fn sealed_headers_while(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        predicate: impl Fn(&SealedHeader) -> bool,
+    ) -> RethResult<Vec<SealedHeader>>;
 }
