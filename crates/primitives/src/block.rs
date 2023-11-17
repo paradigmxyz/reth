@@ -255,6 +255,11 @@ impl SealedBlockWithSenders {
     pub fn into_components(self) -> (SealedBlock, Vec<Address>) {
         (self.block, self.senders)
     }
+
+    /// Returns [BlockWithSenders]
+    pub fn into_block_with_senders(self) -> Option<BlockWithSenders> {
+        BlockWithSenders::new(self.block.into(), self.senders)
+    }
 }
 
 impl Deref for SealedBlockWithSenders {
