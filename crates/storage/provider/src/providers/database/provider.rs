@@ -24,16 +24,11 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
-<<<<<<< HEAD
-use reth_interfaces::provider::{ProviderResult, RootMismatch};
-=======
 use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
     p2p::headers::downloader::SyncTarget,
-    provider::RootMismatch,
+    provider::{ProviderResult, RootMismatch},
     RethError, RethResult,
 };
->>>>>>> 661876f8b (implement proper poll ready methods for headers and bodies, fix tests, add header sync gap provider)
 use reth_primitives::{
     keccak256,
     revm::{
@@ -1115,11 +1110,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-<<<<<<< HEAD
     ) -> ProviderResult<Option<BlockWithSenders>> {
-=======
-    ) -> RethResult<Option<BlockWithSenders>> {
->>>>>>> 661876f8b (implement proper poll ready methods for headers and bodies, fix tests, add header sync gap provider)
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
 
         let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };

@@ -444,93 +444,9 @@ where
                 }
                 Err(err) => {
                     self.listeners.notify(PipelineEvent::Error { stage_id });
-<<<<<<< HEAD
-
-                    let out = if let StageError::DetachedHead { local_head, header, error } = err {
-                        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
-
-                        // We unwind because of a detached head.
-                        let unwind_to = local_head
-                            .number
-                            .saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH)
-                            .max(1);
-                        Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
-                    } else if let StageError::Block { block, error } = err {
-                        match error {
-                            BlockErrorKind::Validation(validation_error) => {
-                                error!(
-                                    target: "sync::pipeline",
-                                    stage = %stage_id,
-                                    bad_block = %block.number,
-                                    "Stage encountered a validation error: {validation_error}"
-                                );
-
-                                // FIXME: When handling errors, we do not commit the database
-                                // transaction. This leads to the Merkle
-                                // stage not clearing its checkpoint, and
-                                // restarting from an invalid place.
-                                drop(provider_rw);
-                                let provider_rw = factory.provider_rw()?;
-                                provider_rw.save_stage_checkpoint_progress(
-                                    StageId::MerkleExecute,
-                                    vec![],
-                                )?;
-                                provider_rw.save_stage_checkpoint(
-                                    StageId::MerkleExecute,
-                                    prev_checkpoint.unwrap_or_default(),
-                                )?;
-                                provider_rw.commit()?;
-
-                                // We unwind because of a validation error. If the unwind itself
-                                // fails, we bail entirely,
-                                // otherwise we restart the execution loop from the
-                                // beginning.
-                                Ok(ControlFlow::Unwind {
-                                    target: prev_checkpoint.unwrap_or_default().block_number,
-                                    bad_block: block,
-                                })
-                            }
-                            BlockErrorKind::Execution(execution_error) => {
-                                error!(
-                                    target: "sync::pipeline",
-                                    stage = %stage_id,
-                                    bad_block = %block.number,
-                                    "Stage encountered an execution error: {execution_error}"
-                                );
-
-                                // We unwind because of an execution error. If the unwind itself
-                                // fails, we bail entirely,
-                                // otherwise we restart
-                                // the execution loop from the beginning.
-                                Ok(ControlFlow::Unwind {
-                                    target: prev_checkpoint.unwrap_or_default().block_number,
-                                    bad_block: block,
-                                })
-                            }
-                        }
-                    } else if err.is_fatal() {
-                        error!(
-                            target: "sync::pipeline",
-                            stage = %stage_id,
-                            "Stage encountered a fatal error: {err}."
-                        );
-                        Err(err.into())
-                    } else {
-                        // On other errors we assume they are recoverable if we discard the
-                        // transaction and run the stage again.
-                        warn!(
-                            target: "sync::pipeline",
-                            stage = %stage_id,
-                            "Stage encountered a non-fatal error: {err}. Retrying..."
-                        );
-                        continue
-                    };
-                    return out
-=======
                     if let Some(ctrl) = on_stage_error(&factory, stage_id, prev_checkpoint, err)? {
                         return Ok(ctrl)
                     }
->>>>>>> 55f1ec5e0 (fix poll error handling & docs)
                 }
             }
         }
@@ -563,7 +479,7 @@ fn on_stage_error<DB: Database>(
                 // FIXME: When handling errors, we do not commit the database transaction. This
                 // leads to the Merkle stage not clearing its checkpoint, and restarting from an
                 // invalid place.
-                let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                let provider_rw = factory.provider_rw()?;
                 provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
                 provider_rw.save_stage_checkpoint(
                     StageId::MerkleExecute,

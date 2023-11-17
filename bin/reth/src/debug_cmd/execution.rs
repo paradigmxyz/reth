@@ -31,7 +31,7 @@ use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, Stage
 use reth_stages::{
     sets::DefaultStages,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
-    Pipeline, PipelineError, StageSet,
+    Pipeline, StageSet,
 };
 use reth_tasks::TaskExecutor;
 use std::{
