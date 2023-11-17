@@ -102,7 +102,11 @@ impl Command {
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), db.clone())
+            .build(
+                client,
+                Arc::clone(&consensus),
+                ProviderFactory::new(db.clone(), self.chain.clone()),
+            )
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;

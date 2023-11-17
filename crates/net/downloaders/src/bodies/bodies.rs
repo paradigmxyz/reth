@@ -2,7 +2,6 @@ use super::queue::BodiesRequestQueue;
 use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
-use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -15,6 +14,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
+use reth_provider::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::Ordering,
@@ -27,22 +27,18 @@ use std::{
 };
 use tracing::info;
 
-/// The scope for headers downloader metrics.
-pub const BODIES_DOWNLOADER_SCOPE: &str = "downloaders.bodies";
-
 /// Downloads bodies in batches.
 ///
 /// All blocks in a batch are fetched at the same time.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
-pub struct BodiesDownloader<B: BodiesClient, DB> {
+pub struct BodiesDownloader<B: BodiesClient, Provider> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
     consensus: Arc<dyn Consensus>,
-    // TODO: make this a [HeaderProvider]
     /// The database handle
-    db: DB,
+    provider: Provider,
     /// The maximum number of non-empty blocks per one request
     request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
@@ -67,10 +63,10 @@ pub struct BodiesDownloader<B: BodiesClient, DB> {
     metrics: BodyDownloaderMetrics,
 }
 
-impl<B, DB> BodiesDownloader<B, DB>
+impl<B, Provider> BodiesDownloader<B, Provider>
 where
     B: BodiesClient + 'static,
-    DB: Database + Unpin + 'static,
+    Provider: HeaderProvider + Unpin + 'static,
 {
     /// Returns the next contiguous request.
     fn next_headers_request(&mut self) -> DownloadResult<Option<Vec<SealedHeader>>> {
@@ -103,47 +99,32 @@ where
             return Ok(None)
         }
 
-        // Collection of results
-        let mut headers = Vec::new();
-
-        // Non empty headers count
-        let mut non_empty_headers = 0;
-        let mut current_block_num = *range.start();
-
-        // Acquire cursors over canonical and header tables
-        let tx = self.db.tx()?;
-        let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
-
         // Collect headers while
         //      1. Current block number is in range
         //      2. The number of non empty headers is less than maximum
         //      3. The total number of headers is less than the stream batch size (this is only
-        // relevant if the range consists entirely of empty headers)
-        while range.contains(&current_block_num) &&
-            non_empty_headers < max_non_empty &&
-            headers.len() < self.stream_batch_size
-        {
-            // Find the block hash.
-            let (number, hash) = canonical_cursor
-                .seek_exact(current_block_num)?
-                .ok_or(DownloadError::MissingHeader { block_number: current_block_num })?;
-            // Find the block header.
-            let (_, header) = header_cursor
-                .seek_exact(number)?
-                .ok_or(DownloadError::MissingHeader { block_number: number })?;
+        //         relevant if the range consists entirely of empty headers)
+        let mut collected = 0;
+        let mut non_empty_headers = 0;
+        let headers = self
+            .provider
+            .sealed_headers_while(range.clone(), |header| {
+                let should_take = range.contains(&header.number) &&
+                    non_empty_headers < max_non_empty &&
+                    collected < self.stream_batch_size;
 
-            // If the header is not empty, increment the counter
-            if !header.is_empty() {
-                non_empty_headers += 1;
-            }
+                if should_take {
+                    collected += 1;
+                    if !header.is_empty() {
+                        non_empty_headers += 1;
+                    }
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap(); // TODO: decide what to do with RethError 😡
 
-            // Add header to the result collection
-            headers.push(header.seal(hash));
-
-            // Increment current block number
-            current_block_num += 1;
-        }
         Ok(Some(headers).filter(|h| !h.is_empty()))
     }
 
@@ -286,10 +267,10 @@ where
     }
 }
 
-impl<B, DB> BodiesDownloader<B, DB>
+impl<B, Provider> BodiesDownloader<B, Provider>
 where
     B: BodiesClient + 'static,
-    DB: Database + Unpin + 'static,
+    Provider: HeaderProvider + Unpin + 'static,
     Self: BodyDownloader + 'static,
 {
     /// Spawns the downloader task via [tokio::task::spawn]
@@ -306,10 +287,10 @@ where
     }
 }
 
-impl<B, DB> BodyDownloader for BodiesDownloader<B, DB>
+impl<B, Provider> BodyDownloader for BodiesDownloader<B, Provider>
 where
     B: BodiesClient + 'static,
-    DB: Database + Unpin + 'static,
+    Provider: HeaderProvider + Unpin + 'static,
 {
     /// Set a new download range (exclusive).
     ///
@@ -354,10 +335,10 @@ where
     }
 }
 
-impl<B, DB> Stream for BodiesDownloader<B, DB>
+impl<B, Provider> Stream for BodiesDownloader<B, Provider>
 where
     B: BodiesClient + 'static,
-    DB: Database + Unpin + 'static,
+    Provider: HeaderProvider + Unpin + 'static,
 {
     type Item = BodyDownloaderResult;
 
@@ -557,15 +538,15 @@ impl BodiesDownloaderBuilder {
     }
 
     /// Consume self and return the concurrent downloader.
-    pub fn build<B, DB>(
+    pub fn build<B, Provider>(
         self,
         client: B,
         consensus: Arc<dyn Consensus>,
-        db: DB,
-    ) -> BodiesDownloader<B, DB>
+        provider: Provider,
+    ) -> BodiesDownloader<B, Provider>
     where
         B: BodiesClient + 'static,
-        DB: Database,
+        Provider: HeaderProvider,
     {
         let Self {
             request_limit,
@@ -578,7 +559,7 @@ impl BodiesDownloaderBuilder {
         BodiesDownloader {
             client: Arc::new(client),
             consensus,
-            db,
+            provider,
             request_limit,
             stream_batch_size,
             max_buffered_blocks_size_bytes,
@@ -605,7 +586,8 @@ mod tests {
     use futures_util::stream::StreamExt;
     use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
-    use reth_primitives::{BlockBody, B256};
+    use reth_primitives::{BlockBody, B256, MAINNET};
+    use reth_provider::ProviderFactory;
     use std::{collections::HashMap, sync::Arc};
 
     // Check that the blocks are emitted in order of block number, not in order of
@@ -624,7 +606,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            db,
+            ProviderFactory::new(db, MAINNET.clone()),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
@@ -659,9 +641,12 @@ mod tests {
 
         let request_limit = 10;
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
-        let mut downloader = BodiesDownloaderBuilder::default()
-            .with_request_limit(request_limit)
-            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+        let mut downloader =
+            BodiesDownloaderBuilder::default().with_request_limit(request_limit).build(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                ProviderFactory::new(db, MAINNET.clone()),
+            );
         downloader.set_download_range(0..=199).expect("failed to set download range");
 
         let _ = downloader.collect::<Vec<_>>().await;
@@ -686,7 +671,11 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_stream_batch_size(stream_batch_size)
             .with_request_limit(request_limit)
-            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+            .build(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                ProviderFactory::new(db, MAINNET.clone()),
+            );
 
         let mut range_start = 0;
         while range_start < 100 {
@@ -715,7 +704,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            db,
+            ProviderFactory::new(db, MAINNET.clone()),
         );
 
         // Set and download the first range
@@ -752,7 +741,11 @@ mod tests {
             .with_stream_batch_size(10)
             .with_request_limit(1)
             .with_max_buffered_blocks_size_bytes(1)
-            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+            .build(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                ProviderFactory::new(db, MAINNET.clone()),
+            );
 
         // Set and download the entire range
         downloader.set_download_range(0..=199).expect("failed to set download range");
@@ -779,7 +772,11 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_request_limit(3)
             .with_stream_batch_size(100)
-            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+            .build(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                ProviderFactory::new(db, MAINNET.clone()),
+            );
 
         // Download the requested range
         downloader.set_download_range(0..=99).expect("failed to set download range");

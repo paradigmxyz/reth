@@ -42,16 +42,17 @@ impl TaskDownloader {
     /// # Example
     ///
     /// ```
-    /// use reth_db::database::Database;
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
     /// use reth_interfaces::{consensus::Consensus, p2p::bodies::client::BodiesClient};
+    /// use reth_provider::HeaderProvider;
     /// use std::sync::Arc;
-    /// fn t<B: BodiesClient + 'static, DB: Database + 'static>(
+    ///
+    /// fn t<B: BodiesClient + 'static, Provider: HeaderProvider + 'static>(
     ///     client: Arc<B>,
     ///     consensus: Arc<dyn Consensus>,
-    ///     db: Arc<DB>,
+    ///     provider: Provider,
     /// ) {
-    ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, db);
+    ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, provider);
     ///     let downloader = TaskDownloader::spawn(downloader);
     /// }
     /// ```
@@ -170,6 +171,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
+    use reth_primitives::MAINNET;
+    use reth_provider::ProviderFactory;
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -187,7 +190,7 @@ mod tests {
         let downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            db,
+            ProviderFactory::new(db, MAINNET.clone()),
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
@@ -209,7 +212,7 @@ mod tests {
         let downloader = BodiesDownloaderBuilder::default().build(
             Arc::new(TestBodiesClient::default()),
             Arc::new(TestConsensus::default()),
-            db,
+            ProviderFactory::new(db, MAINNET.clone()),
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 

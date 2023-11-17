@@ -455,6 +455,8 @@ where
     pub fn build(self) -> (TestBeaconConsensusEngine<Client>, TestEnv<Arc<DatabaseEnv>>) {
         reth_tracing::init_test_tracing();
         let db = create_test_rw_db();
+        let provider_factory =
+            ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());
 
         let consensus: Arc<dyn Consensus> = match self.base_config.consensus {
             TestConsensusConfig::Real => {
@@ -496,7 +498,7 @@ where
                     .into_task();
 
                 let body_downloader = BodiesDownloaderBuilder::default()
-                    .build(client.clone(), consensus.clone(), db.clone())
+                    .build(client.clone(), consensus.clone(), provider_factory.clone())
                     .into_task();
 
                 Pipeline::builder().add_stages(DefaultStages::new(
@@ -527,9 +529,8 @@ where
         let tree = ShareableBlockchainTree::new(
             BlockchainTree::new(externals, config, None).expect("failed to create tree"),
         );
-        let shareable_db = ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
-        let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
+        let blockchain_provider = BlockchainProvider::with_latest(provider_factory, tree, latest);
 
         let pruner = Pruner::new(
             db.clone(),
