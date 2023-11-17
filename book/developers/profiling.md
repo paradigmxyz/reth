@@ -79,9 +79,31 @@ making it extremely useful to developers in understanding how their application 
  * How to use `cgroups` to limit memory usage
    * Enable cgroups on your system
      * grub var
+```
+GRUB_CMDLINE_LINUX_DEFAULT="cgroup_enable=memory"
+```
    * Create a cgroup
+```
+sudo cgcreate -t $USER:$USER -a $USER:$USER -g memory:rethMemory
+```
+   * Set up cgroup memory limit (this one does 8G)
+```
+echo 8G > /sys/fs/cgroup/memory/rethMemory/memory.limit_in_bytes
+```
    * Important - check swap!
-   * Using `cgexec`
+
+To check swap, use `free -m`:
+```
+ubuntu@bench-box:~/reth$ free -m
+              total        used        free      shared  buff/cache   available
+Mem:         257668       10695      218760          12       28213      244761
+Swap:          8191         159        8032
+```
+    * If swap is enabled / high then the oom will take longer
+   * Using `cgexec` to run reth
+```
+cgexec -g memory:rethMemory reth node
+```
 
 ### Understanding allocation with jeprof
 
@@ -101,10 +123,12 @@ If reth is not built properly, you will see this when you try to run reth:
 
 If this happens, jemalloc likely needs to be rebuilt with the `jemalloc-prof` feature enabled.
 
+
 If everything is working, this will output `jeprof.*.heap` files while reth is running.
 [The jemalloc website](http://jemalloc.net/jemalloc.3.html#opt.abort) has a helpful overview of the options available, for example `lg_prof_interval`, `lg_prof_sample`, `prof_leak`, and `prof_final`.
 
-Now, there should be a 
+
+Now that we have the heap snapshots, we can analyze them using `jeprof`.
 
 ### TODO / to resolve
  * how can this document give the reader more intuition on debugging memory leaks beyond providing tutorials on tools
