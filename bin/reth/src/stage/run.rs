@@ -12,6 +12,7 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::Parser;
+use futures::future::poll_fn;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::init_db;
@@ -256,19 +257,20 @@ impl Command {
             checkpoint: Some(checkpoint.with_block_number(self.from)),
         };
 
-        while let ExecOutput { checkpoint: stage_progress, done: false } =
-            exec_stage.execute(&provider_rw, input)?
-        {
-            input.checkpoint = Some(stage_progress);
+        loop {
+            poll_fn(|cx| exec_stage.poll_execute_ready(cx, input)).await?;
+            let output = exec_stage.execute(&provider_rw, input)?;
+
+            input.checkpoint = Some(output.checkpoint);
 
             if self.commit {
                 provider_rw.commit()?;
                 provider_rw = factory.provider_rw()?;
             }
-        }
 
-        if self.commit {
-            provider_rw.commit()?;
+            if output.done {
+                break
+            }
         }
 
         Ok(())
