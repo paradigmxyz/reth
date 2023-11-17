@@ -41,9 +41,9 @@ pub struct Command {
     #[arg(
         long, short,
         default_value = "1",
-        value_parser = RangedU64ValueParser::<u64>::new().range(1..)
+        value_parser = RangedU64ValueParser::<usize>::new().range(1..)
     )]
-    parallel: u64,
+    parallel: usize,
 
     /// Flag to skip snapshot creation and print snapshot files stats.
     #[arg(long, default_value = "false")]
@@ -172,11 +172,10 @@ impl Command {
         let dir = PathBuf::default();
         let ranges = self.block_ranges(factory.last_block_number()?);
 
-        let mut created_snapshots = vec![];
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(self.parallel).build()?;
 
-        // Filter/PHF is memory intensive, so we have to limit the parallelism.
-        for block_ranges in ranges.chunks(self.parallel as usize) {
-            let created_files = block_ranges
+        let created_snapshots: eyre::Result<Vec<_>> = pool.install(|| {
+            ranges
                 .into_par_iter()
                 .map(|block_range| {
                     let provider = factory.provider()?;
@@ -188,14 +187,12 @@ impl Command {
                     let tx_range =
                         provider.transaction_range_by_block_range(block_range.clone())?;
 
-                    Ok(segment.segment().filename(block_range, &tx_range))
+                    Ok(segment.segment().filename(&block_range, &tx_range))
                 })
-                .collect::<Result<Vec<_>, eyre::Report>>()?;
+                .collect()
+        });
 
-            created_snapshots.extend(created_files);
-        }
-
-        self.stats(created_snapshots)
+        self.stats(created_snapshots?)
     }
 
     /// Prints detailed statistics for each snapshot, including loading time.
