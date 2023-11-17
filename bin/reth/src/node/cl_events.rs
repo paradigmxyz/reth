@@ -104,6 +104,8 @@ impl Stream for ConsensusLayerHealthEvents {
         if let Some(event) = health_event {
             self.report_health_status(&event);
             return Poll::Ready(Some(event));
+        } else {
+            Poll::Pending
         }
     }
 }
