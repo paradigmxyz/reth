@@ -67,3 +67,25 @@ async fn trace_filters() {
         println!("Duration since test start: {:?}", start_time.elapsed());
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn trace_call() {
+    let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
+    let client = HttpClientBuilder::default().build(url).unwrap();
+    let trace_call_request = TraceCallRequest::default();
+    let mut stream = client.trace_call_stream(trace_call_request);
+    let start_time = Instant::now();
+
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(trace_result) => {
+                println!("Trace Result: {:?}", trace_result);
+            }
+            Err((error, request)) => {
+                eprintln!("Error for request {:?}: {:?}", request, error);
+            }
+        }
+    }
+
+    println!("Completed in {:?}", start_time.elapsed());
+}
