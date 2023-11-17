@@ -53,7 +53,7 @@ where
             }
             opcode::CALL | opcode::CALLCODE => {
                 if let Ok(slot) = interpreter.stack().peek(1) {
-                    self.0.account_code(Address::from_word(B256::from(slot.to_be_bytes())));
+                    self.0.account_info(Address::from_word(B256::from(slot.to_be_bytes())));
                 }
                 if let Ok(value) = interpreter.stack.peek(2) {
                     if value != U256::ZERO {
@@ -63,7 +63,7 @@ where
             }
             opcode::DELEGATECALL | opcode::STATICCALL => {
                 if let Ok(slot) = interpreter.stack().peek(1) {
-                    self.0.account_code(Address::from_word(B256::from(slot.to_be_bytes())));
+                    self.0.account_info(Address::from_word(B256::from(slot.to_be_bytes())));
                 }
             }
             // `SSTORE` also constitutes a read due to dynamic gas based on the current value.
@@ -76,6 +76,9 @@ where
                 // We need to read the balance and nonce in order to transfer or reset it.
                 self.0.account_nonce(interpreter.contract.address);
                 self.0.account_balance(interpreter.contract.address);
+                if let Ok(slot) = interpreter.stack.peek(0) {
+                    self.0.account_info(Address::from_word(B256::from(slot.to_be_bytes())));
+                }
             }
             _ => (),
         }

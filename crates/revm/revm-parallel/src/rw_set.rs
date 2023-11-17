@@ -40,6 +40,13 @@ where
 }
 
 impl RevmAccessSet {
+    /// Record account info access.
+    pub fn account_info(&mut self, address: Address) {
+        self.account(address, RevmAccountDataKey::Nonce);
+        self.account(address, RevmAccountDataKey::Balance);
+        self.account(address, RevmAccountDataKey::Code);
+    }
+
     /// Record account nonce access.
     pub fn account_nonce(&mut self, address: Address) {
         self.account(address, RevmAccountDataKey::Nonce);
