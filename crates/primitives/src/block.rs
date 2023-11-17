@@ -102,6 +102,34 @@ impl BlockWithSenders {
     pub fn into_components(self) -> (Block, Vec<Address>) {
         (self.block, self.senders)
     }
+
+    /// Returns an iterator over all transactions in the block.
+    #[inline]
+    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.block.body.iter()
+    }
+
+    /// Returns an iterator over all transactions and their sender.
+    #[inline]
+    pub fn transactions_with_sender(
+        &self,
+    ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
+        self.senders.iter().zip(self.block.body.iter())
+    }
+
+    /// Consumes the block and returns the transactions of the block.
+    #[inline]
+    pub fn into_transactions(self) -> Vec<TransactionSigned> {
+        self.block.body
+    }
+
+    /// Returns an iterator over all transactions in the chain.
+    #[inline]
+    pub fn into_transactions_ecrecovered(
+        self,
+    ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
+        self.block.body.into_iter().zip(self.senders).map(|(tx, sender)| tx.with_signer(sender))
+    }
 }
 
 impl Deref for BlockWithSenders {
