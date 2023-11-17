@@ -69,6 +69,7 @@ async fn trace_filters() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 async fn trace_call() {
     let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
     let client = HttpClientBuilder::default().build(url).unwrap();
