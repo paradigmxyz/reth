@@ -1153,7 +1153,7 @@ mod tests {
     #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
     fn parse_dev() {
         let cmd = NodeCommand::<()>::parse_from(["reth", "--dev"]);
-        let chain = DEV.clone();
+        let chain = reth_primitives::DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
         assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
         assert_eq!(
