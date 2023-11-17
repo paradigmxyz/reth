@@ -8,21 +8,8 @@
    - [Limiting process memory](#limiting-process-memory)
    - [Understanding allocation with jeprof](#understanding-allocation-with-jeprof)
 
-
-[TODO: intro that lays out the below prior knowledge requirements]()
-
-Audience:
- * Assuming knowledge of:
-   * Linux command line maturity
-   * How to compile reth from source
-   * How to set up grafana + reth metrics
- * Requires:
-   * Linux
-
 ## Memory profiling
 
-<!-- TODO: i feel like this might be jumping into things too quickly - right now the document feels like it just "starts" and starts talking about memory, would like to make a more gradual
-introduction so the reader has all the required context when they get to this paragraph -->
 When a program consumes all of the system's available memory (and swap, if any), the OOM killer starts killing processes that are taking up the most memory, until the system has
 memory available again. [todo: go here for more info on oomkiller?]().
 Reth is in the class of rust programs that distributes to many different hardware targets, some with less memory than others. As a result, sometimes bugs can cause memory leaks or out-of-memory crashes for _some_ users, but not others.
@@ -79,8 +66,10 @@ Some of reth's internal components also have metrics for the memory usage of cer
 **The transaction pool subpools**:
 <img width="749" alt="The transaction pool subpool size graph" src="https://github.com/paradigmxyz/reth/assets/6798349/c5066fd6-7ff7-4e62-9226-89327c7a802c">
 
-### Limiting process memory
+One of these metrics growing beyond, 2GB for example, is likely a bug and could lead to an OOM on a low memory machine. It isn't likely for that to happen frequently, so in the best case these metrics can be used to
+rule out these components from having a leak, if an OOM is occurring.
 
+### Limiting process memory
 
 Memory leaks that cause OOMs can be difficult to trigger sometimes, and highly depend on the testing hardware. A testing machine with 128GB of RAM is not going to encounter OOMs caused by
 memory spikes or leaks as often as a machine with only 8GB of RAM. Development machines are powerful for a reason, so artificially limiting memory usage is often the best way to replicate a
@@ -96,19 +85,27 @@ making it extremely useful to developers in understanding how their application 
 
 ### Understanding allocation with jeprof
 
- * How to enable profiling with environment variables
-   * `_RJEM_MALLOC_blah=blah`
- * What is produced by jemalloc
-   * When are snapshots taken
-   * `jeprof.*.heap`
- * How to visualize jemalloc heap profiles
-   * jeprof
-   * `--pdf`
-   * flamegraphs
+When reth is built with the `jemalloc-prof` feature and debug symbols, the profiling still needs to be configured and enabled at runtime. This is done with the `_RJEM_MALLOC_CONF` environment variable. Take the following
+command to launch reth with jemalloc profiling enabled:
+```
+_RJEM_MALLOC_CONF=prof:true,lg_prof_interval:32,lg_prof_sample:19 reth node
+```
+
+If reth is not built properly, you will see this when you try to run reth:
+```
+~/p/reth (dan/managing-memory)> _RJEM_MALLOC_CONF=prof:true,lg_prof_interval:32,lg_prof_sample:19 reth node
+<jemalloc>: Invalid conf pair: prof:true
+<jemalloc>: Invalid conf pair: lg_prof_interval:32
+<jemalloc>: Invalid conf pair: lg_prof_sample:19
+```
+
+If this happens, jemalloc likely needs to be rebuilt with the `jemalloc-prof` feature enabled.
+
+If everything is working, this will output `jeprof.*.heap` files while reth is running.
+[The jemalloc website](http://jemalloc.net/jemalloc.3.html#opt.abort) has a helpful overview of the options available, for example `lg_prof_interval`, `lg_prof_sample`, `prof_leak`, and `prof_final`.
+
+Now, there should be a 
 
 ### TODO / to resolve
- * tips?
- * intro / background on memory?
- * write a brief description / introduction to the OOM acronym before using it all over the place
  * how can this document give the reader more intuition on debugging memory leaks beyond providing tutorials on tools
 
