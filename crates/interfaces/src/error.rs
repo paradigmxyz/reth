@@ -33,12 +33,6 @@ impl From<crate::blockchain_tree::error::BlockchainTreeError> for RethError {
     }
 }
 
-impl From<reth_nippy_jar::NippyJarError> for RethError {
-    fn from(err: reth_nippy_jar::NippyJarError) -> Self {
-        RethError::Custom(err.to_string())
-    }
-}
-
 impl From<reth_primitives::fs::FsPathError> for RethError {
     fn from(err: reth_primitives::fs::FsPathError) -> Self {
         RethError::Custom(err.to_string())

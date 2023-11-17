@@ -272,6 +272,9 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
     }
 }
 
+/// This is the log base 2 of 1.125, which we'll use to calculate the priority
+const LOG_2_1_125: f64 = 0.16992500144231237;
+
 /// The blob step function, attempting to compute the delta given the `max_tx_fee`, and
 /// `current_fee`.
 ///
@@ -284,26 +287,52 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
 ///
 /// This is supposed to get the number of fee jumps required to get from the current fee to the fee
 /// cap, or where the transaction would not be executable any more.
-fn fee_delta(max_tx_fee: u128, current_fee: u128) -> f64 {
+pub fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
+    if max_tx_fee == current_fee {
+        // if these are equal, then there's no fee jump
+        return 0;
+    }
+
+    let max_tx_fee_jumps = if max_tx_fee == 0 {
+        // we can't take log2 of 0, so we set this to zero here
+        0f64
+    } else {
+        (max_tx_fee.ilog2() as f64) / LOG_2_1_125
+    };
+
+    let current_fee_jumps = if current_fee == 0 {
+        // we can't take log2 of 0, so we set this to zero here
+        0f64
+    } else {
+        (current_fee.ilog2() as f64) / LOG_2_1_125
+    };
+
     // jumps = log1.125(txfee) - log1.125(basefee)
-    // TODO: should we do this without f64?
-    let jumps = (max_tx_fee as f64).log(1.125) - (current_fee as f64).log(1.125);
+    let jumps = max_tx_fee_jumps - current_fee_jumps;
+
     // delta = sign(jumps) * log(abs(jumps))
-    jumps.signum() * jumps.abs().log2()
+    match (jumps as i64).cmp(&0) {
+        Ordering::Equal => {
+            // can't take ilog2 of 0
+            0
+        }
+        Ordering::Greater => (jumps.ceil() as i64).ilog2() as i64,
+        Ordering::Less => -((-jumps.floor() as i64).ilog2() as i64),
+    }
 }
 
 /// Returns the priority for the transaction, based on the "delta" blob fee and priority fee.
-fn blob_tx_priority(
+pub fn blob_tx_priority(
     blob_fee_cap: u128,
     blob_fee: u128,
     max_priority_fee: u128,
     base_fee: u128,
-) -> f64 {
+) -> i64 {
     let delta_blob_fee = fee_delta(blob_fee_cap, blob_fee);
     let delta_priority_fee = fee_delta(max_priority_fee, base_fee);
 
     // priority = min(delta-basefee, delta-blobfee, 0)
-    delta_blob_fee.min(delta_priority_fee).min(0.0)
+    delta_blob_fee.min(delta_priority_fee).min(0)
 }
 
 #[derive(Debug, Clone)]
@@ -312,7 +341,7 @@ struct BlobOrd {
     pub(crate) submission_id: u64,
     // The priority for this transaction, calculated using the [`blob_tx_priority`] function,
     // taking into account both the blob and priority fee.
-    pub(crate) priority: f64,
+    pub(crate) priority: i64,
 }
 
 impl Eq for BlobOrd {}
@@ -331,7 +360,7 @@ impl PartialOrd<Self> for BlobOrd {
 
 impl Ord for BlobOrd {
     fn cmp(&self, other: &Self) -> Ordering {
-        let ord = other.priority.total_cmp(&self.priority);
+        let ord = other.priority.cmp(&self.priority);
 
         // use submission_id to break ties
         if ord == Ordering::Equal {
@@ -562,6 +591,29 @@ mod tests {
                 ordering.fees, actual_txs,
                 "ordering mismatch, expected: {:#?}, actual: {:#?}",
                 ordering.fees, actual_txs
+            );
+        }
+    }
+
+    #[test]
+    fn priority_tests() {
+        // Test vectors from:
+        // <https://github.com/ethereum/go-ethereum/blob/e91cdb49beb4b2a3872b5f2548bf2d6559e4f561/core/txpool/blobpool/priority_test.go#L27-L49>
+        let vectors = vec![
+            (7u128, 10u128, 2i64),
+            (17_200_000_000, 17_200_000_000, 0),
+            (9_853_941_692, 11_085_092_510, 0),
+            (11_544_106_391, 10_356_781_100, 0),
+            (17_200_000_000, 7, -7),
+            (7, 17_200_000_000, 7),
+        ];
+
+        for (base_fee, tx_fee, expected) in vectors {
+            let actual = fee_delta(tx_fee, base_fee);
+            assert_eq!(
+                actual, expected,
+                "fee_delta({}, {}) = {}, expected: {}",
+                tx_fee, base_fee, actual, expected
             );
         }
     }

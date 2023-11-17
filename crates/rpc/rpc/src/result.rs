@@ -104,6 +104,7 @@ macro_rules! impl_to_rpc_result {
 
 impl_to_rpc_result!(PayloadError);
 impl_to_rpc_result!(reth_interfaces::RethError);
+impl_to_rpc_result!(reth_interfaces::provider::ProviderError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
 /// An extension to used to apply error conversions to various result types

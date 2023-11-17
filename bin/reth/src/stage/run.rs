@@ -24,7 +24,7 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, ExecOutput, PipelineError, Stage, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, Stage, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -129,7 +129,7 @@ impl Command {
         info!(target: "reth::cli", "Database opened");
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -255,7 +255,7 @@ impl Command {
 
                 if self.commit {
                     provider_rw.commit()?;
-                    provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                    provider_rw = factory.provider_rw()?;
                 }
             }
         }
@@ -274,7 +274,7 @@ impl Command {
             }
             if self.commit {
                 provider_rw.commit()?;
-                provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                provider_rw = factory.provider_rw()?;
             }
 
             if done {

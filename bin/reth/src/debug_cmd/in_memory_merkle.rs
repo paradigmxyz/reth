@@ -194,7 +194,7 @@ impl Command {
         provider_rw.insert_block(block.clone(), None, None)?;
         block_state.write_to_db(provider_rw.tx_ref(), OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
-        let storages = provider_rw.plainstate_storages(storage_lists)?;
+        let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
         let account_lists = provider_rw.changed_accounts_with_range(block.number..=block.number)?;
         let accounts = provider_rw.basic_accounts(account_lists)?;

@@ -1,4 +1,4 @@
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockHashOrNumber, Header};
 use revm::primitives::{BlockEnv, CfgEnv};
 
@@ -15,10 +15,10 @@ pub trait EvmEnvProvider: Send + Sync {
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
-    ) -> RethResult<()>;
+    ) -> ProviderResult<()>;
 
     /// Fills the default [CfgEnv] and [BlockEnv] fields with values specific to the given [Header].
-    fn env_with_header(&self, header: &Header) -> RethResult<(CfgEnv, BlockEnv)> {
+    fn env_with_header(&self, header: &Header) -> ProviderResult<(CfgEnv, BlockEnv)> {
         let mut cfg = CfgEnv::default();
         let mut block_env = BlockEnv::default();
         self.fill_env_with_header(&mut cfg, &mut block_env, header)?;
@@ -31,21 +31,25 @@ pub trait EvmEnvProvider: Send + Sync {
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> RethResult<()>;
+    ) -> ProviderResult<()>;
 
     /// Fills the [BlockEnv] fields with values specific to the given [BlockHashOrNumber].
-    fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockHashOrNumber) -> RethResult<()>;
+    fn fill_block_env_at(
+        &self,
+        block_env: &mut BlockEnv,
+        at: BlockHashOrNumber,
+    ) -> ProviderResult<()>;
 
     /// Fills the [BlockEnv] fields with values specific to the given [Header].
     fn fill_block_env_with_header(
         &self,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> RethResult<()>;
+    ) -> ProviderResult<()>;
 
     /// Fills the [CfgEnv] fields with values specific to the given [BlockHashOrNumber].
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> RethResult<()>;
+    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> ProviderResult<()>;
 
     /// Fills the [CfgEnv] fields with values specific to the given [Header].
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> RethResult<()>;
+    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> ProviderResult<()>;
 }
