@@ -4,7 +4,7 @@ pub use manager::SnapshotProvider;
 mod jar;
 pub use jar::SnapshotJarProvider;
 
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{snapshot::SegmentHeader, SnapshotSegment};
 use std::ops::Deref;
@@ -20,7 +20,7 @@ pub struct LoadedJar {
 }
 
 impl LoadedJar {
-    fn new(jar: NippyJar<SegmentHeader>) -> RethResult<Self> {
+    fn new(jar: NippyJar<SegmentHeader>) -> ProviderResult<Self> {
         let mmap_handle = jar.open_data()?;
         Ok(Self { jar, mmap_handle })
     }

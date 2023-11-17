@@ -2,7 +2,7 @@ use crate::{
     bundle_state::BundleStateWithReceipts, AccountReader, BlockHashReader, BundleStateDataProvider,
     StateProvider, StateRootProvider,
 };
-use reth_interfaces::{provider::ProviderError, RethResult};
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{trie::AccountProof, Account, Address, BlockNumber, Bytecode, B256};
 
 /// A state provider that either resolves to data in a wrapped [`crate::BundleStateWithReceipts`],
@@ -27,7 +27,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> BundleStateProvider<SP, B
 impl<SP: StateProvider, BSDP: BundleStateDataProvider> BlockHashReader
     for BundleStateProvider<SP, BSDP>
 {
-    fn block_hash(&self, block_number: BlockNumber) -> RethResult<Option<B256>> {
+    fn block_hash(&self, block_number: BlockNumber) -> ProviderResult<Option<B256>> {
         let block_hash = self.post_state_data_provider.block_hash(block_number);
         if block_hash.is_some() {
             return Ok(block_hash)
@@ -39,7 +39,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> BlockHashReader
         &self,
         _start: BlockNumber,
         _end: BlockNumber,
-    ) -> RethResult<Vec<B256>> {
+    ) -> ProviderResult<Vec<B256>> {
         unimplemented!()
     }
 }
@@ -47,7 +47,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> BlockHashReader
 impl<SP: StateProvider, BSDP: BundleStateDataProvider> AccountReader
     for BundleStateProvider<SP, BSDP>
 {
-    fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
+    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         if let Some(account) = self.post_state_data_provider.state().account(&address) {
             Ok(account)
         } else {
@@ -59,7 +59,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> AccountReader
 impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateRootProvider
     for BundleStateProvider<SP, BSDP>
 {
-    fn state_root(&self, post_state: &BundleStateWithReceipts) -> RethResult<B256> {
+    fn state_root(&self, post_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
         let mut state = self.post_state_data_provider.state().clone();
         state.extend(post_state.clone());
         self.state_provider.state_root(&state)
@@ -73,7 +73,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateProvider
         &self,
         account: Address,
         storage_key: reth_primitives::StorageKey,
-    ) -> RethResult<Option<reth_primitives::StorageValue>> {
+    ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
         let u256_storage_key = storage_key.into();
         if let Some(value) =
             self.post_state_data_provider.state().storage(&account, u256_storage_key)
@@ -84,7 +84,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateProvider
         self.state_provider.storage(account, storage_key)
     }
 
-    fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(bytecode) = self.post_state_data_provider.state().bytecode(&code_hash) {
             return Ok(Some(bytecode))
         }
@@ -92,7 +92,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateProvider
         self.state_provider.bytecode_by_hash(code_hash)
     }
 
-    fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
+    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }

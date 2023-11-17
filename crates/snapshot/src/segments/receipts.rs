@@ -1,6 +1,6 @@
 use crate::segments::{prepare_jar, Segment};
 use reth_db::{database::Database, snapshot::create_snapshot_T1, tables};
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     snapshot::{Compression, Filters, SegmentConfig, SegmentHeader},
     BlockNumber, SnapshotSegment, TxNumber,
@@ -37,7 +37,7 @@ impl Segment for Receipts {
         provider: &DatabaseProviderRO<'_, DB>,
         directory: impl AsRef<Path>,
         block_range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
         let tx_range_len = tx_range.clone().count();
 

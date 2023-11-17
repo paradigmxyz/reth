@@ -12,7 +12,7 @@ pub use receipts::Receipts;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, RawKey, RawTable,
 };
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{
@@ -34,7 +34,7 @@ pub trait Segment: Default {
         provider: &DatabaseProviderRO<'_, DB>,
         directory: impl AsRef<Path>,
         range: RangeInclusive<BlockNumber>,
-    ) -> RethResult<()>;
+    ) -> ProviderResult<()>;
 
     /// Returns this struct's [`SnapshotSegment`].
     fn segment() -> SnapshotSegment;
@@ -45,7 +45,7 @@ pub trait Segment: Default {
         provider: &DatabaseProviderRO<'_, DB>,
         range: &RangeInclusive<u64>,
         range_len: usize,
-    ) -> RethResult<Vec<Vec<u8>>> {
+    ) -> ProviderResult<Vec<Vec<u8>>> {
         let mut cursor = provider.tx_ref().cursor_read::<RawTable<T>>()?;
         Ok(cursor
             .walk_back(Some(RawKey::from(*range.end())))?
@@ -64,8 +64,8 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     segment_config: SegmentConfig,
     block_range: RangeInclusive<BlockNumber>,
     total_rows: usize,
-    prepare_compression: impl Fn() -> RethResult<Rows<COLUMNS>>,
-) -> RethResult<NippyJar<SegmentHeader>> {
+    prepare_compression: impl Fn() -> ProviderResult<Rows<COLUMNS>>,
+) -> ProviderResult<NippyJar<SegmentHeader>> {
     let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
     let mut nippy_jar = NippyJar::new(
         COLUMNS,

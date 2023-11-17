@@ -109,9 +109,9 @@ pub enum PipelineError {
     /// The pipeline encountered a database error.
     #[error(transparent)]
     Database(#[from] DbError),
-    /// The pipeline encountered an irrecoverable error in one of the stages.
+    /// Provider error.
     #[error(transparent)]
-    Interface(#[from] RethError),
+    Provider(#[from] ProviderError),
     /// The pipeline encountered an error while trying to send an event.
     #[error("pipeline encountered an error while trying to send an event")]
     Channel(#[from] SendError<PipelineEvent>),
