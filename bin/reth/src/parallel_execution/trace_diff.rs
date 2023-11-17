@@ -136,13 +136,15 @@ impl Command {
         )?;
         let expected_trace = self.inspect_target(db, target_env.clone())?;
 
+        let parallel_provider = factory.provider().map_err(PipelineError::Interface)?;
+        let parallel_sp = HistoricalStateProvider::new(parallel_provider.into_tx(), 1);
         let queue_store = Arc::new(TransitionQueueStore::new(self.queue_store.clone()));
         let mut parallel_executor = ParallelExecutor::new(
             factory.clone(),
             self.chain.clone(),
             Box::new(ctx.task_executor.clone()),
             queue_store.clone(), // unused
-            sp_database,
+            Box::new(StateProviderDatabase::new(&parallel_sp)),
             0,
             0,
             None,
