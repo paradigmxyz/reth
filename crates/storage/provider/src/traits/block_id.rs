@@ -63,11 +63,11 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
             BlockNumberOrTag::Number(num) => num,
             BlockNumberOrTag::Finalized => match self.finalized_block_number()? {
                 Some(block_number) => block_number,
-                None => return Err(ProviderError::FinalizedBlockNotFound.into()),
+                None => return Err(ProviderError::FinalizedBlockNotFound),
             },
             BlockNumberOrTag::Safe => match self.safe_block_number()? {
                 Some(block_number) => block_number,
-                None => return Err(ProviderError::SafeBlockNotFound.into()),
+                None => return Err(ProviderError::SafeBlockNotFound),
             },
         };
         Ok(Some(num))

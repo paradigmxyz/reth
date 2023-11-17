@@ -2063,8 +2063,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     root: GotExpected { got: new_state_root, expected: parent_state_root },
                     block_number: parent_number,
                     block_hash: parent_hash,
-                }))
-                .into())
+                })))
             }
             trie_updates.flush(&self.tx)?;
         }

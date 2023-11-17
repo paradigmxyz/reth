@@ -125,7 +125,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
 
 impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        Ok(self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())?)
+        self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
     }
 
     fn canonical_hashes_range(
@@ -148,17 +148,17 @@ impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
 impl<'a> BlockNumReader for SnapshotJarProvider<'a> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Information on live database
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
         // Information on live database
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
         // Information on live database
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -190,7 +190,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
         &self,
         num: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        Ok(self.cursor()?.get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?)
+        self.cursor()?.get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -205,12 +205,12 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
         _hash: TxHash,
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
         // Information required on indexing table [`tables::TransactionBlock`]
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         // Information on indexing table [`tables::TransactionBlock`]
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transactions_by_block(
@@ -219,7 +219,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
         // Related to indexing tables. Live database should get the tx_range and call snapshot
         // provider with `transactions_by_tx_range` instead.
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transactions_by_block_range(
@@ -228,7 +228,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
         // Related to indexing tables. Live database should get the tx_range and call snapshot
         // provider with `transactions_by_tx_range` instead.
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn senders_by_tx_range(
@@ -268,13 +268,13 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
 
 impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
-        Ok(self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())?)
+        self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         if let Some(tx_snapshot) = &self.auxiliar_jar {
             if let Some(num) = tx_snapshot.transaction_id(hash)? {
-                return Ok(self.receipt(num)?)
+                return self.receipt(num)
             }
         }
         Ok(None)
@@ -283,7 +283,7 @@ impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         // Related to indexing tables. Snapshot should get the tx_range and call snapshot
         // provider with `receipt()` instead for each
-        Err(ProviderError::UnsupportedProvider.into())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 

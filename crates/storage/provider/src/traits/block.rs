@@ -190,7 +190,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     /// Returns `None` if header is not found.
     fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Header>> {
         self.convert_block_number(id)?
-            .map_or_else(|| Ok(None), |num| Ok(self.header_by_hash_or_number(num.into())?))
+            .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))
     }
 
     /// Returns the header with matching tag from the database

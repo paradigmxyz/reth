@@ -63,7 +63,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
     /// Lookup an account in the AccountHistory table
     pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
         // history key to search IntegerList of block number changesets.
@@ -82,7 +82,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         storage_key: StorageKey,
     ) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
         // history key to search IntegerList of block number changesets.
@@ -199,7 +199,7 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     fn state_root(&self, _post_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }
 
@@ -241,7 +241,7 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
 
     /// Get account and storage proofs.
     fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }
 
@@ -566,11 +566,11 @@ mod tests {
         );
         assert_eq!(
             provider.account_history_lookup(ADDRESS),
-            Err(ProviderError::StateAtBlockPruned(provider.block_number).into())
+            Err(ProviderError::StateAtBlockPruned(provider.block_number))
         );
         assert_eq!(
             provider.storage_history_lookup(ADDRESS, STORAGE),
-            Err(ProviderError::StateAtBlockPruned(provider.block_number).into())
+            Err(ProviderError::StateAtBlockPruned(provider.block_number))
         );
 
         // provider block_number == lowest available block number,

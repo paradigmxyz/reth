@@ -79,7 +79,7 @@ impl SnapshotProvider {
             || self.get_segment_ranges_from_block(segment, block),
             path,
         )?
-        .ok_or_else(|| ProviderError::MissingSnapshotBlock(segment, block).into())
+        .ok_or_else(|| ProviderError::MissingSnapshotBlock(segment, block))
     }
 
     /// Gets the [`SnapshotJarProvider`] of the requested segment and transaction.
@@ -94,7 +94,7 @@ impl SnapshotProvider {
             || self.get_segment_ranges_from_transaction(segment, tx),
             path,
         )?
-        .ok_or_else(|| ProviderError::MissingSnapshotTx(segment, tx).into())
+        .ok_or_else(|| ProviderError::MissingSnapshotTx(segment, tx))
     }
 
     /// Gets the [`SnapshotJarProvider`] of the requested segment and block or transaction.
@@ -326,7 +326,7 @@ impl BlockNumReader for SnapshotProvider {
 
 impl TransactionsProvider for SnapshotProvider {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        Ok(self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
+        self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
             let mut cursor = jar_provider.cursor()?;
             if cursor
                 .get_one::<TransactionMask<TransactionSignedNoHash>>((&tx_hash).into())?
@@ -337,7 +337,7 @@ impl TransactionsProvider for SnapshotProvider {
             } else {
                 Ok(None)
             }
-        })?)
+        })
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
@@ -354,13 +354,13 @@ impl TransactionsProvider for SnapshotProvider {
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
-        Ok(self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
+        self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
                 .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
                 .map(|tx| tx.with_hash())
                 .and_then(|tx| (tx.hash_ref() == &hash).then_some(tx)))
-        })?)
+        })
     }
 
     fn transaction_by_hash_with_meta(

@@ -107,7 +107,7 @@ where
     fn ensure_canonical_block(&self, block_number: BlockNumber) -> ProviderResult<()> {
         let latest = self.best_block_number()?;
         if block_number > latest {
-            Err(ProviderError::HeaderNotFound(block_number.into()).into())
+            Err(ProviderError::HeaderNotFound(block_number.into()))
         } else {
             Ok(())
         }

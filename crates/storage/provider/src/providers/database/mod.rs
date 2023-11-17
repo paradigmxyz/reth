@@ -261,11 +261,11 @@ impl<DB: Database> BlockNumReader for ProviderFactory<DB> {
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        Ok(self.provider()?.last_block_number()?)
+        self.provider()?.last_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        Ok(self.provider()?.block_number(hash)?)
+        self.provider()?.block_number(hash)
     }
 }
 
