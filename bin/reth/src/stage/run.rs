@@ -101,6 +101,10 @@ pub struct Command {
     // e.g. query the DB size, or any table data.
     #[arg(long, short)]
     commit: bool,
+
+    /// Save stage checkpoints
+    #[arg(long)]
+    checkpoints: bool,
 }
 
 impl Command {
@@ -245,7 +249,9 @@ impl Command {
                 let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind).await?;
                 unwind.checkpoint = checkpoint;
 
-                provider_rw.save_stage_checkpoint(unwind_stage.id(), checkpoint)?;
+                if self.checkpoints {
+                    provider_rw.save_stage_checkpoint(unwind_stage.id(), checkpoint)?;
+                }
 
                 if self.commit {
                     provider_rw.commit()?;
@@ -263,7 +269,9 @@ impl Command {
             let ExecOutput { checkpoint, done } = exec_stage.execute(&provider_rw, input).await?;
             input.checkpoint = Some(checkpoint);
 
-            provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
+            if self.checkpoints {
+                provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
+            }
             if self.commit {
                 provider_rw.commit()?;
                 provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
@@ -272,10 +280,6 @@ impl Command {
             if done {
                 break
             }
-        }
-
-        if self.commit {
-            provider_rw.commit()?;
         }
 
         Ok(())
