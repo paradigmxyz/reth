@@ -75,7 +75,7 @@ impl<K: TransactionKind> Tx<K> {
     }
 
     /// Create db Cursor
-    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'_, K, T>, DatabaseError> {
+    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
         let inner = self
             .inner
             .cursor_with_dbi(self.get_dbi::<T>()?)
@@ -168,13 +168,13 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
 }
 
 impl<'a, K: TransactionKind> DbTxGAT<'a> for Tx<K> {
-    type Cursor<T: Table> = Cursor<'a, K, T>;
-    type DupCursor<T: DupSort> = Cursor<'a, K, T>;
+    type Cursor<T: Table> = Cursor<K, T>;
+    type DupCursor<T: DupSort> = Cursor<K, T>;
 }
 
 impl<'a, K: TransactionKind> DbTxMutGAT<'a> for Tx<K> {
-    type CursorMut<T: Table> = Cursor<'a, RW, T>;
-    type DupCursorMut<T: DupSort> = Cursor<'a, RW, T>;
+    type CursorMut<T: Table> = Cursor<RW, T>;
+    type DupCursorMut<T: DupSort> = Cursor<RW, T>;
 }
 
 impl TableImporter for Tx<RW> {}

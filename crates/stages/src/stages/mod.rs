@@ -166,7 +166,7 @@ mod tests {
                 assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
             } else {
                 acc_indexing_stage.execute(&provider, input).await.unwrap();
-                let mut account_history: Cursor<'_, RW, AccountHistory> =
+                let mut account_history: Cursor<RW, AccountHistory> =
                     provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
                 assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
             }
