@@ -28,7 +28,7 @@ impl<'txn, K> Cursor<'txn, K>
 where
     K: TransactionKind,
 {
-    pub(crate) fn new(txn: &'txn Transaction<'_, K>, dbi: ffi::MDBX_dbi) -> Result<Self> {
+    pub(crate) fn new(txn: &'txn Transaction<K>, dbi: ffi::MDBX_dbi) -> Result<Self> {
         let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
         let txn = txn.txn_ptr();
         unsafe {
