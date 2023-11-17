@@ -95,9 +95,17 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
         Ok(headers)
     }
 
-    fn sealed_headers_range(
+    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        Ok(self
+            .cursor()?
+            .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+            .map(|(header, hash)| header.seal(hash)))
+    }
+
+    fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
+        mut predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> RethResult<Vec<SealedHeader>> {
         let range = to_range(range);
 
@@ -108,17 +116,14 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
             if let Some((header, hash)) =
                 cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
             {
-                headers.push(header.seal(hash))
+                let sealed = header.seal(hash);
+                if !predicate(&sealed) {
+                    break
+                }
+                headers.push(sealed);
             }
         }
         Ok(headers)
-    }
-
-    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
-        Ok(self
-            .cursor()?
-            .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
-            .map(|(header, hash)| header.seal(hash)))
     }
 }
 

@@ -113,7 +113,7 @@ impl SnapshotProvider {
                 })?)
                 .and_then(|(parsed_segment, block_range, tx_range)| {
                     if parsed_segment == segment {
-                        return Some((block_range, tx_range));
+                        return Some((block_range, tx_range))
                     }
                     None
                 })
@@ -123,7 +123,7 @@ impl SnapshotProvider {
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         if let Some((block_range, tx_range)) = snapshot_ranges {
-            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range, &tx_range)?));
+            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range, &tx_range)?))
         }
 
         Ok(None)
@@ -171,7 +171,7 @@ impl SnapshotProvider {
             let block_start =
                 snapshots_rev_iter.peek().map(|(block_end, _)| *block_end + 1).unwrap_or(0);
             if block_start <= block {
-                return Some((block_start..=*block_end, tx_range.clone()));
+                return Some((block_start..=*block_end, tx_range.clone()))
             }
         }
         None
@@ -194,7 +194,7 @@ impl SnapshotProvider {
         while let Some((tx_end, block_range)) = snapshots_rev_iter.next() {
             let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some((block_range.clone(), tx_start..=*tx_end));
+                return Some((block_range.clone(), tx_start..=*tx_end))
             }
         }
         None
@@ -278,16 +278,17 @@ impl HeaderProvider for SnapshotProvider {
         todo!();
     }
 
-    fn sealed_headers_range(
-        &self,
-        _range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<SealedHeader>> {
-        todo!();
-    }
-
     fn sealed_header(&self, num: BlockNumber) -> RethResult<Option<SealedHeader>> {
         self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
             .sealed_header(num)
+    }
+
+    fn sealed_headers_while(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+        _predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> RethResult<Vec<SealedHeader>> {
+        todo!()
     }
 }
 

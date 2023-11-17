@@ -235,15 +235,16 @@ impl HeaderProvider for NoopProvider {
         Ok(vec![])
     }
 
-    fn sealed_headers_range(
-        &self,
-        _range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<SealedHeader>> {
-        Ok(vec![])
-    }
-
     fn sealed_header(&self, _number: BlockNumber) -> RethResult<Option<SealedHeader>> {
         Ok(None)
+    }
+
+    fn sealed_headers_while(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+        _predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> RethResult<Vec<SealedHeader>> {
+        Ok(vec![])
     }
 }
 

@@ -214,6 +214,10 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         self.provider()?.headers_range(range)
     }
 
+    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        self.provider()?.sealed_header(number)
+    }
+
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -221,8 +225,12 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         self.provider()?.sealed_headers_range(range)
     }
 
-    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
-        self.provider()?.sealed_header(number)
+    fn sealed_headers_while(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> RethResult<Vec<SealedHeader>> {
+        self.provider()?.sealed_headers_while(range, predicate)
     }
 }
 
