@@ -33,7 +33,7 @@ pub enum InitDatabaseError {
         database_hash: B256,
     },
 
-    /// Internal error.
+    /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
 }

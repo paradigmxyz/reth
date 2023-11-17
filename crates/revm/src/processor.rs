@@ -600,8 +600,7 @@ mod tests {
 
     impl AccountReader for StateProviderTest {
         fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-            let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
-            ret
+            Ok(self.accounts.get(&address).map(|(_, acc)| *acc))
         }
     }
 
