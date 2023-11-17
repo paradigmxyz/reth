@@ -41,8 +41,8 @@ pub struct DatabaseEnv {
 }
 
 impl<'a> DatabaseGAT<'a> for DatabaseEnv {
-    type TX = tx::Tx<'a, RO>;
-    type TXMut = tx::Tx<'a, RW>;
+    type TX = tx::Tx<RO>;
+    type TXMut = tx::Tx<RW>;
 }
 
 impl Database for DatabaseEnv {
