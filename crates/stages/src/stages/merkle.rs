@@ -7,7 +7,6 @@ use reth_db::{
 };
 use reth_interfaces::consensus;
 use reth_primitives::{
-    hex,
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
     BlockNumber, GotExpected, SealedHeader, B256,
@@ -104,7 +103,6 @@ impl MerkleStage {
             debug!(
                 target: "sync::stages::merkle::exec",
                 last_account_key = ?checkpoint.last_account_key,
-                last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
                 "Saving inner merkle checkpoint"
             );
             checkpoint.to_compact(&mut buf);
@@ -163,7 +161,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     current = ?current_block_number,
                     target = ?to_block,
                     last_account_key = ?checkpoint.last_account_key,
-                    last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
                     "Continuing inner merkle checkpoint"
                 );
 

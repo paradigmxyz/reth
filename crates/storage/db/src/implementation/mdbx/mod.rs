@@ -81,7 +81,10 @@ impl DatabaseEnv {
             }
         };
 
-        inner_env.set_max_dbs(Tables::ALL.len());
+        // Note: We set max dbs to 256 here to allow for custom tables. This needs to be set on
+        // environment creation.
+        debug_assert!(Tables::ALL.len() <= 256, "number of tables exceed max dbs");
+        inner_env.set_max_dbs(256);
         inner_env.set_geometry(Geometry {
             // Maximum database size of 4 terabytes
             size: Some(0..(4 * TERABYTE)),
