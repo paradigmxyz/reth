@@ -3,11 +3,9 @@ use derive_more::*;
 use std::{borrow::Cow, slice};
 
 /// Implement this to be able to decode data values
-pub trait TableObject {
+pub trait TableObject: Sized {
     /// Decodes the object from the given bytes.
-    fn decode(data_val: &[u8]) -> Result<Self, Error>
-    where
-        Self: Sized;
+    fn decode(data_val: &[u8]) -> Result<Self, Error>;
 
     /// Decodes the value directly from the given MDBX_val pointer.
     ///
@@ -17,14 +15,13 @@ pub trait TableObject {
     #[doc(hidden)]
     unsafe fn decode_val<K: TransactionKind>(
         _: *const ffi::MDBX_txn,
-        data_val: &ffi::MDBX_val,
+        data_val: ffi::MDBX_val,
     ) -> Result<Self, Error>
     where
         Self: Sized,
     {
         let s = slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len);
-
-        TableObject::decode(s)
+        Self::decode(s)
     }
 }
 
@@ -36,7 +33,7 @@ impl<'tx> TableObject for Cow<'tx, [u8]> {
     #[doc(hidden)]
     unsafe fn decode_val<K: TransactionKind>(
         _txn: *const ffi::MDBX_txn,
-        data_val: &ffi::MDBX_val,
+        data_val: ffi::MDBX_val,
     ) -> Result<Self, Error> {
         let s = slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len);
 
@@ -56,10 +53,7 @@ impl<'tx> TableObject for Cow<'tx, [u8]> {
 }
 
 impl TableObject for Vec<u8> {
-    fn decode(data_val: &[u8]) -> Result<Self, Error>
-    where
-        Self: Sized,
-    {
+    fn decode(data_val: &[u8]) -> Result<Self, Error> {
         Ok(data_val.to_vec())
     }
 }
@@ -71,7 +65,7 @@ impl TableObject for () {
 
     unsafe fn decode_val<K: TransactionKind>(
         _: *const ffi::MDBX_txn,
-        _: &ffi::MDBX_val,
+        _: ffi::MDBX_val,
     ) -> Result<Self, Error> {
         Ok(())
     }
@@ -82,19 +76,13 @@ impl TableObject for () {
 pub struct ObjectLength(pub usize);
 
 impl TableObject for ObjectLength {
-    fn decode(data_val: &[u8]) -> Result<Self, Error>
-    where
-        Self: Sized,
-    {
+    fn decode(data_val: &[u8]) -> Result<Self, Error> {
         Ok(Self(data_val.len()))
     }
 }
 
 impl<const LEN: usize> TableObject for [u8; LEN] {
-    fn decode(data_val: &[u8]) -> Result<Self, Error>
-    where
-        Self: Sized,
-    {
+    fn decode(data_val: &[u8]) -> Result<Self, Error> {
         if data_val.len() != LEN {
             return Err(Error::DecodeErrorLenDiff)
         }
