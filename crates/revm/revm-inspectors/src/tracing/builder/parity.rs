@@ -1,6 +1,7 @@
 use super::walker::CallTraceNodeWalkerBF;
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStep},
+    utils::load_account_code,
     TracingInspectorConfig,
 };
 use reth_primitives::{Address, U64};
@@ -179,15 +180,12 @@ impl ParityTraceBuilder {
     /// Note: this is considered a convenience method that takes the state map of
     /// [ResultAndState] after inspecting a transaction
     /// with the [TracingInspector](crate::tracing::TracingInspector).
-    pub fn into_trace_results_with_state<DB>(
+    pub fn into_trace_results_with_state<DB: DatabaseRef>(
         self,
         res: &ResultAndState,
         trace_types: &HashSet<TraceType>,
         db: DB,
-    ) -> Result<TraceResults, DB::Error>
-    where
-        DB: DatabaseRef,
-    {
+    ) -> Result<TraceResults, DB::Error> {
         let ResultAndState { ref result, ref state } = res;
 
         let breadth_first_addresses = if trace_types.contains(&TraceType::VmTrace) {
@@ -381,7 +379,10 @@ impl ParityTraceBuilder {
         let maybe_memory = if step.memory.is_empty() {
             None
         } else {
-            Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
+            Some(MemoryDelta {
+                off: step.memory_size,
+                data: step.memory.as_bytes().to_vec().into(),
+            })
         };
 
         // Calculate the stack items at this step
@@ -545,11 +546,11 @@ where
 
         let addr = addrs.next().expect("there should be an address");
 
-        let db_acc = db.basic(addr)?.unwrap_or_default();
+        let db_acc = db.basic_ref(addr)?.unwrap_or_default();
 
         let code_hash = if db_acc.code_hash != KECCAK_EMPTY { db_acc.code_hash } else { continue };
 
-        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes();
+        curr_ref.code = db.code_by_hash_ref(code_hash)?.original_bytes();
     }
 
     Ok(())
@@ -583,19 +584,19 @@ where
         if changed_acc.is_created() || changed_acc.is_loaded_as_not_existing() {
             entry.balance = Delta::Added(changed_acc.info.balance);
             entry.nonce = Delta::Added(U64::from(changed_acc.info.nonce));
-            if changed_acc.info.code_hash == KECCAK_EMPTY {
-                // this is an additional check to ensure new accounts always get the empty code
-                // marked as added
-                entry.code = Delta::Added(Default::default());
-            }
 
-            // new storage values
-            for (key, slot) in changed_acc.storage.iter() {
+            // accounts without code are marked as added
+            let account_code = load_account_code(&db, &changed_acc.info).unwrap_or_default();
+            entry.code = Delta::Added(account_code);
+
+            // new storage values are marked as added,
+            // however we're filtering changed here to avoid adding entries for the zero value
+            for (key, slot) in changed_acc.storage.iter().filter(|(_, slot)| slot.is_changed()) {
                 entry.storage.insert((*key).into(), Delta::Added(slot.present_value.into()));
             }
         } else {
             // account already exists, we need to fetch the account from the db
-            let db_acc = db.basic(addr)?.unwrap_or_default();
+            let db_acc = db.basic_ref(addr)?.unwrap_or_default();
 
             // update _changed_ storage values
             for (key, slot) in changed_acc.storage.iter().filter(|(_, slot)| slot.is_changed()) {

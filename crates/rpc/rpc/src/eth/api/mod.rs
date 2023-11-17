@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
+    revm_primitives::{BlockEnv, CfgEnv},
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
 };
 use reth_provider::{
@@ -22,7 +23,6 @@ use reth_provider::{
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{BlockEnv, CfgEnv};
 use std::{
     future::Future,
     sync::Arc,
@@ -33,13 +33,15 @@ use tokio::sync::{oneshot, Mutex};
 mod block;
 mod call;
 mod fees;
+#[cfg(feature = "optimism")]
+mod optimism;
 mod pending_block;
 mod server;
 mod sign;
 mod state;
 mod transactions;
 
-use crate::TracingCallPool;
+use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -91,7 +93,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
-        tracing_call_pool: TracingCallPool,
+        blocking_task_pool: BlockingTaskPool,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -101,7 +103,7 @@ where
             gas_oracle,
             gas_cap.into().into(),
             Box::<TokioTaskExecutor>::default(),
-            tracing_call_pool,
+            blocking_task_pool,
         )
     }
 
@@ -115,7 +117,7 @@ where
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: u64,
         task_spawner: Box<dyn TaskSpawner>,
-        tracing_call_pool: TracingCallPool,
+        blocking_task_pool: BlockingTaskPool,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -136,7 +138,9 @@ where
             starting_block: U256::from(latest_block),
             task_spawner,
             pending_block: Default::default(),
-            tracing_call_pool,
+            blocking_task_pool,
+            #[cfg(feature = "optimism")]
+            http_client: reqwest::Client::new(),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -222,12 +226,12 @@ where
 
     /// Returns the state at the given block number
     pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox<'_>> {
-        self.provider().history_by_block_hash(block_hash)
+        Ok(self.provider().history_by_block_hash(block_hash)?)
     }
 
     /// Returns the _latest_ state
     pub fn latest_state(&self) -> RethResult<StateProviderBox<'_>> {
-        self.provider().latest()
+        Ok(self.provider().latest()?)
     }
 }
 
@@ -262,6 +266,12 @@ where
         };
 
         let mut cfg = CfgEnv::default();
+
+        #[cfg(feature = "optimism")]
+        {
+            cfg.optimism = self.provider().chain_spec().is_optimism();
+        }
+
         let mut block_env = BlockEnv::default();
         // Note: for the PENDING block we assume it is past the known merge block and thus this will
         // not fail when looking up the total difficulty value for the blockenv.
@@ -354,7 +364,7 @@ where
 
     /// Returns the current info for the chain
     fn chain_info(&self) -> RethResult<ChainInfo> {
-        self.provider().chain_info()
+        Ok(self.provider().chain_info()?)
     }
 
     fn accounts(&self) -> Vec<Address> {
@@ -436,6 +446,9 @@ struct EthApiInner<Provider, Pool, Network> {
     task_spawner: Box<dyn TaskSpawner>,
     /// Cached pending block if any
     pending_block: Mutex<Option<PendingBlock>>,
-    /// A pool dedicated to tracing calls
-    tracing_call_pool: TracingCallPool,
+    /// A pool dedicated to blocking tasks.
+    blocking_task_pool: BlockingTaskPool,
+    /// An http client for communicating with sequencers.
+    #[cfg(feature = "optimism")]
+    http_client: reqwest::Client,
 }

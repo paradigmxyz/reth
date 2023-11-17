@@ -1,7 +1,8 @@
+use futures::StreamExt;
 use jsonrpsee::http_client::HttpClientBuilder;
 use reth_rpc_api_testing_util::{trace::TraceApiExt, utils::parse_env_url};
-use std::time::Instant;
-
+use reth_rpc_types::trace::{filter::TraceFilter, parity::TraceType};
+use std::{collections::HashSet, time::Instant};
 /// This is intended to be run locally against a running node.
 ///
 /// This is a noop of env var `RETH_RPC_TEST_NODE_URL` is not set.
@@ -20,4 +21,49 @@ async fn trace_many_blocks() {
         eprintln!("Error tracing block {block:?}: {err:?}");
     }
     println!("Traced all blocks in {:?}", now.elapsed());
+}
+
+/// Tests the replaying of transactions on a local Ethereum node.
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn replay_transactions() {
+    let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
+    let client = HttpClientBuilder::default().build(url).unwrap();
+
+    let tx_hashes = vec![
+        "0x4e08fe36db723a338e852f89f613e606b0c9a17e649b18b01251f86236a2cef3".parse().unwrap(),
+        "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb".parse().unwrap(),
+    ];
+
+    let trace_types = HashSet::from([TraceType::StateDiff, TraceType::VmTrace]);
+
+    let mut stream = client.replay_transactions(tx_hashes, trace_types);
+    let now = Instant::now();
+    while let Some(replay_txs) = stream.next().await {
+        println!("Transaction: {:?}", replay_txs);
+        println!("Replayed transactions in {:?}", now.elapsed());
+    }
+}
+
+/// Tests the tracers filters on a local Ethereum node
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn trace_filters() {
+    // Parse the node URL from environment variable and create an HTTP client.
+    let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
+    let client = HttpClientBuilder::default().build(url).unwrap();
+
+    // Set up trace filters.
+    let filter = TraceFilter::default();
+    let filters = vec![filter];
+
+    // Initialize a stream for the trace filters.
+    let mut stream = client.trace_filter_stream(filters);
+    let start_time = Instant::now();
+    while let Some(trace) = stream.next().await {
+        println!("Transaction Trace: {:?}", trace);
+        println!("Duration since test start: {:?}", start_time.elapsed());
+    }
 }

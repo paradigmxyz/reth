@@ -100,38 +100,16 @@ impl<DB> Inspector<DB> for InspectorStack
 where
     DB: Database,
 {
-    fn initialize_interp(
-        &mut self,
-        interpreter: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn initialize_interp(&mut self, interpreter: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.initialize_interp(interpreter, data);
-
-            // Allow inspectors to exit early
-            if status != InstructionResult::Continue {
-                return status
-            }
+            inspector.initialize_interp(interpreter, data);
         });
-
-        InstructionResult::Continue
     }
 
-    fn step(
-        &mut self,
-        interpreter: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn step(&mut self, interpreter: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step(interpreter, data);
-
-            // Allow inspectors to exit early
-            if status != InstructionResult::Continue {
-                return status
-            }
+            inspector.step(interpreter, data);
         });
-
-        InstructionResult::Continue
     }
 
     fn log(
@@ -146,22 +124,10 @@ where
         });
     }
 
-    fn step_end(
-        &mut self,
-        interpreter: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        eval: InstructionResult,
-    ) -> InstructionResult {
+    fn step_end(&mut self, interpreter: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step_end(interpreter, data, eval);
-
-            // Allow inspectors to exit early
-            if status != InstructionResult::Continue {
-                return status
-            }
+            inspector.step_end(interpreter, data);
         });
-
-        InstructionResult::Continue
     }
 
     fn call(

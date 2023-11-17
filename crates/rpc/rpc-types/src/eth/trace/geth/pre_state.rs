@@ -1,4 +1,5 @@
-use reth_primitives::{serde_helper::num::from_int_or_hex_opt, Address, Bytes, B256, U256};
+use crate::serde_helpers::num::from_int_or_hex_opt;
+use alloy_primitives::{Address, Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map, BTreeMap};
 
@@ -195,6 +196,11 @@ impl AccountChangeKind {
     }
 }
 
+/// The config for the prestate tracer.
+///
+/// If `diffMode` is set to true, the response frame includes all the account and storage diffs for
+/// the transaction. If it's missing or set to false it only returns the accounts and storage
+/// necessary to execute the transaction.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreStateConfig {
@@ -203,8 +209,16 @@ pub struct PreStateConfig {
 }
 
 impl PreStateConfig {
+    /// Returns true if this trace was requested with diffmode.
+    #[inline]
     pub fn is_diff_mode(&self) -> bool {
         self.diff_mode.unwrap_or_default()
+    }
+
+    /// Is default mode if diff_mode is not set
+    #[inline]
+    pub fn is_default_mode(&self) -> bool {
+        !self.is_diff_mode()
     }
 }
 

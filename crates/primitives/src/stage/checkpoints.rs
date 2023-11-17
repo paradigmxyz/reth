@@ -147,7 +147,7 @@ pub struct EntitiesCheckpoint {
 
 impl Display for EntitiesCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.1}%", 100.0 * self.processed as f64 / self.total as f64)
+        write!(f, "{:.2}%", 100.0 * self.processed as f64 / self.total as f64)
     }
 }
 
@@ -215,15 +215,6 @@ impl StageCheckpoint {
                 progress: entities,
                 ..
             }) => Some(entities),
-        }
-    }
-}
-
-impl Display for StageCheckpoint {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.entities() {
-            Some(entities) => entities.fmt(f),
-            None => write!(f, "{}", self.block_number),
         }
     }
 }

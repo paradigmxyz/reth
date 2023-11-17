@@ -19,6 +19,15 @@ pub struct Signature {
     pub odd_y_parity: bool,
 }
 
+impl Signature {
+    /// Returns the signature for the optimism deposit transactions, which don't include a
+    /// signature.
+    #[cfg(feature = "optimism")]
+    pub(crate) const fn optimism_deposit_tx_signature() -> Self {
+        Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+    }
+}
+
 impl Compact for Signature {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
@@ -62,6 +71,11 @@ impl Signature {
     /// Output the `v` of the signature depends on chain_id
     #[inline]
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
+        #[cfg(feature = "optimism")]
+        if self.r == U256::ZERO && self.s == U256::ZERO {
+            return 0
+        }
+
         if let Some(chain_id) = chain_id {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
             self.odd_y_parity as u64 + chain_id * 2 + 35
@@ -158,27 +172,50 @@ mod tests {
 
     #[test]
     fn test_payload_len_with_eip155_chain_id() {
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+        // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
 
         assert_eq!(3, signature.payload_len_with_eip155_chain_id(None));
         assert_eq!(3, signature.payload_len_with_eip155_chain_id(Some(1)));
         assert_eq!(4, signature.payload_len_with_eip155_chain_id(Some(47)));
     }
 
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn test_zero_signature_payload_len_with_eip155_chain_id() {
+        let zero_signature = Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false };
+
+        assert_eq!(3, zero_signature.payload_len_with_eip155_chain_id(None));
+        assert_eq!(3, zero_signature.payload_len_with_eip155_chain_id(Some(1)));
+        assert_eq!(3, zero_signature.payload_len_with_eip155_chain_id(Some(47)));
+    }
+
     #[test]
     fn test_v() {
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+        // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
         assert_eq!(27, signature.v(None));
         assert_eq!(37, signature.v(Some(1)));
 
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: true };
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: true };
         assert_eq!(28, signature.v(None));
         assert_eq!(38, signature.v(Some(1)));
     }
 
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn test_zero_signature_v() {
+        let signature = Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false };
+
+        assert_eq!(0, signature.v(None));
+        assert_eq!(0, signature.v(Some(1)));
+        assert_eq!(0, signature.v(Some(47)));
+    }
+
     #[test]
     fn test_encode_and_decode_with_eip155_chain_id() {
-        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+        // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
 
         let mut encoded = BytesMut::new();
         signature.encode_with_eip155_chain_id(&mut encoded, None);

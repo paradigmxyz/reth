@@ -1,12 +1,17 @@
+//! RPC types for transactions
+
+pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
+use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
 pub use common::TransactionInfo;
 pub use receipt::TransactionReceipt;
 pub use request::TransactionRequest;
-use reth_primitives::{AccessListItem, Address, Bytes, B256, U128, U256, U64};
 use serde::{Deserialize, Serialize};
 pub use signature::{Parity, Signature};
 pub use typed::*;
 
+mod access_list;
 mod common;
+pub mod kzg;
 mod receipt;
 mod request;
 mod signature;
@@ -69,6 +74,27 @@ pub struct Transaction {
     /// Some(1) for AccessList transaction, None for Legacy
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub transaction_type: Option<U64>,
+
+    /// Optimism specific transaction fields
+    #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    pub optimism: OptimismTransactionFields,
+}
+
+/// Optimism specific transaction fields
+#[cfg(feature = "optimism")]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OptimismTransactionFields {
+    /// Hash that uniquely identifies the source of the deposit.
+    #[serde(rename = "sourceHash", skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<B256>,
+    /// The ETH value to mint on L2
+    #[serde(rename = "mint", skip_serializing_if = "Option::is_none")]
+    pub mint: Option<U128>,
+    /// Field indicating whether the transaction is a system transaction, and therefore
+    /// exempt from the L2 gas limit.
+    #[serde(rename = "isSystemTx", skip_serializing_if = "Option::is_none")]
+    pub is_system_tx: Option<bool>,
 }
 
 #[cfg(test)]
@@ -103,6 +129,8 @@ mod tests {
             max_fee_per_gas: Some(U128::from(21)),
             max_priority_fee_per_gas: Some(U128::from(22)),
             max_fee_per_blob_gas: None,
+            #[cfg(feature = "optimism")]
+            optimism: Default::default(),
         };
         let serialized = serde_json::to_string(&transaction).unwrap();
         assert_eq!(
@@ -140,6 +168,8 @@ mod tests {
             max_fee_per_gas: Some(U128::from(21)),
             max_priority_fee_per_gas: Some(U128::from(22)),
             max_fee_per_blob_gas: None,
+            #[cfg(feature = "optimism")]
+            optimism: Default::default(),
         };
         let serialized = serde_json::to_string(&transaction).unwrap();
         assert_eq!(

@@ -518,7 +518,7 @@ impl Default for BodiesDownloaderBuilder {
     fn default() -> Self {
         Self {
             request_limit: 200,
-            stream_batch_size: 10_000,
+            stream_batch_size: 1_000,
             max_buffered_blocks_size_bytes: 2 * 1024 * 1024 * 1024, // ~2GB
             concurrent_requests_range: 5..=100,
         }
@@ -616,7 +616,7 @@ mod tests {
         let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
@@ -655,7 +655,7 @@ mod tests {
             })
             .collect::<HashMap<_, _>>();
 
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         let request_limit = 10;
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
@@ -676,7 +676,7 @@ mod tests {
         let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=99);
 
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         let stream_batch_size = 20;
         let request_limit = 10;
@@ -709,7 +709,7 @@ mod tests {
         let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=199);
 
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
         let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
@@ -733,6 +733,59 @@ mod tests {
         assert_matches!(
             downloader.next().await,
             Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &mut bodies))
+        );
+    }
+
+    // Check that the downloader continues after the size limit is reached.
+    #[tokio::test]
+    async fn can_download_after_exceeding_limit() {
+        // Generate some random blocks
+        let db = create_test_rw_db();
+        let (headers, mut bodies) = generate_bodies(0..=199);
+
+        insert_headers(db.db(), &headers);
+
+        let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
+        // Set the max buffered block size to 1 byte, to make sure that every response exceeds the
+        // limit
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_stream_batch_size(10)
+            .with_request_limit(1)
+            .with_max_buffered_blocks_size_bytes(1)
+            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+
+        // Set and download the entire range
+        downloader.set_download_range(0..=199).expect("failed to set download range");
+        let mut header = 0;
+        while let Some(Ok(resp)) = downloader.next().await {
+            assert_eq!(resp, zip_blocks(headers.iter().skip(header).take(resp.len()), &mut bodies));
+            header += resp.len();
+        }
+    }
+
+    // Check that the downloader can tolerate a few completely empty responses
+    #[tokio::test]
+    async fn can_tolerate_empty_responses() {
+        // Generate some random blocks
+        let db = create_test_rw_db();
+        let (headers, mut bodies) = generate_bodies(0..=99);
+
+        insert_headers(db.db(), &headers);
+
+        // respond with empty bodies for every other request.
+        let client = Arc::new(
+            TestBodiesClient::default().with_bodies(bodies.clone()).with_empty_responses(2),
+        );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_request_limit(3)
+            .with_stream_batch_size(100)
+            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+
+        // Download the requested range
+        downloader.set_download_range(0..=99).expect("failed to set download range");
+        assert_matches!(
+            downloader.next().await,
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
         );
     }
 }

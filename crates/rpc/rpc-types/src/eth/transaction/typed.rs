@@ -3,81 +3,27 @@
 //! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
-use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError, RlpDecodable, RlpEncodable};
-use reth_primitives::{
+use crate::{
+    eth::transaction::AccessList,
     kzg::{Blob, Bytes48},
-    AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxEip4844, TxLegacy, B256, U128,
-    U256, U64,
 };
+use alloy_primitives::{Address, Bytes, B256, U128, U256, U64};
+use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError};
 use serde::{Deserialize, Serialize};
+
 /// Container type for various Ethereum transaction requests
 ///
 /// Its variants correspond to specific allowed transactions:
 /// 1. Legacy (pre-EIP2718) [`LegacyTransactionRequest`]
 /// 2. EIP2930 (state access lists) [`EIP2930TransactionRequest`]
 /// 3. EIP1559 [`EIP1559TransactionRequest`]
+/// 4. EIP4844 [`EIP4844TransactionRequest`]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TypedTransactionRequest {
     Legacy(LegacyTransactionRequest),
     EIP2930(EIP2930TransactionRequest),
     EIP1559(EIP1559TransactionRequest),
-    EIP4844(Eip4844TransactionRequest),
-}
-
-impl TypedTransactionRequest {
-    /// Converts a typed transaction request into a primitive transaction.
-    ///
-    /// Returns `None` if any of the following are true:
-    /// - `nonce` is greater than [`u64::MAX`]
-    /// - `gas_limit` is greater than [`u64::MAX`]
-    /// - `value` is greater than [`u128::MAX`]
-    pub fn into_transaction(self) -> Option<Transaction> {
-        Some(match self {
-            TypedTransactionRequest::Legacy(tx) => Transaction::Legacy(TxLegacy {
-                chain_id: tx.chain_id,
-                nonce: tx.nonce.to(),
-                gas_price: tx.gas_price.to(),
-                gas_limit: tx.gas_limit.try_into().ok()?,
-                to: tx.kind.into(),
-                value: tx.value.into(),
-                input: tx.input,
-            }),
-            TypedTransactionRequest::EIP2930(tx) => Transaction::Eip2930(TxEip2930 {
-                chain_id: tx.chain_id,
-                nonce: tx.nonce.to(),
-                gas_price: tx.gas_price.to(),
-                gas_limit: tx.gas_limit.try_into().ok()?,
-                to: tx.kind.into(),
-                value: tx.value.into(),
-                input: tx.input,
-                access_list: tx.access_list,
-            }),
-            TypedTransactionRequest::EIP1559(tx) => Transaction::Eip1559(TxEip1559 {
-                chain_id: tx.chain_id,
-                nonce: tx.nonce.to(),
-                max_fee_per_gas: tx.max_fee_per_gas.to(),
-                gas_limit: tx.gas_limit.try_into().ok()?,
-                to: tx.kind.into(),
-                value: tx.value.into(),
-                input: tx.input,
-                access_list: tx.access_list,
-                max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),
-            }),
-            TypedTransactionRequest::EIP4844(tx) => Transaction::Eip4844(TxEip4844 {
-                chain_id: tx.chain_id,
-                nonce: tx.nonce.to(),
-                gas_limit: tx.gas_limit.to(),
-                max_fee_per_gas: tx.max_fee_per_gas.to(),
-                max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),
-                to: tx.kind.into(),
-                value: tx.value.into(),
-                access_list: tx.access_list,
-                blob_versioned_hashes: tx.blob_versioned_hashes,
-                max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-                input: tx.input,
-            }),
-        })
-    }
+    EIP4844(EIP4844TransactionRequest),
 }
 
 /// Represents a legacy transaction request
@@ -93,7 +39,7 @@ pub struct LegacyTransactionRequest {
 }
 
 /// Represents an EIP-2930 transaction request
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EIP2930TransactionRequest {
     pub chain_id: u64,
     pub nonce: U64,
@@ -106,7 +52,7 @@ pub struct EIP2930TransactionRequest {
 }
 
 /// Represents an EIP-1559 transaction request
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EIP1559TransactionRequest {
     pub chain_id: u64,
     pub nonce: U64,
@@ -121,7 +67,7 @@ pub struct EIP1559TransactionRequest {
 
 /// Represents an EIP-4844 transaction request
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Eip4844TransactionRequest {
+pub struct EIP4844TransactionRequest {
     pub chain_id: u64,
     pub nonce: U64,
     pub max_priority_fee_per_gas: U128,
@@ -131,9 +77,8 @@ pub struct Eip4844TransactionRequest {
     pub value: U256,
     pub input: Bytes,
     pub access_list: AccessList,
-    pub max_fee_per_blob_gas: u128,
+    pub max_fee_per_blob_gas: U128,
     pub blob_versioned_hashes: Vec<B256>,
-    pub gas_price: U128,
     pub sidecar: BlobTransactionSidecar,
 }
 
@@ -191,17 +136,9 @@ impl Decodable for TransactionKind {
     }
 }
 
-impl From<TransactionKind> for reth_primitives::TransactionKind {
-    fn from(kind: TransactionKind) -> Self {
-        match kind {
-            TransactionKind::Call(to) => reth_primitives::TransactionKind::Call(to),
-            TransactionKind::Create => reth_primitives::TransactionKind::Create,
-        }
-    }
-}
-
 /// This represents a set of blobs, and its corresponding commitments and proofs.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[repr(C)]
 pub struct BlobTransactionSidecar {
     /// The blob data.
     pub blobs: Vec<Blob>,

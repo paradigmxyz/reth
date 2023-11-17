@@ -5,14 +5,14 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{db::DatabaseError, RethError};
+use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
     stage::StageId, Account, Bytecode, ChainSpec, Receipts, StorageEntry, B256, U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
-    ProviderFactory,
+    ProviderError, ProviderFactory,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -25,7 +25,7 @@ use tracing::debug;
 pub enum InitDatabaseError {
     /// An existing genesis block was found in the database, and its hash did not match the hash of
     /// the chainspec.
-    #[error("Genesis hash in the database does not match the specified chainspec: chainspec is {chainspec_hash}, database is {database_hash}")]
+    #[error("genesis hash in the database does not match the specified chainspec: chainspec is {chainspec_hash}, database is {database_hash}")]
     GenesisHashMismatch {
         /// Expected genesis hash.
         chainspec_hash: B256,
@@ -33,13 +33,15 @@ pub enum InitDatabaseError {
         database_hash: B256,
     },
 
-    /// Low-level database error.
+    /// Provider error.
     #[error(transparent)]
-    DBError(#[from] DatabaseError),
+    Provider(#[from] ProviderError),
+}
 
-    /// Internal error.
-    #[error(transparent)]
-    InternalError(#[from] RethError),
+impl From<DatabaseError> for InitDatabaseError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Provider(ProviderError::Database(error))
+    }
 }
 
 /// Write the genesis block if it has not already been written
@@ -94,7 +96,7 @@ pub fn init_genesis<DB: Database>(
 pub fn insert_genesis_state<DB: Database>(
     tx: &<DB as DatabaseGAT<'_>>::TXMut,
     genesis: &reth_primitives::Genesis,
-) -> Result<(), InitDatabaseError> {
+) -> ProviderResult<()> {
     let mut state_init: BundleStateInit = HashMap::new();
     let mut reverts_init = HashMap::new();
     let mut contracts: HashMap<B256, Bytecode> = HashMap::new();
@@ -160,7 +162,7 @@ pub fn insert_genesis_state<DB: Database>(
 pub fn insert_genesis_hashes<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
     genesis: &reth_primitives::Genesis,
-) -> Result<(), InitDatabaseError> {
+) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
     let alloc_accounts =
         genesis.alloc.clone().into_iter().map(|(addr, account)| (addr, Some(account.into())));
@@ -184,7 +186,7 @@ pub fn insert_genesis_hashes<DB: Database>(
 pub fn insert_genesis_history<DB: Database>(
     provider: &DatabaseProviderRW<'_, &DB>,
     genesis: &reth_primitives::Genesis,
-) -> Result<(), InitDatabaseError> {
+) -> ProviderResult<()> {
     let account_transitions =
         genesis.alloc.keys().map(|addr| (*addr, vec![0])).collect::<BTreeMap<_, _>>();
     provider.insert_account_history_index(account_transitions)?;
@@ -204,7 +206,7 @@ pub fn insert_genesis_history<DB: Database>(
 pub fn insert_genesis_header<DB: Database>(
     tx: &<DB as DatabaseGAT<'_>>::TXMut,
     chain: Arc<ChainSpec>,
-) -> Result<(), InitDatabaseError> {
+) -> ProviderResult<()> {
     let header = chain.sealed_genesis_header();
 
     tx.put::<tables::CanonicalHeaders>(0, header.hash)?;
@@ -228,7 +230,7 @@ mod tests {
     };
     use reth_primitives::{
         Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
-        GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
+        GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
     use std::collections::HashMap;
 
@@ -249,7 +251,7 @@ mod tests {
         let genesis_hash = init_genesis(db, MAINNET.clone()).unwrap();
 
         // actual, expected
-        assert_eq!(genesis_hash, MAINNET_GENESIS);
+        assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
     }
 
     #[test]
@@ -258,7 +260,7 @@ mod tests {
         let genesis_hash = init_genesis(db, GOERLI.clone()).unwrap();
 
         // actual, expected
-        assert_eq!(genesis_hash, GOERLI_GENESIS);
+        assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
     }
 
     #[test]
@@ -267,7 +269,7 @@ mod tests {
         let genesis_hash = init_genesis(db, SEPOLIA.clone()).unwrap();
 
         // actual, expected
-        assert_eq!(genesis_hash, SEPOLIA_GENESIS);
+        assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
     }
 
     #[test]
@@ -281,8 +283,8 @@ mod tests {
         assert_eq!(
             genesis_hash.unwrap_err(),
             InitDatabaseError::GenesisHashMismatch {
-                chainspec_hash: MAINNET_GENESIS,
-                database_hash: SEPOLIA_GENESIS
+                chainspec_hash: MAINNET_GENESIS_HASH,
+                database_hash: SEPOLIA_GENESIS_HASH
             }
         )
     }

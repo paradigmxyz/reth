@@ -8,13 +8,14 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, BlockNumberOrTag, TransactionMeta};
+use reth_primitives::{BlockId, TransactionMeta};
 
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
 
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
+
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
     Provider:
@@ -59,13 +60,13 @@ where
     /// Returns `None` if the block wasn't found.
     pub(crate) async fn block_receipts(
         &self,
-        number: BlockNumberOrTag,
+        block_id: BlockId,
     ) -> EthResult<Option<Vec<TransactionReceipt>>> {
         let mut block_and_receipts = None;
 
-        if number.is_pending() {
+        if block_id.is_pending() {
             block_and_receipts = self.provider().pending_block_and_receipts()?;
-        } else if let Some(block_hash) = self.provider().block_hash_for_id(number.into())? {
+        } else if let Some(block_hash) = self.provider().block_hash_for_id(block_id)? {
             block_and_receipts = self.cache().get_block_and_receipts(block_hash).await?;
         }
 
@@ -74,6 +75,15 @@ where
             let base_fee = block.base_fee_per_gas;
             let block_hash = block.hash;
             let excess_blob_gas = block.excess_blob_gas;
+
+            #[cfg(feature = "optimism")]
+            let (block_timestamp, l1_block_info) = {
+                let body = reth_revm::optimism::parse_l1_info_tx(
+                    &block.body.first().ok_or(EthApiError::InternalEthError)?.input()[4..],
+                );
+                (block.timestamp, body.ok())
+            };
+
             let receipts = block
                 .body
                 .into_iter()
@@ -88,7 +98,19 @@ where
                         base_fee,
                         excess_blob_gas,
                     };
-                    build_transaction_receipt_with_block_receipts(tx, meta, receipt, &receipts)
+
+                    #[cfg(feature = "optimism")]
+                    let op_tx_meta =
+                        self.build_op_tx_meta(&tx, l1_block_info.clone(), block_timestamp)?;
+
+                    build_transaction_receipt_with_block_receipts(
+                        tx,
+                        meta,
+                        receipt,
+                        &receipts,
+                        #[cfg(feature = "optimism")]
+                        op_tx_meta,
+                    )
                 })
                 .collect::<EthResult<Vec<_>>>();
             return receipts.map(Some)

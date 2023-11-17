@@ -9,10 +9,10 @@ pub enum PrunerError {
     #[error(transparent)]
     PruneSegment(#[from] PruneSegmentError),
 
-    #[error("Inconsistent data: {0}")]
+    #[error("inconsistent data: {0}")]
     InconsistentData(&'static str),
 
-    #[error("An interface error occurred.")]
+    #[error(transparent)]
     Interface(#[from] RethError),
 
     #[error(transparent)]

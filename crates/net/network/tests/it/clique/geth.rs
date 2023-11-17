@@ -22,9 +22,7 @@ use std::{
 /// # let clique = async {
 ///
 /// // this creates a funded geth
-/// let clique_geth = Geth::new()
-///     .p2p_port(30303)
-///     .chain_id(1337u64);
+/// let clique_geth = Geth::new().p2p_port(30303).chain_id(1337u64);
 ///
 /// // build the funded geth, generating a random signing key and enabling clique
 /// let mut clique = CliqueGethInstance::new(clique_geth, None).await;

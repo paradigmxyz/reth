@@ -1,7 +1,7 @@
 //! Blob transaction tests
 
 use reth_transaction_pool::{
-    error::PoolError,
+    error::PoolErrorKind,
     test_utils::{testing_pool, MockTransaction, MockTransactionFactory},
     TransactionOrigin, TransactionPool,
 };
@@ -10,8 +10,6 @@ use reth_transaction_pool::{
 async fn blobs_exclusive() {
     let txpool = testing_pool();
     let mut mock_tx_factory = MockTransactionFactory::default();
-    // TODO: add blob sidecar to mock_eip4844_tx returned here so we can test the
-    // BlobTxSidecarListener in tx_pool
     let blob_tx = mock_tx_factory.create_eip4844();
 
     let hash = txpool
@@ -31,10 +29,10 @@ async fn blobs_exclusive() {
     let res =
         txpool.add_transaction(TransactionOrigin::External, eip1559_tx.clone()).await.unwrap_err();
 
-    match res {
-        PoolError::ExistingConflictingTransactionType(addr, hash, tx_type) => {
+    assert_eq!(res.hash, eip1559_tx.get_hash());
+    match res.kind {
+        PoolErrorKind::ExistingConflictingTransactionType(addr, tx_type) => {
             assert_eq!(addr, eip1559_tx.get_sender());
-            assert_eq!(hash, eip1559_tx.get_hash());
             assert_eq!(tx_type, eip1559_tx.tx_type());
         }
         _ => unreachable!(),

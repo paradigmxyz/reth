@@ -1,15 +1,14 @@
 use crate::{
-    error::*, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
-    UnwindInput,
+    error::*, BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage,
+    StageError, UnwindInput,
 };
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
-    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, listener::EventListeners, stage::StageId,
-    BlockNumber, ChainSpec, B256,
+    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, stage::StageId, BlockNumber, ChainSpec, B256,
 };
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
+use reth_tokio_util::EventListeners;
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -264,7 +263,7 @@ where
         let unwind_pipeline = self.stages.iter_mut().rev();
 
         let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let mut provider_rw = factory.provider_rw()?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -273,12 +272,23 @@ where
 
             let mut checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
             if checkpoint.block_number < to {
-                debug!(target: "sync::pipeline", from = %checkpoint, %to, "Unwind point too far for stage");
+                debug!(
+                    target: "sync::pipeline",
+                    from = %checkpoint.block_number,
+                    %to,
+                    "Unwind point too far for stage"
+                );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
                 continue
             }
 
-            debug!(target: "sync::pipeline", from = %checkpoint, %to, ?bad_block, "Starting unwind");
+            debug!(
+                target: "sync::pipeline",
+                from = %checkpoint.block_number,
+                %to,
+                ?bad_block,
+                "Starting unwind"
+            );
             while checkpoint.block_number > to {
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
@@ -310,7 +320,7 @@ where
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         provider_rw.commit()?;
-                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                        provider_rw = factory.provider_rw()?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -336,7 +346,7 @@ where
         let target = self.max_block.or(previous_stage);
 
         let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let mut provider_rw = factory.provider_rw()?;
 
         loop {
             let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
@@ -361,8 +371,10 @@ where
             }
 
             self.listeners.notify(PipelineEvent::Running {
-                pipeline_position: stage_index + 1,
-                pipeline_total: total_stages,
+                pipeline_stages_progress: event::PipelineStagesProgress {
+                    current: stage_index + 1,
+                    total: total_stages,
+                },
                 stage_id,
                 checkpoint: prev_checkpoint,
             });
@@ -374,14 +386,27 @@ where
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=
                         checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
-                    debug!(
-                        target: "sync::pipeline",
-                        stage = %stage_id,
-                        progress = checkpoint.block_number,
-                        %checkpoint,
-                        %done,
-                        "Stage committed progress"
-                    );
+
+                    if let Some(progress) = checkpoint.entities() {
+                        debug!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            ?target,
+                            %progress,
+                            %done,
+                            "Stage committed progress"
+                        );
+                    } else {
+                        debug!(
+                            target: "sync::pipeline",
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            ?target,
+                            %done,
+                            "Stage committed progress"
+                        );
+                    }
                     if let Some(metrics_tx) = &mut self.metrics_tx {
                         let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
                             stage_id,
@@ -392,15 +417,17 @@ where
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran {
-                        pipeline_position: stage_index + 1,
-                        pipeline_total: total_stages,
+                        pipeline_stages_progress: event::PipelineStagesProgress {
+                            current: stage_index + 1,
+                            total: total_stages,
+                        },
                         stage_id,
                         result: out.clone(),
                     });
 
                     // TODO: Make the commit interval configurable
                     provider_rw.commit()?;
-                    provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                    provider_rw = factory.provider_rw()?;
 
                     if done {
                         let block_number = checkpoint.block_number;
@@ -423,53 +450,59 @@ where
                             .saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH)
                             .max(1);
                         Ok(ControlFlow::Unwind { target: unwind_to, bad_block: local_head })
-                    } else if let StageError::Validation { block, error } = err {
-                        error!(
-                            target: "sync::pipeline",
-                            stage = %stage_id,
-                            bad_block = %block.number,
-                            "Stage encountered a validation error: {error}"
-                        );
+                    } else if let StageError::Block { block, error } = err {
+                        match error {
+                            BlockErrorKind::Validation(validation_error) => {
+                                error!(
+                                    target: "sync::pipeline",
+                                    stage = %stage_id,
+                                    bad_block = %block.number,
+                                    "Stage encountered a validation error: {validation_error}"
+                                );
 
-                        // FIXME: When handling errors, we do not commit the database transaction.
-                        // This leads to the Merkle stage not clearing its
-                        // checkpoint, and restarting from an invalid place.
-                        drop(provider_rw);
-                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
-                        provider_rw
-                            .save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
-                        provider_rw.save_stage_checkpoint(
-                            StageId::MerkleExecute,
-                            prev_checkpoint.unwrap_or_default(),
-                        )?;
-                        provider_rw.commit()?;
+                                // FIXME: When handling errors, we do not commit the database
+                                // transaction. This leads to the Merkle
+                                // stage not clearing its checkpoint, and
+                                // restarting from an invalid place.
+                                drop(provider_rw);
+                                provider_rw = factory.provider_rw()?;
+                                provider_rw.save_stage_checkpoint_progress(
+                                    StageId::MerkleExecute,
+                                    vec![],
+                                )?;
+                                provider_rw.save_stage_checkpoint(
+                                    StageId::MerkleExecute,
+                                    prev_checkpoint.unwrap_or_default(),
+                                )?;
+                                provider_rw.commit()?;
 
-                        // We unwind because of a validation error. If the unwind itself fails,
-                        // we bail entirely, otherwise we restart the execution loop from the
-                        // beginning.
-                        Ok(ControlFlow::Unwind {
-                            target: prev_checkpoint.unwrap_or_default().block_number,
-                            bad_block: block,
-                        })
-                    } else if let StageError::ExecutionError {
-                        block,
-                        error: BlockExecutionError::Validation(error),
-                    } = err
-                    {
-                        error!(
-                            target: "sync::pipeline",
-                            stage = %stage_id,
-                            bad_block = %block.number,
-                            "Stage encountered an execution error: {error}"
-                        );
+                                // We unwind because of a validation error. If the unwind itself
+                                // fails, we bail entirely,
+                                // otherwise we restart the execution loop from the
+                                // beginning.
+                                Ok(ControlFlow::Unwind {
+                                    target: prev_checkpoint.unwrap_or_default().block_number,
+                                    bad_block: block,
+                                })
+                            }
+                            BlockErrorKind::Execution(execution_error) => {
+                                error!(
+                                    target: "sync::pipeline",
+                                    stage = %stage_id,
+                                    bad_block = %block.number,
+                                    "Stage encountered an execution error: {execution_error}"
+                                );
 
-                        // We unwind because of an execution error. If the unwind itself fails, we
-                        // bail entirely, otherwise we restart the execution loop from the
-                        // beginning.
-                        Ok(ControlFlow::Unwind {
-                            target: prev_checkpoint.unwrap_or_default().block_number,
-                            bad_block: block,
-                        })
+                                // We unwind because of an execution error. If the unwind itself
+                                // fails, we bail entirely,
+                                // otherwise we restart
+                                // the execution loop from the beginning.
+                                Ok(ControlFlow::Unwind {
+                                    target: prev_checkpoint.unwrap_or_default().block_number,
+                                    bad_block: block,
+                                })
+                            }
+                        }
                     } else if err.is_fatal() {
                         error!(
                             target: "sync::pipeline",
@@ -573,26 +606,22 @@ mod tests {
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 PipelineEvent::Running {
-                    pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
                 },
                 PipelineEvent::Running {
-                    pipeline_position: 2,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 2,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
@@ -640,38 +669,32 @@ mod tests {
             vec![
                 // Executing
                 PipelineEvent::Running {
-                    pipeline_position: 1,
-                    pipeline_total: 3,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 3 },
                     stage_id: StageId::Other("A"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 1,
-                    pipeline_total: 3,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 3 },
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
                 },
                 PipelineEvent::Running {
-                    pipeline_position: 2,
-                    pipeline_total: 3,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
                     stage_id: StageId::Other("B"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 2,
-                    pipeline_total: 3,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
                     stage_id: StageId::Other("B"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
                 PipelineEvent::Running {
-                    pipeline_position: 3,
-                    pipeline_total: 3,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
                     stage_id: StageId::Other("C"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 3,
-                    pipeline_total: 3,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
                     stage_id: StageId::Other("C"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
                 },
@@ -750,26 +773,22 @@ mod tests {
             vec![
                 // Executing
                 PipelineEvent::Running {
-                    pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
                 },
                 PipelineEvent::Running {
-                    pipeline_position: 2,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 2,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
@@ -817,9 +836,15 @@ mod tests {
             )
             .add_stage(
                 TestStage::new(StageId::Other("B"))
-                    .add_exec(Err(StageError::Validation {
-                        block: random_header(&mut generators::rng(), 5, Default::default()),
-                        error: consensus::ConsensusError::BaseFeeMissing,
+                    .add_exec(Err(StageError::Block {
+                        block: Box::new(random_header(
+                            &mut generators::rng(),
+                            5,
+                            Default::default(),
+                        )),
+                        error: BlockErrorKind::Validation(
+                            consensus::ConsensusError::BaseFeeMissing,
+                        ),
                     }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
@@ -838,20 +863,17 @@ mod tests {
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 PipelineEvent::Running {
-                    pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
                 PipelineEvent::Running {
-                    pipeline_position: 2,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
                     checkpoint: None
                 },
@@ -869,26 +891,22 @@ mod tests {
                     result: UnwindOutput { checkpoint: StageCheckpoint::new(0) },
                 },
                 PipelineEvent::Running {
-                    pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     checkpoint: Some(StageCheckpoint::new(0))
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 1,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
                 PipelineEvent::Running {
-                    pipeline_position: 2,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
                     checkpoint: None
                 },
                 PipelineEvent::Ran {
-                    pipeline_position: 2,
-                    pipeline_total: 2,
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },

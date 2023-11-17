@@ -1,6 +1,10 @@
 //! Command for debugging in-memory merkle trie calculation.
 use crate::{
-    args::{get_secret_key, utils::genesis_value_parser, DatabaseArgs, NetworkArgs},
+    args::{
+        get_secret_key,
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
     utils::{get_single_body, get_single_header},
@@ -45,17 +49,11 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
@@ -196,7 +194,7 @@ impl Command {
         provider_rw.insert_block(block.clone(), None, None)?;
         block_state.write_to_db(provider_rw.tx_ref(), OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
-        let storages = provider_rw.plainstate_storages(storage_lists)?;
+        let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
         let account_lists = provider_rw.changed_accounts_with_range(block.number..=block.number)?;
         let accounts = provider_rw.basic_accounts(account_lists)?;

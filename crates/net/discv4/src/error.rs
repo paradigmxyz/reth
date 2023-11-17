@@ -6,15 +6,15 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum DecodePacketError {
-    #[error("Failed to rlp decode: {0:?}")]
+    #[error("failed to rlp decode: {0}")]
     Rlp(#[from] alloy_rlp::Error),
-    #[error("Received packet len too short.")]
+    #[error("received packet length is too short")]
     PacketTooShort,
-    #[error("Hash of the header not equals to the hash of the data.")]
+    #[error("header/data hash mismatch")]
     HashMismatch,
-    #[error("Message id {0} is not supported.")]
+    #[error("message ID {0} is not supported")]
     UnknownMessage(u8),
-    #[error("Failed to recover public key: {0:?}")]
+    #[error("failed to recover public key: {0}")]
     Secp256k1(#[from] secp256k1::Error),
 }
 
@@ -22,7 +22,7 @@ pub enum DecodePacketError {
 #[derive(Debug, thiserror::Error)]
 pub enum Discv4Error {
     /// Failed to send a command over the channel
-    #[error("Failed to send on a closed channel")]
+    #[error("failed to send on a closed channel")]
     Send,
     /// Failed to receive a command response
     #[error(transparent)]

@@ -1,0 +1,15 @@
+[package]
+name = "reth-tokio-util"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Additional utilities for working with Tokio in reth."
+
+[dependencies]
+
+# async
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream = { workspace = true, features = ["sync"] }

@@ -60,25 +60,23 @@ impl DbTx for TxMock {
     }
 
     fn commit(self) -> Result<bool, DatabaseError> {
-        todo!()
+        Ok(true)
     }
 
-    fn drop(self) {
-        todo!()
-    }
+    fn abort(self) {}
 
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
-        todo!()
+        Ok(CursorMock { _cursor: 0 })
     }
 
     fn cursor_dup_read<T: DupSort>(
         &self,
     ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
-        todo!()
+        Ok(CursorMock { _cursor: 0 })
     }
 
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
-        todo!()
+        Ok(self._table.len())
     }
 }
 

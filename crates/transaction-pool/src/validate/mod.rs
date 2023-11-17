@@ -59,6 +59,21 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
             Self::Error(hash, ..) => *hash,
         }
     }
+
+    /// Returns true if the transaction is valid.
+    pub fn is_valid(&self) -> bool {
+        matches!(self, Self::Valid { .. })
+    }
+
+    /// Returns true if the transaction is invalid.
+    pub fn is_invalid(&self) -> bool {
+        matches!(self, Self::Invalid(_, _))
+    }
+
+    /// Returns true if validation resulted in an error.
+    pub fn is_error(&self) -> bool {
+        matches!(self, Self::Error(_, _))
+    }
 }
 
 /// A wrapper type for a transaction that is valid and has an optional extracted EIP-4844 blob
@@ -260,6 +275,13 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.cost()
     }
 
+    /// Returns the EIP-4844 max blob fee the caller is willing to pay.
+    ///
+    /// For non-EIP-4844 transactions, this returns [None].
+    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.transaction.max_fee_per_blob_gas()
+    }
+
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
     /// For legacy transactions this is `gas_price`.
@@ -347,6 +369,6 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionValidatorError {
     /// Failed to communicate with the validation service.
-    #[error("Validation service unreachable")]
+    #[error("validation service unreachable")]
     ValidationServiceUnreachable,
 }

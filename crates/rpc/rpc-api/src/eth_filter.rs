@@ -1,6 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_rpc_types::{Filter, FilterChanges, FilterId, Log};
-
+use reth_rpc_types::{Filter, FilterChanges, FilterId, Log, PendingTransactionFilterKind};
 /// Rpc Interface for poll-based ethereum filter API.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
@@ -15,7 +14,10 @@ pub trait EthFilterApi {
 
     /// Creates a pending transaction filter and returns its id.
     #[method(name = "newPendingTransactionFilter")]
-    async fn new_pending_transaction_filter(&self) -> RpcResult<FilterId>;
+    async fn new_pending_transaction_filter(
+        &self,
+        kind: Option<PendingTransactionFilterKind>,
+    ) -> RpcResult<FilterId>;
 
     /// Returns all filter changes since last poll.
     #[method(name = "getFilterChanges")]

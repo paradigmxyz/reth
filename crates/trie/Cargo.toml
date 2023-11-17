@@ -6,15 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Merkle trie implementation
-"""
+description = "Merkle trie implementation"
 
 [dependencies]
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-db = { path = "../storage/db" }
+reth-db.workspace = true
 
 alloy-rlp.workspace = true
 
@@ -48,7 +46,7 @@ tokio-stream.workspace = true
 once_cell.workspace = true
 serde_json.workspace = true
 pretty_assertions = "1.3.0"
-criterion = "0.5"
+criterion.workspace = true
 
 [features]
 test-utils = ["triehash"]

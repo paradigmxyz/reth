@@ -1,11 +1,11 @@
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    constants::SYSTEM_ADDRESS, Address, ChainSpec, Header, Withdrawal, B256, U256,
+    constants::SYSTEM_ADDRESS, revm::env::fill_tx_env_with_beacon_root_contract_call, Address,
+    ChainSpec, Header, Withdrawal, B256, U256,
 };
-use reth_revm_primitives::env::fill_tx_env_with_beacon_root_contract_call;
-use revm::{primitives::ResultAndState, Database, DatabaseCommit, EVM};
-use std::{collections::HashMap, fmt::Debug};
+use revm::{Database, DatabaseCommit, EVM};
+use std::collections::HashMap;
 
 /// Collect all balance changes at the end of the block.
 ///
@@ -61,51 +61,58 @@ pub fn apply_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
-    block_parent_beacon_block_root: Option<B256>,
+    parent_beacon_block_root: Option<B256>,
     evm: &mut EVM<DB>,
 ) -> Result<(), BlockExecutionError>
 where
-    <DB as Database>::Error: Debug,
+    DB::Error: std::fmt::Display,
 {
-    if chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
-        // if the block number is zero (genesis block) then the parent beacon block root must
-        // be 0x0 and no system transaction may occur as per EIP-4788
-        if block_number == 0 {
-            if block_parent_beacon_block_root != Some(B256::ZERO) {
-                return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero.into())
-            }
-        } else {
-            let parent_beacon_block_root = block_parent_beacon_block_root.ok_or(
-                BlockExecutionError::from(BlockValidationError::MissingParentBeaconBlockRoot),
-            )?;
-
-            // get previous env
-            let previous_env = evm.env.clone();
-
-            // modify env for pre block call
-            fill_tx_env_with_beacon_root_contract_call(&mut evm.env, parent_beacon_block_root);
-
-            let ResultAndState { mut state, .. } = match evm.transact() {
-                Ok(res) => res,
-                Err(e) => {
-                    evm.env = previous_env;
-                    return Err(BlockExecutionError::from(BlockValidationError::EVM {
-                        hash: Default::default(),
-                        message: format!("{e:?}"),
-                    }))
-                }
-            };
-
-            state.remove(&SYSTEM_ADDRESS);
-            state.remove(&evm.env.block.coinbase);
-
-            let db = evm.db().expect("db to not be moved");
-            db.commit(state);
-
-            // re-set the previous env
-            evm.env = previous_env;
-        }
+    if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
+        return Ok(())
     }
+
+    let parent_beacon_block_root =
+        parent_beacon_block_root.ok_or(BlockValidationError::MissingParentBeaconBlockRoot)?;
+
+    // if the block number is zero (genesis block) then the parent beacon block root must
+    // be 0x0 and no system transaction may occur as per EIP-4788
+    if block_number == 0 {
+        if parent_beacon_block_root != B256::ZERO {
+            return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
+                parent_beacon_block_root,
+            }
+            .into())
+        }
+        return Ok(())
+    }
+
+    // get previous env
+    let previous_env = evm.env.clone();
+
+    // modify env for pre block call
+    fill_tx_env_with_beacon_root_contract_call(&mut evm.env, parent_beacon_block_root);
+
+    let mut state = match evm.transact() {
+        Ok(res) => res.state,
+        Err(e) => {
+            evm.env = previous_env;
+            return Err(BlockValidationError::BeaconRootContractCall {
+                parent_beacon_block_root: Box::new(parent_beacon_block_root),
+                message: e.to_string(),
+            }
+            .into())
+        }
+    };
+
+    state.remove(&SYSTEM_ADDRESS);
+    state.remove(&evm.env.block.coinbase);
+
+    let db = evm.db().expect("db to not be moved");
+    db.commit(state);
+
+    // re-set the previous env
+    evm.env = previous_env;
+
     Ok(())
 }
 

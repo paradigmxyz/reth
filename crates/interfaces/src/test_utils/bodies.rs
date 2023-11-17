@@ -4,7 +4,6 @@ use crate::p2p::{
     error::PeerRequestResult,
     priority::Priority,
 };
-use async_trait::async_trait;
 use futures::{future, Future, FutureExt};
 use reth_primitives::{BlockBody, WithPeerId, B256};
 use std::{

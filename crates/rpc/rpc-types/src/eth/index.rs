@@ -1,4 +1,4 @@
-use reth_primitives::U256;
+use alloy_primitives::U256;
 use serde::{
     de::{Error, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,

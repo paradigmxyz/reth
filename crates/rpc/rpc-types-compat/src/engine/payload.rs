@@ -1,9 +1,9 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 use reth_primitives::{
-    constants::{MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
-    proofs::{self, EMPTY_LIST_HASH},
-    Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, B256, U256, U64,
+    constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
+    proofs::{self},
+    Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal, B256, U256,
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -23,7 +23,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
     let transactions = payload
         .transactions
         .into_iter()
-        .map(TransactionSigned::decode_enveloped)
+        .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
         .collect::<Result<Vec<_>, _>>()?;
     let transactions_root = proofs::calculate_transaction_root(&transactions);
 
@@ -35,10 +35,10 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         receipts_root: payload.receipts_root,
         withdrawals_root: None,
         logs_bloom: payload.logs_bloom,
-        number: payload.block_number.to(),
-        gas_limit: payload.gas_limit.to(),
-        gas_used: payload.gas_used.to(),
-        timestamp: payload.timestamp.to(),
+        number: payload.block_number,
+        gas_limit: payload.gas_limit,
+        gas_used: payload.gas_used,
+        timestamp: payload.timestamp,
         mix_hash: payload.prev_randao,
         base_fee_per_gas: Some(
             payload
@@ -51,7 +51,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         parent_beacon_block_root: None,
         extra_data: payload.extra_data,
         // Defaults
-        ommers_hash: EMPTY_LIST_HASH,
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         difficulty: Default::default(),
         nonce: Default::default(),
     };
@@ -81,8 +81,8 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
     // used and excess blob gas
     let mut base_block = try_payload_v2_to_block(payload.payload_inner)?;
 
-    base_block.header.blob_gas_used = Some(payload.blob_gas_used.to());
-    base_block.header.excess_blob_gas = Some(payload.excess_blob_gas.to());
+    base_block.header.blob_gas_used = Some(payload.blob_gas_used);
+    base_block.header.excess_blob_gas = Some(payload.excess_blob_gas);
 
     Ok(base_block)
 }
@@ -119,10 +119,10 @@ pub fn try_block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
         receipts_root: value.receipts_root,
         logs_bloom: value.logs_bloom,
         prev_randao: value.mix_hash,
-        block_number: U64::from(value.number),
-        gas_limit: U64::from(value.gas_limit),
-        gas_used: U64::from(value.gas_used),
-        timestamp: U64::from(value.timestamp),
+        block_number: value.number,
+        gas_limit: value.gas_limit,
+        gas_used: value.gas_used,
+        timestamp: value.timestamp,
         extra_data: value.extra_data.clone(),
         base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
         block_hash: value.hash(),
@@ -157,10 +157,10 @@ pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
             receipts_root: value.receipts_root,
             logs_bloom: value.logs_bloom,
             prev_randao: value.mix_hash,
-            block_number: U64::from(value.number),
-            gas_limit: U64::from(value.gas_limit),
-            gas_used: U64::from(value.gas_used),
-            timestamp: U64::from(value.timestamp),
+            block_number: value.number,
+            gas_limit: value.gas_limit,
+            gas_used: value.gas_used,
+            timestamp: value.timestamp,
             extra_data: value.extra_data.clone(),
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
             block_hash: value.hash(),
@@ -199,10 +199,10 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
                 receipts_root: value.receipts_root,
                 logs_bloom: value.logs_bloom,
                 prev_randao: value.mix_hash,
-                block_number: U64::from(value.number),
-                gas_limit: U64::from(value.gas_limit),
-                gas_used: U64::from(value.gas_used),
-                timestamp: U64::from(value.timestamp),
+                block_number: value.number,
+                gas_limit: value.gas_limit,
+                gas_used: value.gas_used,
+                timestamp: value.timestamp,
                 extra_data: value.extra_data.clone(),
                 base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
                 block_hash: value.hash(),
@@ -211,8 +211,8 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
             withdrawals,
         },
 
-        blob_gas_used: U64::from(value.blob_gas_used.unwrap_or_default()),
-        excess_blob_gas: U64::from(value.excess_blob_gas.unwrap_or_default()),
+        blob_gas_used: value.blob_gas_used.unwrap_or_default(),
+        excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
     }
 }
 
@@ -360,12 +360,40 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
     ExecutionPayloadBodyV1 { transactions: transactions.collect(), withdrawals: withdraw }
 }
 
+/// Transforms a [SealedBlock] into a [ExecutionPayloadV1]
+pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
+    let transactions = value
+        .body
+        .iter()
+        .map(|tx| {
+            let mut encoded = Vec::new();
+            tx.encode_enveloped(&mut encoded);
+            encoded.into()
+        })
+        .collect();
+    ExecutionPayloadV1 {
+        parent_hash: value.parent_hash,
+        fee_recipient: value.beneficiary,
+        state_root: value.state_root,
+        receipts_root: value.receipts_root,
+        logs_bloom: value.logs_bloom,
+        prev_randao: value.mix_hash,
+        block_number: value.number,
+        gas_limit: value.gas_limit,
+        gas_used: value.gas_used,
+        timestamp: value.timestamp,
+        extra_data: value.extra_data.clone(),
+        base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
+        block_hash: value.hash(),
+        transactions,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{hex, Bytes, U256, U64};
-    use reth_rpc_types::{engine::ExecutionPayloadV3, ExecutionPayloadV1, ExecutionPayloadV2};
-
     use super::{block_to_payload_v3, try_payload_v3_to_block};
+    use reth_primitives::{hex, Bytes, U256};
+    use reth_rpc_types::{engine::ExecutionPayloadV3, ExecutionPayloadV1, ExecutionPayloadV2};
 
     #[test]
     fn roundtrip_payload_to_block() {
@@ -376,13 +404,13 @@ mod tests {
             payload_inner: ExecutionPayloadV2 {
                 payload_inner: ExecutionPayloadV1 {
                     base_fee_per_gas:  U256::from(7u64),
-                    block_number: U64::from(0xa946u64),
+                    block_number: 0xa946u64,
                     block_hash: hex!("a5ddd3f286f429458a39cafc13ffe89295a7efa8eb363cf89a1a4887dbcf272b").into(),
                     logs_bloom: hex!("00200004000000000000000080000000000200000000000000000000000000000000200000000000000000000000000000000000800000000200000000000000000000000000000000000008000000200000000000000000000001000000000000000000000000000000800000000000000000000100000000000030000000000000000040000000000000000000000000000000000800080080404000000000000008000000000008200000000000200000000000000000000000000000000000000002000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000100000000000000000000").into(),
                     extra_data: hex!("d883010d03846765746888676f312e32312e31856c696e7578").into(),
-                    gas_limit: U64::from(0x1c9c380),
-                    gas_used: U64::from(0x1f4a9),
-                    timestamp: U64::from(0x651f35b8),
+                    gas_limit: 0x1c9c380,
+                    gas_used: 0x1f4a9,
+                    timestamp: 0x651f35b8,
                     fee_recipient: hex!("f97e180c050e5ab072211ad2c213eb5aee4df134").into(),
                     parent_hash: hex!("d829192799c73ef28a7332313b3c03af1f2d5da2c36f8ecfafe7a83a3bfb8d1e").into(),
                     prev_randao: hex!("753888cc4adfbeb9e24e01c84233f9d204f4a9e1273f0e29b43c4c148b2b8b7e").into(),
@@ -392,8 +420,8 @@ mod tests {
                 },
                 withdrawals: vec![],
             },
-            blob_gas_used: U64::from(0xc0000),
-            excess_blob_gas: U64::from(0x580000),
+            blob_gas_used: 0xc0000,
+            excess_blob_gas: 0x580000,
         };
 
         let mut block = try_payload_v3_to_block(new_payload.clone()).unwrap();
@@ -419,13 +447,13 @@ mod tests {
             payload_inner: ExecutionPayloadV2 {
                 payload_inner: ExecutionPayloadV1 {
                     base_fee_per_gas:  U256::from(7u64),
-                    block_number: U64::from(0xa946u64),
+                    block_number: 0xa946u64,
                     block_hash: hex!("a5ddd3f286f429458a39cafc13ffe89295a7efa8eb363cf89a1a4887dbcf272b").into(),
                     logs_bloom: hex!("00200004000000000000000080000000000200000000000000000000000000000000200000000000000000000000000000000000800000000200000000000000000000000000000000000008000000200000000000000000000001000000000000000000000000000000800000000000000000000100000000000030000000000000000040000000000000000000000000000000000800080080404000000000000008000000000008200000000000200000000000000000000000000000000000000002000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000100000000000000000000").into(),
                     extra_data: hex!("d883010d03846765746888676f312e32312e31856c696e7578").into(),
-                    gas_limit: U64::from(0x1c9c380),
-                    gas_used: U64::from(0x1f4a9),
-                    timestamp: U64::from(0x651f35b8),
+                    gas_limit: 0x1c9c380,
+                    gas_used: 0x1f4a9,
+                    timestamp: 0x651f35b8,
                     fee_recipient: hex!("f97e180c050e5ab072211ad2c213eb5aee4df134").into(),
                     parent_hash: hex!("d829192799c73ef28a7332313b3c03af1f2d5da2c36f8ecfafe7a83a3bfb8d1e").into(),
                     prev_randao: hex!("753888cc4adfbeb9e24e01c84233f9d204f4a9e1273f0e29b43c4c148b2b8b7e").into(),
@@ -435,8 +463,8 @@ mod tests {
                 },
                 withdrawals: vec![],
             },
-            blob_gas_used: U64::from(0xc0000),
-            excess_blob_gas: U64::from(0x580000),
+            blob_gas_used: 0xc0000,
+            excess_blob_gas: 0x580000,
         };
 
         let _block = try_payload_v3_to_block(new_payload.clone())

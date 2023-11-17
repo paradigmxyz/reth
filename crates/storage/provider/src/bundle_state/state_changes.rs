@@ -5,8 +5,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::db::DatabaseError;
-use reth_primitives::{Bytecode, StorageEntry, U256};
-use reth_revm_primitives::into_reth_acc;
+use reth_primitives::{revm::compat::into_reth_acc, Bytecode, StorageEntry, U256};
 use revm::db::states::{PlainStorageChangeset, StateChangeset};
 
 /// A change to the state of the world.

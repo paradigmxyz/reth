@@ -70,7 +70,13 @@ where
     /// Returns a reference to the value for a given key and promotes that element to be the most
     /// recently used.
     pub fn get(&mut self, key: &K) -> Option<&mut V> {
-        self.cache.get(key)
+        let entry = self.cache.get(key);
+        if entry.is_some() {
+            self.metrics.hits.increment(1);
+        } else {
+            self.metrics.misses.increment(1);
+        }
+        entry
     }
 
     /// Inserts a new element into the map.

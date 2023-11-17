@@ -26,11 +26,13 @@ pub use factory::Factory;
 
 /// reexport for convenience
 pub use reth_revm_inspectors::*;
-/// reexport for convenience
-pub use reth_revm_primitives::*;
 
 /// Re-export everything
 pub use revm::{self, *};
 
 /// Ethereum DAO hardfork state change data.
 pub mod eth_dao_fork;
+
+/// Optimism-specific implementation and utilities for the executor
+#[cfg(feature = "optimism")]
+pub mod optimism;

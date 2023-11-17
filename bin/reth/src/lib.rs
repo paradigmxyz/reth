@@ -15,6 +15,9 @@
 //!   calls to the logging component is made.
 //! - `min-debug-logs`: Disables all logs below `debug` level.
 //! - `min-trace-logs`: Disables all logs below `trace` level.
+//! - `optimism`: Enables [OP-Stack](https://stack.optimism.io/) support for the node. Note that
+//!   this breaks compatibility with the Ethereum mainnet as a new deposit transaction type is
+//!   introduced as well as gas cost changes.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

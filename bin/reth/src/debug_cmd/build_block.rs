@@ -1,6 +1,9 @@
 //! Command for debugging block building.
 use crate::{
-    args::{utils::genesis_value_parser, DatabaseArgs},
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
@@ -24,7 +27,6 @@ use reth_primitives::{
     stage::StageId,
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
     SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
-    U64,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
@@ -57,17 +59,11 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
@@ -156,7 +152,6 @@ impl Command {
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
-        let _tree_config = BlockchainTreeConfig::default();
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = ShareableBlockchainTree::new(tree);
 
@@ -202,27 +197,21 @@ impl Command {
                         "encountered a blob tx. `--blobs-bundle-path` must be provided"
                     ))?;
 
-                    let (commitments, proofs, blobs) =
-                        blobs_bundle.take(blob_versioned_hashes.len());
+                    let sidecar: BlobTransactionSidecar =
+                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len()).into();
 
                     // first construct the tx, calculating the length of the tx with sidecar before
                     // insertion
-                    let sidecar = BlobTransactionSidecar::new(
-                        blobs.clone(),
-                        commitments.clone(),
-                        proofs.clone(),
-                    );
-                    let tx =
-                        BlobTransaction::try_from_signed(transaction.as_ref().clone(), sidecar)
-                            .expect("should not fail to convert blob tx if it is already eip4844");
+                    let tx = BlobTransaction::try_from_signed(
+                        transaction.as_ref().clone(),
+                        sidecar.clone(),
+                    )
+                    .expect("should not fail to convert blob tx if it is already eip4844");
                     let pooled = PooledTransactionsElement::BlobTransaction(tx);
                     let encoded_length = pooled.length_without_header();
 
                     // insert the blob into the store
-                    blob_store.insert(
-                        transaction.hash,
-                        BlobTransactionSidecar { blobs, commitments, proofs },
-                    )?;
+                    blob_store.insert(transaction.hash, sidecar)?;
 
                     encoded_length
                 }
@@ -241,16 +230,21 @@ impl Command {
         let payload_attrs = PayloadAttributes {
             parent_beacon_block_root: self.parent_beacon_block_root,
             prev_randao: self.prev_randao,
-            timestamp: U64::from(self.timestamp),
+            timestamp: self.timestamp,
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: reth_rpc_types::engine::OptimismPayloadAttributes::default(
+            ),
         };
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            PayloadBuilderAttributes::new(best_block.hash, payload_attrs),
+            PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
             self.chain.clone(),
+            #[cfg(feature = "optimism")]
+            true,
         );
         let args = BuildArguments::new(
             blockchain_db.clone(),

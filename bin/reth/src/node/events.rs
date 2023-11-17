@@ -56,25 +56,36 @@ impl NodeState {
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
-            PipelineEvent::Running { pipeline_position, pipeline_total, stage_id, checkpoint } => {
+            PipelineEvent::Running { pipeline_stages_progress, stage_id, checkpoint } => {
                 let notable = self.current_stage.is_none();
                 self.current_stage = Some(stage_id);
                 self.current_checkpoint = checkpoint.unwrap_or_default();
 
                 if notable {
-                    info!(
-                        pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
-                        stage = %stage_id,
-                        from = self.current_checkpoint.block_number,
-                        checkpoint = %self.current_checkpoint,
-                        eta = %self.eta.fmt_for_stage(stage_id),
-                        "Executing stage",
-                    );
+                    if let Some(progress) = self.current_checkpoint.entities() {
+                        info!(
+                            pipeline_stages = %pipeline_stages_progress,
+                            stage = %stage_id,
+                            from = self.current_checkpoint.block_number,
+                            checkpoint = %self.current_checkpoint.block_number,
+                            %progress,
+                            eta = %self.eta.fmt_for_stage(stage_id),
+                            "Executing stage",
+                        );
+                    } else {
+                        info!(
+                            pipeline_stages = %pipeline_stages_progress,
+                            stage = %stage_id,
+                            from = self.current_checkpoint.block_number,
+                            checkpoint = %self.current_checkpoint.block_number,
+                            eta = %self.eta.fmt_for_stage(stage_id),
+                            "Executing stage",
+                        );
+                    }
                 }
             }
             PipelineEvent::Ran {
-                pipeline_position,
-                pipeline_total,
+                pipeline_stages_progress,
                 stage_id,
                 result: ExecOutput { checkpoint, done },
             } => {
@@ -84,19 +95,27 @@ impl NodeState {
                 }
                 self.eta.update(self.current_checkpoint);
 
-                info!(
-                    pipeline_stages = %format!("{pipeline_position}/{pipeline_total}"),
-                    stage = %stage_id,
-                    block = checkpoint.block_number,
-                    %checkpoint,
-                    eta = %self.eta.fmt_for_stage(stage_id),
-                    "{}",
-                    if done {
-                        "Stage finished executing"
-                    } else {
-                        "Stage committed progress"
-                    }
-                );
+                let message =
+                    if done { "Stage finished executing" } else { "Stage committed progress" };
+
+                if let Some(progress) = checkpoint.entities() {
+                    info!(
+                        pipeline_stages = %pipeline_stages_progress,
+                        stage = %stage_id,
+                        checkpoint = %checkpoint.block_number,
+                        %progress,
+                        eta = %self.eta.fmt_for_stage(stage_id),
+                        "{message}",
+                    );
+                } else {
+                    info!(
+                        pipeline_stages = %pipeline_stages_progress,
+                        stage = %stage_id,
+                        checkpoint = %checkpoint.block_number,
+                        eta = %self.eta.fmt_for_stage(stage_id),
+                        "{message}",
+                    );
+                }
 
                 if done {
                     self.current_stage = None;
@@ -254,15 +273,27 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            if let Some(stage_id) = this.state.current_stage {
-                info!(
-                    target: "reth::cli",
-                    connected_peers = this.state.num_connected_peers(),
-                    stage = %stage_id.to_string(),
-                    checkpoint = %this.state.current_checkpoint,
-                    eta = %this.state.eta.fmt_for_stage(stage_id),
-                    "Status"
-                );
+            if let Some(stage) = this.state.current_stage {
+                if let Some(progress) = this.state.current_checkpoint.entities() {
+                    info!(
+                        target: "reth::cli",
+                        connected_peers = this.state.num_connected_peers(),
+                        %stage,
+                        checkpoint = %this.state.current_checkpoint.block_number,
+                        %progress,
+                        eta = %this.state.eta.fmt_for_stage(stage),
+                        "Status"
+                    );
+                } else {
+                    info!(
+                        target: "reth::cli",
+                        connected_peers = this.state.num_connected_peers(),
+                        %stage,
+                        checkpoint = %this.state.current_checkpoint.block_number,
+                        eta = %this.state.eta.fmt_for_stage(stage),
+                        "Status"
+                    );
+                }
             } else {
                 info!(
                     target: "reth::cli",

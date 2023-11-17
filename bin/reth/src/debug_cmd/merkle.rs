@@ -1,6 +1,10 @@
 //! Command for debugging merkle trie calculation.
 use crate::{
-    args::{get_secret_key, utils::genesis_value_parser, DatabaseArgs, NetworkArgs},
+    args::{
+        get_secret_key,
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
     utils::get_single_header,
@@ -24,7 +28,7 @@ use reth_stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
-    ExecInput, PipelineError, Stage,
+    ExecInput, Stage,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -50,17 +54,11 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
@@ -123,7 +121,7 @@ impl Command {
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let provider_rw = factory.provider_rw()?;
 
         // Configure and build network
         let network_secret_path =

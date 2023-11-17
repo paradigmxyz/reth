@@ -50,28 +50,27 @@ pub enum DisconnectReason {
 impl Display for DisconnectReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
-            DisconnectReason::DisconnectRequested => "Disconnect requested",
+            DisconnectReason::DisconnectRequested => "disconnect requested",
             DisconnectReason::TcpSubsystemError => "TCP sub-system error",
             DisconnectReason::ProtocolBreach => {
-                "Breach of protocol, e.g. a malformed message, bad RLP, ..."
+                "breach of protocol, e.g. a malformed message, bad RLP, etc."
             }
-            DisconnectReason::UselessPeer => "Useless peer",
-            DisconnectReason::TooManyPeers => "Too many peers",
-            DisconnectReason::AlreadyConnected => "Already connected",
-            DisconnectReason::IncompatibleP2PProtocolVersion => "Incompatible P2P protocol version",
+            DisconnectReason::UselessPeer => "useless peer",
+            DisconnectReason::TooManyPeers => "too many peers",
+            DisconnectReason::AlreadyConnected => "already connected",
+            DisconnectReason::IncompatibleP2PProtocolVersion => "incompatible P2P protocol version",
             DisconnectReason::NullNodeIdentity => {
-                "Null node identity received - this is automatically invalid"
+                "null node identity received - this is automatically invalid"
             }
-            DisconnectReason::ClientQuitting => "Client quitting",
-            DisconnectReason::UnexpectedHandshakeIdentity => "Unexpected identity in handshake",
+            DisconnectReason::ClientQuitting => "client quitting",
+            DisconnectReason::UnexpectedHandshakeIdentity => "unexpected identity in handshake",
             DisconnectReason::ConnectedToSelf => {
-                "Identity is the same as this node (i.e. connected to itself)"
+                "identity is the same as this node (i.e. connected to itself)"
             }
-            DisconnectReason::PingTimeout => "Ping timeout",
-            DisconnectReason::SubprotocolSpecific => "Some other reason specific to a subprotocol",
+            DisconnectReason::PingTimeout => "ping timeout",
+            DisconnectReason::SubprotocolSpecific => "some other reason specific to a subprotocol",
         };
-
-        write!(f, "{message}")
+        f.write_str(message)
     }
 }
 

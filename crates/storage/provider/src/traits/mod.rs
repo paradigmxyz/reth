@@ -7,7 +7,10 @@ mod storage;
 pub use storage::StorageReader;
 
 mod block;
-pub use block::{BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter};
+pub use block::{
+    BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
+    TransactionVariant,
+};
 
 mod block_hash;
 pub use block_hash::BlockHashReader;
@@ -34,7 +37,7 @@ pub use state::{
 };
 
 mod transactions;
-pub use transactions::TransactionsProvider;
+pub use transactions::{TransactionsProvider, TransactionsProviderExt};
 
 mod withdrawals;
 pub use withdrawals::WithdrawalsProvider;

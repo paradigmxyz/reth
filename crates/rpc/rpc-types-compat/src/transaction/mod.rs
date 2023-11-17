@@ -1,12 +1,13 @@
 //! Compatibility functions for rpc `Transaction` type.
 mod signature;
+mod typed;
 use reth_primitives::{
-    AccessListItem, BlockNumber, Transaction as PrimitiveTransaction,
-    TransactionKind as PrimitiveTransactionKind, TransactionSignedEcRecovered, TxType, B256, U128,
-    U256, U64,
+    BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
+    TransactionSignedEcRecovered, TxType, B256, U128, U256, U64,
 };
-use reth_rpc_types::{CallInput, CallRequest, Transaction};
+use reth_rpc_types::{AccessListItem, CallInput, CallRequest, Transaction};
 use signature::from_primitive_signature;
+pub use typed::*;
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.
 ///
@@ -53,12 +54,16 @@ fn fill(
             // baseFee`
             let gas_price = base_fee
                 .and_then(|base_fee| {
-                    signed_tx.effective_tip_per_gas(base_fee).map(|tip| tip + base_fee as u128)
+                    signed_tx
+                        .effective_tip_per_gas(Some(base_fee))
+                        .map(|tip| tip + base_fee as u128)
                 })
                 .unwrap_or_else(|| signed_tx.max_fee_per_gas());
 
             (Some(U128::from(gas_price)), Some(U128::from(signed_tx.max_fee_per_gas())))
         }
+        #[cfg(feature = "optimism")]
+        TxType::DEPOSIT => (None, None),
     };
 
     let chain_id = signed_tx.chain_id().map(U64::from);
@@ -101,6 +106,8 @@ fn fill(
                     .collect(),
             )
         }
+        #[cfg(feature = "optimism")]
+        PrimitiveTransaction::Deposit(_) => None,
     };
 
     let signature =
@@ -126,11 +133,49 @@ fn fill(
         block_hash,
         block_number: block_number.map(U256::from),
         transaction_index,
-
         // EIP-4844 fields
         max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas().map(U128::from),
         blob_versioned_hashes,
+        // Optimism fields
+        #[cfg(feature = "optimism")]
+        optimism: reth_rpc_types::OptimismTransactionFields {
+            source_hash: signed_tx.source_hash(),
+            mint: signed_tx.mint().map(U128::from),
+            is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
+        },
     }
+}
+
+/// Convert [reth_primitives::AccessList] to [reth_rpc_types::AccessList]
+pub fn from_primitive_access_list(
+    access_list: reth_primitives::AccessList,
+) -> reth_rpc_types::AccessList {
+    reth_rpc_types::AccessList(
+        access_list
+            .0
+            .into_iter()
+            .map(|item| reth_rpc_types::AccessListItem {
+                address: item.address.0.into(),
+                storage_keys: item.storage_keys.into_iter().map(|key| key.0.into()).collect(),
+            })
+            .collect(),
+    )
+}
+
+/// Convert [reth_rpc_types::AccessList] to [reth_primitives::AccessList]
+pub fn to_primitive_access_list(
+    access_list: reth_rpc_types::AccessList,
+) -> reth_primitives::AccessList {
+    reth_primitives::AccessList(
+        access_list
+            .0
+            .into_iter()
+            .map(|item| reth_primitives::AccessListItem {
+                address: item.address.0.into(),
+                storage_keys: item.storage_keys.into_iter().map(|key| key.0.into()).collect(),
+            })
+            .collect(),
+    )
 }
 
 /// Convert [TransactionSignedEcRecovered] to [CallRequest]
@@ -142,7 +187,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequ
     let input = tx.transaction.input().clone();
     let nonce = tx.transaction.nonce();
     let chain_id = tx.transaction.chain_id();
-    let access_list = tx.transaction.access_list().cloned();
+    let access_list = tx.transaction.access_list().cloned().map(from_primitive_access_list);
     let max_fee_per_blob_gas = tx.transaction.max_fee_per_blob_gas();
     let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
     let tx_type = tx.transaction.tx_type();

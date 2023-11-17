@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Reth node implementation
-"""
+description = "Reth node implementation"
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
@@ -18,39 +16,39 @@ normal = [
 
 [dependencies]
 # reth
-reth-config = { path = "../../crates/config" }
+reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-revm = { path = "../../crates/revm" }
-reth-revm-inspectors = { path = "../../crates/revm/revm-inspectors" }
-reth-stages = { path = "../../crates/stages" }
+reth-revm.workspace = true
+reth-revm-inspectors.workspace = true
+reth-stages.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils", "clap"] }
 reth-transaction-pool.workspace = true
-reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
-reth-auto-seal-consensus = { path = "../../crates/consensus/auto-seal" }
-reth-consensus-common = { path = "../../crates/consensus/common" }
-reth-blockchain-tree = { path = "../../crates/blockchain-tree" }
-reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
-reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
-reth-rpc = { path = "../../crates/rpc/rpc" }
-reth-rpc-types = { path = "../../crates/rpc/rpc-types" }
-reth-rpc-types-compat = { path = "../../crates/rpc/rpc-types-compat" }
-reth-rpc-api = { path = "../../crates/rpc/rpc-api", features = ["client"] }
-reth-network = { path = "../../crates/net/network", features = ["serde"] }
+reth-beacon-consensus.workspace = true
+reth-auto-seal-consensus.workspace = true
+reth-consensus-common.workspace = true
+reth-blockchain-tree.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-rpc-builder.workspace = true
+reth-rpc.workspace = true
+reth-rpc-types.workspace = true
+reth-rpc-types-compat.workspace = true
+reth-rpc-api = { workspace = true, features = ["client"] }
+reth-network = { workspace = true, features = ["serde"] }
 reth-network-api.workspace = true
-reth-downloaders = { path = "../../crates/net/downloaders", features = ["test-utils"] }
+reth-downloaders = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-tasks.workspace = true
-reth-net-nat = { path = "../../crates/net/nat" }
+reth-net-nat.workspace = true
 reth-payload-builder.workspace = true
-reth-basic-payload-builder = { path = "../../crates/payload/basic" }
-reth-discv4 = { path = "../../crates/net/discv4" }
-reth-prune = { path = "../../crates/prune" }
-reth-snapshot = { path = "../../crates/snapshot", features = ["clap"] }
-reth-trie = { path = "../../crates/trie" }
-reth-nippy-jar = { path = "../../crates/storage/nippy-jar" }
+reth-basic-payload-builder.workspace = true
+reth-discv4.workspace = true
+reth-prune.workspace = true
+reth-snapshot = { workspace = true, features = ["clap"] }
+reth-trie.workspace = true
+reth-nippy-jar.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
@@ -119,6 +117,30 @@ min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-revm/optimism",
+    "reth-interfaces/optimism",
+    "reth-rpc/optimism",
+    "reth-rpc-engine-api/optimism",
+    "reth-transaction-pool/optimism",
+    "reth-provider/optimism",
+    "reth-beacon-consensus/optimism",
+    "reth-basic-payload-builder/optimism",
+    "reth-network/optimism",
+    "reth-network-api/optimism",
+]
+# no-op feature flag for switching between the `optimism` and default functionality in CI matrices
+ethereum = []
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
+
+[[bin]]
+name = "reth"
+path = "src/main.rs"
+
+[[bin]]
+name = "op-reth"
+path = "src/optimism.rs"
+required-features = ["optimism"]

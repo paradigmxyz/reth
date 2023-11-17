@@ -2,7 +2,11 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::{get_secret_key, utils::chain_spec_value_parser, DatabaseArgs, NetworkArgs, StageEnum},
+    args::{
+        get_secret_key,
+        utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs, StageEnum,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
     version::SHORT_VERSION,
@@ -20,7 +24,7 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, ExecOutput, PipelineError, Stage, UnwindInput,
+    ExecInput, ExecOutput, Stage, UnwindInput,
 };
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -45,18 +49,12 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
-    long,
-    value_name = "CHAIN_OR_PATH",
-    verbatim_doc_comment,
-    default_value = "mainnet",
-    value_parser = chain_spec_value_parser
+        long,
+        value_name = "CHAIN_OR_PATH",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
+        value_parser = chain_spec_value_parser
     )]
     chain: Arc<ChainSpec>,
 
@@ -127,12 +125,13 @@ impl Command {
         info!(target: "reth::cli", "Database opened");
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
-            prometheus_exporter::initialize(
+            prometheus_exporter::serve(
                 listen_addr,
+                prometheus_exporter::install_recorder()?,
                 Arc::clone(&db),
                 metrics_process::Collector::default(),
             )
@@ -248,7 +247,7 @@ impl Command {
 
                 if self.commit {
                     provider_rw.commit()?;
-                    provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                    provider_rw = factory.provider_rw()?;
                 }
             }
         }
@@ -265,7 +264,7 @@ impl Command {
 
             if self.commit {
                 provider_rw.commit()?;
-                provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                provider_rw = factory.provider_rw()?;
             }
         }
 

@@ -10,7 +10,10 @@ use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_provider::{ProviderFactory, StageCheckpointReader};
 
-use crate::args::{utils::genesis_value_parser, DatabaseArgs};
+use crate::args::{
+    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    DatabaseArgs,
+};
 use reth_config::Config;
 use reth_db::{database::Database, init_db};
 use reth_downloaders::{
@@ -50,17 +53,11 @@ pub struct ImportCommand {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
@@ -117,7 +114,7 @@ impl ImportCommand {
         debug!(target: "reth::cli", ?tip, "Tip manually set");
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider = factory.provider().map_err(PipelineError::Interface)?;
+        let provider = factory.provider()?;
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
@@ -216,7 +213,7 @@ mod tests {
 
     #[test]
     fn parse_common_import_command_chain_args() {
-        for chain in ["mainnet", "sepolia", "goerli"] {
+        for chain in SUPPORTED_CHAINS {
             let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }

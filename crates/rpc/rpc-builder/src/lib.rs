@@ -18,16 +18,33 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
-//! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
+//! use reth_provider::{
+//!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+//!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
+//! };
+//! use reth_rpc_builder::{
+//!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
+//! };
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
-//! pub async fn launch<Provider, Pool, Network, Events>(provider: Provider, pool: Pool, network: Network, events: Events)
-//! where
-//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//! pub async fn launch<Provider, Pool, Network, Events>(
+//!     provider: Provider,
+//!     pool: Pool,
+//!     network: Network,
+//!     events: Events,
+//! ) where
+//!     Provider: AccountReader
+//!         + BlockReaderIdExt
+//!         + ChainSpecProvider
+//!         + ChangeSetReader
+//!         + StateProviderFactory
+//!         + EvmEnvProvider
+//!         + Clone
+//!         + Unpin
+//!         + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events: CanonStateSubscriptions +  Clone + 'static,
+//!     Events: CanonStateSubscriptions + Clone + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -36,7 +53,9 @@
 //!         RethRpcModule::Eth,
 //!         RethRpcModule::Web3,
 //!     ]);
-//!     let transport_modules = RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events).build(transports);
+//!     let transport_modules =
+//!         RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events)
+//!             .build(transports);
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(transport_modules)
@@ -49,22 +68,40 @@
 //!
 //!
 //! ```
-//! use tokio::try_join;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{AccountReader, BlockReaderIdExt, ChainSpecProvider, CanonStateSubscriptions, StateProviderFactory, EvmEnvProvider, ChangeSetReader};
+//! use reth_provider::{
+//!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+//!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
+//! };
 //! use reth_rpc::JwtSecret;
-//! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
+//! use reth_rpc_api::EngineApiServer;
+//! use reth_rpc_builder::{
+//!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
+//!     TransportRpcModuleConfig,
+//! };
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
-//! use reth_rpc_api::EngineApiServer;
-//! use reth_rpc_builder::auth::AuthServerConfig;
-//! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(provider: Provider, pool: Pool, network: Network, events: Events, engine_api: EngineApi)
-//! where
-//!     Provider: AccountReader + BlockReaderIdExt + ChainSpecProvider + ChangeSetReader + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//! use tokio::try_join;
+//! pub async fn launch<Provider, Pool, Network, Events, EngineApi>(
+//!     provider: Provider,
+//!     pool: Pool,
+//!     network: Network,
+//!     events: Events,
+//!     engine_api: EngineApi,
+//! ) where
+//!     Provider: AccountReader
+//!         + BlockReaderIdExt
+//!         + ChainSpecProvider
+//!         + ChangeSetReader
+//!         + StateProviderFactory
+//!         + EvmEnvProvider
+//!         + Clone
+//!         + Unpin
+//!         + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events: CanonStateSubscriptions +  Clone + 'static,
-//!     EngineApi: EngineApiServer
+//!     Events: CanonStateSubscriptions + Clone + 'static,
+//!     EngineApi: EngineApiServer,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -73,20 +110,20 @@
 //!         RethRpcModule::Eth,
 //!         RethRpcModule::Web3,
 //!     ]);
-//!     let builder = RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
+//!     let builder =
+//!         RpcModuleBuilder::new(provider, pool, network, TokioTaskExecutor::default(), events);
 //!
-//!   // configure the server modules
-//!    let (modules, auth_module, _registry) = builder.build_with_auth_server(transports, engine_api);
+//!     // configure the server modules
+//!     let (modules, auth_module, _registry) =
+//!         builder.build_with_auth_server(transports, engine_api);
 //!
-//!   // start the servers
-//!   let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
-//!   let config = RpcServerConfig::default();
+//!     // start the servers
+//!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
+//!     let config = RpcServerConfig::default();
 //!
-//!   let (_rpc_handle, _auth_handle) = try_join!(
-//!         modules.start_server(config),
-//!         auth_module.start_server(auth_config),
-//!  ).unwrap();
-//!
+//!     let (_rpc_handle, _auth_handle) =
+//!         try_join!(modules.start_server(config), auth_module.start_server(auth_config),)
+//!             .unwrap();
 //! }
 //! ```
 
@@ -99,15 +136,31 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics};
-use constants::*;
-use error::{RpcError, ServerKind};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    str::FromStr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use hyper::{header::AUTHORIZATION, HeaderMap};
+pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
+use serde::{Deserialize, Serialize, Serializer};
+use strum::{AsRefStr, EnumVariantNames, ParseError, VariantNames};
+use tower::layer::util::{Identity, Stack};
+use tower_http::cors::CorsLayer;
+use tracing::{instrument, trace};
+
+use constants::*;
+use error::{RpcError, ServerKind};
 use reth_ipc::server::IpcServer;
-use reth_network_api::{NetworkInfo, Peers};
+pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -116,25 +169,22 @@ use reth_rpc::{
     eth::{
         cache::{cache_new_blocks_task, EthStateCache},
         gas_oracle::GasPriceOracle,
+        EthBundle,
     },
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TracingCallGuard, TracingCallPool, TxPoolApi,
-    Web3Api,
+    AdminApi, AuthLayer, BlockingTaskGuard, BlockingTaskPool, Claims, DebugApi, EngineEthApi,
+    EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
+    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::TransactionPool;
-use serde::{Deserialize, Serialize, Serializer};
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    str::FromStr,
+use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
+
+use crate::{
+    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
+    RpcModuleSelection::Selection,
 };
-use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
-use tower::layer::util::{Identity, Stack};
-use tower_http::cors::CorsLayer;
-use tracing::{instrument, trace};
+// re-export for convenience
+pub use crate::eth::{EthConfig, EthHandlers};
 
 /// Auth server utilities.
 pub mod auth;
@@ -153,13 +203,6 @@ pub mod constants;
 
 // Rpc server metrics
 mod metrics;
-
-// re-export for convenience
-pub use crate::eth::{EthConfig, EthHandlers};
-pub use jsonrpsee::server::ServerBuilder;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
-use reth_network_api::noop::NoopNetwork;
-use reth_transaction_pool::noop::NoopTransactionPool;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Provider, Pool, Network, Tasks, Events>(
@@ -513,19 +556,25 @@ impl RpcModuleSelection {
     /// Create a selection from the [RethRpcModule] string identifiers
     ///
     /// ```
-    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// assert_eq!(
+    ///     config,
+    ///     RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
+    /// );
     /// ```
     ///
     /// Create a unique selection from the [RethRpcModule] string identifiers
     ///
     /// ```
-    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin", "eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// assert_eq!(
+    ///     config,
+    ///     RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
+    /// );
     /// ```
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
@@ -634,10 +683,14 @@ impl FromStr for RpcModuleSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Ok(Selection(vec![]))
+        }
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
         match first {
             "all" | "All" => Ok(RpcModuleSelection::All),
+            "none" | "None" => Ok(Selection(vec![])),
             _ => RpcModuleSelection::try_from_selection(modules),
         }
     }
@@ -654,9 +707,7 @@ impl fmt::Display for RpcModuleSelection {
 }
 
 /// Represents RPC modules that are supported by reth
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, EnumString, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum RethRpcModule {
@@ -680,6 +731,11 @@ pub enum RethRpcModule {
     Reth,
     /// `ots_` module
     Ots,
+    /// For single non-standard `eth_` namespace call `eth_callBundle`
+    ///
+    /// This is separate from [RethRpcModule::Eth] because it is a non standardized call that
+    /// should be opt-in.
+    EthCallBundle,
 }
 
 // === impl RethRpcModule ===
@@ -688,6 +744,34 @@ impl RethRpcModule {
     /// Returns all variants of the enum
     pub const fn all_variants() -> &'static [&'static str] {
         Self::VARIANTS
+    }
+}
+
+impl FromStr for RethRpcModule {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "admin" => RethRpcModule::Admin,
+            "debug" => RethRpcModule::Debug,
+            "eth" => RethRpcModule::Eth,
+            "net" => RethRpcModule::Net,
+            "trace" => RethRpcModule::Trace,
+            "txpool" => RethRpcModule::Txpool,
+            "web3" => RethRpcModule::Web3,
+            "rpc" => RethRpcModule::Rpc,
+            "reth" => RethRpcModule::Reth,
+            "ots" => RethRpcModule::Ots,
+            "eth-call-bundle" | "eth_callBundle" => RethRpcModule::EthCallBundle,
+            _ => return Err(ParseError::VariantNotFound),
+        })
+    }
+}
+
+impl TryFrom<&str> for RethRpcModule {
+    type Error = ParseError;
+    fn try_from(s: &str) -> Result<RethRpcModule, <Self as TryFrom<&str>>::Error> {
+        FromStr::from_str(s)
     }
 }
 
@@ -719,7 +803,7 @@ pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
     /// Holds a clone of all the eth namespace handlers
     eth: Option<EthHandlers<Provider, Pool, Network, Events>>,
     /// to put trace calls behind semaphore
-    tracing_call_guard: TracingCallGuard,
+    blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
     modules: HashMap<RethRpcModule, Methods>,
 }
@@ -745,7 +829,7 @@ impl<Provider, Pool, Network, Tasks, Events>
             eth: None,
             executor,
             modules: Default::default(),
-            tracing_call_guard: TracingCallGuard::new(config.eth.max_tracing_requests),
+            blocking_pool_guard: BlockingTaskGuard::new(config.eth.max_tracing_requests),
             config,
             events,
         }
@@ -927,7 +1011,7 @@ where
             filter: eth_filter,
             pubsub: eth_pubsub,
             cache: _,
-            tracing_call_pool: _,
+            blocking_task_pool: _,
         } = self.with_eth(|eth| eth.clone());
 
         // Create a copy, so we can list out all the methods for rpc_ api
@@ -946,7 +1030,7 @@ where
                             self.provider.clone(),
                             eth_api.clone(),
                             Box::new(self.executor.clone()),
-                            self.tracing_call_guard.clone(),
+                            self.blocking_pool_guard.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -964,7 +1048,7 @@ where
                         RethRpcModule::Trace => TraceApi::new(
                             self.provider.clone(),
                             eth_api.clone(),
-                            self.tracing_call_guard.clone(),
+                            self.blocking_pool_guard.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -983,6 +1067,11 @@ where
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                         RethRpcModule::Reth => {
                             RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
+                                .into_rpc()
+                                .into()
+                        }
+                        RethRpcModule::EthCallBundle => {
+                            EthBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
                                 .into()
                         }
@@ -1026,7 +1115,8 @@ where
             );
 
             let executor = Box::new(self.executor.clone());
-            let tracing_call_pool = TracingCallPool::build().expect("failed to build tracing pool");
+            let blocking_task_pool =
+                BlockingTaskPool::build().expect("failed to build tracing pool");
             let api = EthApi::with_spawner(
                 self.provider.clone(),
                 self.pool.clone(),
@@ -1035,13 +1125,13 @@ where
                 gas_oracle,
                 self.config.eth.rpc_gas_cap,
                 executor.clone(),
-                tracing_call_pool.clone(),
+                blocking_task_pool.clone(),
             );
             let filter = EthFilter::new(
                 self.provider.clone(),
                 self.pool.clone(),
                 cache.clone(),
-                self.config.eth.max_logs_per_response,
+                self.config.eth.filter_config(),
                 executor.clone(),
             );
 
@@ -1053,7 +1143,7 @@ where
                 executor,
             );
 
-            let eth = EthHandlers { api, cache, filter, pubsub, tracing_call_pool };
+            let eth = EthHandlers { api, cache, filter, pubsub, blocking_task_pool };
             self.eth = Some(eth);
         }
         f(self.eth.as_ref().expect("exists; qed"))
@@ -1071,7 +1161,13 @@ where
     /// Instantiates TraceApi
     pub fn trace_api(&mut self) -> TraceApi<Provider, EthApi<Provider, Pool, Network>> {
         let eth = self.eth_handlers();
-        TraceApi::new(self.provider.clone(), eth.api, self.tracing_call_guard.clone())
+        TraceApi::new(self.provider.clone(), eth.api, self.blocking_pool_guard.clone())
+    }
+
+    /// Instantiates [EthBundle] Api
+    pub fn bundle_api(&mut self) -> EthBundle<EthApi<Provider, Pool, Network>> {
+        let eth_api = self.eth_api();
+        EthBundle::new(eth_api, self.blocking_pool_guard.clone())
     }
 
     /// Instantiates OtterscanApi
@@ -1087,7 +1183,7 @@ where
             self.provider.clone(),
             eth_api,
             Box::new(self.executor.clone()),
-            self.tracing_call_guard.clone(),
+            self.blocking_pool_guard.clone(),
         )
     }
 
@@ -1132,6 +1228,8 @@ pub struct RpcServerConfig {
     ipc_server_config: Option<IpcServerBuilder>,
     /// The Endpoint where to launch the ipc server
     ipc_endpoint: Option<Endpoint>,
+    /// JWT secret for authentication
+    jwt_secret: Option<JwtSecret>,
 }
 
 impl fmt::Debug for RpcServerConfig {
@@ -1144,6 +1242,7 @@ impl fmt::Debug for RpcServerConfig {
             .field("ws_addr", &self.ws_addr)
             .field("ipc_server_config", &self.ipc_server_config)
             .field("ipc_endpoint", &self.ipc_endpoint.as_ref().map(|endpoint| endpoint.path()))
+            .field("jwt_secret", &self.jwt_secret)
             .finish()
     }
 }
@@ -1255,6 +1354,12 @@ impl RpcServerConfig {
         self
     }
 
+    /// Configures the JWT secret for authentication.
+    pub fn with_jwt_secret(mut self, secret: Option<JwtSecret>) -> Self {
+        self.jwt_secret = secret;
+        self
+    }
+
     /// Returns true if any server is configured.
     ///
     /// If no server is configured, no server will be be launched on [RpcServerConfig::start].
@@ -1281,22 +1386,26 @@ impl RpcServerConfig {
 
     /// Convenience function to do [RpcServerConfig::build] and [RpcServer::start] in one step
     pub async fn start(self, modules: TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
-        self.build().await?.start(modules).await
+        self.build(&modules).await?.start(modules).await
     }
 
     /// Builds the ws and http server(s).
     ///
     /// If both are on the same port, they are combined into one server.
-    async fn build_ws_http(&mut self) -> Result<WsHttpServer, RpcError> {
+    async fn build_ws_http(
+        &mut self,
+        modules: &TransportRpcModules,
+    ) -> Result<WsHttpServer, RpcError> {
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::LOCALHOST,
             DEFAULT_HTTP_RPC_PORT,
         )));
+        let jwt_secret = self.jwt_secret.clone();
 
         let ws_socket_addr = self
             .ws_addr
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
-        let metrics = RpcServerMetrics::default();
+
         // If both are configured on the same port, we combine them into one server.
         if self.http_addr == self.ws_addr &&
             self.http_server_config.is_some() &&
@@ -1319,22 +1428,33 @@ impl RpcServerConfig {
             }
             .cloned();
 
+            let secret = self.jwt_secret.clone();
+
             // we merge this into one server using the http setup
             self.ws_server_config.take();
+
+            modules.config.ensure_ws_http_identical()?;
 
             let builder = self.http_server_config.take().expect("is set; qed");
             let (server, addr) = WsHttpServerKind::build(
                 builder,
                 http_socket_addr,
                 cors,
+                secret,
                 ServerKind::WsHttp(http_socket_addr),
-                metrics.clone(),
+                modules
+                    .http
+                    .as_ref()
+                    .or(modules.ws.as_ref())
+                    .map(RpcServerMetrics::new)
+                    .unwrap_or_default(),
             )
             .await?;
             return Ok(WsHttpServer {
                 http_local_addr: Some(addr),
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
+                jwt_secret,
             })
         }
 
@@ -1349,8 +1469,9 @@ impl RpcServerConfig {
                 builder,
                 ws_socket_addr,
                 self.ws_cors_domains.take(),
+                self.jwt_secret.clone(),
                 ServerKind::WS(ws_socket_addr),
-                metrics.clone(),
+                modules.ws.as_ref().map(RpcServerMetrics::new).unwrap_or_default(),
             )
             .await?;
             ws_local_addr = Some(addr);
@@ -1363,8 +1484,9 @@ impl RpcServerConfig {
                 builder,
                 http_socket_addr,
                 self.http_cors_domains.take(),
+                self.jwt_secret.clone(),
                 ServerKind::Http(http_socket_addr),
-                metrics.clone(),
+                modules.http.as_ref().map(RpcServerMetrics::new).unwrap_or_default(),
             )
             .await?;
             http_local_addr = Some(addr);
@@ -1375,6 +1497,7 @@ impl RpcServerConfig {
             http_local_addr,
             ws_local_addr,
             server: WsHttpServers::DifferentPort { http: http_server, ws: ws_server },
+            jwt_secret,
         })
     }
 
@@ -1383,15 +1506,16 @@ impl RpcServerConfig {
     /// This consumes the builder and returns a server.
     ///
     /// Note: The server ist not started and does nothing unless polled, See also [RpcServer::start]
-    pub async fn build(mut self) -> Result<RpcServer, RpcError> {
+    pub async fn build(mut self, modules: &TransportRpcModules) -> Result<RpcServer, RpcError> {
         let mut server = RpcServer::empty();
-        server.ws_http = self.build_ws_http().await?;
+        server.ws_http = self.build_ws_http(modules).await?;
 
         if let Some(builder) = self.ipc_server_config {
+            let metrics = modules.ipc.as_ref().map(RpcServerMetrics::new).unwrap_or_default();
             let ipc_path = self
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
-            let ipc = builder.build(ipc_path.path())?;
+            let ipc = builder.set_logger(metrics).build(ipc_path.path())?;
             server.ipc = Some(ipc);
         }
 
@@ -1407,8 +1531,8 @@ impl RpcServerConfig {
 ///
 /// ```
 /// use reth_rpc_builder::{RethRpcModule, TransportRpcModuleConfig};
-///  let config = TransportRpcModuleConfig::default()
-///       .with_http([RethRpcModule::Eth, RethRpcModule::Admin]);
+/// let config =
+///     TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth, RethRpcModule::Admin]);
 /// ```
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct TransportRpcModuleConfig {
@@ -1594,6 +1718,8 @@ struct WsHttpServer {
     ws_local_addr: Option<SocketAddr>,
     /// Configured ws,http servers
     server: WsHttpServers,
+    /// The jwt secret.
+    jwt_secret: Option<JwtSecret>,
 }
 
 /// Enum for holding the http and ws servers in all possible combinations.
@@ -1658,6 +1784,12 @@ enum WsHttpServerKind {
     Plain(Server<Identity, RpcServerMetrics>),
     /// Http server with cors
     WithCors(Server<Stack<CorsLayer, Identity>, RpcServerMetrics>),
+    /// Http server with auth
+    WithAuth(Server<Stack<AuthLayer<JwtAuthValidator>, Identity>, RpcServerMetrics>),
+    /// Http server with cors and auth
+    WithCorsAuth(
+        Server<Stack<AuthLayer<JwtAuthValidator>, Stack<CorsLayer, Identity>>, RpcServerMetrics>,
+    ),
 }
 
 // === impl WsHttpServerKind ===
@@ -1668,30 +1800,69 @@ impl WsHttpServerKind {
         match self {
             WsHttpServerKind::Plain(server) => server.start(module),
             WsHttpServerKind::WithCors(server) => server.start(module),
+            WsHttpServerKind::WithAuth(server) => server.start(module),
+            WsHttpServerKind::WithCorsAuth(server) => server.start(module),
         }
     }
 
-    /// Builds
+    /// Builds the server according to the given config parameters.
+    ///
+    /// Returns the address of the started server.
     async fn build(
         builder: ServerBuilder,
         socket_addr: SocketAddr,
         cors_domains: Option<String>,
+        jwt_secret: Option<JwtSecret>,
         server_kind: ServerKind,
         metrics: RpcServerMetrics,
     ) -> Result<(Self, SocketAddr), RpcError> {
         if let Some(cors) = cors_domains.as_deref().map(cors::create_cors_layer) {
             let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
-            let middleware = tower::ServiceBuilder::new().layer(cors);
+
+            if let Some(secret) = jwt_secret {
+                // stack cors and auth layers
+                let middleware = tower::ServiceBuilder::new()
+                    .layer(cors)
+                    .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+
+                let server = builder
+                    .set_middleware(middleware)
+                    .set_logger(metrics)
+                    .build(socket_addr)
+                    .await
+                    .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind))?;
+                let local_addr = server.local_addr()?;
+                let server = WsHttpServerKind::WithCorsAuth(server);
+                Ok((server, local_addr))
+            } else {
+                let middleware = tower::ServiceBuilder::new().layer(cors);
+                let server = builder
+                    .set_middleware(middleware)
+                    .set_logger(metrics)
+                    .build(socket_addr)
+                    .await
+                    .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind))?;
+                let local_addr = server.local_addr()?;
+                let server = WsHttpServerKind::WithCors(server);
+                Ok((server, local_addr))
+            }
+        } else if let Some(secret) = jwt_secret {
+            // jwt auth layered service
+            let middleware = tower::ServiceBuilder::new()
+                .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
             let server = builder
                 .set_middleware(middleware)
                 .set_logger(metrics)
                 .build(socket_addr)
                 .await
-                .map_err(|err| RpcError::from_jsonrpsee_error(err, server_kind))?;
+                .map_err(|err| {
+                    RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr))
+                })?;
             let local_addr = server.local_addr()?;
-            let server = WsHttpServerKind::WithCors(server);
+            let server = WsHttpServerKind::WithAuth(server);
             Ok((server, local_addr))
         } else {
+            // plain server without any middleware
             let server = builder
                 .set_logger(metrics)
                 .build(socket_addr)
@@ -1709,7 +1880,7 @@ pub struct RpcServer {
     /// Configured ws,http servers
     ws_http: WsHttpServer,
     /// ipc server
-    ipc: Option<IpcServer>,
+    ipc: Option<IpcServer<Identity, RpcServerMetrics>>,
 }
 
 // === impl RpcServer ===
@@ -1722,6 +1893,10 @@ impl RpcServer {
     /// Returns the [`SocketAddr`] of the http server if started.
     pub fn http_local_addr(&self) -> Option<SocketAddr> {
         self.ws_http.http_local_addr
+    }
+    /// Return the JwtSecret of the the server
+    pub fn jwt(&self) -> Option<JwtSecret> {
+        self.ws_http.jwt_secret.clone()
     }
 
     /// Returns the [`SocketAddr`] of the ws server if started.
@@ -1750,6 +1925,7 @@ impl RpcServer {
             ws: None,
             ipc_endpoint: None,
             ipc: None,
+            jwt_secret: None,
         };
 
         let (http, ws) = ws_http.server.start(http, ws, &config).await?;
@@ -1790,11 +1966,28 @@ pub struct RpcServerHandle {
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
     ipc: Option<ServerHandle>,
+    jwt_secret: Option<JwtSecret>,
 }
 
 // === impl RpcServerHandle ===
 
 impl RpcServerHandle {
+    /// Configures the JWT secret for authentication.
+    fn bearer_token(&self) -> Option<String> {
+        self.jwt_secret.as_ref().map(|secret| {
+            format!(
+                "Bearer {}",
+                secret
+                    .encode(&Claims {
+                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
+                            Duration::from_secs(60))
+                        .as_secs(),
+                        exp: None,
+                    })
+                    .unwrap()
+            )
+        })
+    }
     /// Returns the [`SocketAddr`] of the http server if started.
     pub fn http_local_addr(&self) -> Option<SocketAddr> {
         self.http_local_addr
@@ -1840,19 +2033,28 @@ impl RpcServerHandle {
     /// Returns a http client connected to the server.
     pub fn http_client(&self) -> Option<jsonrpsee::http_client::HttpClient> {
         let url = self.http_url()?;
-        let client = jsonrpsee::http_client::HttpClientBuilder::default()
-            .build(url)
-            .expect("Failed to create http client");
-        Some(client)
-    }
 
+        let client = if let Some(token) = self.bearer_token() {
+            jsonrpsee::http_client::HttpClientBuilder::default()
+                .set_headers(HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]))
+                .build(url)
+        } else {
+            jsonrpsee::http_client::HttpClientBuilder::default().build(url)
+        };
+
+        client.expect("failed to create http client").into()
+    }
     /// Returns a ws client connected to the server.
     pub async fn ws_client(&self) -> Option<jsonrpsee::ws_client::WsClient> {
         let url = self.ws_url()?;
-        let client = jsonrpsee::ws_client::WsClientBuilder::default()
-            .build(url)
-            .await
-            .expect("Failed to create ws client");
+        let mut builder = jsonrpsee::ws_client::WsClientBuilder::default();
+
+        if let Some(token) = self.bearer_token() {
+            let headers = HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]);
+            builder = builder.set_headers(headers);
+        }
+
+        let client = builder.build(url).await.expect("failed to create ws client");
         Some(client)
     }
 }
@@ -1872,9 +2074,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_eth_call_bundle() {
+        let selection = "eth-call-bundle".parse::<RethRpcModule>().unwrap();
+        assert_eq!(selection, RethRpcModule::EthCallBundle);
+        let selection = "eth_callBundle".parse::<RethRpcModule>().unwrap();
+        assert_eq!(selection, RethRpcModule::EthCallBundle);
+    }
+
+    #[test]
     fn parse_rpc_module_selection() {
         let selection = "all".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(selection, RpcModuleSelection::All);
+    }
+
+    #[test]
+    fn parse_rpc_module_selection_none() {
+        let selection = "none".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(selection, Selection(vec![]));
     }
 
     #[test]
@@ -1958,6 +2174,20 @@ mod tests {
                     RethRpcModule::Eth,
                     RethRpcModule::Admin
                 ])),
+                ws: None,
+                ipc: None,
+                config: None,
+            }
+        )
+    }
+
+    #[test]
+    fn test_configure_transport_config_none() {
+        let config = TransportRpcModuleConfig::default().with_http(Vec::<RethRpcModule>::new());
+        assert_eq!(
+            config,
+            TransportRpcModuleConfig {
+                http: Some(RpcModuleSelection::Selection(vec![])),
                 ws: None,
                 ipc: None,
                 config: None,

@@ -1,8 +1,6 @@
-use crate::Log as RpcLog;
+use crate::{eth::log::Log as RpcLog, BlockNumberOrTag, Log, Transaction};
+use alloy_primitives::{keccak256, Address, Bloom, BloomInput, B256, U256, U64};
 use itertools::{EitherOrBoth::*, Itertools};
-use reth_primitives::{
-    keccak256, Address, BlockNumberOrTag, Bloom, BloomInput, Log, B256, U256, U64,
-};
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
     ser::SerializeStruct,
@@ -284,7 +282,7 @@ impl Filter {
     /// Match the latest block only
     ///
     /// ```rust
-    /// # use reth_primitives::BlockNumberOrTag;
+    /// # use reth_rpc_types::BlockNumberOrTag;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
     /// let filter = Filter::new().select(BlockNumberOrTag::Latest);
@@ -294,7 +292,7 @@ impl Filter {
     /// Match a block by its hash
     ///
     /// ```rust
-    /// # use reth_primitives::B256;
+    /// # use alloy_primitives::B256;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
     /// let filter = Filter::new().select(B256::ZERO);
@@ -365,10 +363,11 @@ impl Filter {
     /// Match only a specific address `("0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF")`
     ///
     /// ```rust
-    /// # use reth_primitives::Address;
+    /// # use alloy_primitives::Address;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
-    /// let filter = Filter::new().address("0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap());
+    /// let filter = Filter::new()
+    ///     .address("0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap());
     /// # }
     /// ```
     ///
@@ -376,10 +375,13 @@ impl Filter {
     /// "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8"])`
     ///
     /// ```rust
-    /// # use reth_primitives::Address;
+    /// # use alloy_primitives::Address;
     /// # use reth_rpc_types::Filter;
     /// # fn main() {
-    /// let addresses = vec!["0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap(),"0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8".parse::<Address>().unwrap()];
+    /// let addresses = vec![
+    ///     "0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap(),
+    ///     "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8".parse::<Address>().unwrap(),
+    /// ];
     /// let filter = Filter::new().address(addresses);
     /// # }
     /// ```
@@ -822,7 +824,6 @@ impl FilteredParams {
         true
     }
 }
-
 /// Response of the `eth_getFilterChanges` RPC.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FilterChanges {
@@ -830,6 +831,8 @@ pub enum FilterChanges {
     Logs(Vec<RpcLog>),
     /// New hashes (block or transactions)
     Hashes(Vec<B256>),
+    /// New transactions.
+    Transactions(Vec<Transaction>),
     /// Empty result,
     Empty,
 }
@@ -842,6 +845,7 @@ impl Serialize for FilterChanges {
         match self {
             FilterChanges::Logs(logs) => logs.serialize(s),
             FilterChanges::Hashes(hashes) => hashes.serialize(s),
+            FilterChanges::Transactions(transactions) => transactions.serialize(s),
             FilterChanges::Empty => (&[] as &[serde_json::Value]).serialize(s),
         }
     }
@@ -910,11 +914,56 @@ impl From<jsonrpsee_types::SubscriptionId<'_>> for FilterId {
         }
     }
 }
+/// Specifies the kind of information you wish to receive from the `eth_newPendingTransactionFilter`
+/// RPC endpoint.
+///
+/// When this type is used in a request, it determines whether the client wishes to receive:
+/// - Only the transaction hashes (`Hashes` variant), or
+/// - Full transaction details (`Full` variant).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PendingTransactionFilterKind {
+    /// Receive only the hashes of the transactions.
+    #[default]
+    Hashes,
+    /// Receive full details of the transactions.
+    Full,
+}
+
+impl Serialize for PendingTransactionFilterKind {
+    /// Serializes the `PendingTransactionFilterKind` into a boolean value:
+    /// - `false` for `Hashes`
+    /// - `true` for `Full`
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            PendingTransactionFilterKind::Hashes => false.serialize(serializer),
+            PendingTransactionFilterKind::Full => true.serialize(serializer),
+        }
+    }
+}
+
+impl<'a> Deserialize<'a> for PendingTransactionFilterKind {
+    /// Deserializes a boolean value into `PendingTransactionFilterKind`:
+    /// - `false` becomes `Hashes`
+    /// - `true` becomes `Full`
+    fn deserialize<D>(deserializer: D) -> Result<PendingTransactionFilterKind, D::Error>
+    where
+        D: Deserializer<'a>,
+    {
+        let val = Option::<bool>::deserialize(deserializer)?;
+        match val {
+            Some(true) => Ok(PendingTransactionFilterKind::Full),
+            _ => Ok(PendingTransactionFilterKind::Hashes),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::U256;
+    use alloy_primitives::U256;
     use serde_json::json;
 
     fn serialize<T: serde::Serialize>(t: &T) -> serde_json::Value {
