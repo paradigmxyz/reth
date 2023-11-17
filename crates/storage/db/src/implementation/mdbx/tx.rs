@@ -167,12 +167,12 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
     }
 }
 
-impl<'a, K: TransactionKind> DbTxGAT<'a> for Tx<K> {
-    type Cursor<T: Table> = Cursor<'a, K, T>;
-    type DupCursor<T: DupSort> = Cursor<'a, K, T>;
+impl<K: TransactionKind> DbTxGAT for Tx<K> {
+    type Cursor<T: Table> = Cursor<'_, K, T>;
+    type DupCursor<T: DupSort> = Cursor<'_, K, T>;
 }
 
-impl<'a, K: TransactionKind> DbTxMutGAT<'a> for Tx<K> {
+impl<'a, K: TransactionKind> DbTxMutGAT for Tx<K> {
     type CursorMut<T: Table> = Cursor<'a, RW, T>;
     type DupCursorMut<T: DupSort> = Cursor<'a, RW, T>;
 }
@@ -202,14 +202,14 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     // Iterate over read only values in database.
-    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
+    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT>::Cursor<T>, DatabaseError> {
         self.new_cursor()
     }
 
     /// Iterate over read only values in database.
     fn cursor_dup_read<T: DupSort>(
         &self,
-    ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
+    ) -> Result<<Self as DbTxGAT>::DupCursor<T>, DatabaseError> {
         self.new_cursor()
     }
 
@@ -270,13 +270,13 @@ impl DbTxMut for Tx<RW> {
 
     fn cursor_write<T: Table>(
         &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, DatabaseError> {
+    ) -> Result<<Self as DbTxMutGAT>::CursorMut<T>, DatabaseError> {
         self.new_cursor()
     }
 
     fn cursor_dup_write<T: DupSort>(
         &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, DatabaseError> {
+    ) -> Result<<Self as DbTxMutGAT>::DupCursorMut<T>, DatabaseError> {
         self.new_cursor()
     }
 }

@@ -193,17 +193,17 @@ pub mod test_utils {
         }
     }
 
-    impl<'a, DB: Database> DatabaseGAT<'a> for TempDatabase<DB> {
-        type TX = <DB as DatabaseGAT<'a>>::TX;
-        type TXMut = <DB as DatabaseGAT<'a>>::TXMut;
+    impl<DB: Database> DatabaseGAT for TempDatabase<DB> {
+        type TX = <DB as DatabaseGAT>::TX;
+        type TXMut = <DB as DatabaseGAT>::TXMut;
     }
 
     impl<DB: Database> Database for TempDatabase<DB> {
-        fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
+        fn tx(&self) -> Result<<Self as DatabaseGAT>::TX, DatabaseError> {
             self.db().tx()
         }
 
-        fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
+        fn tx_mut(&self) -> Result<<Self as DatabaseGAT>::TXMut, DatabaseError> {
             self.db().tx_mut()
         }
     }

@@ -1,6 +1,5 @@
 //! Mock database
 use std::{collections::BTreeMap, ops::RangeBounds};
-
 use crate::{
     common::{PairResult, ValueOnlyResult},
     cursor::{
@@ -22,16 +21,16 @@ pub struct DatabaseMock {
 }
 
 impl Database for DatabaseMock {
-    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
+    fn tx(&self) -> Result<<Self as DatabaseGAT>::TX, DatabaseError> {
         Ok(TxMock::default())
     }
 
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT>::TXMut, DatabaseError> {
         Ok(TxMock::default())
     }
 }
 
-impl<'a> DatabaseGAT<'a> for DatabaseMock {
+impl DatabaseGAT for DatabaseMock {
     type TX = TxMock;
 
     type TXMut = TxMock;
@@ -44,12 +43,12 @@ pub struct TxMock {
     _table: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
-impl<'a> DbTxGAT<'a> for TxMock {
+impl DbTxGAT for TxMock {
     type Cursor<T: Table> = CursorMock;
     type DupCursor<T: DupSort> = CursorMock;
 }
 
-impl<'a> DbTxMutGAT<'a> for TxMock {
+impl DbTxMutGAT for TxMock {
     type CursorMut<T: Table> = CursorMock;
     type DupCursorMut<T: DupSort> = CursorMock;
 }
@@ -65,13 +64,13 @@ impl DbTx for TxMock {
 
     fn abort(self) {}
 
-    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
+    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT>::Cursor<T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 
     fn cursor_dup_read<T: DupSort>(
         &self,
-    ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
+    ) -> Result<<Self as DbTxGAT>::DupCursor<T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 
@@ -99,13 +98,13 @@ impl DbTxMut for TxMock {
 
     fn cursor_write<T: Table>(
         &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, DatabaseError> {
+    ) -> Result<<Self as DbTxMutGAT>::CursorMut<T>, DatabaseError> {
         todo!()
     }
 
     fn cursor_dup_write<T: DupSort>(
         &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, DatabaseError> {
+    ) -> Result<<Self as DbTxMutGAT>::DupCursorMut<T>, DatabaseError> {
         todo!()
     }
 }
