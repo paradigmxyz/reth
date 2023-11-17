@@ -1,6 +1,7 @@
 //! Events related to Consensus Layer health.
 
 use futures::Stream;
+use log::{info, warn};
 use reth_provider::CanonChainTracker;
 use std::{
     fmt,
@@ -9,7 +10,6 @@ use std::{
     time::Duration,
 };
 use tokio::time::{Instant, Interval};
-
 /// Interval of checking Consensus Layer client health.
 const CHECK_INTERVAL: Duration = Duration::from_secs(300);
 /// Period of not exchanging transition configurations with Consensus Layer client,
@@ -38,6 +38,27 @@ impl ConsensusLayerHealthEvents {
         let interval = tokio::time::interval_at(Instant::now() + CHECK_INTERVAL, CHECK_INTERVAL);
         Self { interval, canon_chain }
     }
+
+    /// Reports the status of the consensus layer based on the health event.
+    pub fn report_health_status(&self, event: &ConsensusLayerHealthEvent) {
+        match event {
+            ConsensusLayerHealthEvent::NeverSeen => {
+                warn!("Consensus Layer client was never seen.");
+            }
+            ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(duration) => {
+                warn!("Consensus Layer client has not been seen for {:?}", duration);
+            }
+            ConsensusLayerHealthEvent::NeverReceivedUpdates => {
+                warn!("Updates from the Consensus Layer client were never received.");
+            }
+            ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(duration) => {
+                warn!(
+                    "Updates from the Consensus Layer client have not been received for {:?}",
+                    duration
+                );
+            }
+        }
+    }
 }
 
 impl Stream for ConsensusLayerHealthEvents {
@@ -52,14 +73,14 @@ impl Stream for ConsensusLayerHealthEvents {
             if let Some(fork_choice) = this.canon_chain.last_received_update_timestamp() {
                 if fork_choice.elapsed() <= NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD {
                     // We had an FCU, and it's recent. CL is healthy.
-                    continue
+                    continue;
                 } else {
                     // We had an FCU, but it's too old.
                     return Poll::Ready(Some(
                         ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(
                             fork_choice.elapsed(),
                         ),
-                    ))
+                    ));
                 }
             }
 
@@ -68,17 +89,21 @@ impl Stream for ConsensusLayerHealthEvents {
             {
                 if transition_config.elapsed() <= NO_TRANSITION_CONFIG_EXCHANGED_PERIOD {
                     // We never had an FCU, but had a transition config exchange, and it's recent.
-                    return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates))
+                    return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates));
                 } else {
                     // We never had an FCU, but had a transition config exchange, but it's too old.
                     return Poll::Ready(Some(ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(
                         transition_config.elapsed(),
-                    )))
+                    )));
                 }
             }
 
             // We never had both FCU and transition config exchange.
-            return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen))
+            return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen));
+        }
+        if let Some(event) = health_event {
+            self.report_health_status(&event);
+            return Poll::Ready(Some(event));
         }
     }
 }
