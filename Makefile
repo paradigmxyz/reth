@@ -228,3 +228,7 @@ update-book-cli: ## Update book cli documentation.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 	@echo "Updating book cli doc..."
 	@./book/cli/update.sh $(BUILD_PATH)
+
+.PHONY: maxperf
+maxperf:
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
