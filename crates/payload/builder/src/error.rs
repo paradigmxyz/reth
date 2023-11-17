@@ -17,12 +17,9 @@ pub enum PayloadBuilderError {
     /// Error occurring in the blob store.
     #[error(transparent)]
     BlobStore(#[from] BlobStoreError),
-    /// Provider error
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
     /// Other internal error
     #[error(transparent)]
-    Internal(#[from] RethError), // TODO: remove?
+    Internal(#[from] RethError),
     /// Unrecoverable error during evm execution.
     #[error("evm execution error: {0}")]
     EvmExecutionError(EVMError<RethError>),
@@ -33,6 +30,12 @@ pub enum PayloadBuilderError {
     #[cfg(feature = "optimism")]
     #[error(transparent)]
     Optimism(#[from] OptimismPayloadBuilderError),
+}
+
+impl From<ProviderError> for PayloadBuilderError {
+    fn from(error: ProviderError) -> Self {
+        PayloadBuilderError::Internal(RethError::Provider(error))
+    }
 }
 
 /// Optimism specific payload building errors.

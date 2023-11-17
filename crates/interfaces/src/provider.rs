@@ -8,12 +8,6 @@ use thiserror::Error;
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
 
-impl From<reth_nippy_jar::NippyJarError> for ProviderError {
-    fn from(err: reth_nippy_jar::NippyJarError) -> Self {
-        ProviderError::NippyJar(err.to_string())
-    }
-}
-
 /// Bundled errors variants thrown by various providers.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ProviderError {
@@ -120,6 +114,12 @@ pub enum ProviderError {
     /// Snapshot file is not found for requested transaction.
     #[error("not able to find {0} snapshot file for transaction id {1}")]
     MissingSnapshotTx(SnapshotSegment, TxNumber),
+}
+
+impl From<reth_nippy_jar::NippyJarError> for ProviderError {
+    fn from(err: reth_nippy_jar::NippyJarError) -> Self {
+        ProviderError::NippyJar(err.to_string())
+    }
 }
 
 /// A root mismatch error at a given block height.
