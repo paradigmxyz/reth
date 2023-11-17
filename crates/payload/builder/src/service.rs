@@ -214,6 +214,7 @@ where
             .find(|(_, job_id)| *job_id == id)
             .map(|(j, _)| j.best_payload());
         if let Some(Ok(ref best)) = res {
+            // TODO: remove `to`
             self.metrics.set_best_revenue(best.block.number, best.fees().to::<u128>() as f64);
         }
 
@@ -248,6 +249,7 @@ where
         let fut = async move {
             let res = fut.await;
             if let Ok(ref payload) = res {
+                // TODO: remove `to`
                 resolved_metrics
                     .set_resolved_revenue(payload.block.number, payload.fees().to::<u128>() as f64);
             }
