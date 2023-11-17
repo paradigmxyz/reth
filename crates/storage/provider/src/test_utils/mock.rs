@@ -175,7 +175,7 @@ impl HeaderProvider for MockEthProvider {
             .headers_range(range)?
             .into_iter()
             .map(|h| h.seal_slow())
-            .take_while(|h| predicate(&h))
+            .take_while(|h| predicate(h))
             .collect())
     }
 }
