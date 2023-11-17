@@ -344,7 +344,6 @@ where
     /// the next key.
     pub fn iter<Key, Value>(&mut self) -> Iter<'_, K, Key, Value>
     where
-        Self: Sized,
         Key: TableObject,
         Value: TableObject,
     {
@@ -358,7 +357,6 @@ where
     /// the next key.
     pub fn iter_start<Key, Value>(&mut self) -> Iter<'_, K, Key, Value>
     where
-        Self: Sized,
         Key: TableObject,
         Value: TableObject,
     {
