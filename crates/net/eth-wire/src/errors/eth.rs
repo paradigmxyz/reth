@@ -10,22 +10,22 @@ use std::io;
 
 pub enum EthStreamError {
     #[error(transparent)]
-    /// Represents complications in peer-to-peer networking.
+    /// Error of the underlying P2P connection.
     P2PStreamError(#[from] P2PStreamError),
     #[error(transparent)]
-    /// Indicates difficulties in interpreting Ethereum version information.
+    /// Failed to parse peer's version.
     ParseVersionError(#[from] ParseVersionError),
     #[error(transparent)]
-    /// Concerns arising during the Ethereum protocol handshake.
+    /// Failed Ethereum handshake.
     EthHandshakeError(#[from] EthHandshakeError),
     #[error("message id {1:?} is invalid for version {0:?}")]
     /// Flags an unrecognized message ID for a given protocol version.
     EthInvalidMessageError(EthVersion, EthMessageID),
     #[error("message size ({0}) exceeds max length (10MB)")]
-    /// Indicates a message whose size exceeds the standard limit.
+    /// Received a message whose size exceeds the standard limit.
     MessageTooBig(usize),
     #[error("TransactionHashes invalid len of fields: hashes_len={hashes_len} types_len={types_len} sizes_len={sizes_len}")]
-    /// Points out discrepancies in the length of transaction hash components.
+    /// Received malformed transaction hashes message with discrepancies in field lengths.
     TransactionHashesInvalidLenOfFields {
         /// The number of transaction hashes.
         hashes_len: usize,
