@@ -3,7 +3,7 @@ use derive_more::*;
 use std::{borrow::Cow, slice};
 
 /// Implement this to be able to decode data values
-pub trait TableObject<'tx> {
+pub trait TableObject {
     /// Decodes the object from the given bytes.
     fn decode(data_val: &[u8]) -> Result<Self, Error>
     where
@@ -28,7 +28,7 @@ pub trait TableObject<'tx> {
     }
 }
 
-impl<'tx> TableObject<'tx> for Cow<'tx, [u8]> {
+impl<'tx> TableObject for Cow<'tx, [u8]> {
     fn decode(_: &[u8]) -> Result<Self, Error> {
         unreachable!()
     }
@@ -55,22 +55,7 @@ impl<'tx> TableObject<'tx> for Cow<'tx, [u8]> {
     }
 }
 
-#[cfg(feature = "lifetimed-bytes")]
-impl<'tx> TableObject<'tx> for lifetimed_bytes::Bytes<'tx> {
-    fn decode(_: &[u8]) -> Result<Self, Error> {
-        unreachable!()
-    }
-
-    #[doc(hidden)]
-    unsafe fn decode_val<K: TransactionKind>(
-        txn: *const ffi::MDBX_txn,
-        data_val: &ffi::MDBX_val,
-    ) -> Result<Self, Error> {
-        Cow::<'tx, [u8]>::decode_val::<K>(txn, data_val).map(From::from)
-    }
-}
-
-impl<'tx> TableObject<'tx> for Vec<u8> {
+impl TableObject for Vec<u8> {
     fn decode(data_val: &[u8]) -> Result<Self, Error>
     where
         Self: Sized,
@@ -79,7 +64,7 @@ impl<'tx> TableObject<'tx> for Vec<u8> {
     }
 }
 
-impl<'tx> TableObject<'tx> for () {
+impl TableObject for () {
     fn decode(_: &[u8]) -> Result<Self, Error> {
         Ok(())
     }
@@ -96,7 +81,7 @@ impl<'tx> TableObject<'tx> for () {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Deref, DerefMut)]
 pub struct ObjectLength(pub usize);
 
-impl<'tx> TableObject<'tx> for ObjectLength {
+impl TableObject for ObjectLength {
     fn decode(data_val: &[u8]) -> Result<Self, Error>
     where
         Self: Sized,
@@ -105,7 +90,7 @@ impl<'tx> TableObject<'tx> for ObjectLength {
     }
 }
 
-impl<'tx, const LEN: usize> TableObject<'tx> for [u8; LEN] {
+impl<const LEN: usize> TableObject for [u8; LEN] {
     fn decode(data_val: &[u8]) -> Result<Self, Error>
     where
         Self: Sized,
