@@ -47,7 +47,7 @@ impl TaskDownloader {
     /// use reth_provider::HeaderProvider;
     /// use std::sync::Arc;
     ///
-    /// fn t<B: BodiesClient + 'static, Provider: HeaderProvider + 'static>(
+    /// fn t<B: BodiesClient + 'static, Provider: HeaderProvider + Unpin + 'static>(
     ///     client: Arc<B>,
     ///     consensus: Arc<dyn Consensus>,
     ///     provider: Provider,
