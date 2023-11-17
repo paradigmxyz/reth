@@ -131,13 +131,16 @@ mod tests {
     const STORAGE_KEY: B256 =
         b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
+    const LAST_BLOCK_IN_FULL_SHARD: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber;
+    const MAX_BLOCK: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber + 2;
+
     fn storage(key: B256) -> StorageEntry {
         // Value is not used in indexing stage.
         StorageEntry { key, value: U256::ZERO }
     }
 
-    fn trns(transition_id: u64) -> BlockNumberAddress {
-        BlockNumberAddress((transition_id, ADDRESS))
+    fn block_number_address(block_number: u64) -> BlockNumberAddress {
+        BlockNumberAddress((block_number, ADDRESS))
     }
 
     /// Shard for account
@@ -167,34 +170,33 @@ mod tests {
     fn partial_setup(tx: &TestTransaction) {
         // setup
         tx.commit(|tx| {
-            // we just need first and last
-            tx.put::<tables::BlockBodyIndices>(
-                0,
-                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
-            )
-            .unwrap();
-
-            tx.put::<tables::BlockBodyIndices>(
-                5,
-                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
-            )
-            .unwrap();
-
-            // setup changeset that are going to be applied to history index
-            tx.put::<tables::StorageChangeSet>(trns(4), storage(STORAGE_KEY)).unwrap();
-            tx.put::<tables::StorageChangeSet>(trns(5), storage(STORAGE_KEY)).unwrap();
+            for block in 0..=MAX_BLOCK {
+                tx.put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                )?;
+                // setup changeset that is going to be applied to history index
+                tx.put::<tables::StorageChangeSet>(
+                    block_number_address(block),
+                    storage(STORAGE_KEY),
+                )?;
+            }
             Ok(())
         })
         .unwrap()
     }
 
-    async fn run(tx: &TestTransaction, run_to: u64) {
-        let input = ExecInput { target: Some(run_to), ..Default::default() };
+    async fn run(tx: &TestTransaction, run_to: u64, input_checkpoint: Option<BlockNumber>) {
+        let input = ExecInput {
+            target: Some(run_to),
+            checkpoint: input_checkpoint
+                .map(|block_number| StageCheckpoint { block_number, stage_checkpoint: None }),
+        };
         let mut stage = IndexStorageHistoryStage::default();
         let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
         let out = stage.execute(&provider, input).await.unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
         provider.commit().unwrap();
     }
 
@@ -221,11 +223,11 @@ mod tests {
         partial_setup(&tx);
 
         // run
-        run(&tx, 5).await;
+        run(&tx, 3, None).await;
 
         // verify
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![4, 5]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
 
         // unwind
         unwind(&tx, 5, 0).await;
@@ -249,28 +251,26 @@ mod tests {
         .unwrap();
 
         // run
-        run(&tx, 5).await;
+        run(&tx, 5, Some(3)).await;
 
         // verify
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5])]));
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, 5, 3).await;
 
         // verify initial state
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
     }
 
     #[tokio::test]
     async fn insert_index_to_full_shard() {
         // init
         let tx = TestTransaction::default();
-        let _input = ExecInput { target: Some(5), ..Default::default() };
-
         // change does not matter only that account is present in changeset.
-        let full_list = vec![3; NUM_OF_INDICES_IN_SHARD];
+        let full_list = (1..=LAST_BLOCK_IN_FULL_SHARD).collect::<Vec<_>>();
 
         // setup
         partial_setup(&tx);
@@ -281,17 +281,20 @@ mod tests {
         .unwrap();
 
         // run
-        run(&tx, 5).await;
+        run(&tx, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD)).await;
 
         // verify
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
         assert_eq!(
             table,
-            BTreeMap::from([(shard(3), full_list.clone()), (shard(u64::MAX), vec![4, 5])])
+            BTreeMap::from([
+                (shard(LAST_BLOCK_IN_FULL_SHARD), full_list.clone()),
+                (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2])
+            ])
         );
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD).await;
 
         // verify initial state
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
@@ -302,33 +305,33 @@ mod tests {
     async fn insert_index_to_fill_shard() {
         // init
         let tx = TestTransaction::default();
-        let mut close_full_list = vec![1; NUM_OF_INDICES_IN_SHARD - 2];
+        let mut almost_full_list = (1..=LAST_BLOCK_IN_FULL_SHARD - 2).collect::<Vec<_>>();
 
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
+            tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&almost_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&tx, 5).await;
+        run(&tx, LAST_BLOCK_IN_FULL_SHARD, Some(LAST_BLOCK_IN_FULL_SHARD - 2)).await;
 
         // verify
-        close_full_list.push(4);
-        close_full_list.push(5);
+        almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD - 1);
+        almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list.clone()),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list.clone())]));
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, LAST_BLOCK_IN_FULL_SHARD, LAST_BLOCK_IN_FULL_SHARD - 2).await;
 
         // verify initial state
-        close_full_list.pop();
-        close_full_list.pop();
+        almost_full_list.pop();
+        almost_full_list.pop();
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list)]));
 
         // verify initial state
     }
@@ -337,7 +340,7 @@ mod tests {
     async fn insert_index_second_half_shard() {
         // init
         let tx = TestTransaction::default();
-        let mut close_full_list = vec![1; NUM_OF_INDICES_IN_SHARD - 1];
+        let mut close_full_list = (1..=LAST_BLOCK_IN_FULL_SHARD - 1).collect::<Vec<_>>();
 
         // setup
         partial_setup(&tx);
@@ -348,42 +351,49 @@ mod tests {
         .unwrap();
 
         // run
-        run(&tx, 5).await;
+        run(&tx, LAST_BLOCK_IN_FULL_SHARD + 1, Some(LAST_BLOCK_IN_FULL_SHARD - 1)).await;
 
         // verify
-        close_full_list.push(4);
+        close_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
         assert_eq!(
             table,
-            BTreeMap::from([(shard(4), close_full_list.clone()), (shard(u64::MAX), vec![5])])
+            BTreeMap::from([
+                (shard(LAST_BLOCK_IN_FULL_SHARD), close_full_list.clone()),
+                (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1])
+            ])
         );
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, LAST_BLOCK_IN_FULL_SHARD, LAST_BLOCK_IN_FULL_SHARD - 1).await;
 
         // verify initial state
         close_full_list.pop();
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list)]));
     }
 
     #[tokio::test]
     async fn insert_index_to_third_shard() {
         // init
         let tx = TestTransaction::default();
-        let full_list = vec![1; NUM_OF_INDICES_IN_SHARD];
+        let full_list = (1..=LAST_BLOCK_IN_FULL_SHARD).collect::<Vec<_>>();
 
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
             tx.put::<tables::StorageHistory>(shard(1), list(&full_list)).unwrap();
             tx.put::<tables::StorageHistory>(shard(2), list(&full_list)).unwrap();
-            tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&[2, 3])).unwrap();
+            tx.put::<tables::StorageHistory>(
+                shard(u64::MAX),
+                list(&[LAST_BLOCK_IN_FULL_SHARD + 1]),
+            )
+            .unwrap();
             Ok(())
         })
         .unwrap();
 
-        run(&tx, 5).await;
+        run(&tx, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD + 1)).await;
 
         // verify
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
@@ -392,12 +402,12 @@ mod tests {
             BTreeMap::from([
                 (shard(1), full_list.clone()),
                 (shard(2), full_list.clone()),
-                (shard(u64::MAX), vec![2, 3, 4, 5])
+                (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2])
             ])
         );
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&tx, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD + 1).await;
 
         // verify initial state
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
@@ -406,7 +416,7 @@ mod tests {
             BTreeMap::from([
                 (shard(1), full_list.clone()),
                 (shard(2), full_list.clone()),
-                (shard(u64::MAX), vec![2, 3])
+                (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1])
             ])
         );
     }
@@ -432,9 +442,12 @@ mod tests {
             .unwrap();
 
             // setup changeset that are going to be applied to history index
-            tx.put::<tables::StorageChangeSet>(trns(20), storage(STORAGE_KEY)).unwrap();
-            tx.put::<tables::StorageChangeSet>(trns(36), storage(STORAGE_KEY)).unwrap();
-            tx.put::<tables::StorageChangeSet>(trns(100), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSet>(block_number_address(20), storage(STORAGE_KEY))
+                .unwrap();
+            tx.put::<tables::StorageChangeSet>(block_number_address(36), storage(STORAGE_KEY))
+                .unwrap();
+            tx.put::<tables::StorageChangeSet>(block_number_address(100), storage(STORAGE_KEY))
+                .unwrap();
             Ok(())
         })
         .unwrap();
@@ -453,7 +466,7 @@ mod tests {
 
         // verify
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100])]));
 
         // unwind
         unwind(&tx, 20000, 0).await;
@@ -505,16 +518,16 @@ mod tests {
 
             let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3);
 
-            let (transitions, _) = random_changeset_range(
+            let (changesets, _) = random_changeset_range(
                 &mut rng,
                 blocks.iter(),
                 accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
                 0..3,
-                0..256,
+                0..4096,
             );
 
             // add block changeset from block 1.
-            self.tx.insert_changesets(transitions, Some(start))?;
+            self.tx.insert_changesets(changesets, Some(start))?;
 
             Ok(())
         }
