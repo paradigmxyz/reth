@@ -208,7 +208,7 @@ impl Environment {
         let db = Database::freelist_db();
         let cursor = txn.cursor(&db)?;
 
-        for result in cursor.into_iter() {
+        for result in cursor.into_iter_slices() {
             let (_key, value) = result?;
             if value.len() < size_of::<usize>() {
                 return Err(Error::Corrupted)

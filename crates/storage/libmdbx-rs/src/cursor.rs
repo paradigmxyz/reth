@@ -60,11 +60,21 @@ where
         self.cursor
     }
 
-    /// Returns an Iterator over key value slices
+    /// Returns an Iterator over the raw key value slices
+    ///
+    /// Note: The lifetime ensures that the transaction is kept alive while entries are used
+    pub fn into_iter_slices<'cur>(self) -> IntoIter<'cur, K, Cow<'cur, [u8]>, Cow<'cur, [u8]>> {
+        self.into_iter()
+    }
+    /// Returns an Iterator over key value pairs of the cursor
     ///
     /// Note: The lifetime ensures that the transaction is kept alive while entries are used
     #[allow(clippy::should_implement_trait)]
-    pub fn into_iter<'cur>(self) -> IntoIter<'cur, K, Cow<'cur, [u8]>, Cow<'cur, [u8]>> {
+    pub fn into_iter<'cur, Key, Value>(self) -> IntoIter<'cur, K, Key, Value>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
         IntoIter::new(self, MDBX_NEXT, MDBX_NEXT)
     }
 
