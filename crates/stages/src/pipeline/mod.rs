@@ -443,6 +443,7 @@ where
                     }
                 }
                 Err(err) => {
+                    drop(provider_rw);
                     self.listeners.notify(PipelineEvent::Error { stage_id });
                     if let Some(ctrl) = on_stage_error(&factory, stage_id, prev_checkpoint, err)? {
                         return Ok(ctrl)
