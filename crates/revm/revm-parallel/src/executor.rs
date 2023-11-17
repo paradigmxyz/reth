@@ -294,7 +294,7 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
         let (tx, rx) = std::sync::mpsc::channel();
         for transition in transitions {
             let state = self.state.clone();
-            let transition = match transition {
+            match transition {
                 StateTransitionData::PreBlock(_) => {
                     unimplemented!("pre block transition is not implemented")
                 }
@@ -502,12 +502,15 @@ impl<'a, Provider: BlockReader> ParallelExecutor<'a, Provider> {
                 let mut cumulative_gas_used = 0;
                 let mut receipts = Vec::with_capacity(executed.block.body.len());
                 for (transaction, (_, result)) in executed.block.body.iter().zip(executed.results) {
-                    cumulative_gas_used += result.gas_used();
+                    let gas_used = result.gas_used();
+                    let success = result.is_success();
+                    tracing::trace!(target: "evm::parallel", block_number, hash = %transaction.hash, gas_used, success, "Generating receipt");
+                    cumulative_gas_used += gas_used;
                     receipts.push(Receipt {
                         tx_type: transaction.tx_type(),
                         // Success flag was added in `EIP-658: Embedding transaction status code in
                         // receipts`.
-                        success: result.is_success(),
+                        success,
                         cumulative_gas_used,
                         // convert to reth log
                         logs: result.into_logs().into_iter().map(into_reth_log).collect(),
