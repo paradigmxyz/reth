@@ -65,7 +65,7 @@ where
     /// Note: The lifetime ensures that the transaction is kept alive while entries are used
     #[allow(clippy::should_implement_trait)]
     pub fn into_iter<'cur>(self) -> IntoIter<'cur, K, Cow<'cur, [u8]>, Cow<'cur, [u8]>> {
-        IntoIter::new(Cow::Owned(self), MDBX_NEXT, MDBX_NEXT)
+        IntoIter::new(self, MDBX_NEXT, MDBX_NEXT)
     }
 
     /// Retrieves a key/data pair from the cursor. Depending on the cursor op,
@@ -518,7 +518,7 @@ where
     /// fails for some reason.
     Ok {
         /// The MDBX cursor with which to iterate.
-        cursor: Cow<'cur, Cursor<K>>,
+        cursor: Cursor<K>,
 
         /// The first operation to perform when the consumer calls [Iter::next()].
         op: ffi::MDBX_cursor_op,
@@ -537,11 +537,7 @@ where
     Value: TableObject,
 {
     /// Creates a new iterator backed by the given cursor.
-    fn new(
-        cursor: Cow<'cur, Cursor<K>>,
-        op: ffi::MDBX_cursor_op,
-        next_op: ffi::MDBX_cursor_op,
-    ) -> Self {
+    fn new(cursor: Cursor<K>, op: ffi::MDBX_cursor_op, next_op: ffi::MDBX_cursor_op) -> Self {
         IntoIter::Ok { cursor, op, next_op, _marker: Default::default() }
     }
 }
@@ -755,7 +751,7 @@ where
 
                     (err_code == ffi::MDBX_SUCCESS).then(|| {
                         IntoIter::new(
-                            Cow::Owned(Cursor::new_at_position(&**cursor).unwrap()),
+                            Cursor::new_at_position(&**cursor).unwrap(),
                             ffi::MDBX_GET_CURRENT,
                             ffi::MDBX_NEXT_DUP,
                         )
