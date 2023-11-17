@@ -17,7 +17,7 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
 ) -> Result<()> {
     let (output_db, tip_block_number) = setup(from, to, output_db, db_tool)?;
 
-    unwind_and_copy(db_tool, from, tip_block_number, &output_db).await?;
+    unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;
 
     if should_run {
         dry_run(db_tool.chain.clone(), output_db, to, from).await?;
@@ -27,7 +27,7 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
 }
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
-async fn unwind_and_copy<DB: Database>(
+fn unwind_and_copy<DB: Database>(
     db_tool: &DbTool<'_, DB>,
     from: u64,
     tip_block_number: u64,
@@ -38,16 +38,14 @@ async fn unwind_and_copy<DB: Database>(
 
     let mut exec_stage = StorageHashingStage::default();
 
-    exec_stage
-        .unwind(
-            &provider,
-            UnwindInput {
-                unwind_to: from,
-                checkpoint: StageCheckpoint::new(tip_block_number),
-                bad_block: None,
-            },
-        )
-        .await?;
+    exec_stage.unwind(
+        &provider,
+        UnwindInput {
+            unwind_to: from,
+            checkpoint: StageCheckpoint::new(tip_block_number),
+            bad_block: None,
+        },
+    )?;
     let unwind_inner_tx = provider.into_tx();
 
     // TODO optimize we can actually just get the entries we need for both these tables
@@ -69,23 +67,19 @@ async fn dry_run<DB: Database>(
 
     let factory = ProviderFactory::new(&output_db, chain);
     let provider = factory.provider_rw()?;
-    let mut exec_stage = StorageHashingStage {
+    let mut stage = StorageHashingStage {
         clean_threshold: 1, // Forces hashing from scratch
         ..Default::default()
     };
 
-    let mut exec_output = false;
-    while !exec_output {
-        exec_output = exec_stage
-            .execute(
-                &provider,
-                reth_stages::ExecInput {
-                    target: Some(to),
-                    checkpoint: Some(StageCheckpoint::new(from)),
-                },
-            )
-            .await?
-            .done;
+    loop {
+        let input = reth_stages::ExecInput {
+            target: Some(to),
+            checkpoint: Some(StageCheckpoint::new(from)),
+        };
+        if stage.execute(&provider, input)?.done {
+            break
+        }
     }
 
     info!(target: "reth::cli", "Success.");

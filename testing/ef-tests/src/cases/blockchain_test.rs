@@ -111,8 +111,7 @@ impl Case for BlockchainTestCase {
                     .expect("Could not build tokio RT")
                     .block_on(async {
                         // ignore error
-                        let _ =
-                            stage.execute(&provider, ExecInput { target, checkpoint: None }).await;
+                        let _ = stage.execute(&provider, ExecInput { target, checkpoint: None });
                     });
             }
 

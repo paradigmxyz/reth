@@ -26,17 +26,15 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneModes, Receipt, B256, U256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
-    BundleStateWithReceipts, ExecutorFactory, ProviderFactory, PrunableBlockExecutor,
+    BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, ProviderFactory,
+    PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
 use reth_revm::Factory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
-use reth_stages::{
-    sets::DefaultStages, stages::HeaderSyncMode, test_utils::TestStages, ExecOutput, Pipeline,
-    StageError,
-};
+use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipeline, StageError};
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
@@ -502,6 +500,7 @@ where
                     .into_task();
 
                 Pipeline::builder().add_stages(DefaultStages::new(
+                    ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone()),
                     HeaderSyncMode::Tip(tip_rx.clone()),
                     Arc::clone(&consensus),
                     header_downloader,
