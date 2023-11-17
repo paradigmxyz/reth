@@ -563,8 +563,8 @@ mod tests {
                         .iter()
                         .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
                         .into_iter()
-                        .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
-                        .collect::<Vec<_>>();
+                        .map(|chunks| chunks.copied().collect::<Vec<u64>>())
+                        .collect::<Vec<Vec<_>>>();
                     let last_chunk = chunks.pop();
 
                     chunks.into_iter().for_each(|list| {

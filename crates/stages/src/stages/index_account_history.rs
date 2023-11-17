@@ -546,8 +546,8 @@ mod tests {
                         .iter()
                         .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
                         .into_iter()
-                        .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
-                        .collect::<Vec<_>>();
+                        .map(|chunks| chunks.copied().collect::<Vec<_>>())
+                        .collect::<Vec<Vec<_>>>();
                     let last_chunk = chunks.pop();
 
                     chunks.into_iter().for_each(|list| {
@@ -556,16 +556,13 @@ mod tests {
                                 address,
                                 *list.last().expect("Chuck does not return empty list")
                                     as BlockNumber,
-                            ) as ShardedKey<Address>,
+                            ),
                             list,
                         );
                     });
 
                     if let Some(last_list) = last_chunk {
-                        result.insert(
-                            ShardedKey::new(address, u64::MAX) as ShardedKey<Address>,
-                            last_list,
-                        );
+                        result.insert(ShardedKey::new(address, u64::MAX), last_list);
                     };
                 }
 
