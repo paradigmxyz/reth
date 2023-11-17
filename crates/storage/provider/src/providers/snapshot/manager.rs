@@ -6,7 +6,7 @@ use reth_db::{
     codecs::CompactU256,
     snapshot::{HeaderMask, TransactionMask},
 };
-use reth_interfaces::{provider::ProviderError, RethResult};
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::HighestSnapshots, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo,
@@ -73,7 +73,7 @@ impl SnapshotProvider {
         segment: SnapshotSegment,
         block: BlockNumber,
         path: Option<&Path>,
-    ) -> RethResult<SnapshotJarProvider<'_>> {
+    ) -> ProviderResult<SnapshotJarProvider<'_>> {
         self.get_segment_provider(
             segment,
             || self.get_segment_ranges_from_block(segment, block),
@@ -88,7 +88,7 @@ impl SnapshotProvider {
         segment: SnapshotSegment,
         tx: TxNumber,
         path: Option<&Path>,
-    ) -> RethResult<SnapshotJarProvider<'_>> {
+    ) -> ProviderResult<SnapshotJarProvider<'_>> {
         self.get_segment_provider(
             segment,
             || self.get_segment_ranges_from_transaction(segment, tx),
@@ -103,7 +103,7 @@ impl SnapshotProvider {
         segment: SnapshotSegment,
         fn_ranges: impl Fn() -> Option<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>,
         path: Option<&Path>,
-    ) -> RethResult<Option<SnapshotJarProvider<'_>>> {
+    ) -> ProviderResult<Option<SnapshotJarProvider<'_>>> {
         // If we have a path, then get the block range and transaction range from its name.
         // Otherwise, check `self.available_snapshots`
         let snapshot_ranges = match path {
@@ -136,7 +136,7 @@ impl SnapshotProvider {
         segment: SnapshotSegment,
         block_range: &RangeInclusive<u64>,
         tx_range: &RangeInclusive<u64>,
-    ) -> Result<SnapshotJarProvider<'_>, reth_interfaces::RethError> {
+    ) -> ProviderResult<SnapshotJarProvider<'_>> {
         let key = (*block_range.end(), segment);
         if let Some(jar) = self.map.get(&key) {
             Ok(jar.into())
@@ -212,8 +212,8 @@ impl SnapshotProvider {
     pub fn find_snapshot<T>(
         &self,
         segment: SnapshotSegment,
-        func: impl Fn(SnapshotJarProvider<'_>) -> RethResult<Option<T>>,
-    ) -> RethResult<Option<T>> {
+        func: impl Fn(SnapshotJarProvider<'_>) -> ProviderResult<Option<T>>,
+    ) -> ProviderResult<Option<T>> {
         let snapshots = self.snapshots_block_index.read();
         if let Some(segment_snapshots) = snapshots.get(&segment) {
             // It's more probable that the request comes from a newer block height, so we iterate
@@ -241,7 +241,7 @@ impl SnapshotProvider {
 }
 
 impl HeaderProvider for SnapshotProvider {
-    fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.find_snapshot(SnapshotSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
@@ -255,12 +255,12 @@ impl HeaderProvider for SnapshotProvider {
         })
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
         self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
             .header_by_number(num)
     }
 
-    fn header_td(&self, block_hash: &BlockHash) -> RethResult<Option<U256>> {
+    fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
         self.find_snapshot(SnapshotSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
@@ -269,16 +269,16 @@ impl HeaderProvider for SnapshotProvider {
         })
     }
 
-    fn header_td_by_number(&self, num: BlockNumber) -> RethResult<Option<U256>> {
+    fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
         self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
             .header_td_by_number(num)
     }
 
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
         todo!();
     }
 
-    fn sealed_header(&self, num: BlockNumber) -> RethResult<Option<SealedHeader>> {
+    fn sealed_header(&self, num: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
         self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
             .sealed_header(num)
     }
@@ -287,13 +287,13 @@ impl HeaderProvider for SnapshotProvider {
         &self,
         _range: impl RangeBounds<BlockNumber>,
         _predicate: impl FnMut(&SealedHeader) -> bool,
-    ) -> RethResult<Vec<SealedHeader>> {
+    ) -> ProviderResult<Vec<SealedHeader>> {
         todo!()
     }
 }
 
 impl BlockHashReader for SnapshotProvider {
-    fn block_hash(&self, num: u64) -> RethResult<Option<B256>> {
+    fn block_hash(&self, num: u64) -> ProviderResult<Option<B256>> {
         self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?.block_hash(num)
     }
 
@@ -301,32 +301,32 @@ impl BlockHashReader for SnapshotProvider {
         &self,
         _start: BlockNumber,
         _end: BlockNumber,
-    ) -> RethResult<Vec<B256>> {
+    ) -> ProviderResult<Vec<B256>> {
         todo!()
     }
 }
 
 impl BlockNumReader for SnapshotProvider {
-    fn chain_info(&self) -> RethResult<ChainInfo> {
+    fn chain_info(&self) -> ProviderResult<ChainInfo> {
         todo!()
     }
 
-    fn best_block_number(&self) -> RethResult<BlockNumber> {
+    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
         todo!()
     }
 
-    fn last_block_number(&self) -> RethResult<BlockNumber> {
+    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
         todo!()
     }
 
-    fn block_number(&self, _hash: B256) -> RethResult<Option<BlockNumber>> {
+    fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
         todo!()
     }
 }
 
 impl TransactionsProvider for SnapshotProvider {
-    fn transaction_id(&self, tx_hash: TxHash) -> RethResult<Option<TxNumber>> {
-        self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
+    fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
+        Ok(self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
             let mut cursor = jar_provider.cursor()?;
             if cursor
                 .get_one::<TransactionMask<TransactionSignedNoHash>>((&tx_hash).into())?
@@ -337,10 +337,10 @@ impl TransactionsProvider for SnapshotProvider {
             } else {
                 Ok(None)
             }
-        })
+        })?)
     }
 
-    fn transaction_by_id(&self, num: TxNumber) -> RethResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
         self.get_segment_provider_from_transaction(SnapshotSegment::Transactions, num, None)?
             .transaction_by_id(num)
     }
@@ -348,58 +348,61 @@ impl TransactionsProvider for SnapshotProvider {
     fn transaction_by_id_no_hash(
         &self,
         num: TxNumber,
-    ) -> RethResult<Option<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.get_segment_provider_from_transaction(SnapshotSegment::Transactions, num, None)?
             .transaction_by_id_no_hash(num)
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> RethResult<Option<TransactionSigned>> {
-        self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
+        Ok(self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
                 .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
                 .map(|tx| tx.with_hash())
                 .and_then(|tx| (tx.hash_ref() == &hash).then_some(tx)))
-        })
+        })?)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         _hash: TxHash,
-    ) -> RethResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
         todo!()
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> RethResult<Option<BlockNumber>> {
+    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         todo!()
     }
 
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
-    ) -> RethResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
         todo!()
     }
 
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
         todo!()
     }
 
-    fn senders_by_tx_range(&self, _range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
         todo!()
     }
 
     fn transactions_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
-    ) -> RethResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
         todo!()
     }
 
-    fn transaction_sender(&self, id: TxNumber) -> RethResult<Option<Address>> {
+    fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
         Ok(self.transaction_by_id_no_hash(id)?.and_then(|tx| tx.recover_signer()))
     }
 }

@@ -263,7 +263,7 @@ where
         let unwind_pipeline = self.stages.iter_mut().rev();
 
         let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let mut provider_rw = factory.provider_rw()?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -320,7 +320,7 @@ where
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         provider_rw.commit()?;
-                        provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                        provider_rw = factory.provider_rw()?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -346,7 +346,7 @@ where
         let target = self.max_block.or(previous_stage);
 
         let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+        let mut provider_rw = factory.provider_rw()?;
 
         loop {
             let prev_checkpoint = provider_rw.get_stage_checkpoint(stage_id)?;
@@ -427,7 +427,7 @@ where
 
                     // TODO: Make the commit interval configurable
                     provider_rw.commit()?;
-                    provider_rw = factory.provider_rw().map_err(PipelineError::Interface)?;
+                    provider_rw = factory.provider_rw()?;
 
                     if done {
                         let block_number = checkpoint.block_number;
@@ -465,8 +465,7 @@ where
                                 // stage not clearing its checkpoint, and
                                 // restarting from an invalid place.
                                 drop(provider_rw);
-                                provider_rw =
-                                    factory.provider_rw().map_err(PipelineError::Interface)?;
+                                provider_rw = factory.provider_rw()?;
                                 provider_rw.save_stage_checkpoint_progress(
                                     StageId::MerkleExecute,
                                     vec![],

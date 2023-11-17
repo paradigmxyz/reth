@@ -34,7 +34,7 @@ use reth_stages::{
         ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
         TotalDifficultyStage,
     },
-    Pipeline, PipelineError, StageSet,
+    Pipeline, StageSet,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -234,7 +234,7 @@ impl Command {
         )?;
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider = factory.provider().map_err(PipelineError::Interface)?;
+        let provider = factory.provider()?;
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
@@ -269,8 +269,7 @@ impl Command {
             // Unwind the pipeline without committing.
             {
                 factory
-                    .provider_rw()
-                    .map_err(PipelineError::Interface)?
+                    .provider_rw()?
                     .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
             }
 

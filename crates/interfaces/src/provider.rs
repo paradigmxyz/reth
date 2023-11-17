@@ -5,12 +5,27 @@ use reth_primitives::{
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// Provider result type.
+pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
+
+impl From<reth_nippy_jar::NippyJarError> for ProviderError {
+    fn from(err: reth_nippy_jar::NippyJarError) -> Self {
+        ProviderError::NippyJar(err.to_string())
+    }
+}
+
 /// Bundled errors variants thrown by various providers.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] crate::db::DatabaseError),
+    /// Nippy jar error.
+    #[error("nippy jar error: {0}")]
+    NippyJar(String),
+    /// Error when recovering the sender for a transaction
+    #[error("failed to recover sender for transaction")]
+    SenderRecoveryError,
     /// The header number was not found for the given block hash.
     #[error("block hash {0} does not exist in Headers table")]
     BlockHashNotFound(BlockHash),

@@ -1,6 +1,6 @@
 //! Error types emitted by types or implementations of this crate.
 
-use reth_interfaces::RethError;
+use reth_interfaces::{provider::ProviderError, RethError};
 use reth_primitives::{revm_primitives::EVMError, B256};
 use reth_transaction_pool::BlobStoreError;
 use tokio::sync::oneshot;
@@ -17,9 +17,12 @@ pub enum PayloadBuilderError {
     /// Error occurring in the blob store.
     #[error(transparent)]
     BlobStore(#[from] BlobStoreError),
+    /// Provider error
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
     /// Other internal error
     #[error(transparent)]
-    Internal(#[from] RethError),
+    Internal(#[from] RethError), // TODO: remove?
     /// Unrecoverable error during evm execution.
     #[error("evm execution error: {0}")]
     EvmExecutionError(EVMError<RethError>),
