@@ -110,6 +110,7 @@ pub use listener::{AllTransactionsEvents, TransactionEvents};
 
 mod best;
 mod blob;
+pub use blob::{blob_tx_priority, fee_delta};
 mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
