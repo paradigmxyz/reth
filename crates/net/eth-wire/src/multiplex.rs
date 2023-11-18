@@ -158,8 +158,9 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {}
 impl<St, Primary> Stream for RlpxSatelliteStream<St, Primary>
 where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+    Primary: Stream + Unpin,
 {
-    type Item = ();
+    type Item = <Primary as Stream>::Item;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         todo!()
@@ -169,7 +170,7 @@ where
 impl<St, Primary, T> Sink<T> for RlpxSatelliteStream<St, Primary>
 where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
-    Primary: Sink<T, Error = io::Error>,
+    Primary: Sink<T, Error = io::Error> + Unpin,
 {
     type Error = <Primary as Sink<T>>::Error;
 
