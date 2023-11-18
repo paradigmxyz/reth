@@ -104,8 +104,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
 
         // TODO(rakita) save last finalized block inside database but for now just take
-        // tip-max_reorg_depth
-        // task: https://github.com/paradigmxyz/reth/issues/1712
+        // `tip - max_reorg_depth`
+        // https://github.com/paradigmxyz/reth/issues/1712
         let last_finalized_block_number = if last_canonical_hashes.len() > max_reorg_depth {
             // we pick `Highest - max_reorg_depth` block as last finalized block.
             last_canonical_hashes.keys().nth_back(max_reorg_depth)

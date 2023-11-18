@@ -14,6 +14,7 @@ use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
 };
+use reth_trie::updates::TrieUpdates;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -198,7 +199,14 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn state_root(&self, _post_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+    fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
+    }
+
+    fn state_root_with_updates(
+        &self,
+        _bundle_state: &BundleStateWithReceipts,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }

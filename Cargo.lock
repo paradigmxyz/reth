@@ -6297,6 +6297,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm-inspectors",
+ "reth-trie",
  "revm",
  "tracing",
 ]

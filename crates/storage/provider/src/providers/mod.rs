@@ -571,14 +571,14 @@ where
 
     fn pending_with_provider(
         &self,
-        post_state_data: Box<dyn BundleStateDataProvider>,
+        bundle_state_data: Box<dyn BundleStateDataProvider>,
     ) -> ProviderResult<StateProviderBox<'_>> {
-        let canonical_fork = post_state_data.canonical_fork();
+        let canonical_fork = bundle_state_data.canonical_fork();
         trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
 
         let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let post_state_provider = BundleStateProvider::new(state_provider, post_state_data);
-        Ok(Box::new(post_state_provider))
+        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
+        Ok(Box::new(bundle_state_provider))
     }
 }
 
