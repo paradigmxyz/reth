@@ -280,7 +280,7 @@ impl AppendableChain {
         let parent_block = self.chain.tip();
 
         let post_state_data = BundleStateDataRef {
-            state: &self.state(),
+            state: self.state(),
             sidechain_block_hashes: &side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,
