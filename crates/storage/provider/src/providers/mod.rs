@@ -508,7 +508,7 @@ where
     Tree: BlockchainTreePendingStateProvider + BlockchainTreeViewer,
 {
     /// Storage provider for latest block
-    fn latest(&self) -> ProviderResult<StateProviderBox<'_>> {
+    fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
         self.database.latest()
     }
@@ -516,18 +516,18 @@ where
     fn history_by_block_number(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox<'_>> {
+    ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         self.ensure_canonical_block(block_number)?;
         self.database.history_by_block_number(block_number)
     }
 
-    fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox<'_>> {
+    fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         self.database.history_by_block_hash(block_hash)
     }
 
-    fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox<'_>> {
+    fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block, "Getting state by block hash");
         let mut state = self.history_by_block_hash(block);
 
@@ -546,7 +546,7 @@ where
     ///
     /// If there's no pending block available then the latest state provider is returned:
     /// [Self::latest]
-    fn pending(&self) -> ProviderResult<StateProviderBox<'_>> {
+    fn pending(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
 
         if let Some(block) = self.tree.pending_block_num_hash() {
@@ -559,10 +559,7 @@ where
         self.latest()
     }
 
-    fn pending_state_by_hash(
-        &self,
-        block_hash: B256,
-    ) -> ProviderResult<Option<StateProviderBox<'_>>> {
+    fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(state) = self.tree.find_pending_state_provider(block_hash) {
             return Ok(Some(self.pending_with_provider(state)?))
         }
@@ -572,7 +569,7 @@ where
     fn pending_with_provider(
         &self,
         post_state_data: Box<dyn BundleStateDataProvider>,
-    ) -> ProviderResult<StateProviderBox<'_>> {
+    ) -> ProviderResult<StateProviderBox> {
         let canonical_fork = post_state_data.canonical_fork();
         trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
 

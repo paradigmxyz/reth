@@ -2,7 +2,7 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput}
 use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::{Database, DatabaseGAT},
+    database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -60,7 +60,7 @@ where
 
     fn is_stage_done<DB: Database>(
         &self,
-        tx: &<DB as DatabaseGAT<'_>>::TXMut,
+        tx: &<DB as Database>::TXMut,
         checkpoint: u64,
     ) -> Result<bool, StageError> {
         let mut header_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
@@ -76,7 +76,7 @@ where
     /// Note: this writes the headers with rising block numbers.
     fn write_headers<DB: Database>(
         &self,
-        tx: &<DB as DatabaseGAT<'_>>::TXMut,
+        tx: &<DB as Database>::TXMut,
         headers: Vec<SealedHeader>,
     ) -> Result<Option<BlockNumber>, StageError> {
         trace!(target: "sync::stages::headers", len = headers.len(), "writing headers");
@@ -176,7 +176,7 @@ where
     /// starting from the tip of the chain
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let current_checkpoint = input.checkpoint();
@@ -279,7 +279,7 @@ where
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();

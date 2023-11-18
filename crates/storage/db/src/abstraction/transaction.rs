@@ -4,19 +4,8 @@ use crate::{
     DatabaseError,
 };
 
-/// Trait that provides the different read-only cursor types.
-pub trait DbCursors: Send + Sync {
-    /// Cursor GAT
-    type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
-    /// DupCursor GAT
-    type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
-}
-
-/// Trait that provides the different read-write cursor types.
-pub trait DbCursorsMut: Send + Sync {}
-
 /// Read only transaction
-pub trait DbTx {
+pub trait DbTx: Send + Sync {
     /// Cursor type for this read-only transaction
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
     /// DupCursor type for this read-only transaction
@@ -38,10 +27,10 @@ pub trait DbTx {
 }
 
 /// Read write transaction that allows writing to database
-pub trait DbTxMut {
-    /// Cursor GAT
+pub trait DbTxMut: Send + Sync {
+    /// Read-Write Cursor type
     type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
-    /// DupCursor GAT
+    /// Read-Write DupCursor type
     type DupCursorMut<T: DupSort>: DbDupCursorRW<T>
         + DbCursorRW<T>
         + DbDupCursorRO<T>

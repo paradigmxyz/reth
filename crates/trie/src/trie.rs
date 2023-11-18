@@ -1254,7 +1254,7 @@ mod tests {
     }
 
     fn extension_node_storage_trie(
-        tx: &DatabaseProviderRW<'_, &DatabaseEnv>,
+        tx: &DatabaseProviderRW<&DatabaseEnv>,
         hashed_address: B256,
     ) -> (B256, HashMap<Nibbles, BranchNodeCompact>) {
         let value = U256::from(1);
@@ -1282,7 +1282,7 @@ mod tests {
         (root, updates)
     }
 
-    fn extension_node_trie(tx: &DatabaseProviderRW<'_, &DatabaseEnv>) -> B256 {
+    fn extension_node_trie(tx: &DatabaseProviderRW<&DatabaseEnv>) -> B256 {
         let a =
             Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(B256::random()) };
         let val = encode_account(a, None);
