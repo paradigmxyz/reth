@@ -291,7 +291,8 @@ impl SealedBlockWithSenders {
     /// Returns [BlockWithSenders]
     pub fn into_block_with_senders(self) -> Option<BlockWithSenders> {
         BlockWithSenders::new(self.block.into(), self.senders)
-      
+    }
+    
     /// Returns an iterator over all transactions in the block.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
