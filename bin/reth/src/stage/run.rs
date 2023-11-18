@@ -163,6 +163,9 @@ impl Command {
 
                     let default_peers_path = data_dir.known_peers_path();
 
+                    let provider_factory =
+                        Arc::new(ProviderFactory::new(db.clone(), self.chain.clone()));
+
                     let network = self
                         .network
                         .network_config(
@@ -171,7 +174,7 @@ impl Command {
                             p2p_secret_key,
                             default_peers_path,
                         )
-                        .build(Arc::new(ProviderFactory::new(db.clone(), self.chain.clone())))
+                        .build(provider_factory.clone())
                         .start_network()
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);
@@ -187,9 +190,8 @@ impl Command {
                                 config.stages.bodies.downloader_min_concurrent_requests..=
                                     config.stages.bodies.downloader_max_concurrent_requests,
                             )
-                            .build(fetch_client, consensus.clone(), db.clone()),
+                            .build(fetch_client, consensus.clone(), provider_factory),
                     );
-
                     (Box::new(stage), None)
                 }
                 StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),

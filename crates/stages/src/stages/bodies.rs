@@ -484,7 +484,7 @@ mod tests {
             tables,
             test_utils::TempDatabase,
             transaction::{DbTx, DbTxMut},
-            DatabaseEnv,
+            DatabaseEnv, DatabaseError,
         };
         use reth_interfaces::{
             p2p::{
@@ -494,7 +494,7 @@ mod tests {
                     response::BlockResponse,
                 },
                 download::DownloadClient,
-                error::DownloadResult,
+                error::{DownloadError, DownloadResult},
                 priority::Priority,
             },
             test_utils::{
@@ -780,22 +780,27 @@ mod tests {
                 &mut self,
                 range: RangeInclusive<BlockNumber>,
             ) -> DownloadResult<()> {
-                self.headers =
-                    VecDeque::from(self.db.view(|tx| -> DownloadResult<Vec<SealedHeader>> {
-                        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
+                self.headers = VecDeque::from(
+                    self.db
+                        .view(|tx| -> Result<Vec<SealedHeader>, DatabaseError> {
+                            let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
-                        let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-                        let walker = canonical_cursor.walk_range(range)?;
+                            let mut canonical_cursor =
+                                tx.cursor_read::<tables::CanonicalHeaders>()?;
+                            let walker = canonical_cursor.walk_range(range)?;
 
-                        let mut headers = Vec::default();
-                        for entry in walker {
-                            let (num, hash) = entry?;
-                            let (_, header) =
-                                header_cursor.seek_exact(num)?.expect("missing header");
-                            headers.push(header.seal(hash));
-                        }
-                        Ok(headers)
-                    })??);
+                            let mut headers = Vec::default();
+                            for entry in walker {
+                                let (num, hash) = entry?;
+                                let (_, header) =
+                                    header_cursor.seek_exact(num)?.expect("missing header");
+                                headers.push(header.seal(hash));
+                            }
+                            Ok(headers)
+                        })
+                        .map_err(|err| DownloadError::Provider(err.into()))?
+                        .map_err(|err| DownloadError::Provider(err.into()))?,
+                );
                 Ok(())
             }
         }
