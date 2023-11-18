@@ -34,7 +34,7 @@ metrics.workspace = true
 # misc
 tracing.workspace = true
 thiserror.workspace = true
-schnellru = "0.2"
+schnellru.workspace = true
 cfg-if = "1.0.0"
 
 [dev-dependencies]

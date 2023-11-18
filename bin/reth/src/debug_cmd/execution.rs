@@ -27,14 +27,11 @@ use reth_interfaces::{
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
-use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
+use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,
-    stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
-    },
-    Pipeline, PipelineError, StageSet,
+    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
+    Pipeline, StageSet,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -105,7 +102,11 @@ impl Command {
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), db.clone())
+            .build(
+                client,
+                Arc::clone(&consensus),
+                ProviderFactory::new(db.clone(), self.chain.clone()),
+            )
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
@@ -118,6 +119,7 @@ impl Command {
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
+                    ProviderFactory::new(db.clone(), self.chain.clone()),
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,
@@ -234,7 +236,7 @@ impl Command {
         )?;
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider = factory.provider().map_err(PipelineError::Interface)?;
+        let provider = factory.provider()?;
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
@@ -269,8 +271,7 @@ impl Command {
             // Unwind the pipeline without committing.
             {
                 factory
-                    .provider_rw()
-                    .map_err(PipelineError::Interface)?
+                    .provider_rw()?
                     .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
             }
 

@@ -78,17 +78,24 @@ impl Case for BlockchainTestCase {
             let provider = factory.provider_rw().unwrap();
 
             // Insert test state
-            provider.insert_block(
-                SealedBlock::new(case.genesis_block_header.clone().into(), BlockBody::default()),
-                None,
-                None,
-            )?;
+            provider
+                .insert_block(
+                    SealedBlock::new(
+                        case.genesis_block_header.clone().into(),
+                        BlockBody::default(),
+                    ),
+                    None,
+                    None,
+                )
+                .map_err(|err| Error::RethError(err.into()))?;
             case.pre.write_to_db(provider.tx_ref())?;
 
             let mut last_block = None;
             for block in case.blocks.iter() {
                 let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                provider.insert_block(decoded.clone(), None, None)?;
+                provider
+                    .insert_block(decoded.clone(), None, None)
+                    .map_err(|err| Error::RethError(err.into()))?;
                 last_block = Some(decoded);
             }
 
@@ -104,8 +111,7 @@ impl Case for BlockchainTestCase {
                     .expect("Could not build tokio RT")
                     .block_on(async {
                         // ignore error
-                        let _ =
-                            stage.execute(&provider, ExecInput { target, checkpoint: None }).await;
+                        let _ = stage.execute(&provider, ExecInput { target, checkpoint: None });
                     });
             }
 
@@ -118,11 +124,9 @@ impl Case for BlockchainTestCase {
                 // `insert_hashes` will insert hashed data, compute the state root and match it to
                 // expected internally
                 let last_block = last_block.unwrap_or_default();
-                provider.insert_hashes(
-                    0..=last_block.number,
-                    last_block.hash,
-                    expected_state_root,
-                )?;
+                provider
+                    .insert_hashes(0..=last_block.number, last_block.hash, expected_state_root)
+                    .map_err(|err| Error::RethError(err.into()))?;
             } else {
                 return Err(Error::MissingPostState)
             }

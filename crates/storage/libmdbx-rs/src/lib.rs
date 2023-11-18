@@ -15,8 +15,7 @@ pub use crate::{
     cursor::{Cursor, Iter, IterDup},
     database::Database,
     environment::{
-        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, Info, NoWriteMap, PageSize,
-        Stat, WriteMap,
+        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, Info, PageSize, Stat,
     },
     error::{Error, Result},
     flags::*,
@@ -40,8 +39,6 @@ mod test_utils {
     use byteorder::{ByteOrder, LittleEndian};
     use tempfile::tempdir;
 
-    type Environment = crate::Environment<NoWriteMap>;
-
     /// Regression test for https://github.com/danburkert/lmdb-rs/issues/21.
     /// This test reliably segfaults when run against lmbdb compiled with opt level -O3 and newer
     /// GCC compilers.
@@ -52,7 +49,7 @@ mod test_utils {
         let dir = tempdir().unwrap();
 
         let env = {
-            let mut builder = Environment::new();
+            let mut builder = Environment::builder();
             builder.set_max_dbs(2);
             builder
                 .set_geometry(Geometry { size: Some(1_000_000..1_000_000), ..Default::default() });

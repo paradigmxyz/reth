@@ -16,6 +16,7 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
+    revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,
     TransactionKind::{Call, Create},
@@ -39,7 +40,6 @@ use revm::{
     primitives::{BlockEnv, CfgEnv},
     Inspector,
 };
-use revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State};
 
 #[cfg(feature = "optimism")]
 use crate::eth::api::optimism::OptimismTxMeta;
@@ -329,15 +329,11 @@ where
         F: FnOnce(StateProviderBox<'_>) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        let this = self.clone();
-        self.inner
-            .blocking_task_pool
-            .spawn(move || {
-                let state = this.state_at(at)?;
-                f(state)
-            })
-            .await
-            .map_err(|_| EthApiError::InternalBlockingTaskError)?
+        self.spawn_tracing_task_with(move |this| {
+            let state = this.state_at(at)?;
+            f(state)
+        })
+        .await
     }
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
@@ -495,7 +491,7 @@ where
         self.forward_to_sequencer(&tx).await?;
 
         let recovered = recover_raw_transaction(tx)?;
-        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
+        let pool_transaction = <Pool::Transaction>::from_recovered_pooled_transaction(recovered);
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
@@ -582,7 +578,8 @@ where
         let recovered =
             signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered.into());
+        let pool_transaction =
+            <Pool::Transaction>::from_recovered_pooled_transaction(recovered.into());
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
@@ -803,34 +800,48 @@ where
             None => return Ok(None),
         };
 
-        // we need to get the state of the parent block because we're replaying this block on top of
-        // its parent block's state
-        let state_at = block.parent_hash;
-
-        let block_hash = block.hash;
-        let transactions = block.body;
-
         // replay all transactions of the block
-        self.spawn_with_state_at_block(state_at.into(), move |state| {
+        self.spawn_tracing_task_with(move |this| {
+            // we need to get the state of the parent block because we're replaying this block on
+            // top of its parent block's state
+            let state_at = block.parent_hash;
+            let block_hash = block.hash;
+
+            let block_number = block_env.number.saturating_to::<u64>();
+            let base_fee = block_env.basefee.saturating_to::<u64>();
+
+            // prepare transactions, we do everything upfront to reduce time spent with open state
+            let max_transactions =
+                highest_index.map_or(block.body.len(), |highest| highest as usize);
+            let transactions = block
+                .body
+                .into_iter()
+                .take(max_transactions)
+                .enumerate()
+                .map(|(idx, tx)| -> EthResult<_> {
+                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                    let tx_info = TransactionInfo {
+                        hash: Some(tx.hash()),
+                        index: Some(idx as u64),
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_number),
+                        base_fee: Some(base_fee),
+                    };
+                    let tx_env = tx_env_with_recovered(&tx);
+
+                    Ok((tx_info, tx_env))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
             let mut results = Vec::with_capacity(transactions.len());
+
+            // now get the state
+            let state = this.state_at(state_at.into())?;
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-            let max_transactions =
-                highest_index.map_or(transactions.len(), |highest| highest as usize);
-            let mut transactions =
-                transactions.into_iter().take(max_transactions).enumerate().peekable();
+            let mut transactions = transactions.into_iter().peekable();
 
-            while let Some((idx, tx)) = transactions.next() {
-                let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
-                let tx_info = TransactionInfo {
-                    hash: Some(tx.hash()),
-                    index: Some(idx as u64),
-                    block_hash: Some(block_hash),
-                    block_number: Some(block_env.number.try_into().unwrap_or(u64::MAX)),
-                    base_fee: Some(block_env.basefee.try_into().unwrap_or(u64::MAX)),
-                };
-
-                let tx = tx_env_with_recovered(&tx);
+            while let Some((tx_info, tx)) = transactions.next() {
                 let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
 
                 let mut inspector = TracingInspector::new(config);
@@ -855,6 +866,28 @@ where
 }
 
 // === impl EthApi ===
+
+impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+where
+    Pool: TransactionPool + Clone + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
+{
+    /// Spawns the given closure on a new blocking tracing task
+    async fn spawn_tracing_task_with<F, T>(&self, f: F) -> EthResult<T>
+    where
+        F: FnOnce(Self) -> EthResult<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let this = self.clone();
+        self.inner
+            .blocking_task_pool
+            .spawn(move || f(this))
+            .await
+            .map_err(|_| EthApiError::InternalBlockingTaskError)?
+    }
+}
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where

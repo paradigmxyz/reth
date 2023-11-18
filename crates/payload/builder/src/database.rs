@@ -1,10 +1,13 @@
 //! Database adapters for payload building.
 
-use reth_primitives::U256;
-use revm_primitives::{
-    db::{Database, DatabaseRef},
-    AccountInfo, Address, Bytecode, B256,
+use reth_primitives::{
+    revm_primitives::{
+        db::{Database, DatabaseRef},
+        AccountInfo, Address, Bytecode, B256,
+    },
+    U256,
 };
+
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},

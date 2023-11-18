@@ -3,6 +3,7 @@
 use crate::{
     consensus::ConsensusError,
     executor::{BlockExecutionError, BlockValidationError},
+    provider::ProviderError,
 };
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
@@ -201,6 +202,9 @@ pub enum InsertBlockErrorKind {
     /// Block violated tree invariants.
     #[error(transparent)]
     Tree(#[from] BlockchainTreeError),
+    /// Provider error.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
     /// An internal error occurred, like interacting with the database.
     #[error(transparent)]
     Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
@@ -260,7 +264,7 @@ impl InsertBlockErrorKind {
                     BlockchainTreeError::BlockBufferingFailed { .. } => false,
                 }
             }
-            InsertBlockErrorKind::Internal(_) => {
+            InsertBlockErrorKind::Provider(_) | InsertBlockErrorKind::Internal(_) => {
                 // any other error, such as database errors, are considered internal errors
                 false
             }

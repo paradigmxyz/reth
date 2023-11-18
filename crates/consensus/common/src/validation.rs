@@ -71,7 +71,7 @@ pub fn validate_transaction_regarding_header(
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
-            if chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(at_block_number) &&
+            if !chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(at_block_number) &&
                 chain_id.is_some()
             {
                 return Err(InvalidTransactionError::OldLegacyChainId.into())
@@ -484,8 +484,8 @@ mod tests {
     use super::*;
     use mockall::mock;
     use reth_interfaces::{
+        provider::ProviderResult,
         test_utils::generators::{self, Rng},
-        RethResult,
     };
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
@@ -498,13 +498,13 @@ mod tests {
         WithdrawalsProvider {}
 
         impl WithdrawalsProvider for WithdrawalsProvider {
-            fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> ;
+            fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> ;
 
             fn withdrawals_by_block(
                 &self,
                 _id: BlockHashOrNumber,
                 _timestamp: u64,
-            ) -> RethResult<Option<Vec<Withdrawal>>> ;
+            ) -> ProviderResult<Option<Vec<Withdrawal>>> ;
         }
     }
 
@@ -537,45 +537,52 @@ mod tests {
     }
 
     impl AccountReader for Provider {
-        fn basic_account(&self, _address: Address) -> RethResult<Option<Account>> {
+        fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
             Ok(self.account)
         }
     }
 
     impl HeaderProvider for Provider {
-        fn is_known(&self, _block_hash: &BlockHash) -> RethResult<bool> {
+        fn is_known(&self, _block_hash: &BlockHash) -> ProviderResult<bool> {
             Ok(self.is_known)
         }
 
-        fn header(&self, _block_number: &BlockHash) -> RethResult<Option<Header>> {
+        fn header(&self, _block_number: &BlockHash) -> ProviderResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_by_number(&self, _num: u64) -> RethResult<Option<Header>> {
+        fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_td(&self, _hash: &BlockHash) -> RethResult<Option<U256>> {
+        fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
             Ok(None)
         }
 
-        fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
+        fn header_td_by_number(&self, _number: BlockNumber) -> ProviderResult<Option<U256>> {
             Ok(None)
         }
 
-        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
-            Ok(vec![])
-        }
-
-        fn sealed_headers_range(
+        fn headers_range(
             &self,
             _range: impl RangeBounds<BlockNumber>,
-        ) -> RethResult<Vec<SealedHeader>> {
+        ) -> ProviderResult<Vec<Header>> {
             Ok(vec![])
         }
 
-        fn sealed_header(&self, _block_number: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        fn sealed_header(
+            &self,
+            _block_number: BlockNumber,
+        ) -> ProviderResult<Option<SealedHeader>> {
             Ok(None)
+        }
+
+        fn sealed_headers_while(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+            _predicate: impl FnMut(&SealedHeader) -> bool,
+        ) -> ProviderResult<Vec<SealedHeader>> {
+            Ok(vec![])
         }
     }
 
@@ -584,11 +591,11 @@ mod tests {
             &self,
             _id: BlockHashOrNumber,
             _timestamp: u64,
-        ) -> RethResult<Option<Vec<Withdrawal>>> {
+        ) -> ProviderResult<Option<Vec<Withdrawal>>> {
             self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
         }
 
-        fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> {
+        fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
             self.withdrawals_provider.latest_withdrawal()
         }
     }
@@ -836,7 +843,7 @@ mod tests {
 
         let block = SealedBlock::new(header, body);
 
-        // 10 blobs times the blob gas per blob
+        // 10 blobs times the blob gas per blob.
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
 
         // validate blob, it should fail blob gas used validation
@@ -846,6 +853,87 @@ mod tests {
                 got: 1,
                 expected: expected_blob_gas_used
             }))
+        );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_increase() {
+        let parent = SealedHeader {
+            header: Header { gas_limit: 1024 * 10, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit + 5, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_increase_exceeding_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header {
+                gas_limit: parent.header.gas_limit + parent.header.gas_limit / 1024 + 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            check_gas_limit(&parent, &child, &chain_spec),
+            Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
+            })
+        );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_decrease_within_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit - 5, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_decrease_exceeding_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header {
+                gas_limit: parent.header.gas_limit - parent.header.gas_limit / 1024 - 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            check_gas_limit(&parent, &child, &chain_spec),
+            Err(ConsensusError::GasLimitInvalidDecrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
+            })
         );
     }
 }

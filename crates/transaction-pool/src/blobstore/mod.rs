@@ -1,11 +1,13 @@
 //! Storage for blob data of EIP4844 transactions.
 
+pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
 use reth_primitives::{BlobTransactionSidecar, B256};
-use std::fmt;
+use std::{fmt, sync::atomic::AtomicUsize};
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
+pub mod disk;
 mod mem;
 mod noop;
 mod tracker;
@@ -32,17 +34,22 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
 
+    /// Checks if the given transaction hash is in the blob store.
+    fn contains(&self, tx: B256) -> Result<bool, BlobStoreError>;
+
     /// Retrieves all decoded blob data for the given transaction hashes.
     ///
     /// This only returns the blobs that were found in the store.
     /// If there's no blob it will not be returned.
+    ///
+    /// Note: this is not guaranteed to return the blobs in the same order as the input.
     fn get_all(
         &self,
         txs: Vec<B256>,
     ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError>;
 
-    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
-    /// they were requested.
+    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the exact
+    /// order they were requested.
     ///
     /// Returns an error if any of the blobs are not found in the blob store.
     fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
@@ -66,6 +73,45 @@ pub enum BlobStoreError {
     /// Other implementation specific error.
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
+}
+
+/// Keeps track of the size of the blob store.
+#[derive(Debug, Default)]
+pub(crate) struct BlobStoreSize {
+    data_size: AtomicUsize,
+    num_blobs: AtomicUsize,
+}
+
+impl BlobStoreSize {
+    #[inline]
+    pub(crate) fn add_size(&self, add: usize) {
+        self.data_size.fetch_add(add, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn sub_size(&self, sub: usize) {
+        self.data_size.fetch_sub(sub, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn update_len(&self, len: usize) {
+        self.num_blobs.store(len, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn inc_len(&self, add: usize) {
+        self.num_blobs.fetch_add(add, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn data_size(&self) -> usize {
+        self.data_size.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub(crate) fn blobs_len(&self) -> usize {
+        self.num_blobs.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 #[cfg(test)]

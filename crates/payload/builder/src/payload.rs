@@ -2,8 +2,9 @@
 
 use alloy_rlp::{Encodable, Error as DecodeError};
 use reth_primitives::{
-    revm::config::revm_spec_by_timestamp_after_merge, Address, BlobTransactionSidecar, ChainSpec,
-    Header, SealedBlock, Withdrawal, B256, U256,
+    revm::config::revm_spec_by_timestamp_after_merge,
+    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
+    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
@@ -12,9 +13,8 @@ use reth_rpc_types::engine::{
 
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v3, convert_block_to_payload_field_v2,
-    convert_standalone_withdraw_to_withdrawal, from_primitive_sidecar, try_block_to_payload_v1,
+    convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
 };
-use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId};
 
 #[cfg(feature = "optimism")]
 use reth_primitives::TransactionSigned;
@@ -116,11 +116,7 @@ impl From<BuiltPayload> for ExecutionPayloadEnvelopeV3 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars
-                .into_iter()
-                .map(from_primitive_sidecar)
-                .collect::<Vec<_>>()
-                .into(),
+            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
         }
     }
 }
@@ -177,7 +173,7 @@ impl PayloadBuilderAttributes {
                 .as_deref()
                 .unwrap_or(&[])
                 .iter()
-                .map(|tx| TransactionSigned::decode_enveloped(tx.clone()))
+                .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
                 .collect::<Result<_, _>>()?;
             (payload_id(&parent, &attributes, &transactions), transactions)
         };

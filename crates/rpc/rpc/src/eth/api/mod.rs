@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
+    revm_primitives::{BlockEnv, CfgEnv},
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
 };
 use reth_provider::{
@@ -22,7 +23,6 @@ use reth_provider::{
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{BlockEnv, CfgEnv};
 use std::{
     future::Future,
     sync::Arc,
@@ -226,12 +226,12 @@ where
 
     /// Returns the state at the given block number
     pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox<'_>> {
-        self.provider().history_by_block_hash(block_hash)
+        Ok(self.provider().history_by_block_hash(block_hash)?)
     }
 
     /// Returns the _latest_ state
     pub fn latest_state(&self) -> RethResult<StateProviderBox<'_>> {
-        self.provider().latest()
+        Ok(self.provider().latest()?)
     }
 }
 
@@ -364,7 +364,7 @@ where
 
     /// Returns the current info for the chain
     fn chain_info(&self) -> RethResult<ChainInfo> {
-        self.provider().chain_info()
+        Ok(self.provider().chain_info()?)
     }
 
     fn accounts(&self) -> Vec<Address> {

@@ -10,13 +10,13 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
-use reth_interfaces::RethError;
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredTransaction,
+    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredPooledTransaction,
+    FromRecoveredTransaction, PooledTransactionsElementEcRecovered,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
-    StateProviderFactory,
+    ProviderError, StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use std::{
@@ -279,16 +279,38 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 changed_accounts.extend(new_changed_accounts.into_iter().map(|entry| entry.0));
 
                 // all transactions mined in the new chain
-                let new_mined_transactions: HashSet<_> =
-                    new_blocks.transactions().map(|tx| tx.hash).collect();
+                let new_mined_transactions: HashSet<_> = new_blocks.transaction_hashes().collect();
 
                 // update the pool then re-inject the pruned transactions
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
-                    .transactions()
+                    .transactions_ecrecovered()
                     .filter(|tx| !new_mined_transactions.contains(&tx.hash))
-                    .filter_map(|tx| tx.clone().into_ecrecovered())
-                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
+                    .filter_map(|tx| {
+                        if tx.is_eip4844() {
+                            // reorged blobs no longer include the blob, which is necessary for
+                            // validating the transaction. Even though the transaction could have
+                            // been validated previously, we still need the blob in order to
+                            // accurately set the transaction's
+                            // encoded-length which is propagated over the network.
+                            pool.get_blob(tx.hash)
+                                .ok()
+                                .flatten()
+                                .and_then(|sidecar| {
+                                    PooledTransactionsElementEcRecovered::try_from_blob_transaction(
+                                        tx, sidecar,
+                                    )
+                                    .ok()
+                                })
+                                .map(
+                                    <P as TransactionPool>::Transaction::from_recovered_pooled_transaction,
+                                )
+                        } else {
+                            Some(<P as TransactionPool>::Transaction::from_recovered_transaction(
+                                tx,
+                            ))
+                        }
+                    })
                     .collect::<Vec<_>>();
 
                 // update the pool first
@@ -306,11 +328,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // to be re-injected
                 //
                 // Note: we no longer know if the tx was local or external
+                // Because the transactions are not finalized, the corresponding blobs are still in
+                // blob store (if we previously received them from the network)
                 metrics.inc_reinserted_transactions(pruned_old_transactions.len());
                 let _ = pool.add_external_transactions(pruned_old_transactions).await;
 
-                // keep track of mined blob transactions
-                // TODO(mattsse): handle reorged transactions
+                // keep track of new mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&new_blocks);
             }
             CanonStateNotification::Commit { new } => {
@@ -359,7 +382,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     changed_accounts.push(acc);
                 }
 
-                let mined_transactions = blocks.transactions().map(|tx| tx.hash).collect();
+                let mined_transactions = blocks.transaction_hashes().collect();
 
                 // check if the range of the commit is canonical with the pool's block
                 if first_block.parent_hash != pool_info.last_seen_block_hash {
@@ -471,7 +494,7 @@ fn load_accounts<Client, I>(
     client: Client,
     at: BlockHash,
     addresses: I,
-) -> Result<LoadedAccounts, Box<(HashSet<Address>, RethError)>>
+) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
 where
     I: Iterator<Item = Address>,
 

@@ -10,7 +10,7 @@ use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
-    ExecInput, Stage, UnwindInput,
+    ExecInput, Stage, StageExt, UnwindInput,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -138,7 +138,11 @@ fn measure_stage_with_path<F, S>(
                 let mut stage = stage.clone();
                 let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
                 let provider = factory.provider_rw().unwrap();
-                stage.execute(&provider, input).await.unwrap();
+                stage
+                    .execute_ready(input)
+                    .await
+                    .and_then(|_| stage.execute(&provider, input))
+                    .unwrap();
                 provider.commit().unwrap();
             },
         )

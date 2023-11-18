@@ -5,10 +5,10 @@ The `eth-wire` crate provides abstractions over the [RLPx](https://github.com/et
 
 This crate can be thought of as having 2 components:
 
-1. Data structures which serialize and deserialize the eth protcol messages into Rust compatible types.
-2. Abstractions over Tokio Streams which operate on these types.
+1. Data structures that serialize and deserialize the Ethereum protocol messages into Rust-compatible types.
+2. Abstractions over Tokio Streams that operate on these types.
 
-(Note that ECIES is implemented in a  seperate `reth-ecies` crate.)
+(Note that ECIES is implemented in a separate `reth-ecies` crate.)
 ## Types
 The most basic Eth-wire type is an `ProtocolMessage`. It describes all messages that reth can send/receive.
 
@@ -59,7 +59,7 @@ pub struct RequestPair<T> {
 }
 
 ```
-Every `Ethmessage` has a correspoding rust struct which implements the `Encodable` and `Decodable` traits.
+Every `Ethmessage` has a corresponding rust struct that implements the `Encodable` and `Decodable` traits.
 These traits are defined as follows:
 
 [Crate: crates/rlp](https://github.com/paradigmxyz/reth/tree/1563506aea09049a85e5cc72c2894f3f7a371581/crates/rlp)

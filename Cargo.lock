@@ -4008,15 +4008,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lifetimed-bytes"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c970c8ea4c7b023a41cfa4af4c785a16694604c2f2a3b0d1f20a9bcb73fa550"
-dependencies = [
- "bytes",
-]
-
-[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5058,9 +5049,9 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
 name = "pprof"
-version = "0.12.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "978385d59daf9269189d052ca8a84c1acfd0715c0599a5d5188d4acc078ca46a"
+checksum = "ef5c97c51bd34c7e742402e216abdeb44d415fbe6ae41d56b114723e953711cb"
 dependencies = [
  "backtrace",
  "cfg-if",
@@ -5899,6 +5890,7 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
+ "reth-provider",
  "reth-tasks",
  "reth-tracing",
  "tempfile",
@@ -6027,7 +6019,6 @@ dependencies = [
  "derive_more",
  "indexmap 2.1.0",
  "libc",
- "lifetimed-bytes",
  "parking_lot 0.12.1",
  "pprof",
  "rand 0.8.5",
@@ -6470,7 +6461,6 @@ dependencies = [
  "alloy-rlp",
  "arbitrary",
  "bytes",
- "c-kzg",
  "itertools 0.11.0",
  "jsonrpsee-types",
  "proptest",
@@ -6506,6 +6496,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-stages",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",
@@ -6519,6 +6510,7 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "async-trait",
+ "auto_impl",
  "criterion",
  "futures-util",
  "itertools 0.11.0",
@@ -6608,7 +6600,9 @@ dependencies = [
  "reth-revm",
  "reth-tasks",
  "revm",
+ "schnellru",
  "serde",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",

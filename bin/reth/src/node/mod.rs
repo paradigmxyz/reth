@@ -61,7 +61,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
-    HeaderProvider, ProviderFactory, StageCheckpointReader,
+    HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::{segments::SegmentSet, Pruner};
 use reth_revm::Factory;
@@ -71,9 +71,9 @@ use reth_snapshot::HighestSnapshotsTracker;
 use reth_stages::{
     prelude::*,
     stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TotalDifficultyStage, TransactionLookupStage,
     },
 };
 use reth_tasks::TaskExecutor;
@@ -298,8 +298,17 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // fetch the head block from the database
         let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
 
+        // configure snapshotter
+        let snapshotter = reth_snapshot::Snapshotter::new(
+            db.clone(),
+            data_dir.snapshots_path(),
+            self.chain.clone(),
+            self.chain.snapshot_block_interval,
+        )?;
+
         // setup the blockchain provider
-        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
+        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain))
+            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
         let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
@@ -454,12 +463,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             None
         };
 
-        let (highest_snapshots_tx, highest_snapshots_rx) = watch::channel(None);
-
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = self.build_pruner(&prune_config, db.clone(), highest_snapshots_rx);
+            let mut pruner = self.build_pruner(
+                &prune_config,
+                db.clone(),
+                snapshotter.highest_snapshot_receiver(),
+            );
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
@@ -469,13 +480,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             Either::Right(stream::empty())
         };
-
-        let _snapshotter = reth_snapshot::Snapshotter::new(
-            db,
-            self.chain.clone(),
-            self.chain.snapshot_block_interval,
-            highest_snapshots_tx,
-        );
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
@@ -613,7 +617,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), db.clone())
+            .build(
+                client,
+                Arc::clone(&consensus),
+                ProviderFactory::new(db.clone(), self.chain.clone()),
+            )
             .into_task_with(task_executor);
 
         let pipeline = self
@@ -892,6 +900,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .with_metrics_tx(metrics_tx.clone())
             .add_stages(
                 DefaultStages::new(
+                    ProviderFactory::new(db.clone(), self.chain.clone()),
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,
@@ -1044,7 +1053,6 @@ mod tests {
     use super::*;
     use crate::args::utils::SUPPORTED_CHAINS;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_primitives::DEV;
     use std::{
         net::{IpAddr, Ipv4Addr},
         path::Path,
@@ -1150,7 +1158,7 @@ mod tests {
     #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
     fn parse_dev() {
         let cmd = NodeCommand::<()>::parse_from(["reth", "--dev"]);
-        let chain = DEV.clone();
+        let chain = reth_primitives::DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
         assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
         assert_eq!(

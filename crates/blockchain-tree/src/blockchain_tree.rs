@@ -21,33 +21,30 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    chain::{ChainSplit, SplitAt},
+    chain::{ChainSplit, ChainSplitTarget},
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     DatabaseProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider,
 };
 use reth_stages::{MetricEvent, MetricEventsSender};
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
-/// Tree of chains and its identifications.
+/// A Tree of chains.
 ///
-/// Mermaid flowchart represent all blocks that can appear in blockchain.
-/// Green blocks belong to canonical chain and are saved inside database table, they are our main
+/// Mermaid flowchart represents all the states a block can have inside the blockchaintree.
+/// Green blocks belong to canonical chain and are saved inside then database, they are our main
 /// chain. Pending blocks and sidechains are found in memory inside [`BlockchainTree`].
-/// Both pending and sidechains have same mechanisms only difference is when they got committed to
-/// database. For pending it is just append operation but for sidechains they need to move current
-/// canonical blocks to BlockchainTree flush sidechain to the database to become canonical chain.
-/// ```mermaid
+/// Both pending and sidechains have same mechanisms only difference is when they get committed to
+/// the database. For pending it is an append operation but for sidechains they need to move current
+/// canonical blocks to BlockchainTree and commit the sidechain to the database to become canonical
+/// chain (reorg). ```mermaid
 /// flowchart BT
 /// subgraph canonical chain
 /// CanonState:::state
-/// block0canon:::canon -->block1canon:::canon -->block2canon:::canon -->block3canon:::canon --> block4canon:::canon --> block5canon:::canon
-/// end
+/// block0canon:::canon -->block1canon:::canon -->block2canon:::canon -->block3canon:::canon -->
+/// block4canon:::canon --> block5canon:::canon end
 /// block5canon --> block6pending1:::pending
 /// block5canon --> block6pending2:::pending
 /// subgraph sidechain2
@@ -56,23 +53,21 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// end
 /// subgraph sidechain1
 /// S1State:::state
-/// block2canon --> block3s1:::sidechain --> block4s1:::sidechain --> block5s1:::sidechain --> block6s1:::sidechain
-/// end
+/// block2canon --> block3s1:::sidechain --> block4s1:::sidechain --> block5s1:::sidechain -->
+/// block6s1:::sidechain end
 /// classDef state fill:#1882C4
 /// classDef canon fill:#8AC926
 /// classDef pending fill:#FFCA3A
 /// classDef sidechain fill:#FF595E
 /// ```
-///
+/// 
 ///
 /// main functions:
 /// * [BlockchainTree::insert_block]: Connect block to chain, execute it and if valid insert block
-///   inside tree.
-/// * [BlockchainTree::finalize_block]: Remove chains that join to now finalized block, as chain
-///   becomes invalid.
-/// * [BlockchainTree::make_canonical]: Check if we have the hash of block that we want to finalize
-///   and commit it to db. If we don't have the block, pipeline syncing should start to fetch the
-///   blocks from p2p. Do reorg in tables if canonical chain if needed.
+///   into the tree.
+/// * [BlockchainTree::finalize_block]: Remove chains that are branch off the now finalized block.
+/// * [BlockchainTree::make_canonical]: Check if we have the hash of block that is the current
+///   canonical head and commit it to db.
 #[derive(Debug)]
 pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
     /// The state of the tree
@@ -142,14 +137,13 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         self
     }
 
-    /// Check if then block is known to blockchain tree or database and return its status.
+    /// Check if the block is known to blockchain tree or database and return its status.
     ///
     /// Function will check:
-    /// * if block is inside database and return [BlockStatus::Valid] if it is.
-    /// * if block is inside buffer and return [BlockStatus::Disconnected] if it is.
-    /// * if block is part of the side chain and return [BlockStatus::Accepted] if it is.
-    /// * if block is part of the canonical chain that tree knows, return [BlockStatus::Valid], if
-    ///   it is.
+    /// * if block is inside database returns [BlockStatus::Valid].
+    /// * if block is inside buffer returns [BlockStatus::Disconnected].
+    /// * if block is part of a side chain returns [BlockStatus::Accepted].
+    /// * if block is part of the canonical returns [BlockStatus::Valid].
     ///
     /// Returns an error if
     ///    - an error occurred while reading from the database.
@@ -244,7 +238,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     ///     * `BundleState` changes that happened at the asked `block_hash`
     ///     * `BTreeMap<BlockNumber,BlockHash>` list of past pending and canonical hashes, That are
     ///       needed for evm `BLOCKHASH` opcode.
-    /// Return none if block is not known.
+    /// Return none if block unknown.
     pub fn post_state_data(&self, block_hash: BlockHash) -> Option<BundleStateData> {
         trace!(target: "blockchain_tree", ?block_hash, "Searching for post state data");
         // if it is part of the chain
@@ -287,7 +281,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// Try inserting a validated [Self::validate_block] block inside the tree.
     ///
     /// If the block's parent block is unknown, this returns [`BlockStatus::Disconnected`] and the
-    /// block will be buffered until the parent block is inserted and then attached.
+    /// block will be buffered until the parent block is inserted and then attached to sidechain
     #[instrument(level = "trace", skip_all, fields(block = ?block.num_hash()), target = "blockchain_tree", ret)]
     fn try_insert_validated_block(
         &mut self,
@@ -564,12 +558,12 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         hashes
     }
 
-    /// Get the block at which the given chain forked from the current canonical chain.
+    /// Get the block at which the given chain forks off the current canonical chain.
     ///
     /// This is used to figure out what kind of state provider the executor should use to execute
-    /// the block.
+    /// the block on
     ///
-    /// Returns `None` if the chain is not known.
+    /// Returns `None` if the chain is unknown.
     fn canonical_fork(&self, chain_id: BlockChainId) -> Option<ForkBlock> {
         let mut chain_id = chain_id;
         let mut fork;
@@ -603,7 +597,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         self.state.lowest_buffered_ancestor(hash)
     }
 
-    /// Insert a new block in the tree.
+    /// Insert a new block into the tree.
     ///
     /// # Note
     ///
@@ -677,7 +671,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         None
     }
 
-    /// Insert a block (with senders recovered) in the tree.
+    /// Insert a block (with recovered senders) into the tree.
     ///
     /// Returns the [BlockStatus] on success:
     ///
@@ -686,14 +680,14 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// - The parent is part of a sidechain in the tree, and we can fork at this block, or
     /// - The parent is part of the canonical chain, and we can fork at this block
     ///
-    /// Otherwise, and error is returned, indicating that neither the block nor its parent is part
+    /// Otherwise, an error is returned, indicating that neither the block nor its parent are part
     /// of the chain or any sidechains.
     ///
     /// This means that if the block becomes canonical, we need to fetch the missing blocks over
     /// P2P.
     ///
-    /// If the [BlockValidationKind::SkipStateRootValidation] is provided the state root is not
-    /// validated.
+    /// If the [BlockValidationKind::SkipStateRootValidation] variant is provided the state root is
+    /// not validated.
     ///
     /// # Note
     ///
@@ -813,9 +807,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
     /// Connect unconnected (buffered) blocks if the new block closes a gap.
     ///
-    /// This will try to insert all children of the new block, extending the chain.
+    /// This will try to insert all children of the new block, extending its chain.
     ///
-    /// If all children are valid, then this essentially moves appends all children blocks to the
+    /// If all children are valid, then this essentially appends all child blocks to the
     /// new block's chain.
     fn try_connect_buffered_blocks(&mut self, new_block: BlockNumHash) {
         trace!(target: "blockchain_tree", ?new_block, "try_connect_buffered_blocks");
@@ -844,7 +838,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         &mut self,
         chain_id: BlockChainId,
         chain: AppendableChain,
-        split_at: SplitAt,
+        split_at: ChainSplitTarget,
     ) -> Chain {
         let chain = chain.into_inner();
         match chain.split(split_at) {
@@ -949,7 +943,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         trace!(target: "blockchain_tree", ?chain, "Found chain to make canonical");
 
         // we are splitting chain at the block hash that we want to make canonical
-        let canonical = self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash));
+        let canonical = self.split_chain(chain_id, chain, ChainSplitTarget::Hash(*block_hash));
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
         let mut block_fork = canonical.fork_block();
@@ -961,7 +955,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             let chain = self.state.chains.remove(&chain_id).expect("To fork to be present");
             block_fork = chain.fork_block();
             // canonical chain is lower part of the chain.
-            let canonical = self.split_chain(chain_id, chain, SplitAt::Number(block_fork_number));
+            let canonical =
+                self.split_chain(chain_id, chain, ChainSplitTarget::Number(block_fork_number));
             block_fork_number = canonical.fork_block_number();
             chains_to_promote.push(canonical);
         }
@@ -1126,9 +1121,10 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         Ok(())
     }
 
-    /// Revert canonical blocks from the database and return them.
+    /// Reverts the canonical chain down to the given block from the database and returns the
+    /// unwound chain.
     ///
-    /// The block, `revert_until`, is non-inclusive, i.e. `revert_until` stays in the database.
+    /// The block, `revert_until`, is __non-inclusive__, i.e. `revert_until` stays in the database.
     fn revert_canonical_from_database(
         &mut self,
         revert_until: BlockNumber,
@@ -1184,16 +1180,6 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     }
 }
 
-/// A container that wraps chains and block indices to allow searching for block hashes across all
-/// sidechains.
-#[derive(Debug)]
-pub struct BlockHashes<'a> {
-    /// The current tracked chains.
-    pub chains: &'a mut HashMap<BlockChainId, AppendableChain>,
-    /// The block indices for all chains.
-    pub indices: &'a BlockIndices,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1214,7 +1200,10 @@ mod tests {
         test_utils::{blocks::BlockChainTestData, TestExecutorFactory},
         BlockWriter, BundleStateWithReceipts, ProviderFactory,
     };
-    use std::{collections::HashSet, sync::Arc};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
 
     fn setup_externals(
         exec_res: Vec<BundleStateWithReceipts>,

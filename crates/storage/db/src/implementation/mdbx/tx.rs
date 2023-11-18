@@ -12,14 +12,14 @@ use crate::{
 };
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
-use reth_libmdbx::{ffi::DBI, EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
+use reth_libmdbx::{ffi::DBI, Transaction, TransactionKind, WriteFlags, RW};
 use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
-pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
+pub struct Tx<K: TransactionKind> {
     /// Libmdbx-sys transaction.
-    pub inner: Transaction<'a, K, E>,
+    pub inner: Transaction<K>,
     /// Database table handle cache.
     pub(crate) db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
@@ -29,20 +29,14 @@ pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     metrics_handler: Option<MetricsHandler<K>>,
 }
 
-impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
+impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction.
-    pub fn new<'a>(inner: Transaction<'a, K, E>) -> Self
-    where
-        'a: 'env,
-    {
+    pub fn new(inner: Transaction<K>) -> Self {
         Self { inner, db_handles: Default::default(), metrics_handler: None }
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
-    pub fn new_with_metrics<'a>(inner: Transaction<'a, K, E>, with_metrics: bool) -> Self
-    where
-        'a: 'env,
-    {
+    pub fn new_with_metrics(inner: Transaction<K>, with_metrics: bool) -> Self {
         let metrics_handler = with_metrics.then(|| {
             let handler = MetricsHandler::<K> {
                 txn_id: inner.id(),
@@ -81,7 +75,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     }
 
     /// Create db Cursor
-    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'env, K, T>, DatabaseError> {
+    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
         let inner = self
             .inner
             .cursor_with_dbi(self.get_dbi::<T>()?)
@@ -128,7 +122,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         &self,
         operation: Operation,
         value_size: Option<usize>,
-        f: impl FnOnce(&Transaction<'_, K, E>) -> R,
+        f: impl FnOnce(&Transaction<K>) -> R,
     ) -> R {
         if self.metrics_handler.is_some() {
             OperationMetrics::record(T::NAME, operation, value_size, || f(&self.inner))
@@ -173,19 +167,19 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
     }
 }
 
-impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxGAT<'a> for Tx<'_, K, E> {
-    type Cursor<T: Table> = Cursor<'a, K, T>;
-    type DupCursor<T: DupSort> = Cursor<'a, K, T>;
+impl<'a, K: TransactionKind> DbTxGAT<'a> for Tx<K> {
+    type Cursor<T: Table> = Cursor<K, T>;
+    type DupCursor<T: DupSort> = Cursor<K, T>;
 }
 
-impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxMutGAT<'a> for Tx<'_, K, E> {
-    type CursorMut<T: Table> = Cursor<'a, RW, T>;
-    type DupCursorMut<T: DupSort> = Cursor<'a, RW, T>;
+impl<'a, K: TransactionKind> DbTxMutGAT<'a> for Tx<K> {
+    type CursorMut<T: Table> = Cursor<RW, T>;
+    type DupCursorMut<T: DupSort> = Cursor<RW, T>;
 }
 
-impl<E: EnvironmentKind> TableImporter for Tx<'_, RW, E> {}
+impl TableImporter for Tx<RW> {}
 
-impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
+impl<K: TransactionKind> DbTx for Tx<K> {
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
             tx.get(self.get_dbi::<T>()?, key.encode().as_ref())
@@ -229,7 +223,7 @@ impl<K: TransactionKind, E: EnvironmentKind> DbTx for Tx<'_, K, E> {
     }
 }
 
-impl<E: EnvironmentKind> DbTxMut for Tx<'_, RW, E> {
+impl DbTxMut for Tx<RW> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = value.compress();

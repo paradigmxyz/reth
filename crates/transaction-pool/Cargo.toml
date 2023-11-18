@@ -39,6 +39,7 @@ metrics.workspace = true
 aquamarine.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+schnellru.workspace = true
 serde = { workspace = true, features = ["derive", "rc"], optional = true }
 fnv = "1.0.7"
 bitflags.workspace = true
@@ -55,8 +56,9 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 paste = "1.0"
 rand = "0.8"
 proptest.workspace = true
-criterion = "0.5"
+criterion.workspace = true
 assert_matches.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["serde"]
@@ -75,4 +77,9 @@ optimism = [
 [[bench]]
 name = "reorder"
 required-features = ["test-utils", "arbitrary"]
+harness = false
+
+[[bench]]
+name = "priority"
+required-features = ["arbitrary"]
 harness = false

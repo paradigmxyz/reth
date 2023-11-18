@@ -27,6 +27,10 @@ impl BlobStore for NoopBlobStore {
         Ok(None)
     }
 
+    fn contains(&self, _tx: B256) -> Result<bool, BlobStoreError> {
+        Ok(false)
+    }
+
     fn get_all(
         &self,
         _txs: Vec<B256>,

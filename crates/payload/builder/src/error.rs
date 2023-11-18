@@ -1,9 +1,8 @@
 //! Error types emitted by types or implementations of this crate.
 
-use reth_interfaces::RethError;
-use reth_primitives::B256;
+use reth_interfaces::{provider::ProviderError, RethError};
+use reth_primitives::{revm_primitives::EVMError, B256};
 use reth_transaction_pool::BlobStoreError;
-use revm_primitives::EVMError;
 use tokio::sync::oneshot;
 
 /// Possible error variants during payload building.
@@ -31,6 +30,12 @@ pub enum PayloadBuilderError {
     #[cfg(feature = "optimism")]
     #[error(transparent)]
     Optimism(#[from] OptimismPayloadBuilderError),
+}
+
+impl From<ProviderError> for PayloadBuilderError {
+    fn from(error: ProviderError) -> Self {
+        PayloadBuilderError::Internal(RethError::Provider(error))
+    }
 }
 
 /// Optimism specific payload building errors.

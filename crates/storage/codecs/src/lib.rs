@@ -31,7 +31,7 @@ use revm_primitives::{
 /// Regarding the `specialized_to/from_compact` methods: Mainly used as a workaround for not being
 /// able to specialize an impl over certain types like `Vec<T>`/`Option<T>` where `T` is a fixed
 /// size array like `Vec<B256>`.
-pub trait Compact {
+pub trait Compact: Sized {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
@@ -43,24 +43,18 @@ pub trait Compact {
     /// `len` can either be the `buf` remaining length, or the length of the compacted type.
     ///
     /// It will panic, if `len` is smaller than `buf.len()`.
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
-    where
-        Self: Sized;
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]);
 
     /// "Optional": If there's no good reason to use it, don't.
     fn specialized_to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
-        Self: Sized,
     {
         self.to_compact(buf)
     }
 
     /// "Optional": If there's no good reason to use it, don't.
-    fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         Self::from_compact(buf, len)
     }
 }

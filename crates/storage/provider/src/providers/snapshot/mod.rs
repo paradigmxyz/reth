@@ -4,7 +4,7 @@ pub use manager::SnapshotProvider;
 mod jar;
 pub use jar::SnapshotJarProvider;
 
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{snapshot::SegmentHeader, SnapshotSegment};
 use std::ops::Deref;
@@ -20,7 +20,7 @@ pub struct LoadedJar {
 }
 
 impl LoadedJar {
-    fn new(jar: NippyJar<SegmentHeader>) -> RethResult<Self> {
+    fn new(jar: NippyJar<SegmentHeader>) -> ProviderResult<Self> {
         let mmap_handle = jar.open_data()?;
         Ok(Self { jar, mmap_handle })
     }
@@ -66,7 +66,8 @@ mod test {
         // Data sources
         let db = create_test_rw_db();
         let factory = ProviderFactory::new(&db, MAINNET.clone());
-        let snap_file = tempfile::NamedTempFile::new().unwrap();
+        let snap_path = tempfile::tempdir().unwrap();
+        let snap_file = snap_path.path().join(SnapshotSegment::Headers.filename(&range, &range));
 
         // Setup data
         let mut headers = random_header_range(
@@ -96,7 +97,7 @@ mod test {
             let with_compression = true;
             let with_filter = true;
 
-            let mut nippy_jar = NippyJar::new(3, snap_file.path(), segment_header);
+            let mut nippy_jar = NippyJar::new(3, snap_file.as_path(), segment_header);
 
             if with_compression {
                 nippy_jar = nippy_jar.with_zstd(false, 0);
@@ -134,9 +135,9 @@ mod test {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = SnapshotProvider::default();
+            let manager = SnapshotProvider::new(snap_path.path());
             let jar_provider = manager
-                .get_segment_provider(SnapshotSegment::Headers, 0, Some(snap_file.path().into()))
+                .get_segment_provider_from_block(SnapshotSegment::Headers, 0, Some(&snap_file))
                 .unwrap();
 
             assert!(!headers.is_empty());

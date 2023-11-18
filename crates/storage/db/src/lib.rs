@@ -87,15 +87,7 @@ pub use tables::*;
 pub use utils::is_database_empty;
 
 #[cfg(feature = "mdbx")]
-use mdbx::{Env, EnvKind, NoWriteMap, WriteMap};
-
-#[cfg(feature = "mdbx")]
-/// Alias type for the database environment in use. Read/Write mode.
-pub type DatabaseEnv = Env<WriteMap>;
-
-#[cfg(feature = "mdbx")]
-/// Alias type for the database engine in use. Read only mode.
-pub type DatabaseEnvRO = Env<NoWriteMap>;
+pub use mdbx::{DatabaseEnv, DatabaseEnvKind};
 
 use eyre::WrapErr;
 use reth_interfaces::db::LogLevel;
@@ -120,7 +112,7 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
     }
     #[cfg(feature = "mdbx")]
     {
-        let db = DatabaseEnv::open(rpath, EnvKind::RW, log_level)?;
+        let db = DatabaseEnv::open(rpath, DatabaseEnvKind::RW, log_level)?;
         db.create_tables()?;
         Ok(db)
     }
@@ -131,10 +123,10 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
 }
 
 /// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
-pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnvRO> {
+pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<NoWriteMap>::open(path, EnvKind::RO, log_level)
+        DatabaseEnv::open(path, DatabaseEnvKind::RO, log_level)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -143,12 +135,12 @@ pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Resu
     }
 }
 
-/// Opens up an existing database. Read/Write mode. It doesn't create it or create tables if
-/// missing.
+/// Opens up an existing database. Read/Write mode with WriteMap enabled. It doesn't create it or
+/// create tables if missing.
 pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<WriteMap>::open(path, EnvKind::RW, log_level)
+        DatabaseEnv::open(path, DatabaseEnvKind::RW, log_level)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -234,7 +226,7 @@ pub mod test_utils {
     }
 
     /// Create read only database for testing
-    pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnvRO>> {
+    pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
         {
             init_db(path.as_path(), None).expect(ERROR_DB_CREATION);

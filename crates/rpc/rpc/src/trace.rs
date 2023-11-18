@@ -11,7 +11,8 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{
-    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
+    revm::env::tx_env_with_recovered, revm_primitives::db::DatabaseCommit, BlockId,
+    BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
 };
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
@@ -25,7 +26,6 @@ use reth_rpc_types::{
     BlockError, BlockOverrides, CallRequest, Index,
 };
 use revm::{db::CacheDB, primitives::Env};
-use revm_primitives::db::DatabaseCommit;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
