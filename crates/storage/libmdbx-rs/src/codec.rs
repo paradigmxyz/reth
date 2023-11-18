@@ -16,10 +16,7 @@ pub trait TableObject: Sized {
     unsafe fn decode_val<K: TransactionKind>(
         _: *const ffi::MDBX_txn,
         data_val: ffi::MDBX_val,
-    ) -> Result<Self, Error>
-    where
-        Self: Sized,
-    {
+    ) -> Result<Self, Error> {
         let s = slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len);
         Self::decode(s)
     }

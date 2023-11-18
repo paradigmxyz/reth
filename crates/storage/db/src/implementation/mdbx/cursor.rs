@@ -107,10 +107,7 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
         decode!(self.inner.get_current())
     }
 
-    fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError>
-    where
-        Self: Sized,
-    {
+    fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
         let start = if let Some(start_key) = start_key {
             self.inner
                 .set_range(start_key.encode().as_ref())
@@ -126,10 +123,7 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     fn walk_range(
         &mut self,
         range: impl RangeBounds<T::Key>,
-    ) -> Result<RangeWalker<'_, T, Self>, DatabaseError>
-    where
-        Self: Sized,
-    {
+    ) -> Result<RangeWalker<'_, T, Self>, DatabaseError> {
         let start = match range.start_bound().cloned() {
             Bound::Included(key) => self.inner.set_range(key.encode().as_ref()),
             Bound::Excluded(_key) => {
@@ -146,10 +140,7 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     fn walk_back(
         &mut self,
         start_key: Option<T::Key>,
-    ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError>
-    where
-        Self: Sized,
-    {
+    ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
         let start = if let Some(start_key) = start_key {
             decode!(self.inner.set_range(start_key.encode().as_ref()))
         } else {
@@ -207,16 +198,14 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
                 // encode key and decode it after.
-                let key = key.encode().as_ref().to_vec();
-
+                let key: Vec<u8> = key.encode().into();
                 self.inner
                     .get_both_range(key.as_ref(), subkey.encode().as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
                     .map(|val| decoder::<T>((Cow::Owned(key), val)))
             }
             (Some(key), None) => {
-                let key = key.encode().as_ref().to_vec();
-
+                let key: Vec<u8> = key.encode().into();
                 self.inner
                     .set(key.as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
@@ -224,8 +213,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
             }
             (None, Some(subkey)) => {
                 if let Some((key, _)) = self.first()? {
-                    let key = key.encode().as_ref().to_vec();
-
+                    let key: Vec<u8> = key.encode().into();
                     self.inner
                         .get_both_range(key.as_ref(), subkey.encode().as_ref())
                         .map_err(|e| DatabaseError::Read(e.into()))?

@@ -46,10 +46,7 @@ impl Compact for StoredSubNode {
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let key_len = buf.get_u16() as usize;
         let key = Vec::from(&buf[..key_len]);
         buf.advance(key_len);

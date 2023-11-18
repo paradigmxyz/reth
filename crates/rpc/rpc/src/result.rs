@@ -8,12 +8,11 @@ use reth_rpc_types::engine::PayloadError;
 use std::fmt::Display;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
-pub trait ToRpcResult<Ok, Err> {
+pub trait ToRpcResult<Ok, Err>: Sized {
     /// Converts the error of the [Result] to an [RpcResult] via the `Err` [Display] impl.
     fn to_rpc_result(self) -> RpcResult<Ok>
     where
         Err: Display,
-        Self: Sized,
     {
         self.map_internal_err(|err| err.to_string())
     }
