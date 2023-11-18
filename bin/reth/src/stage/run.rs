@@ -12,7 +12,6 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::Parser;
-use futures::future::poll_fn;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::init_db;
@@ -25,7 +24,7 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, Stage, UnwindInput,
+    ExecInput, Stage, StagePollExt, UnwindInput,
 };
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -258,7 +257,7 @@ impl Command {
         };
 
         loop {
-            poll_fn(|cx| exec_stage.poll_execute_ready(cx, input)).await?;
+            exec_stage.execute_ready(input).await?;
             let output = exec_stage.execute(&provider_rw, input)?;
 
             input.checkpoint = Some(output.checkpoint);
