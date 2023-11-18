@@ -10,10 +10,12 @@ pub fn revm_spec_by_timestamp_after_merge(
 ) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
     if chain_spec.is_optimism() {
-        if chain_spec.fork(Hardfork::Regolith).active_at_timestamp(timestamp) {
-            return revm_primitives::REGOLITH
+        if chain_spec.fork(Hardfork::Canyon).active_at_timestamp(timestamp) {
+            unimplemented!()
+        } else if chain_spec.fork(Hardfork::Regolith).active_at_timestamp(timestamp) {
+            return revm_primitives::REGOLITH;
         } else {
-            return revm_primitives::BEDROCK
+            return revm_primitives::BEDROCK;
         }
     }
 
@@ -30,10 +32,12 @@ pub fn revm_spec_by_timestamp_after_merge(
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
     if chain_spec.is_optimism() {
-        if chain_spec.fork(Hardfork::Regolith).active_at_head(&block) {
-            return revm_primitives::REGOLITH
+        if chain_spec.fork(Hardfork::Canyon).active_at_head(&block) {
+            unimplemented!()
+        } else if chain_spec.fork(Hardfork::Regolith).active_at_head(&block) {
+            return revm_primitives::REGOLITH;
         } else if chain_spec.fork(Hardfork::Bedrock).active_at_head(&block) {
-            return revm_primitives::BEDROCK
+            return revm_primitives::BEDROCK;
         }
     }
 
@@ -138,6 +142,11 @@ mod tests {
                 f(cs).build()
             }
 
+            // TODO: Enable once `reth` has been updated to a revm version that knows about Canyon.
+            // assert_eq!(
+            //     revm_spec(&op_cs(|cs| cs.canyon_activated()), Head::default()),
+            //     revm_primitives::CANYON
+            // );
             assert_eq!(
                 revm_spec(&op_cs(|cs| cs.bedrock_activated()), Head::default()),
                 revm_primitives::BEDROCK
