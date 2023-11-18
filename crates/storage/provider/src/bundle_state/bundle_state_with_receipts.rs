@@ -214,7 +214,7 @@ impl BundleStateWithReceipts {
         self.state_root_calculator(tx, &hashed_post_state).root()
     }
 
-    /// Calculates the state root for this [BundleState] and returns it alongside with trie updates.
+    /// Calculates the state root for this [BundleState] and returns it alongside trie updates.
     /// See [Self::state_root_slow] for more info.
     pub fn state_root_slow_with_updates<TX: DbTx>(
         &self,
