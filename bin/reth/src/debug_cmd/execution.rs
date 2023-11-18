@@ -27,13 +27,10 @@ use reth_interfaces::{
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
-use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
+use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,
-    stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
-    },
+    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
     Pipeline, StageSet,
 };
 use reth_tasks::TaskExecutor;
@@ -105,7 +102,11 @@ impl Command {
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), db.clone())
+            .build(
+                client,
+                Arc::clone(&consensus),
+                ProviderFactory::new(db.clone(), self.chain.clone()),
+            )
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
@@ -118,6 +119,7 @@ impl Command {
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
+                    ProviderFactory::new(db.clone(), self.chain.clone()),
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,

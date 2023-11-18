@@ -21,8 +21,8 @@ use std::{
     cmp::max,
     fmt::Debug,
     ops::{Range, RangeInclusive},
+    sync::mpsc,
 };
-use tokio::sync::mpsc;
 use tracing::*;
 
 /// Account hashing stage hashes plain account.
@@ -125,7 +125,6 @@ impl AccountHashingStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for AccountHashingStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -133,7 +132,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     }
 
     /// Execute the stage.
-    async fn execute(
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: ExecInput,
@@ -190,7 +189,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     )
                 {
                     // An _unordered_ channel to receive results from a rayon job
-                    let (tx, rx) = mpsc::unbounded_channel();
+                    let (tx, rx) = mpsc::channel();
                     channels.push(rx);
 
                     let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
@@ -205,8 +204,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 let mut hashed_batch = Vec::with_capacity(self.commit_threshold as usize);
 
                 // Iterate over channels and append the hashed accounts.
-                for mut channel in channels {
-                    while let Some(hashed) = channel.recv().await {
+                for channel in channels {
+                    while let Ok(hashed) = channel.recv() {
                         hashed_batch.push(hashed);
                     }
                 }
@@ -265,7 +264,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<'_, &DB>,
         input: UnwindInput,

@@ -22,19 +22,17 @@ pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, DatabaseError>
 
 // Sealed trait helper to prevent misuse of the Database API.
 mod sealed {
+    use crate::{database::Database, mock::DatabaseMock, DatabaseEnv};
     use std::sync::Arc;
-    use crate::database::Database;
-    use crate::DatabaseEnv;
-    use crate::mock::DatabaseMock;
 
     /// Sealed trait to limit the implementors of the Database trait.
     pub trait Sealed: Sized {}
 
-    impl<DB: Database> Sealed for &DB { }
-    impl<DB: Database> Sealed for Arc<DB> { }
-    impl Sealed for DatabaseEnv{ }
-    impl Sealed for DatabaseMock{ }
+    impl<DB: Database> Sealed for &DB {}
+    impl<DB: Database> Sealed for Arc<DB> {}
+    impl Sealed for DatabaseEnv {}
+    impl Sealed for DatabaseMock {}
 
     #[cfg(any(test, feature = "test-utils"))]
-    impl<DB: Database> Sealed for crate::test_utils::TempDatabase<DB>{ }
+    impl<DB: Database> Sealed for crate::test_utils::TempDatabase<DB> {}
 }

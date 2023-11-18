@@ -16,16 +16,29 @@ use std::{borrow::Cow, collections::BTreeMap, fmt};
 /// Used inside the BlockchainTree.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
+    /// All blocks in this chain.
+    blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
     /// The state of all accounts after execution of the _all_ blocks in this chain's range from
     /// [Chain::first] to [Chain::tip], inclusive.
     ///
     /// This state also contains the individual changes that lead to the current state.
-    pub state: BundleStateWithReceipts,
-    /// All blocks in this chain.
-    pub blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
+    state: BundleStateWithReceipts,
 }
 
 impl Chain {
+    /// Create new Chain from blocks and state.
+    pub fn new(
+        blocks: impl IntoIterator<Item = SealedBlockWithSenders>,
+        state: BundleStateWithReceipts,
+    ) -> Self {
+        Self { blocks: BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b))), state }
+    }
+
+    /// Create new Chain from a single block and its state.
+    pub fn from_block(block: SealedBlockWithSenders, state: BundleStateWithReceipts) -> Self {
+        Self::new([block], state)
+    }
+
     /// Get the blocks in this chain.
     pub fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
         &self.blocks
@@ -96,18 +109,6 @@ impl Chain {
         ForkBlock { number: first.number.saturating_sub(1), hash: first.parent_hash }
     }
 
-    /// Get the block number at which this chain forked.
-    #[track_caller]
-    pub fn fork_block_number(&self) -> BlockNumber {
-        self.first().number.saturating_sub(1)
-    }
-
-    /// Get the block hash at which this chain forked.
-    #[track_caller]
-    pub fn fork_block_hash(&self) -> BlockHash {
-        self.first().parent_hash
-    }
-
     /// Get the first block in this chain.
     #[track_caller]
     pub fn first(&self) -> &SealedBlockWithSenders {
@@ -122,11 +123,6 @@ impl Chain {
     #[track_caller]
     pub fn tip(&self) -> &SealedBlockWithSenders {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
-    }
-
-    /// Create new chain with given blocks and post state.
-    pub fn new(blocks: Vec<SealedBlockWithSenders>, state: BundleStateWithReceipts) -> Self {
-        Self { state, blocks: blocks.into_iter().map(|b| (b.number, b)).collect() }
     }
 
     /// Returns length of the chain.
@@ -160,22 +156,30 @@ impl Chain {
         receipt_attch
     }
 
+    /// Append a single block with state to the chain.
+    /// This method assumes that blocks attachment to the chain has already been validated.
+    pub fn append_block(&mut self, block: SealedBlockWithSenders, state: BundleStateWithReceipts) {
+        self.blocks.insert(block.number, block);
+        self.state.extend(state);
+    }
+
     /// Merge two chains by appending the given chain into the current one.
     ///
     /// The state of accounts for this chain is set to the state of the newest chain.
-    pub fn append_chain(&mut self, chain: Chain) -> RethResult<()> {
+    pub fn append_chain(&mut self, other: Chain) -> RethResult<()> {
         let chain_tip = self.tip();
-        if chain_tip.hash != chain.fork_block_hash() {
+        let other_fork_block = other.fork_block();
+        if chain_tip.hash != other_fork_block.hash {
             return Err(BlockExecutionError::AppendChainDoesntConnect {
                 chain_tip: Box::new(chain_tip.num_hash()),
-                other_chain_fork: Box::new(chain.fork_block()),
+                other_chain_fork: Box::new(other_fork_block),
             }
             .into())
         }
 
         // Insert blocks from other chain
-        self.blocks.extend(chain.blocks);
-        self.state.extend(chain.state);
+        self.blocks.extend(other.blocks);
+        self.state.extend(other.state);
 
         Ok(())
     }

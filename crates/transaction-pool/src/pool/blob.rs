@@ -272,6 +272,9 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
     }
 }
 
+/// This is the log base 2 of 1.125, which we'll use to calculate the priority
+const LOG_2_1_125: f64 = 0.16992500144231237;
+
 /// The blob step function, attempting to compute the delta given the `max_tx_fee`, and
 /// `current_fee`.
 ///
@@ -284,9 +287,28 @@ impl<T: PoolTransaction> Ord for BlobTransaction<T> {
 ///
 /// This is supposed to get the number of fee jumps required to get from the current fee to the fee
 /// cap, or where the transaction would not be executable any more.
-fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
+pub fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
+    if max_tx_fee == current_fee {
+        // if these are equal, then there's no fee jump
+        return 0;
+    }
+
+    let max_tx_fee_jumps = if max_tx_fee == 0 {
+        // we can't take log2 of 0, so we set this to zero here
+        0f64
+    } else {
+        (max_tx_fee.ilog2() as f64) / LOG_2_1_125
+    };
+
+    let current_fee_jumps = if current_fee == 0 {
+        // we can't take log2 of 0, so we set this to zero here
+        0f64
+    } else {
+        (current_fee.ilog2() as f64) / LOG_2_1_125
+    };
+
     // jumps = log1.125(txfee) - log1.125(basefee)
-    let jumps = (max_tx_fee as f64).log(1.125) - (current_fee as f64).log(1.125);
+    let jumps = max_tx_fee_jumps - current_fee_jumps;
 
     // delta = sign(jumps) * log(abs(jumps))
     match (jumps as i64).cmp(&0) {
@@ -300,7 +322,7 @@ fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
 }
 
 /// Returns the priority for the transaction, based on the "delta" blob fee and priority fee.
-fn blob_tx_priority(
+pub fn blob_tx_priority(
     blob_fee_cap: u128,
     blob_fee: u128,
     max_priority_fee: u128,

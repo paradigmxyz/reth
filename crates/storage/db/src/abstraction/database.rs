@@ -1,5 +1,5 @@
 use crate::{
-    common::{Sealed},
+    common::Sealed,
     table::TableImporter,
     transaction::{DbTx, DbTxMut},
     DatabaseError,
@@ -10,14 +10,16 @@ use std::{fmt::Debug, sync::Arc};
 ///
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DatabaseGAT: Sealed + Send + Sync {
-    /// RO database transaction
-    type TX: DbTx + Send + Sync + Debug;
-    /// RW database transaction
-    type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug;
+
 }
 
 /// Main Database trait that spawns transactions to be executed.
 pub trait Database: DatabaseGAT {
+    /// RO database transaction
+    type TX: DbTx + Send + Sync + Debug;
+    /// RW database transaction
+    type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug;
+
     /// Create read only transaction.
     fn tx(&self) -> Result<<Self as DatabaseGAT>::TX, DatabaseError>;
 

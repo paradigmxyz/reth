@@ -20,25 +20,30 @@ pub enum ProviderError {
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
     SenderRecoveryError,
+    /// Inconsistent header gap.
+    #[error("inconsistent header gap in the database")]
+    InconsistentHeaderGap,
     /// The header number was not found for the given block hash.
     #[error("block hash {0} does not exist in Headers table")]
     BlockHashNotFound(BlockHash),
     /// A block body is missing.
     #[error("block meta not found for block #{0}")]
     BlockBodyIndicesNotFound(BlockNumber),
-    /// The transition id was found for the given address and storage key, but the changeset was
+    /// The transition ID was found for the given address and storage key, but the changeset was
     /// not found.
-    #[error("storage ChangeSet address: ({address} key: {storage_key:?}) for block #{block_number} does not exist")]
+    #[error("storage change set for address {address} and key {storage_key} at block #{block_number} does not exist")]
     StorageChangesetNotFound {
         /// The block number found for the address and storage key.
         block_number: BlockNumber,
         /// The account address.
         address: Address,
         /// The storage key.
-        storage_key: B256,
+        // NOTE: This is a Box only because otherwise this variant is 16 bytes larger than the
+        // second largest (which uses `BlockHashOrNumber`).
+        storage_key: Box<B256>,
     },
     /// The block number was found for the given address, but the changeset was not found.
-    #[error("account {address} ChangeSet for block #{block_number} does not exist")]
+    #[error("account change set for address {address} at block #{block_number} does not exist")]
     AccountChangesetNotFound {
         /// Block number found for the address.
         block_number: BlockNumber,

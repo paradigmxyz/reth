@@ -1,5 +1,5 @@
 use super::TestTransaction;
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput};
 use reth_db::DatabaseEnv;
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::MAINNET;
@@ -48,10 +48,13 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         let (db, mut stage) = (self.tx().inner_raw(), self.stage());
         tokio::spawn(async move {
             let factory = ProviderFactory::new(db.db(), MAINNET.clone());
-            let provider = factory.provider_rw().unwrap();
 
-            let result = stage.execute(&provider, input).await;
-            provider.commit().expect("failed to commit");
+            let result = stage.execute_ready(input).await.and_then(|_| {
+                let provider_rw = factory.provider_rw().unwrap();
+                let result = stage.execute(&provider_rw, input);
+                provider_rw.commit().expect("failed to commit");
+                result
+            });
             tx.send(result).expect("failed to send message")
         });
         rx
@@ -76,7 +79,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
             let factory = ProviderFactory::new(db.db(), MAINNET.clone());
             let provider = factory.provider_rw().unwrap();
 
-            let result = stage.unwind(&provider, input).await;
+            let result = stage.unwind(&provider, input);
             provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");
         });

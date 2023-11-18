@@ -78,3 +78,8 @@ optimism = [
 name = "reorder"
 required-features = ["test-utils", "arbitrary"]
 harness = false
+
+[[bench]]
+name = "priority"
+required-features = ["arbitrary"]
+harness = false
