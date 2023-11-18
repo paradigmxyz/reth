@@ -948,17 +948,15 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
         let mut fork_block = canonical.fork_block();
-        let mut fork_block_number = fork_block.number;
         let mut chains_to_promote = vec![canonical];
 
         // loop while fork blocks are found in Tree.
         while let Some(chain_id) = self.block_indices().get_blocks_chain_id(&fork_block.hash) {
-            let chain = self.state.chains.remove(&chain_id).expect("To fork to be present");
-            fork_block = chain.fork_block();
+            let chain = self.state.chains.remove(&chain_id).expect("fork is present");
             // canonical chain is lower part of the chain.
             let canonical =
-                self.split_chain(chain_id, chain, ChainSplitTarget::Number(fork_block_number));
-            fork_block_number = canonical.fork_block().number;
+                self.split_chain(chain_id, chain, ChainSplitTarget::Number(fork_block.number));
+            fork_block = canonical.fork_block();
             chains_to_promote.push(canonical);
         }
         durations_recorder.record_relative(MakeCanonicalAction::SplitChainForks);
