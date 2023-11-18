@@ -1,14 +1,3 @@
-use std::{borrow::Cow, fmt, marker::PhantomData, mem, ptr};
-
-use libc::c_void;
-
-use ffi::{
-    MDBX_cursor_op, MDBX_FIRST, MDBX_FIRST_DUP, MDBX_GET_BOTH, MDBX_GET_BOTH_RANGE,
-    MDBX_GET_CURRENT, MDBX_GET_MULTIPLE, MDBX_LAST, MDBX_LAST_DUP, MDBX_NEXT, MDBX_NEXT_DUP,
-    MDBX_NEXT_MULTIPLE, MDBX_NEXT_NODUP, MDBX_PREV, MDBX_PREV_DUP, MDBX_PREV_MULTIPLE,
-    MDBX_PREV_NODUP, MDBX_SET, MDBX_SET_KEY, MDBX_SET_LOWERBOUND, MDBX_SET_RANGE,
-};
-
 use crate::{
     error::{mdbx_result, Error, Result},
     flags::*,
@@ -16,6 +5,14 @@ use crate::{
     transaction::{TransactionKind, RW},
     TableObject, Transaction,
 };
+use ffi::{
+    MDBX_cursor_op, MDBX_FIRST, MDBX_FIRST_DUP, MDBX_GET_BOTH, MDBX_GET_BOTH_RANGE,
+    MDBX_GET_CURRENT, MDBX_GET_MULTIPLE, MDBX_LAST, MDBX_LAST_DUP, MDBX_NEXT, MDBX_NEXT_DUP,
+    MDBX_NEXT_MULTIPLE, MDBX_NEXT_NODUP, MDBX_PREV, MDBX_PREV_DUP, MDBX_PREV_MULTIPLE,
+    MDBX_PREV_NODUP, MDBX_SET, MDBX_SET_KEY, MDBX_SET_LOWERBOUND, MDBX_SET_RANGE,
+};
+use libc::c_void;
+use std::{borrow::Cow, fmt, marker::PhantomData, mem, ptr};
 
 /// A cursor for navigating the items within a database.
 pub struct Cursor<K>
@@ -60,22 +57,20 @@ where
         self.cursor
     }
 
-    /// Returns an Iterator over the raw key value slices
-    ///
-    /// Note: The lifetime ensures that the transaction is kept alive while entries are used
-    pub fn into_iter_slices<'cur>(self) -> IntoIter<'cur, K, Cow<'cur, [u8]>, Cow<'cur, [u8]>> {
+    /// Returns an iterator over the raw key value slices.
+    #[allow(clippy::needless_lifetimes)]
+    pub fn iter_slices<'a>(&'a self) -> IntoIter<'a, K, Cow<'a, [u8]>, Cow<'a, [u8]>> {
         self.into_iter()
     }
-    /// Returns an Iterator over key value pairs of the cursor
-    ///
-    /// Note: The lifetime ensures that the transaction is kept alive while entries are used
+
+    /// Returns an iterator over database items.
     #[allow(clippy::should_implement_trait)]
-    pub fn into_iter<'cur, Key, Value>(self) -> IntoIter<'cur, K, Key, Value>
+    pub fn into_iter<Key, Value>(&self) -> IntoIter<'_, K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
     {
-        IntoIter::new(self, MDBX_NEXT, MDBX_NEXT)
+        IntoIter::new(self.clone(), MDBX_NEXT, MDBX_NEXT)
     }
 
     /// Retrieves a key/data pair from the cursor. Depending on the cursor op,
@@ -106,12 +101,12 @@ where
                 let key_out = {
                     // MDBX wrote in new key
                     if key_ptr != key_val.iov_base {
-                        Some(Key::decode_val::<K>(txn, &key_val)?)
+                        Some(Key::decode_val::<K>(txn, key_val)?)
                     } else {
                         None
                     }
                 };
-                let data_out = Value::decode_val::<K>(txn, &data_val)?;
+                let data_out = Value::decode_val::<K>(txn, data_val)?;
                 Ok((key_out, data_out, v))
             })
         }
@@ -335,9 +330,10 @@ where
         Ok(Some((found, k.unwrap(), v)))
     }
 
-    /// Iterate over database items. The iterator will begin with item next
-    /// after the cursor, and continue until the end of the database. For new
-    /// cursors, the iterator will begin with the first item in the database.
+    /// Returns an iterator over database items.
+    ///
+    /// The iterator will begin with item next after the cursor, and continue until the end of the
+    /// database. For new cursors, the iterator will begin with the first item in the database.
     ///
     /// For databases with duplicate data items ([DatabaseFlags::DUP_SORT]), the
     /// duplicate data items of each key will be returned before moving on to
@@ -534,7 +530,7 @@ where
         /// The next and subsequent operations to perform.
         next_op: ffi::MDBX_cursor_op,
 
-        _marker: PhantomData<fn(&'cur (), K, Key, Value)>,
+        _marker: PhantomData<(&'cur (), Key, Value)>,
     },
 }
 
@@ -568,11 +564,11 @@ where
                     cursor.txn.txn_execute(|txn| {
                         match ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) {
                             ffi::MDBX_SUCCESS => {
-                                let key = match Key::decode_val::<K>(txn, &key) {
+                                let key = match Key::decode_val::<K>(txn, key) {
                                     Ok(v) => v,
                                     Err(e) => return Some(Err(e)),
                                 };
-                                let data = match Value::decode_val::<K>(txn, &data) {
+                                let data = match Value::decode_val::<K>(txn, data) {
                                     Ok(v) => v,
                                     Err(e) => return Some(Err(e)),
                                 };
@@ -659,11 +655,11 @@ where
                     cursor.txn.txn_execute(|txn| {
                         match ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) {
                             ffi::MDBX_SUCCESS => {
-                                let key = match Key::decode_val::<K>(txn, &key) {
+                                let key = match Key::decode_val::<K>(txn, key) {
                                     Ok(v) => v,
                                     Err(e) => return Some(Err(e)),
                                 };
-                                let data = match Value::decode_val::<K>(txn, &data) {
+                                let data = match Value::decode_val::<K>(txn, data) {
                                     Ok(v) => v,
                                     Err(e) => return Some(Err(e)),
                                 };

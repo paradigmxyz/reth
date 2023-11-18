@@ -156,7 +156,7 @@ where
 
         self.txn_execute(|txn| unsafe {
             match ffi::mdbx_get(txn, dbi, &key_val, &mut data_val) {
-                ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, &data_val).map(Some),
+                ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, data_val).map(Some),
                 ffi::MDBX_NOTFOUND => Ok(None),
                 err_code => Err(Error::from_err_code(err_code)),
             }

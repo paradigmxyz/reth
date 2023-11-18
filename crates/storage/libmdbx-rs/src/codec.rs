@@ -15,11 +15,10 @@ pub trait TableObject: Sized {
     #[doc(hidden)]
     unsafe fn decode_val<K: TransactionKind>(
         _: *const ffi::MDBX_txn,
-        data_val: &ffi::MDBX_val,
+        data_val: ffi::MDBX_val,
     ) -> Result<Self, Error> {
         let s = slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len);
-
-        TableObject::decode(s)
+        Self::decode(s)
     }
 }
 
@@ -31,7 +30,7 @@ impl<'tx> TableObject for Cow<'tx, [u8]> {
     #[doc(hidden)]
     unsafe fn decode_val<K: TransactionKind>(
         _txn: *const ffi::MDBX_txn,
-        data_val: &ffi::MDBX_val,
+        data_val: ffi::MDBX_val,
     ) -> Result<Self, Error> {
         let s = slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len);
 
@@ -63,7 +62,7 @@ impl TableObject for () {
 
     unsafe fn decode_val<K: TransactionKind>(
         _: *const ffi::MDBX_txn,
-        _: &ffi::MDBX_val,
+        _: ffi::MDBX_val,
     ) -> Result<Self, Error> {
         Ok(())
     }
