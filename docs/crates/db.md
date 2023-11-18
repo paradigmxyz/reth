@@ -173,11 +173,11 @@ pub trait DbTxMut: Send + Sync {
     type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
     /// Read-Write DupCursor type
     type DupCursorMut<T: DupSort>: DbDupCursorRW<T>
-    + DbCursorRW<T>
-    + DbDupCursorRO<T>
-    + DbCursorRO<T>
-    + Send
-    + Sync;
+        + DbCursorRW<T>
+        + DbDupCursorRO<T>
+        + DbCursorRO<T>
+        + Send
+        + Sync;
     /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error>;
     /// Delete value from database
