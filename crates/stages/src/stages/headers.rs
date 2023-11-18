@@ -189,7 +189,7 @@ where
         let local_head = gap.local_head.number;
         let tip = gap.target.tip();
 
-        let downloaded_headers = self.buffer.take().ok_or(StageError::MissingBuffer)?;
+        let downloaded_headers = self.buffer.take().ok_or(StageError::MissingDownloadBuffer)?;
         let tip_block_number = match tip {
             // If tip is hash and it equals to the first downloaded header's hash, we can use
             // the block number of this header as tip.

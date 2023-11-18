@@ -119,7 +119,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
 
-        let buffer = self.buffer.take().ok_or(StageError::MissingBuffer)?;
+        let buffer = self.buffer.take().ok_or(StageError::MissingDownloadBuffer)?;
         trace!(target: "sync::stages::bodies", bodies_len = buffer.len(), "Writing blocks");
         let mut highest_block = from_block;
         for response in buffer {
