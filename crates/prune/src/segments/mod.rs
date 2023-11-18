@@ -22,7 +22,7 @@ pub use transactions::Transactions;
 
 use crate::PrunerError;
 use reth_db::database::Database;
-use reth_interfaces::RethResult;
+use reth_interfaces::{provider::ProviderResult, RethResult};
 use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber};
 use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter};
 use std::ops::RangeInclusive;
@@ -54,7 +54,7 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
         &self,
         provider: &DatabaseProviderRW<'_, DB>,
         checkpoint: PruneCheckpoint,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         provider.save_prune_checkpoint(self.segment(), checkpoint)
     }
 }

@@ -59,18 +59,18 @@ impl TransactionKind for RW {
 /// An MDBX transaction.
 ///
 /// All database operations require a transaction.
-pub struct Transaction<'env, K>
+pub struct Transaction<K>
 where
     K: TransactionKind,
 {
-    inner: Arc<TransactionInner<'env, K>>,
+    inner: Arc<TransactionInner<K>>,
 }
 
-impl<'env, K> Transaction<'env, K>
+impl<K> Transaction<K>
 where
     K: TransactionKind,
 {
-    pub(crate) fn new(env: &'env Environment) -> Result<Self> {
+    pub(crate) fn new(env: Environment) -> Result<Self> {
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
         unsafe {
             mdbx_result(ffi::mdbx_txn_begin_ex(
@@ -84,7 +84,7 @@ where
         }
     }
 
-    pub(crate) fn new_from_ptr(env: &'env Environment, txn: *mut ffi::MDBX_txn) -> Self {
+    pub(crate) fn new_from_ptr(env: Environment, txn: *mut ffi::MDBX_txn) -> Self {
         let inner = TransactionInner {
             txn: TransactionPtr::new(txn),
             primed_dbis: Mutex::new(IndexSet::new()),
@@ -105,11 +105,6 @@ where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
         self.inner.txn_execute(f)
-    }
-
-    /// Returns a copy of the pointer to the underlying MDBX transaction.
-    pub(crate) fn txn_ptr(&self) -> TransactionPtr {
-        self.inner.txn.clone()
     }
 
     /// Returns a copy of the raw pointer to the underlying MDBX transaction.
@@ -135,7 +130,7 @@ where
 
     /// Returns a raw pointer to the MDBX environment.
     pub fn env(&self) -> &Environment {
-        self.inner.env
+        &self.inner.env
     }
 
     /// Returns the transaction id.
@@ -151,9 +146,9 @@ where
     /// returned. Retrieval of other items requires the use of
     /// [Cursor]. If the item is not in the database, then
     /// [None] will be returned.
-    pub fn get<'txn, Key>(&'txn self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
+    pub fn get<Key>(&self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
     where
-        Key: TableObject<'txn>,
+        Key: TableObject,
     {
         let key_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
@@ -161,7 +156,7 @@ where
 
         self.txn_execute(|txn| unsafe {
             match ffi::mdbx_get(txn, dbi, &key_val, &mut data_val) {
-                ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, &data_val).map(Some),
+                ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, data_val).map(Some),
                 ffi::MDBX_NOTFOUND => Ok(None),
                 err_code => Err(Error::from_err_code(err_code)),
             }
@@ -175,13 +170,12 @@ where
         self.commit_and_rebind_open_dbs().map(|v| v.0)
     }
 
-    pub fn prime_for_permaopen(&self, db: Database<'_>) {
+    pub fn prime_for_permaopen(&self, db: Database) {
         self.inner.primed_dbis.lock().insert(db.dbi());
     }
 
-    /// Commits the transaction and returns table handles permanently open for the lifetime of
-    /// `Environment`.
-    pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, Vec<Database<'env>>)> {
+    /// Commits the transaction and returns table handles permanently open until dropped.
+    pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, Vec<Database>)> {
         let result = {
             let result = self.txn_execute(|txn| {
                 if K::ONLY_CLEAN {
@@ -206,7 +200,7 @@ where
                     .primed_dbis
                     .lock()
                     .iter()
-                    .map(|&dbi| Database::new_from_ptr(dbi))
+                    .map(|&dbi| Database::new_from_ptr(dbi, self.env().clone()))
                     .collect(),
             )
         })
@@ -223,12 +217,12 @@ where
     /// The returned database handle may be shared among any transaction in the environment.
     ///
     /// The database name may not contain the null character.
-    pub fn open_db(&self, name: Option<&str>) -> Result<Database<'_>> {
+    pub fn open_db(&self, name: Option<&str>) -> Result<Database> {
         Database::new(self, name, 0)
     }
 
     /// Gets the option flags for the given database in the transaction.
-    pub fn db_flags<'txn>(&'txn self, db: &Database<'txn>) -> Result<DatabaseFlags> {
+    pub fn db_flags(&self, db: &Database) -> Result<DatabaseFlags> {
         let mut flags: c_uint = 0;
         unsafe {
             mdbx_result(self.txn_execute(|txn| {
@@ -242,7 +236,7 @@ where
     }
 
     /// Retrieves database statistics.
-    pub fn db_stat<'txn>(&'txn self, db: &Database<'txn>) -> Result<Stat> {
+    pub fn db_stat(&self, db: &Database) -> Result<Stat> {
         self.db_stat_with_dbi(db.dbi())
     }
 
@@ -258,18 +252,36 @@ where
     }
 
     /// Open a new cursor on the given database.
-    pub fn cursor<'txn>(&'txn self, db: &Database<'txn>) -> Result<Cursor<'txn, K>> {
-        Cursor::new(self, db.dbi())
+    pub fn cursor(&self, db: &Database) -> Result<Cursor<K>> {
+        Cursor::new(self.clone(), db.dbi())
     }
 
     /// Open a new cursor on the given dbi.
-    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<'_, K>> {
-        Cursor::new(self, dbi)
+    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
+        Cursor::new(self.clone(), dbi)
+    }
+}
+
+impl<K> Clone for Transaction<K>
+where
+    K: TransactionKind,
+{
+    fn clone(&self) -> Self {
+        Self { inner: Arc::clone(&self.inner) }
+    }
+}
+
+impl<K> fmt::Debug for Transaction<K>
+where
+    K: TransactionKind,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RoTransaction").finish_non_exhaustive()
     }
 }
 
 /// Internals of a transaction.
-struct TransactionInner<'env, K>
+struct TransactionInner<K>
 where
     K: TransactionKind,
 {
@@ -279,11 +291,11 @@ where
     primed_dbis: Mutex<IndexSet<ffi::MDBX_dbi>>,
     /// Whether the transaction has committed.
     committed: AtomicBool,
-    env: &'env Environment,
+    env: Environment,
     _marker: std::marker::PhantomData<fn(K)>,
 }
 
-impl<'env, K> TransactionInner<'env, K>
+impl<K> TransactionInner<K>
 where
     K: TransactionKind,
 {
@@ -305,7 +317,7 @@ where
     }
 }
 
-impl<'env, K> Drop for TransactionInner<'env, K>
+impl<K> Drop for TransactionInner<K>
 where
     K: TransactionKind,
 {
@@ -330,8 +342,8 @@ where
     }
 }
 
-impl<'env> Transaction<'env, RW> {
-    fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database<'_>> {
+impl Transaction<RW> {
+    fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
         Database::new(self, name, flags.bits())
     }
 
@@ -347,7 +359,7 @@ impl<'env> Transaction<'env, RW> {
     ///
     /// This function will fail with [Error::BadRslot] if called by a thread with an open
     /// transaction.
-    pub fn create_db(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database<'_>> {
+    pub fn create_db(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
         self.open_db_with_flags(name, flags | DatabaseFlags::CREATE)
     }
 
@@ -380,13 +392,13 @@ impl<'env> Transaction<'env, RW> {
     /// Returns a buffer which can be used to write a value into the item at the
     /// given key and with the given length. The buffer must be completely
     /// filled by the caller.
-    pub fn reserve<'txn>(
-        &'txn self,
-        db: &Database<'txn>,
+    pub fn reserve(
+        &self,
+        db: &Database,
         key: impl AsRef<[u8]>,
         len: usize,
         flags: WriteFlags,
-    ) -> Result<&'txn mut [u8]> {
+    ) -> Result<&mut [u8]> {
         let key = key.as_ref();
         let key_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
@@ -457,29 +469,29 @@ impl<'env> Transaction<'env, RW> {
     /// # Safety
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn drop_db<'txn>(&'txn self, db: Database<'txn>) -> Result<()> {
+    pub unsafe fn drop_db(&self, db: Database) -> Result<()> {
         mdbx_result(self.txn_execute(|txn| ffi::mdbx_drop(txn, db.dbi(), true)))?;
 
         Ok(())
     }
 }
 
-impl<'env> Transaction<'env, RO> {
+impl Transaction<RO> {
     /// Closes the database handle.
     ///
     /// # Safety
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn close_db(&self, db: Database<'_>) -> Result<()> {
+    pub unsafe fn close_db(&self, db: Database) -> Result<()> {
         mdbx_result(ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()))?;
 
         Ok(())
     }
 }
 
-impl<'env> Transaction<'env, RW> {
+impl Transaction<RW> {
     /// Begins a new nested transaction inside of this transaction.
-    pub fn begin_nested_txn(&mut self) -> Result<Transaction<'_, RW>> {
+    pub fn begin_nested_txn(&mut self) -> Result<Transaction<RW>> {
         if self.inner.env.is_write_map() {
             return Err(Error::NestedTransactionsUnsupportedWithWriteMap)
         }
@@ -495,17 +507,8 @@ impl<'env> Transaction<'env, RW> {
                 })
                 .unwrap();
 
-            rx.recv().unwrap().map(|ptr| Transaction::new_from_ptr(self.env(), ptr.0))
+            rx.recv().unwrap().map(|ptr| Transaction::new_from_ptr(self.env().clone(), ptr.0))
         })
-    }
-}
-
-impl<'env, K> fmt::Debug for Transaction<'env, K>
-where
-    K: TransactionKind,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RoTransaction").finish_non_exhaustive()
     }
 }
 
@@ -546,7 +549,7 @@ mod tests {
 
     #[allow(dead_code)]
     fn test_txn_send_sync() {
-        assert_send_sync::<Transaction<'_, RO>>();
-        assert_send_sync::<Transaction<'_, RW>>();
+        assert_send_sync::<Transaction<RO>>();
+        assert_send_sync::<Transaction<RW>>();
     }
 }
