@@ -86,7 +86,7 @@ mod tests {
     use reth_db::{tables, BlockNumberList};
     use reth_interfaces::test_utils::{
         generators,
-        generators::{random_block_range, random_changeset_range, random_eoa_account_range},
+        generators::{random_block_range, random_changeset_range, random_eoa_accounts},
     };
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
     use reth_provider::PruneCheckpointReader;
@@ -101,8 +101,7 @@ mod tests {
         let blocks = random_block_range(&mut rng, 1..=5000, B256::ZERO, 0..1);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
-        let accounts =
-            random_eoa_account_range(&mut rng, 0..2).into_iter().collect::<BTreeMap<_, _>>();
+        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
 
         let (changesets, _) = random_changeset_range(
             &mut rng,

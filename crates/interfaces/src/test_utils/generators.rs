@@ -10,7 +10,7 @@ use reth_primitives::{
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
 use std::{
     cmp::{max, min},
-    collections::{hash_map::DefaultHasher, BTreeMap},
+    collections::{hash_map::DefaultHasher, BTreeMap, BTreeSet},
     hash::Hasher,
     ops::{Range, RangeInclusive, Sub},
 };
@@ -324,12 +324,9 @@ pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
 }
 
 /// Generate random Externally Owned Accounts
-pub fn random_eoa_account_range<R: Rng>(
-    rng: &mut R,
-    acc_range: Range<u64>,
-) -> Vec<(Address, Account)> {
-    let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
-    for _ in acc_range {
+pub fn random_eoa_accounts<R: Rng>(rng: &mut R, accounts_num: usize) -> Vec<(Address, Account)> {
+    let mut accounts = Vec::with_capacity(accounts_num);
+    for _ in 0..accounts_num {
         accounts.push(random_eoa_account(rng))
     }
     accounts

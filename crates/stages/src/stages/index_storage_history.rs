@@ -523,7 +523,7 @@ mod tests {
                 blocks.iter(),
                 accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
                 0..3,
-                0..4096,
+                0..u64::MAX,
             );
 
             // add block changeset from block 1.

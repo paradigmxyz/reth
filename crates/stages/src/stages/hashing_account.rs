@@ -65,8 +65,8 @@ impl Default for AccountHashingStage {
 pub struct SeedOpts {
     /// The range of blocks to be generated
     pub blocks: RangeInclusive<u64>,
-    /// The range of accounts to be generated
-    pub accounts: Range<u64>,
+    /// The number of accounts to be generated
+    pub accounts: usize,
     /// The range of transactions to be generated per block.
     pub txs: Range<u8>,
 }
@@ -85,7 +85,7 @@ impl AccountHashingStage {
         use reth_db::models::AccountBeforeTx;
         use reth_interfaces::test_utils::{
             generators,
-            generators::{random_block_range, random_eoa_account_range},
+            generators::{random_block_range, random_eoa_accounts},
         };
         use reth_primitives::{Account, B256, U256};
         use reth_provider::BlockWriter;
@@ -97,7 +97,7 @@ impl AccountHashingStage {
         for block in blocks {
             provider.insert_block(block, None, None).unwrap();
         }
-        let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
+        let mut accounts = random_eoa_accounts(&mut rng, opts.accounts);
         {
             // Account State generator
             let mut account_cursor =
@@ -538,7 +538,7 @@ mod tests {
                 let provider = self.tx.inner_rw();
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
-                    SeedOpts { blocks: 1..=input.target(), accounts: 0..10, txs: 0..3 },
+                    SeedOpts { blocks: 1..=input.target(), accounts: 10, txs: 0..3 },
                 )
                 .unwrap());
                 provider.commit().expect("failed to commit");

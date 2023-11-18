@@ -90,7 +90,7 @@ mod tests {
     use reth_db::{tables, BlockNumberList};
     use reth_interfaces::test_utils::{
         generators,
-        generators::{random_block_range, random_changeset_range, random_eoa_account_range},
+        generators::{random_block_range, random_changeset_range, random_eoa_accounts},
     };
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
     use reth_provider::PruneCheckpointReader;
@@ -105,14 +105,13 @@ mod tests {
         let blocks = random_block_range(&mut rng, 0..=5000, B256::ZERO, 0..1);
         tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
-        let accounts =
-            random_eoa_account_range(&mut rng, 0..2).into_iter().collect::<BTreeMap<_, _>>();
+        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
 
         let (changesets, _) = random_changeset_range(
             &mut rng,
             blocks.iter(),
             accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
-            2..3,
+            1..2,
             1..2,
         );
         tx.insert_changesets(changesets.clone(), None).expect("insert changesets");
@@ -142,7 +141,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::StorageHistory)
                     .unwrap(),
                 to_block,
-                delete_limit: 2000,
+                delete_limit: 1000,
             };
             let segment = StorageHistory::new(prune_mode);
 
@@ -236,8 +235,8 @@ mod tests {
             );
         };
 
-        test_prune(998, 1, (false, 1000));
-        test_prune(998, 2, (true, 998));
-        test_prune(1400, 3, (true, 804));
+        test_prune(998, 1, (false, 500));
+        test_prune(998, 2, (true, 499));
+        test_prune(1200, 3, (true, 202));
     }
 }
