@@ -152,7 +152,7 @@ impl AppendableChain {
             )
         })?;
 
-        let mut state = self.state.clone();
+        let mut state = self.state().clone();
 
         // Revert state to the state after execution of the parent block
         state.revert_to(parent.number);
@@ -169,11 +169,8 @@ impl AppendableChain {
                 .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         state.extend(block_state);
 
-        let chain =
-            Self { chain: Chain { state, blocks: BTreeMap::from([(block.number, block)]) } };
-
         // If all is okay, return new chain back. Present chain is not modified.
-        Ok(chain)
+        Ok(Self { chain: Chain::from_block(block, state) })
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
@@ -280,10 +277,10 @@ impl AppendableChain {
         DB: Database,
         EF: ExecutorFactory,
     {
-        let (_, parent_block) = self.blocks.last_key_value().expect("Chain has at least one block");
+        let parent_block = self.chain.tip();
 
         let post_state_data = BundleStateDataRef {
-            state: &self.state,
+            state: &self.state(),
             sidechain_block_hashes: &side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,
@@ -299,8 +296,7 @@ impl AppendableChain {
         )
         .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
         // extend the state.
-        self.state.extend(block_state);
-        self.blocks.insert(block.number, block);
+        self.chain.append_block(block, block_state);
         Ok(())
     }
 }
