@@ -166,9 +166,9 @@ where
 
             // If the inspector returns a different ret or a revert with a non-empty message,
             // we assume it wants to tell us something
-            if new_result.result != result.result
-                || (new_result.result == InstructionResult::Revert
-                    && new_result.output != result.output)
+            if new_result.result != result.result ||
+                (new_result.result == InstructionResult::Revert &&
+                    new_result.output != result.output)
             {
                 return new_result;
             }
