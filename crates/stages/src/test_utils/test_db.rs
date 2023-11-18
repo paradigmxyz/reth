@@ -6,7 +6,7 @@ use reth_db::{
     table::{Table, TableRow},
     tables,
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, TempDatabase},
-    transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
+    transaction::{DbTx, DbCursors, DbTxMut, DbCursorsMut},
     DatabaseEnv, DatabaseError as DbError,
 };
 use reth_interfaces::{test_utils::generators::ChangeSet, RethResult};

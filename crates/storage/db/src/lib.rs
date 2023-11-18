@@ -153,7 +153,7 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::database::{Database, DatabaseGAT};
+    use crate::database::Database;
     use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
@@ -193,17 +193,14 @@ pub mod test_utils {
         }
     }
 
-    impl<DB: Database> DatabaseGAT for TempDatabase<DB> {
-        type TX = <DB as DatabaseGAT>::TX;
-        type TXMut = <DB as DatabaseGAT>::TXMut;
-    }
-
     impl<DB: Database> Database for TempDatabase<DB> {
-        fn tx(&self) -> Result<<Self as DatabaseGAT>::TX, DatabaseError> {
+        type TX = <DB as Database>::TX;
+        type TXMut = <DB as Database>::TXMut;
+        fn tx(&self) -> Result<Self::TX, DatabaseError> {
             self.db().tx()
         }
 
-        fn tx_mut(&self) -> Result<<Self as DatabaseGAT>::TXMut, DatabaseError> {
+        fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
             self.db().tx_mut()
         }
     }

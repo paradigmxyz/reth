@@ -200,9 +200,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     /// Iterate over read only values in database.
-    fn cursor_dup_read<T: DupSort>(
-        &self,
-    ) -> Result<Self::DupCursor<T>, DatabaseError> {
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError> {
         self.new_cursor()
     }
 
@@ -268,9 +266,7 @@ impl DbTxMut for Tx<RW> {
         self.new_cursor()
     }
 
-    fn cursor_dup_write<T: DupSort>(
-        &self,
-    ) -> Result<Self::DupCursorMut<T>, DatabaseError> {
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
         self.new_cursor()
     }
 }

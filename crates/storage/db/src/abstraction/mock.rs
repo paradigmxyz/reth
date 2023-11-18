@@ -5,7 +5,7 @@ use crate::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    database::{Database, DatabaseGAT},
+    database::Database,
     table::{DupSort, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
@@ -21,19 +21,15 @@ pub struct DatabaseMock {
 }
 
 impl Database for DatabaseMock {
-    fn tx(&self) -> Result<<Self as DatabaseGAT>::TX, DatabaseError> {
-        Ok(TxMock::default())
-    }
-
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT>::TXMut, DatabaseError> {
-        Ok(TxMock::default())
-    }
-}
-
-impl DatabaseGAT for DatabaseMock {
     type TX = TxMock;
-
     type TXMut = TxMock;
+    fn tx(&self) -> Result<Self::TX, DatabaseError> {
+        Ok(TxMock::default())
+    }
+
+    fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
+        Ok(TxMock::default())
+    }
 }
 
 /// Mock read only tx
@@ -94,9 +90,7 @@ impl DbTxMut for TxMock {
         todo!()
     }
 
-    fn cursor_dup_write<T: DupSort>(
-        &self,
-    ) -> Result<Self::DupCursorMut<T>, DatabaseError> {
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
         todo!()
     }
 }

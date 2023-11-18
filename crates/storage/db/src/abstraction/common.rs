@@ -1,5 +1,3 @@
-pub(crate) use sealed::Sealed;
-
 use crate::{abstraction::table::*, DatabaseError};
 
 /// A key-value pair for table `T`.
@@ -36,3 +34,4 @@ mod sealed {
     #[cfg(any(test, feature = "test-utils"))]
     impl<DB: Database> Sealed for crate::test_utils::TempDatabase<DB> {}
 }
+pub(crate) use sealed::Sealed;

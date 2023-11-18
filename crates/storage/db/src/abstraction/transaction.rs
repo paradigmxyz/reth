@@ -32,9 +32,7 @@ pub trait DbTx {
     /// Iterate over read only values in table.
     fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError>;
     /// Iterate over read only values in dup sorted table.
-    fn cursor_dup_read<T: DupSort>(
-        &self,
-    ) -> Result<Self::DupCursor<T>, DatabaseError>;
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError>;
     /// Returns number of entries in the table.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
 }
