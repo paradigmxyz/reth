@@ -24,10 +24,10 @@
 use reth_primitives::{hex, Bytes, Selector};
 use reth_rpc_types::trace::geth::FourByteFrame;
 use revm::{
-    interpreter::{CallInputs, Gas, InstructionResult},
-    Database, EVMData, Inspector,
+    interpreter::{CallInputs, Gas, InstructionResult, InterpreterResult},
+    Database, EvmContext, Inspector,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 /// Fourbyte tracing inspector that records all function selectors and their calldata sizes.
 #[derive(Debug, Clone, Default)]
@@ -49,16 +49,23 @@ where
 {
     fn call(
         &mut self,
-        _data: &mut EVMData<'_, DB>,
+        _context: &mut EvmContext<'_, DB>,
         call: &mut CallInputs,
-    ) -> (InstructionResult, Gas, Bytes) {
+    ) -> Option<(InterpreterResult, Range<usize>)> {
         if call.input.len() >= 4 {
             let selector = Selector::try_from(&call.input[..4]).expect("input is at least 4 bytes");
             let calldata_size = call.input[4..].len();
             *self.inner.entry((selector, calldata_size)).or_default() += 1;
         }
 
-        (InstructionResult::Continue, Gas::new(0), Bytes::new())
+        Some((
+            InterpreterResult {
+                result: InstructionResult::Continue,
+                gas: Gas::new(0),
+                output: Bytes::new(),
+            },
+            0..0,
+        ))
     }
 }
 

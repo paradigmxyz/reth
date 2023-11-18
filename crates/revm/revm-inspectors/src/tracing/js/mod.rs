@@ -15,11 +15,13 @@ use reth_primitives::{Account, Address, Bytes, B256, U256};
 use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
+        InterpreterResult,
     },
     precompile::Precompiles,
     primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo},
-    Database, EVMData, Inspector,
+    Database, EvmContext as RevmEvmContext, Inspector,
 };
+use std::ops::Range;
 use tokio::sync::mpsc;
 
 pub(crate) mod bindings;
@@ -92,7 +94,7 @@ impl JsInspector {
             .cloned()
             .ok_or(JsInspectorError::ResultFunctionMissing)?;
         if !result_fn.is_callable() {
-            return Err(JsInspectorError::ResultFunctionMissing)
+            return Err(JsInspectorError::ResultFunctionMissing);
         }
 
         let fault_fn = obj
@@ -101,7 +103,7 @@ impl JsInspector {
             .cloned()
             .ok_or(JsInspectorError::ResultFunctionMissing)?;
         if !result_fn.is_callable() {
-            return Err(JsInspectorError::ResultFunctionMissing)
+            return Err(JsInspectorError::ResultFunctionMissing);
         }
 
         let enter_fn = obj.get("enter", &mut ctx)?.as_object().cloned().filter(|o| o.is_callable());
@@ -113,7 +115,7 @@ impl JsInspector {
 
         if let Some(setup_fn) = obj.get("setup", &mut ctx)?.as_object() {
             if !setup_fn.is_callable() {
-                return Err(JsInspectorError::SetupFunctionNotCallable)
+                return Err(JsInspectorError::SetupFunctionNotCallable);
             }
 
             // call setup()
@@ -272,9 +274,9 @@ impl JsInspector {
     /// Registers the precompiles in the JS context
     fn register_precompiles(&mut self, precompiles: &Precompiles) {
         if !self.precompiles_registered {
-            return
+            return;
         }
-        let precompiles = PrecompileList(precompiles.addresses().into_iter().copied().collect());
+        let precompiles = PrecompileList(precompiles.addresses().copied().collect());
 
         let _ = precompiles.register_callable(&mut self.ctx);
 
@@ -286,16 +288,16 @@ impl<DB> Inspector<DB> for JsInspector
 where
     DB: Database,
 {
-    fn step(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
+    fn step(&mut self, interp: &mut Interpreter, data: &mut RevmEvmContext<'_, DB>) {
         if self.step_fn.is_none() {
-            return
+            return;
         }
 
         let (db, _db_guard) =
             EvmDbRef::new(&data.journaled_state.state, self.to_db_service.clone());
 
         let (stack, _stack_guard) = StackRef::new(&interp.stack);
-        let (memory, _memory_guard) = MemoryRef::new(interp.shared_memory);
+        let (memory, _memory_guard) = MemoryRef::new(&interp.shared_memory);
         let step = StepLog {
             stack,
             op: interp.current_opcode().into(),
@@ -316,16 +318,16 @@ where
 
     fn log(
         &mut self,
-        _evm_data: &mut EVMData<'_, DB>,
+        _evm_data: &mut RevmEvmContext<'_, DB>,
         _address: &Address,
         _topics: &[B256],
         _data: &Bytes,
     ) {
     }
 
-    fn step_end(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
+    fn step_end(&mut self, interp: &mut Interpreter, data: &mut RevmEvmContext<'_, DB>) {
         if self.step_fn.is_none() {
-            return
+            return;
         }
 
         if matches!(interp.instruction_result, return_revert!()) {
@@ -333,7 +335,7 @@ where
                 EvmDbRef::new(&data.journaled_state.state, self.to_db_service.clone());
 
             let (stack, _stack_guard) = StackRef::new(&interp.stack);
-            let (memory, _memory_guard) = MemoryRef::new(interp.shared_memory);
+            let (memory, _memory_guard) = MemoryRef::new(&interp.shared_memory);
             let step = StepLog {
                 stack,
                 op: interp.current_opcode().into(),
@@ -353,10 +355,10 @@ where
 
     fn call(
         &mut self,
-        data: &mut EVMData<'_, DB>,
+        context: &mut RevmEvmContext<'_, DB>,
         inputs: &mut CallInputs,
-    ) -> (InstructionResult, Gas, Bytes) {
-        self.register_precompiles(&data.precompiles);
+    ) -> Option<(InterpreterResult, Range<usize>)> {
+        self.register_precompiles(&context.precompiles);
 
         // determine correct `from` and `to` based on the call scheme
         let (from, to) = match inputs.context.scheme {
@@ -384,43 +386,61 @@ where
                 gas: inputs.gas_limit,
             };
             if let Err(err) = self.try_enter(frame) {
-                return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
+                return Some((
+                    InterpreterResult {
+                        result: InstructionResult::Revert,
+                        output: err.to_string().into(),
+                        gas: Gas::new(0),
+                    },
+                    0..0,
+                ));
             }
         }
 
-        (InstructionResult::Continue, Gas::new(0), Bytes::new())
+        Some((
+            InterpreterResult {
+                result: InstructionResult::Continue,
+                gas: Gas::new(0),
+                output: Bytes::new(),
+            },
+            0..0,
+        ))
     }
 
     fn call_end(
         &mut self,
-        _data: &mut EVMData<'_, DB>,
-        _inputs: &CallInputs,
-        remaining_gas: Gas,
-        ret: InstructionResult,
-        out: Bytes,
-    ) -> (InstructionResult, Gas, Bytes) {
+        _context: &mut RevmEvmContext<'_, DB>,
+        result: InterpreterResult,
+    ) -> InterpreterResult {
         if self.exit_fn.is_some() {
-            let frame_result =
-                FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
+            let frame_result = FrameResult {
+                gas_used: result.gas.spend(),
+                output: result.output.clone(),
+                error: None,
+            };
             if let Err(err) = self.try_exit(frame_result) {
-                return (InstructionResult::Revert, Gas::new(0), err.to_string().into())
+                return InterpreterResult {
+                    result: InstructionResult::Revert,
+                    output: err.to_string().into(),
+                    gas: Gas::new(0),
+                };
             }
         }
 
         self.pop_call();
 
-        (ret, remaining_gas, out)
+        result
     }
 
     fn create(
         &mut self,
-        data: &mut EVMData<'_, DB>,
+        context: &mut RevmEvmContext<'_, DB>,
         inputs: &mut CreateInputs,
-    ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
-        self.register_precompiles(&data.precompiles);
+    ) -> Option<(InterpreterResult, Option<Address>)> {
+        self.register_precompiles(&context.precompiles);
 
-        let _ = data.journaled_state.load_account(inputs.caller, data.db);
-        let nonce = data.journaled_state.account(inputs.caller).info.nonce;
+        let _ = context.journaled_state.load_account(inputs.caller, context.db);
+        let nonce = context.journaled_state.account(inputs.caller).info.nonce;
         let address = get_create_address(inputs, nonce);
         self.push_call(
             address,
@@ -436,33 +456,54 @@ where
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
             if let Err(err) = self.try_enter(frame) {
-                return (InstructionResult::Revert, None, Gas::new(0), err.to_string().into())
+                return Some((
+                    InterpreterResult {
+                        result: InstructionResult::Revert,
+                        gas: Gas::new(0),
+                        output: err.to_string().into(),
+                    },
+                    None,
+                ));
             }
         }
 
-        (InstructionResult::Continue, None, Gas::new(inputs.gas_limit), Bytes::default())
+        Some((
+            InterpreterResult {
+                result: InstructionResult::Continue,
+                gas: Gas::new(inputs.gas_limit),
+                output: Bytes::default(),
+            },
+            None,
+        ))
     }
 
     fn create_end(
         &mut self,
-        _data: &mut EVMData<'_, DB>,
-        _inputs: &CreateInputs,
-        ret: InstructionResult,
+        _context: &mut RevmEvmContext<'_, DB>,
+        result: InterpreterResult,
         address: Option<Address>,
-        remaining_gas: Gas,
-        out: Bytes,
-    ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
+    ) -> (InterpreterResult, Option<Address>) {
         if self.exit_fn.is_some() {
-            let frame_result =
-                FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
+            let frame_result = FrameResult {
+                gas_used: result.gas.spend(),
+                output: result.output.clone(),
+                error: None,
+            };
             if let Err(err) = self.try_exit(frame_result) {
-                return (InstructionResult::Revert, None, Gas::new(0), err.to_string().into())
+                return (
+                    InterpreterResult {
+                        result: InstructionResult::Revert,
+                        gas: Gas::new(0),
+                        output: err.to_string().into(),
+                    },
+                    None,
+                );
             }
         }
 
         self.pop_call();
 
-        (ret, address, remaining_gas, out)
+        (result, address)
     }
 
     fn selfdestruct(&mut self, _contract: Address, _target: Address, _value: U256) {
