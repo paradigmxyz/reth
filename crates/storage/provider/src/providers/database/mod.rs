@@ -489,20 +489,22 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{
-        BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode,
-        TransactionsProvider,
+        BlockHashReader, BlockNumReader, BlockWriter, BundleStateWithReceipts,
+        HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
     };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use rand::Rng;
+    use rand::{seq::IteratorRandom, Rng};
+    use rayon::ThreadPoolBuilder;
     use reth_db::{
+        cursor::DbCursorRO,
         tables,
         test_utils::{create_test_rw_db, ERROR_TEMPDIR},
-        transaction::DbTxMut,
+        transaction::{DbTx, DbTxMut},
         DatabaseEnv,
     };
     use reth_interfaces::{
-        provider::ProviderError,
+        provider::{ProviderError, ProviderResult},
         test_utils::{
             generators,
             generators::{random_block, random_header},
@@ -510,10 +512,74 @@ mod tests {
         RethError,
     };
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
+        hex_literal::hex, Address, ChainSpecBuilder, PruneMode, PruneModes, Receipts, SealedBlock,
+        TxNumber, B256, U256,
+    };
+    use revm::{
+        db::{BundleState, OriginalValuesKnown},
+        primitives::AccountInfo,
     };
     use std::{ops::RangeInclusive, sync::Arc};
-    use tokio::sync::watch;
+    use tokio::sync::{mpsc, watch};
+
+    #[tokio::test]
+    async fn thread_mismatch() {
+        let db = create_test_rw_db();
+        let factory = ProviderFactory::new(db, Arc::new(ChainSpecBuilder::mainnet().build()));
+
+        let mut rng = rand::thread_rng();
+        let mut bundle_state_builder = BundleState::builder(0..=0);
+        let addresses = (0..100_000).into_iter().map(|_| Address::random()).collect::<Vec<_>>();
+        for address in &addresses {
+            bundle_state_builder = bundle_state_builder.state_present_account_info(
+                *address,
+                AccountInfo { balance: U256::from(rng.gen::<u128>()), ..Default::default() },
+            );
+        }
+
+        let mut provider_rw = factory.provider_rw().unwrap();
+        BundleStateWithReceipts::new(bundle_state_builder.build(), Receipts::default(), 0)
+            .write_to_db(provider_rw.tx_mut(), OriginalValuesKnown::No)
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let pool = ThreadPoolBuilder::default()
+            .num_threads(std::thread::available_parallelism().unwrap().get())
+            .build()
+            .unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let query_accounts = |tx: &reth_db::mdbx::tx::Tx<reth_db::mdbx::RW>,
+                              addresses: Vec<&Address>|
+         -> ProviderResult<()> {
+            let mut cursor = tx.cursor_read::<tables::PlainAccountState>()?;
+            for address in addresses {
+                cursor.seek(*address)?;
+            }
+            Ok(())
+        };
+
+        println!("sampling test data");
+        let samples = (0..1_000)
+            .into_iter()
+            .map(|_| addresses.iter().choose_multiple(&mut rng, 100))
+            .collect::<Vec<_>>();
+        for sample in samples {
+            pool.scope(|scope| {
+                let tx = tx.clone();
+                let db_tx_ref = provider_rw.tx_ref();
+                scope.spawn(move |_scope| {
+                    println!("querying from {:?}", rayon::current_thread_index());
+                    tx.send(query_accounts(db_tx_ref, sample)).unwrap();
+                });
+            });
+        }
+
+        drop(tx);
+        while let Some(result) = rx.recv().await {
+            assert_matches!(result, Ok(_));
+        }
+    }
 
     #[test]
     fn common_history_provider() {
