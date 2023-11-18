@@ -163,10 +163,7 @@ impl Compact for BranchNodeCompact {
         buf_size
     }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let hash_len = B256::len_bytes();
 
         // Assert the buffer is long enough to contain the masks and the hashes.
