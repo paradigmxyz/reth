@@ -36,7 +36,7 @@
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::ZERO, vec![]).into()) }),
 //! #    consensus.clone(),
-//! #    db.clone()
+//! #    ProviderFactory::new(db.clone(), MAINNET.clone())
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
 //! # let factory = Factory::new(chain_spec.clone());

@@ -147,7 +147,11 @@ impl ImportCommand {
             .into_task();
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(file_client.clone(), consensus.clone(), db.clone())
+            .build(
+                file_client.clone(),
+                consensus.clone(),
+                ProviderFactory::new(db.clone(), self.chain.clone()),
+            )
             .into_task();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);

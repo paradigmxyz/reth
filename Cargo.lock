@@ -5890,6 +5890,7 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
+ "reth-provider",
  "reth-tasks",
  "reth-tracing",
  "tempfile",
