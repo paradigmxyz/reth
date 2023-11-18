@@ -6510,6 +6510,7 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "async-trait",
+ "auto_impl",
  "criterion",
  "futures-util",
  "itertools 0.11.0",
