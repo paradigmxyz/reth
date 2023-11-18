@@ -235,7 +235,7 @@ pub trait BundleStateDataProvider: Send + Sync {
 pub trait StateRootProvider: Send + Sync {
     /// Returns the state root of the `BundleState` on top of the current state.
     ///
-    /// NOTE: It is recommended to provider a different implementation from
+    /// NOTE: It is recommended to provide a different implementation from
     /// `state_root_with_updates` since it affects the memory usage during state root
     /// computation.
     fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256>;
