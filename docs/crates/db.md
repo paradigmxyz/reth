@@ -162,7 +162,7 @@ pub trait DbTx: Send + Sync {
 }
 ```
 
-The `TXMut` type can be any type that implements the `DbTxMut` trait, which provides a set of functions to interact with read/write transactions.
+The `TXMut` type can be any type that implements the `DbTxMut` trait, which provides a set of functions to interact with read/write transactions and the associated cursor types.
 
 [File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L49)
 
@@ -264,9 +264,6 @@ This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Curso
     let mut tx_sender = db_tx.cursor_read::<tables::TxSenders>()?;
 
 ```
-
-We are almost at the last stop in the tour of the `db` crate. In addition to the methods provided by the `DbTx` and `DbTxMut` traits. These traits provide various associated types related to cursors as well as methods to utilize the cursor types.
-
 
 Lets look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
 
