@@ -1,5 +1,5 @@
 use super::TestTransaction;
-use crate::{ExecInput, ExecOutput, Stage, StageError, StagePollExt, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput};
 use reth_db::DatabaseEnv;
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::MAINNET;

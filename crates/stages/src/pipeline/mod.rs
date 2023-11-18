@@ -1,6 +1,6 @@
 use crate::{
     error::*, BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage,
-    StageError, StagePollExt, UnwindInput,
+    StageError, StageExt, UnwindInput,
 };
 use futures_util::Future;
 use reth_db::database::Database;

@@ -10,7 +10,7 @@ use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
-    ExecInput, Stage, StagePollExt, UnwindInput,
+    ExecInput, Stage, StageExt, UnwindInput,
 };
 use std::{path::PathBuf, sync::Arc};
 

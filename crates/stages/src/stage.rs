@@ -246,9 +246,9 @@ pub trait Stage<DB: Database>: Send + Sync {
     ) -> Result<UnwindOutput, StageError>;
 }
 
-/// The polling [Stage] trait extension.
+/// [Stage] trait extension.
 #[async_trait::async_trait]
-pub trait StagePollExt<DB: Database>: Stage<DB> {
+pub trait StageExt<DB: Database>: Stage<DB> {
     /// Utility extension for the `Stage` trait that invokes `Stage::poll_execute_ready`
     /// with [poll_fn] context. For more information see [Stage::poll_execute_ready].
     async fn execute_ready(&mut self, input: ExecInput) -> Result<(), StageError> {
@@ -256,4 +256,4 @@ pub trait StagePollExt<DB: Database>: Stage<DB> {
     }
 }
 
-impl<DB: Database, S: Stage<DB>> StagePollExt<DB> for S {}
+impl<DB: Database, S: Stage<DB>> StageExt<DB> for S {}
