@@ -113,7 +113,8 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             // Get the rank of the first entry before or equal to our block.
             let mut rank = chunk.rank(self.block_number);
 
-            // Adjust the rank, so that we have the rank of the first entry before our block
+            // Adjust the rank, so that we have the rank of the first entry strictly before our
+            // block (not equal to it).
             if rank.checked_sub(1).and_then(|rank| chunk.select(rank)) == Some(self.block_number) {
                 rank -= 1
             };
