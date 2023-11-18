@@ -7,6 +7,7 @@ use reth_primitives::{
 use reth_provider::{BlockReader, DatabaseProviderRW, ProviderError, TransactionsProvider};
 use std::{
     cmp::{max, min},
+    future::poll_fn,
     ops::{Range, RangeInclusive},
     task::{Context, Poll},
 };
@@ -189,6 +190,7 @@ pub struct UnwindOutput {
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///
 /// Stages receive [`DatabaseProviderRW`].
+#[auto_impl::auto_impl(Box)]
 pub trait Stage<DB: Database>: Send + Sync {
     /// Get the ID of the stage.
     ///
@@ -243,3 +245,15 @@ pub trait Stage<DB: Database>: Send + Sync {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
 }
+
+/// [Stage] trait extension.
+#[async_trait::async_trait]
+pub trait StageExt<DB: Database>: Stage<DB> {
+    /// Utility extension for the `Stage` trait that invokes `Stage::poll_execute_ready`
+    /// with [poll_fn] context. For more information see [Stage::poll_execute_ready].
+    async fn execute_ready(&mut self, input: ExecInput) -> Result<(), StageError> {
+        poll_fn(|cx| self.poll_execute_ready(cx, input)).await
+    }
+}
+
+impl<DB: Database, S: Stage<DB>> StageExt<DB> for S {}

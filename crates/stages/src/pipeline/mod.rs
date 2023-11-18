@@ -1,6 +1,6 @@
 use crate::{
     error::*, BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage,
-    StageError, UnwindInput,
+    StageError, StageExt, UnwindInput,
 };
 use futures_util::Future;
 use reth_db::database::Database;
@@ -11,7 +11,7 @@ use reth_primitives::{
 };
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use reth_tokio_util::EventListeners;
-use std::{future::poll_fn, pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -370,7 +370,7 @@ where
 
             let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
 
-            if let Err(err) = poll_fn(|cx| stage.poll_execute_ready(cx, exec_input)).await {
+            if let Err(err) = stage.execute_ready(exec_input).await {
                 self.listeners.notify(PipelineEvent::Error { stage_id });
                 match on_stage_error(&factory, stage_id, prev_checkpoint, err)? {
                     Some(ctrl) => return Ok(ctrl),
