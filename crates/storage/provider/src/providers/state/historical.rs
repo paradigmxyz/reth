@@ -14,6 +14,7 @@ use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
 };
+use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -109,26 +110,28 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         // index, the first chunk for the next key will be returned so we filter out chunks that
         // have a different key.
         if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
-            // Get the rank of the first entry after our block.
-            let rank = chunk.rank(self.block_number);
+            // Get the rank of the first entry before or equal to our block.
+            let mut rank = chunk.rank(self.block_number);
 
-            let Some(block_number) = chunk.select(rank) else {
-                // The chunk does not contain an entry for a write after our block. This can only
-                // happen if this is the last chunk and so we need to look in the plain state.
-                return Ok(HistoryInfo::InPlainState)
+            // Adjust the rank, so that we have the rank of the first entry before our block
+            if rank.checked_sub(1).and_then(|rank| chunk.select(rank)) == Some(self.block_number) {
+                rank -= 1
             };
 
+            let block_number = chunk.select(rank);
+
             // If our block is before the first entry in the index chunk and this first entry
-            // doesn't equal to our block, it might be before the first write ever. To check, we
+            // doesn't equal to our block it might be before the first write ever. To check, we
             // look at the previous entry and check if the key is the same.
             // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
             // short-circuit) and when it passes we save a full seek into the changeset/plain state
             // table.
             if rank == 0 &&
-                block_number != self.block_number &&
+                block_number != Some(self.block_number) &&
                 !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
             {
-                if lowest_available_block_number.is_some() {
+                if let (Some(_), Some(block_number)) = (lowest_available_block_number, block_number)
+                {
                     // The key may have been written, but due to pruning we may not have changesets
                     // and history, so we need to make a changeset lookup.
                     Ok(HistoryInfo::InChangeset(block_number))
@@ -136,9 +139,13 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
                     // The key is written to, but only after our block.
                     Ok(HistoryInfo::NotYetWritten)
                 }
-            } else {
+            } else if let Some(block_number) = block_number {
                 // The chunk contains an entry for a write after our block, return it.
                 Ok(HistoryInfo::InChangeset(block_number))
+            } else {
+                // The chunk does not contain an entry for a write after our block. This can only
+                // happen if this is the last chunk and so we need to look in the plain state.
+                Ok(HistoryInfo::InPlainState)
             }
         } else if lowest_available_block_number.is_some() {
             // The key may have been written, but due to pruning we may not have changesets and
