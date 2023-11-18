@@ -199,7 +199,8 @@ pub enum ActionType {
     Reward,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ActionKind {
     Call,
     Create,
@@ -410,21 +411,7 @@ impl Serialize for LocalizedTransactionTrace {
         }
         s.serialize_field("subtraces", &self.trace.subtraces)?;
         s.serialize_field("traceAddress", &self.trace.trace_address)?;
-
-        match &self.trace.action.kind() {
-            ActionKind::Call => {
-                s.serialize_field("type", "call")?;
-            }
-            ActionKind::Create => {
-                s.serialize_field("type", "create")?;
-            }
-            ActionKind::Selfdestruct => {
-                s.serialize_field("type", "selfdestruct")?;
-            }
-            ActionKind::Reward => {
-                s.serialize_field("type", "reward")?;
-            }
-        }
+        s.serialize_field("type", &self.trace.action.kind())?;
 
         s.end()
     }
