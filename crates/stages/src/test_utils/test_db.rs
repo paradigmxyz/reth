@@ -1,12 +1,12 @@
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::DatabaseGAT,
+    database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::{Table, TableRow},
     tables,
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, TempDatabase},
-    transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
+    transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
 };
 use reth_interfaces::{test_utils::generators::ChangeSet, RethResult};
@@ -57,12 +57,12 @@ impl TestTransaction {
     }
 
     /// Return a database wrapped in [DatabaseProviderRW].
-    pub fn inner_rw(&self) -> DatabaseProviderRW<'_, Arc<TempDatabase<DatabaseEnv>>> {
+    pub fn inner_rw(&self) -> DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>> {
         self.factory.provider_rw().expect("failed to create db container")
     }
 
     /// Return a database wrapped in [DatabaseProviderRO].
-    pub fn inner(&self) -> DatabaseProviderRO<'_, Arc<TempDatabase<DatabaseEnv>>> {
+    pub fn inner(&self) -> DatabaseProviderRO<Arc<TempDatabase<DatabaseEnv>>> {
         self.factory.provider().expect("failed to create db container")
     }
 
@@ -74,7 +74,7 @@ impl TestTransaction {
     /// Invoke a callback with transaction committing it afterwards
     pub fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
-        F: FnOnce(&<DatabaseEnv as DatabaseGAT<'_>>::TXMut) -> Result<(), DbError>,
+        F: FnOnce(&<DatabaseEnv as Database>::TXMut) -> Result<(), DbError>,
     {
         let mut tx = self.inner_rw();
         f(tx.tx_ref())?;
@@ -85,7 +85,7 @@ impl TestTransaction {
     /// Invoke a callback with a read transaction
     pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
-        F: FnOnce(&<DatabaseEnv as DatabaseGAT<'_>>::TX) -> Result<R, DbError>,
+        F: FnOnce(&<DatabaseEnv as Database>::TX) -> Result<R, DbError>,
     {
         f(self.inner().tx_ref())
     }

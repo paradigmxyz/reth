@@ -30,7 +30,7 @@ impl<DB: Database> Segment<DB> for SenderRecovery {
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let tx_range = match input.get_next_tx_num_range(provider)? {

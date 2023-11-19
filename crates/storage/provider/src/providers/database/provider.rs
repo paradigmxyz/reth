@@ -14,7 +14,7 @@ use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::{Database, DatabaseGAT},
+    database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
@@ -55,39 +55,37 @@ use std::{
 use tracing::{debug, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
-pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<<DB as DatabaseGAT<'this>>::TX>;
+pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
 
 /// A [`DatabaseProvider`] that holds a read-write database transaction.
 ///
 /// Ideally this would be an alias type. However, there's some weird compiler error (<https://github.com/rust-lang/rust/issues/102211>), that forces us to wrap this in a struct instead.
 /// Once that issue is solved, we can probably revert back to being an alias type.
 #[derive(Debug)]
-pub struct DatabaseProviderRW<'this, DB: Database>(
-    pub DatabaseProvider<<DB as DatabaseGAT<'this>>::TXMut>,
-);
+pub struct DatabaseProviderRW<DB: Database>(pub DatabaseProvider<<DB as Database>::TXMut>);
 
-impl<'this, DB: Database> Deref for DatabaseProviderRW<'this, DB> {
-    type Target = DatabaseProvider<<DB as DatabaseGAT<'this>>::TXMut>;
+impl<DB: Database> Deref for DatabaseProviderRW<DB> {
+    type Target = DatabaseProvider<<DB as Database>::TXMut>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<DB: Database> DerefMut for DatabaseProviderRW<'_, DB> {
+impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<'this, DB: Database> DatabaseProviderRW<'this, DB> {
+impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction
     pub fn commit(self) -> ProviderResult<bool> {
         self.0.commit()
     }
 
     /// Consume `DbTx` or `DbTxMut`.
-    pub fn into_tx(self) -> <DB as DatabaseGAT<'this>>::TXMut {
+    pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
     }
 }

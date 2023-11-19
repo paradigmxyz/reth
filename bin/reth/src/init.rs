@@ -1,7 +1,7 @@
 //! Reth genesis initialization utility functions.
 use reth_db::{
     cursor::DbCursorRO,
-    database::{Database, DatabaseGAT},
+    database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -94,7 +94,7 @@ pub fn init_genesis<DB: Database>(
 
 /// Inserts the genesis state into the database.
 pub fn insert_genesis_state<DB: Database>(
-    tx: &<DB as DatabaseGAT<'_>>::TXMut,
+    tx: &<DB as Database>::TXMut,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     let mut state_init: BundleStateInit = HashMap::new();
@@ -160,7 +160,7 @@ pub fn insert_genesis_state<DB: Database>(
 
 /// Inserts hashes for the genesis state.
 pub fn insert_genesis_hashes<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<&DB>,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
@@ -184,7 +184,7 @@ pub fn insert_genesis_hashes<DB: Database>(
 
 /// Inserts history indices for genesis accounts and storage.
 pub fn insert_genesis_history<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<&DB>,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     let account_transitions =
@@ -204,7 +204,7 @@ pub fn insert_genesis_history<DB: Database>(
 
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
-    tx: &<DB as DatabaseGAT<'_>>::TXMut,
+    tx: &<DB as Database>::TXMut,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
     let header = chain.sealed_genesis_header();
@@ -236,7 +236,7 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn collect_table_entries<DB, T>(
-        tx: &<DB as DatabaseGAT<'_>>::TX,
+        tx: &<DB as Database>::TX,
     ) -> Result<Vec<TableRow<T>>, InitDatabaseError>
     where
         DB: Database,

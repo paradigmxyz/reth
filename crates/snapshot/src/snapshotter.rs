@@ -291,7 +291,7 @@ impl<DB: Database> Snapshotter<DB> {
 
     fn get_snapshot_target_tx_range(
         &self,
-        provider: &DatabaseProviderRO<'_, DB>,
+        provider: &DatabaseProviderRO<DB>,
         block_to_tx_number_cache: &mut HashMap<BlockNumber, TxNumber>,
         highest_snapshot: Option<BlockNumber>,
         block_range: &RangeInclusive<BlockNumber>,
