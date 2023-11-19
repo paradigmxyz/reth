@@ -22,7 +22,7 @@ use std::{
 impl Command {
     pub(crate) fn generate_receipts_snapshot<DB: Database>(
         &self,
-        provider: &DatabaseProviderRO<'_, DB>,
+        provider: &DatabaseProviderRO<DB>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,

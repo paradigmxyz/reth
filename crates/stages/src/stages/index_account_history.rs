@@ -44,7 +44,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     /// Execute the stage.
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
@@ -87,7 +87,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =

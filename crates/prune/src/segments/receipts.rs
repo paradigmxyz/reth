@@ -31,7 +31,7 @@ impl<DB: Database> Segment<DB> for Receipts {
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let tx_range = match input.get_next_tx_num_range(provider)? {
@@ -71,7 +71,7 @@ impl<DB: Database> Segment<DB> for Receipts {
 
     fn save_checkpoint(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         checkpoint: PruneCheckpoint,
     ) -> ProviderResult<()> {
         provider.save_prune_checkpoint(PruneSegment::Receipts, checkpoint)?;

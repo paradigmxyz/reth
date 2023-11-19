@@ -9,7 +9,7 @@ use reth_primitives::{
 use reth_trie::updates::TrieUpdates;
 
 /// Type alias of boxed [StateProvider].
-pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;
+pub type StateProviderBox = Box<dyn StateProvider>;
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
@@ -100,13 +100,13 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
 /// to be used, since block `n` was executed on its parent block's state.
 pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for latest block.
-    fn latest(&self) -> ProviderResult<StateProviderBox<'_>>;
+    fn latest(&self) -> ProviderResult<StateProviderBox>;
 
     /// Returns a [StateProvider] indexed by the given [BlockId].
     ///
     /// Note: if a number or hash is provided this will __only__ look at historical(canonical)
     /// state.
-    fn state_by_block_id(&self, block_id: BlockId) -> ProviderResult<StateProviderBox<'_>> {
+    fn state_by_block_id(&self, block_id: BlockId) -> ProviderResult<StateProviderBox> {
         match block_id {
             BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
             BlockId::Hash(block_hash) => self.history_by_block_hash(block_hash.into()),
@@ -119,7 +119,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
-    ) -> ProviderResult<StateProviderBox<'_>> {
+    ) -> ProviderResult<StateProviderBox> {
         match number_or_tag {
             BlockNumberOrTag::Latest => self.latest(),
             BlockNumberOrTag::Finalized => {
@@ -153,40 +153,37 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     ///
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
-    fn history_by_block_number(&self, block: BlockNumber) -> ProviderResult<StateProviderBox<'_>>;
+    fn history_by_block_number(&self, block: BlockNumber) -> ProviderResult<StateProviderBox>;
 
     /// Returns a historical [StateProvider] indexed by the given block hash.
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
-    fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox<'_>>;
+    fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
     /// Returns _any_[StateProvider] with matching block hash.
     ///
     /// This will return a [StateProvider] for either a historical or pending block.
-    fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox<'_>>;
+    fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
     /// Storage provider for pending state.
     ///
     /// Represents the state at the block that extends the canonical chain by one.
     /// If there's no `pending` block, then this is equal to [StateProviderFactory::latest]
-    fn pending(&self) -> ProviderResult<StateProviderBox<'_>>;
+    fn pending(&self) -> ProviderResult<StateProviderBox>;
 
     /// Storage provider for pending state for the given block hash.
     ///
     /// Represents the state at the block that extends the canonical chain.
     ///
     /// If the block couldn't be found, returns `None`.
-    fn pending_state_by_hash(
-        &self,
-        block_hash: B256,
-    ) -> ProviderResult<Option<StateProviderBox<'_>>>;
+    fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>>;
 
     /// Return a [StateProvider] that contains bundle state data provider.
     /// Used to inspect or execute transaction on the pending state.
     fn pending_with_provider(
         &self,
         bundle_state_data: Box<dyn BundleStateDataProvider>,
-    ) -> ProviderResult<StateProviderBox<'_>>;
+    ) -> ProviderResult<StateProviderBox>;
 }
 
 /// Blockchain trait provider that gives access to the blockchain state that is not yet committed
