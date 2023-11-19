@@ -15,6 +15,7 @@ use reth_primitives::{
     SealedBlock, SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
+use reth_trie::updates::TrieUpdates;
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -496,7 +497,14 @@ impl AccountReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn state_root(&self, _state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+    fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+        todo!()
+    }
+
+    fn state_root_with_updates(
+        &self,
+        _bundle_state: &BundleStateWithReceipts,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
         todo!()
     }
 }
@@ -599,7 +607,7 @@ impl StateProviderFactory for MockEthProvider {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _post_state_data: Box<dyn BundleStateDataProvider + 'a>,
+        _bundle_state_data: Box<dyn BundleStateDataProvider + 'a>,
     ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
@@ -632,7 +640,7 @@ impl StateProviderFactory for Arc<MockEthProvider> {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _post_state_data: Box<dyn BundleStateDataProvider + 'a>,
+        _bundle_state_data: Box<dyn BundleStateDataProvider + 'a>,
     ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }

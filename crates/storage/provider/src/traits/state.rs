@@ -6,6 +6,7 @@ use reth_primitives::{
     trie::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
+use reth_trie::updates::TrieUpdates;
 
 /// Type alias of boxed [StateProvider].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -177,11 +178,11 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// If the block couldn't be found, returns `None`.
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>>;
 
-    /// Return a [StateProvider] that contains post state data provider.
+    /// Return a [StateProvider] that contains bundle state data provider.
     /// Used to inspect or execute transaction on the pending state.
     fn pending_with_provider(
         &self,
-        post_state_data: Box<dyn BundleStateDataProvider>,
+        bundle_state_data: Box<dyn BundleStateDataProvider>,
     ) -> ProviderResult<StateProviderBox>;
 }
 
@@ -229,6 +230,17 @@ pub trait BundleStateDataProvider: Send + Sync {
 /// A type that can compute the state root of a given post state.
 #[auto_impl[Box,&, Arc]]
 pub trait StateRootProvider: Send + Sync {
-    /// Returns the state root of the BundleState on top of the current state.
-    fn state_root(&self, post_state: &BundleStateWithReceipts) -> ProviderResult<B256>;
+    /// Returns the state root of the `BundleState` on top of the current state.
+    ///
+    /// NOTE: It is recommended to provide a different implementation from
+    /// `state_root_with_updates` since it affects the memory usage during state root
+    /// computation.
+    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256>;
+
+    /// Returns the state root of the BundleState on top of the current state with trie
+    /// updates to be committed to the database.
+    fn state_root_with_updates(
+        &self,
+        bundle_state: &BundleStateWithReceipts,
+    ) -> ProviderResult<(B256, TrieUpdates)>;
 }
