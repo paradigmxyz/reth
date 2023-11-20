@@ -154,7 +154,7 @@ impl BundleStateWithReceipts {
         hashed_state.sorted()
     }
 
-    /// Returns [StateRoot] calculator base on database and in-memory state.
+    /// Returns [StateRoot] calculator based on database and in-memory state.
     pub fn state_root_calculator<'a, 'b, TX: DbTx>(
         &self,
         tx: &'a TX,
