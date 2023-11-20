@@ -105,31 +105,42 @@ pub struct CursorMock {
 
 impl<T: Table> DbCursorRO<T> for CursorMock {
     fn first(&mut self) -> PairResult<T> {
-        todo!()
+        self._cursor = 0;
+        Ok(None)
     }
 
     fn seek_exact(&mut self, _key: T::Key) -> PairResult<T> {
-        todo!()
+        let mut rng = rand::thread_rng();
+        let found = rng.gen_bool(0.5);
+        if found {
+            Err(DatabaseError::Read(-1))
+        } else {
+            Ok(None)
+        }
     }
 
     fn seek(&mut self, _key: T::Key) -> PairResult<T> {
-        todo!()
+        self._cursor = 1;
+        Ok(None)
     }
 
     fn next(&mut self) -> PairResult<T> {
-        todo!()
+        self._cursor += 1;
+        Ok(None)
     }
 
     fn prev(&mut self) -> PairResult<T> {
-        todo!()
+        self._cursor -= 1;
+        Ok(None)
     }
 
     fn last(&mut self) -> PairResult<T> {
-        todo!()
+        self._cursor = u32::MAX;
+        Ok(None)
     }
 
     fn current(&mut self) -> PairResult<T> {
-        todo!()
+        Ok(None)
     }
 
     fn walk(&mut self, _start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
