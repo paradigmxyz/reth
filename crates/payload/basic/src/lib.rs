@@ -341,7 +341,7 @@ where
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // check if the interval is reached
@@ -426,7 +426,7 @@ where
 
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
-            return Ok(payload.clone())
+            return Ok(payload.clone());
         }
         // No payload has been built yet, but we need to return something that the CL then can
         // deliver, so we need to return an empty payload.
@@ -464,8 +464,8 @@ where
             // upfront with the list of transactions sent in the attributes without caring about
             // the results of the polling job, if a best payload has not already been built.
             #[cfg(feature = "optimism")]
-            if self.config.chain_spec.is_optimism() &&
-                self.config.attributes.optimism_payload_attributes.no_tx_pool
+            if self.config.chain_spec.is_optimism()
+                && self.config.attributes.optimism_payload_attributes.no_tx_pool
             {
                 let args = BuildArguments {
                     client: self.client.clone(),
@@ -488,7 +488,7 @@ where
                             empty_payload,
                         },
                         KeepPayloadJobAlive::Yes,
-                    )
+                    );
                 }
             }
 
@@ -531,13 +531,13 @@ impl Future for ResolveBestPayload {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
-                    return Poll::Ready(Ok(Arc::new(payload)))
+                    return Poll::Ready(Ok(Arc::new(payload)));
                 }
             }
         }
 
         if let Some(best) = this.best_payload.take() {
-            return Poll::Ready(Ok(best))
+            return Poll::Ready(Ok(best));
         }
 
         let mut empty_payload = this.empty_payload.take().expect("polled after completion");
@@ -618,7 +618,7 @@ impl PayloadConfig {
     pub(crate) fn extra_data(&self) -> reth_primitives::Bytes {
         #[cfg(feature = "optimism")]
         if self.chain_spec.is_optimism() {
-            return Default::default()
+            return Default::default();
         }
         self.extra_data.clone()
     }
@@ -801,12 +801,12 @@ where
             // which also removes all dependent transaction from the iterator before we can
             // continue
             best_txs.mark_invalid(&pool_tx);
-            continue
+            continue;
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
+            return Ok(BuildOutcome::Cancelled);
         }
 
         // convert tx to a signed transaction
@@ -822,7 +822,7 @@ where
                 // the gas limit condition for regular transactions above.
                 trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
         }
 
@@ -851,11 +851,11 @@ where
                             best_txs.mark_invalid(&pool_tx);
                         }
 
-                        continue
+                        continue;
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                        return Err(PayloadBuilderError::EvmExecutionError(err));
                     }
                 }
             }
@@ -903,7 +903,7 @@ where
     // check if we have a better block
     if !is_better_payload(best_payload.as_deref(), total_fees) {
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
     }
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
@@ -918,7 +918,15 @@ where
         Receipts::from_vec(vec![receipts]),
         block_number,
     );
-    let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
+    let receipts_root = bundle
+        .receipts_root_slow(
+            block_number,
+            #[cfg(feature = "optimism")]
+            chain_spec.clone(),
+            #[cfg(feature = "optimism")]
+            attributes.timestamp,
+        )
+        .expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
@@ -1101,11 +1109,11 @@ fn commit_withdrawals<DB: Database<Error = RethError>>(
     withdrawals: Vec<Withdrawal>,
 ) -> RethResult<WithdrawalsOutcome> {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-        return Ok(WithdrawalsOutcome::pre_shanghai())
+        return Ok(WithdrawalsOutcome::pre_shanghai());
     }
 
     if withdrawals.is_empty() {
-        return Ok(WithdrawalsOutcome::empty())
+        return Ok(WithdrawalsOutcome::empty());
     }
 
     let balance_increments =

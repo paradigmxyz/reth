@@ -88,9 +88,18 @@ impl Receipts {
     }
 
     /// Retrieves the receipt root for all recorded receipts from index.
-    pub fn root_slow(&self, index: usize) -> Option<B256> {
+    pub fn root_slow(
+        &self,
+        index: usize,
+        #[cfg(feature = "optimism")] chain_spec: std::sync::Arc<crate::ChainSpec>,
+        #[cfg(feature = "optimism")] timestamp: u64,
+    ) -> Option<B256> {
         Some(calculate_receipt_root_ref(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
+            #[cfg(feature = "optimism")]
+            chain_spec,
+            #[cfg(feature = "optimism")]
+            timestamp,
         ))
     }
 
@@ -247,7 +256,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -282,7 +291,7 @@ impl ReceiptWithBloom {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         *buf = *b;
         Ok(this)
@@ -429,7 +438,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return
+            return;
         }
 
         let mut payload = BytesMut::new();

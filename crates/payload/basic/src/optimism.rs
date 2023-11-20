@@ -58,7 +58,7 @@ where
     for sequencer_tx in attributes.optimism_payload_attributes.transactions {
         // Check if the job was cancelled, if so we can exit early.
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled)
+            return Ok(BuildOutcome::Cancelled);
         }
 
         // Convert the transaction to a [TransactionSignedEcRecovered]. This is
@@ -102,11 +102,11 @@ where
                 match err {
                     EVMError::Transaction(err) => {
                         trace!(target: "optimism_payload_builder", ?err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                        continue
+                        continue;
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
+                        return Err(PayloadBuilderError::EvmExecutionError(err));
                     }
                 }
             }
@@ -142,12 +142,12 @@ where
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             // check if the job was cancelled, if so we can exit early
             if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled)
+                return Ok(BuildOutcome::Cancelled);
             }
 
             // convert tx to a signed transaction
@@ -178,11 +178,11 @@ where
                                 best_txs.mark_invalid(&pool_tx);
                             }
 
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                            return Err(PayloadBuilderError::EvmExecutionError(err));
                         }
                     }
                 }
@@ -220,7 +220,7 @@ where
     // check if we have a better block
     if !is_better_payload(best_payload.as_deref(), total_fees) {
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
     }
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
@@ -235,7 +235,9 @@ where
         Receipts::from_vec(vec![receipts]),
         block_number,
     );
-    let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
+    let receipts_root = bundle
+        .receipts_root_slow(block_number, chain_spec.clone(), attributes.timestamp)
+        .expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
