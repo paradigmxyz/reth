@@ -62,7 +62,7 @@ pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Clone, Args)]
-#[command(next_help_heading = "RPC")]
+#[clap(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
     #[arg(long, default_value_if("dev", "true", "true"))]
