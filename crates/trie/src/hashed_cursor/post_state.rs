@@ -38,7 +38,7 @@ impl HashedStorage {
     }
 
     /// Returns all storage slots.
-    pub fn storage_slots<'a>(&'a self) -> impl Iterator<Item = (B256, U256)> + 'a {
+    pub fn storage_slots(&self) -> impl Iterator<Item = (B256, U256)> + '_ {
         self.zero_valued_slots
             .iter()
             .map(|slot| (*slot, U256::ZERO))
@@ -98,7 +98,7 @@ impl HashedPostState {
     }
 
     /// Returns all accounts with their state.
-    pub fn accounts<'a>(&'a self) -> impl Iterator<Item = (B256, Option<Account>)> + 'a {
+    pub fn accounts(&self) -> impl Iterator<Item = (B256, Option<Account>)> + '_ {
         self.destroyed_accounts.iter().map(|hashed_address| (*hashed_address, None)).chain(
             self.accounts.iter().map(|(hashed_address, account)| (*hashed_address, Some(*account))),
         )
