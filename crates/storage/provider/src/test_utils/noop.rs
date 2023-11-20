@@ -14,8 +14,8 @@ use reth_primitives::{
     trie::AccountProof,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode,
     ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
-    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, B256, MAINNET, U256,
+    SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::primitives::{BlockEnv, CfgEnv};
@@ -82,6 +82,10 @@ impl BlockReader for NoopProvider {
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+        Ok(None)
+    }
+
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
         Ok(None)
     }
 

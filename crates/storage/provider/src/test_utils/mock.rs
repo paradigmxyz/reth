@@ -12,8 +12,8 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
     BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
-    SealedBlock, SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::primitives::{BlockEnv, CfgEnv};
@@ -435,6 +435,10 @@ impl BlockReader for MockEthProvider {
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+        Ok(None)
+    }
+
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
         Ok(None)
     }
 

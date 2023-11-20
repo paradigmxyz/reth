@@ -1073,6 +1073,10 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(None)
     }
 
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        Ok(None)
+    }
+
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
         Ok(None)
     }

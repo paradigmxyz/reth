@@ -209,8 +209,20 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// Returns the block with matching hash from any side-chain.
     ///
     /// Caution: This will not return blocks from the canonical chain.
+    #[inline]
     pub fn block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
         self.state.block_by_hash(block_hash)
+    }
+
+    /// Returns the block with matching hash from any side-chain.
+    ///
+    /// Caution: This will not return blocks from the canonical chain.
+    #[inline]
+    pub fn block_with_senders_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> Option<&SealedBlockWithSenders> {
+        self.state.block_with_senders_by_hash(block_hash)
     }
 
     /// Returns the block's receipts with matching hash from any side-chain.

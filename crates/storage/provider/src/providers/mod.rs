@@ -252,6 +252,10 @@ where
         Ok(self.tree.pending_block())
     }
 
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        Ok(self.tree.pending_block_with_senders())
+    }
+
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
         Ok(self.tree.pending_block_and_receipts())
     }
@@ -635,6 +639,10 @@ where
 
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
         self.tree.block_by_hash(block_hash)
+    }
+
+    fn block_with_senders_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlockWithSenders> {
+        self.tree.block_with_senders_by_hash(block_hash)
     }
 
     fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {

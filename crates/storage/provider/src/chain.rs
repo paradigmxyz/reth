@@ -71,9 +71,12 @@ impl Chain {
 
     /// Returns the block with matching hash.
     pub fn block(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
-        self.blocks
-            .iter()
-            .find_map(|(_num, block)| (block.hash() == block_hash).then_some(&block.block))
+        self.block_with_senders(block_hash).map(|block| &block.block)
+    }
+
+    /// Returns the block with matching hash.
+    pub fn block_with_senders(&self, block_hash: BlockHash) -> Option<&SealedBlockWithSenders> {
+        self.blocks.iter().find_map(|(_num, block)| (block.hash() == block_hash).then_some(block))
     }
 
     /// Return post state of the block at the `block_number` or None if block is not known
