@@ -293,16 +293,13 @@ where
             for tx in queued {
                 match tx {
                     Either::Left(block_with_senders) => {
-                        if let Ok(Some(ref block)) = res {
-                            let block_clone = block.clone();
-                            let _ = block_with_senders.send(Ok(Some(block_clone)));
-                        }
+                        let _ = block_with_senders.send(res.clone());
                     }
                     Either::Right(transaction_tx) => {
-                        if let Ok(Some(ref block)) = res {
-                            let block_clone = block.clone();
-                            let _ = transaction_tx.send(Ok(Some(block_clone.body.clone())));
-                        }
+                        let _ = transaction_tx.send(
+                            res.clone()
+                                .map(|maybe_block| maybe_block.map(|block| block.block.body)),
+                        );
                     }
                 }
             }
