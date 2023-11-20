@@ -1,5 +1,5 @@
 use crate::{
-    bundle_state::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
+    bundle_state::{BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit},
     providers::{database::metrics, SnapshotProvider},
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
@@ -43,7 +43,9 @@ use reth_primitives::{
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     TxHash, TxNumber, Withdrawal, B256, U256,
 };
-use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
+use reth_trie::{
+    hashed_cursor::HashedPostState, prefix_set::PrefixSetMut, updates::TrieUpdates, StateRoot,
+};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
@@ -2287,10 +2289,12 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         Ok(block_indices)
     }
 
-    fn append_blocks_with_bundle_state(
+    fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         state: BundleStateWithReceipts,
+        hashed_state: HashedPostState,
+        trie_updates: TrieUpdates,
         prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
@@ -2303,8 +2307,6 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         let last = blocks.last().unwrap();
         let last_block_number = last.number;
-        let last_block_hash = last.hash();
-        let expected_state_root = last.state_root;
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
@@ -2320,7 +2322,11 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         state.write_to_db(self.tx_ref(), OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
-        self.insert_hashes(first_number..=last_block_number, last_block_hash, expected_state_root)?;
+        // insert hashes and intermediate merkle nodes
+        {
+            HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
+            trie_updates.flush(&self.tx)?;
+        }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
         self.update_history_indices(first_number..=last_block_number)?;

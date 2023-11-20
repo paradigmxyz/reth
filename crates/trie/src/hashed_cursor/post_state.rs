@@ -12,11 +12,11 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct HashedStorage {
     /// Hashed storage slots with non-zero.
-    non_zero_valued_storage: Vec<(B256, U256)>,
+    pub non_zero_valued_storage: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
-    zero_valued_slots: HashSet<B256>,
+    pub zero_valued_slots: HashSet<B256>,
     /// Whether the storage was wiped or not.
-    wiped: bool,
+    pub wiped: bool,
     /// Whether the storage entries were sorted or not.
     sorted: bool,
 }
@@ -57,11 +57,11 @@ impl HashedStorage {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct HashedPostState {
     /// Map of hashed addresses to account info.
-    accounts: Vec<(B256, Account)>,
-    /// Set of cleared accounts.
-    cleared_accounts: HashSet<B256>,
+    pub accounts: Vec<(B256, Account)>,
+    /// Set of destroyed accounts.
+    pub destroyed_accounts: HashSet<B256>,
     /// Map of hashed addresses to hashed storage.
-    storages: HashMap<B256, HashedStorage>,
+    pub storages: HashMap<B256, HashedStorage>,
     /// Whether the account and storage entries were sorted or not.
     sorted: bool,
 }
@@ -70,7 +70,7 @@ impl Default for HashedPostState {
     fn default() -> Self {
         Self {
             accounts: Vec::new(),
-            cleared_accounts: HashSet::new(),
+            destroyed_accounts: HashSet::new(),
             storages: HashMap::new(),
             sorted: true, // empty is sorted
         }
@@ -102,15 +102,20 @@ impl HashedPostState {
         self.sorted = false;
     }
 
-    /// Insert cleared hashed account key.
-    pub fn insert_cleared_account(&mut self, hashed_address: B256) {
-        self.cleared_accounts.insert(hashed_address);
+    /// Insert destroyed hashed account key.
+    pub fn insert_destroyed_account(&mut self, hashed_address: B256) {
+        self.destroyed_accounts.insert(hashed_address);
     }
 
     /// Insert hashed storage entry.
     pub fn insert_hashed_storage(&mut self, hashed_address: B256, hashed_storage: HashedStorage) {
         self.sorted &= hashed_storage.sorted;
         self.storages.insert(hashed_address, hashed_storage);
+    }
+
+    /// Returns all destroyed accounts.
+    pub fn destroyed_accounts(&self) -> HashSet<B256> {
+        self.destroyed_accounts.clone()
     }
 
     /// Construct (PrefixSet)[PrefixSet] from hashed post state.
@@ -125,7 +130,7 @@ impl HashedPostState {
         for (hashed_address, _) in &self.accounts {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
         }
-        for hashed_address in &self.cleared_accounts {
+        for hashed_address in &self.destroyed_accounts {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
         }
 
@@ -213,7 +218,7 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
     /// This function only checks the post state, not the database, because the latter does not
     /// store destroyed accounts.
     fn is_account_cleared(&self, account: &B256) -> bool {
-        self.post_state.cleared_accounts.contains(account)
+        self.post_state.destroyed_accounts.contains(account)
     }
 
     /// Return the account with the lowest hashed account key.
@@ -667,7 +672,7 @@ mod tests {
         let mut hashed_post_state = HashedPostState::default();
         for (hashed_address, account) in accounts.iter().filter(|x| x.0[31] % 2 != 0) {
             if removed_keys.contains(hashed_address) {
-                hashed_post_state.insert_cleared_account(*hashed_address);
+                hashed_post_state.insert_destroyed_account(*hashed_address);
             } else {
                 hashed_post_state.insert_account(*hashed_address, *account);
             }
@@ -722,7 +727,7 @@ mod tests {
                     if let Some(account) = account {
                         hashed_post_state.insert_account(*hashed_address, *account);
                     } else {
-                        hashed_post_state.insert_cleared_account(*hashed_address);
+                        hashed_post_state.insert_destroyed_account(*hashed_address);
                     }
                 }
                 hashed_post_state.sort();
