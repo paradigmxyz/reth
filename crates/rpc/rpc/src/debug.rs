@@ -458,7 +458,7 @@ where
         opts: GethDebugTracingOptions,
         env: Env,
         at: BlockId,
-        db: &mut SubState<StateProviderBox<'_>>,
+        db: &mut SubState<StateProviderBox>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 

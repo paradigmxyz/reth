@@ -37,7 +37,7 @@ impl Segment for Headers {
 
     fn snapshot<DB: Database>(
         &self,
-        provider: &DatabaseProviderRO<'_, DB>,
+        provider: &DatabaseProviderRO<DB>,
         directory: impl AsRef<Path>,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {

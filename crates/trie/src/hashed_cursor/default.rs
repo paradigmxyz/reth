@@ -2,13 +2,13 @@ use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
-    transaction::{DbTx, DbTxGAT},
+    transaction::DbTx,
 };
 use reth_primitives::{Account, StorageEntry, B256};
 
 impl<'a, TX: DbTx> HashedCursorFactory for &'a TX {
-    type AccountCursor = <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>;
-    type StorageCursor = <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage>;
+    type AccountCursor = <TX as DbTx>::Cursor<tables::HashedAccount>;
+    type StorageCursor = <TX as DbTx>::DupCursor<tables::HashedStorage>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
         self.cursor_read::<tables::HashedAccount>()

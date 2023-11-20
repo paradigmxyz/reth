@@ -56,7 +56,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -168,7 +168,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
@@ -207,7 +207,7 @@ fn recover_sender(
 }
 
 fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<&DB>,
 ) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::SenderRecovery)?

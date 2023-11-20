@@ -206,7 +206,7 @@ where
     /// Returns the state at the given [BlockId] enum.
     ///
     /// Note: if not [BlockNumberOrTag::Pending] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
-    pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
+    pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox> {
         Ok(self.provider().state_by_block_id(at)?)
     }
 
@@ -216,7 +216,7 @@ where
     pub fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> EthResult<StateProviderBox<'_>> {
+    ) -> EthResult<StateProviderBox> {
         if let Some(block_id) = block_id {
             self.state_at_block_id(block_id)
         } else {
@@ -225,12 +225,12 @@ where
     }
 
     /// Returns the state at the given block number
-    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox<'_>> {
+    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox> {
         Ok(self.provider().history_by_block_hash(block_hash)?)
     }
 
     /// Returns the _latest_ state
-    pub fn latest_state(&self) -> RethResult<StateProviderBox<'_>> {
+    pub fn latest_state(&self) -> RethResult<StateProviderBox> {
         Ok(self.provider().latest()?)
     }
 }

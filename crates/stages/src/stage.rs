@@ -76,7 +76,7 @@ impl ExecInput {
     /// the number of transactions exceeds the threshold.
     pub fn next_block_range_with_transaction_threshold<DB: Database>(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         tx_threshold: u64,
     ) -> Result<(Range<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError> {
         let start_block = self.next_block();
@@ -234,14 +234,14 @@ pub trait Stage<DB: Database>: Send + Sync {
     /// upon invoking this method.
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
 }

@@ -819,7 +819,8 @@ impl TransactionSignedNoHash {
     /// Calculates the transaction hash. If used more than once, it's better to convert it to
     /// [`TransactionSigned`] first.
     pub fn hash(&self) -> B256 {
-        let mut buf = Vec::new();
+        // pre-allocate buffer for the transaction
+        let mut buf = Vec::with_capacity(128 + self.transaction.input().len());
         self.transaction.encode_with_signature(&self.signature, &mut buf, false);
         keccak256(&buf)
     }

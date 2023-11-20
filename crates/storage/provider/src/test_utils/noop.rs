@@ -17,6 +17,7 @@ use reth_primitives::{
     SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, B256, MAINNET, U256,
 };
+use reth_trie::updates::TrieUpdates;
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -274,6 +275,13 @@ impl StateRootProvider for NoopProvider {
     fn state_root(&self, _state: &BundleStateWithReceipts) -> ProviderResult<B256> {
         Ok(B256::default())
     }
+
+    fn state_root_with_updates(
+        &self,
+        _bundle_state: &BundleStateWithReceipts,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        Ok((B256::default(), TrieUpdates::default()))
+    }
 }
 
 impl StateProvider for NoopProvider {
@@ -339,37 +347,34 @@ impl EvmEnvProvider for NoopProvider {
 }
 
 impl StateProviderFactory for NoopProvider {
-    fn latest(&self) -> ProviderResult<StateProviderBox<'_>> {
+    fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }
 
-    fn history_by_block_number(&self, _block: BlockNumber) -> ProviderResult<StateProviderBox<'_>> {
+    fn history_by_block_number(&self, _block: BlockNumber) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox<'_>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }
 
-    fn state_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox<'_>> {
+    fn state_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }
 
-    fn pending(&self) -> ProviderResult<StateProviderBox<'_>> {
+    fn pending(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }
 
-    fn pending_state_by_hash(
-        &self,
-        _block_hash: B256,
-    ) -> ProviderResult<Option<StateProviderBox<'_>>> {
+    fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(*self)))
     }
 
     fn pending_with_provider<'a>(
         &'a self,
-        _post_state_data: Box<dyn crate::BundleStateDataProvider + 'a>,
-    ) -> ProviderResult<StateProviderBox<'a>> {
+        _bundle_state_data: Box<dyn crate::BundleStateDataProvider + 'a>,
+    ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }
 }

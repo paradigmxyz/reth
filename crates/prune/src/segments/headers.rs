@@ -33,7 +33,7 @@ impl<DB: Database> Segment<DB> for Headers {
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let block_range = match input.get_next_block_range() {
@@ -91,7 +91,7 @@ impl Headers {
     /// Returns `done`, number of pruned rows and last pruned block number.
     fn prune_table<DB: Database, T: Table<Key = BlockNumber>>(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         range: RangeInclusive<BlockNumber>,
         delete_limit: usize,
     ) -> RethResult<(bool, usize, BlockNumber)> {

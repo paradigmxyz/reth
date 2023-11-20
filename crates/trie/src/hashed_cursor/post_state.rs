@@ -3,7 +3,7 @@ use crate::prefix_set::{PrefixSet, PrefixSetMut};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
-    transaction::{DbTx, DbTxGAT},
+    transaction::DbTx,
 };
 use reth_primitives::{trie::Nibbles, Account, StorageEntry, B256, U256};
 use std::collections::{HashMap, HashSet};
@@ -171,9 +171,9 @@ impl<'a, 'b, TX> HashedPostStateCursorFactory<'a, 'b, TX> {
 
 impl<'a, 'b, TX: DbTx> HashedCursorFactory for HashedPostStateCursorFactory<'a, 'b, TX> {
     type AccountCursor =
-        HashedPostStateAccountCursor<'b, <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount>>;
+        HashedPostStateAccountCursor<'b, <TX as DbTx>::Cursor<tables::HashedAccount>>;
     type StorageCursor =
-        HashedPostStateStorageCursor<'b, <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage>>;
+        HashedPostStateStorageCursor<'b, <TX as DbTx>::DupCursor<tables::HashedStorage>>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
         let cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
