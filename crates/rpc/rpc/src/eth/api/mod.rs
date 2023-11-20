@@ -303,7 +303,7 @@ where
     pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlockWithSenders>> {
         let pending = self.pending_block_env_and_cfg()?;
         if pending.origin.is_actual_pending() {
-            return Ok(pending.origin.into_actual_pending());
+            return Ok(pending.origin.into_actual_pending())
         }
 
         // no pending block from the CL yet, so we need to build it ourselves via txpool
@@ -314,17 +314,17 @@ where
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.block_env.number.to::<u64>() == pending_block.block.number
-                    && pending.origin.header().hash == pending_block.block.parent_hash
-                    && now <= pending_block.expires_at
+                if pending.block_env.number.to::<u64>() == pending_block.block.number &&
+                    pending.origin.header().hash == pending_block.block.parent_hash &&
+                    now <= pending_block.expires_at
                 {
-                    return Ok(Some(pending_block.block.clone()));
+                    return Ok(Some(pending_block.block.clone()))
                 }
             }
 
             // if we're currently syncing, we're unable to build a pending block
             if this.network().is_syncing() {
-                return Ok(None);
+                return Ok(None)
             }
 
             // we rebuild the block
@@ -332,7 +332,7 @@ where
                 Ok(block) => block,
                 Err(err) => {
                     tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None);
+                    return Ok(None)
                 }
             };
 
@@ -542,7 +542,7 @@ impl FeeHistoryCache {
 
                 entries.insert(block.number, fee_history_entry);
             } else {
-                break;
+                break
             }
         }
         while entries.len() > self.config.max_blocks as usize {
@@ -551,7 +551,7 @@ impl FeeHistoryCache {
         if entries.len() == 0 {
             self.upper_bound.store(0, SeqCst);
             self.lower_bound.store(0, SeqCst);
-            return;
+            return
         }
         let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
         let lower_bound = *entries.first_entry().expect("Contains at least one entry").key();
@@ -686,7 +686,7 @@ async fn calculate_reward_percentiles_for_block(
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
             rewards_in_block.push(U256::ZERO);
-            continue;
+            continue
         }
 
         let threshold = (fee_entry.gas_used as f64 * percentile / 100.) as u64;

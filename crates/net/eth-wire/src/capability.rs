@@ -252,7 +252,7 @@ impl SharedCapability {
     /// Returns an error if the offset is equal or less than [`MAX_RESERVED_MESSAGE_ID`].
     pub(crate) fn new(name: &str, version: u8, offset: u8) -> Result<Self, SharedCapabilityError> {
         if offset <= MAX_RESERVED_MESSAGE_ID {
-            return Err(SharedCapabilityError::ReservedMessageIdOffset(offset));
+            return Err(SharedCapabilityError::ReservedMessageIdOffset(offset))
         }
 
         match name {
@@ -350,7 +350,7 @@ impl SharedCapabilities {
     pub fn eth(&self) -> Result<&SharedCapability, P2PStreamError> {
         for cap in self.iter_caps() {
             if cap.is_eth() {
-                return Ok(cap);
+                return Ok(cap)
             }
         }
         Err(P2PStreamError::CapabilityNotShared)
@@ -427,8 +427,8 @@ pub fn shared_capability_offsets(
             let version = shared_capabilities.get(&peer_capability.name).map(|v| v.version);
 
             // TODO(mattsse): simplify
-            if version.is_none()
-                || (version.is_some() && peer_capability.version > version.expect("is some; qed"))
+            if version.is_none() ||
+                (version.is_some() && peer_capability.version > version.expect("is some; qed"))
             {
                 shared_capabilities.insert(
                     peer_capability.name.clone(),
@@ -441,7 +441,7 @@ pub fn shared_capability_offsets(
 
     // disconnect if we don't share any capabilities
     if shared_capabilities.is_empty() {
-        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities));
+        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
     }
 
     // order versions based on capability name (alphabetical) and select offsets based on
@@ -462,7 +462,7 @@ pub fn shared_capability_offsets(
     }
 
     if shared_with_offsets.is_empty() {
-        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities));
+        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
     }
 
     Ok(shared_with_offsets)

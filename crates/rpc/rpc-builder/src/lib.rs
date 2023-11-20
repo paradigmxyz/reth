@@ -685,7 +685,7 @@ impl FromStr for RpcModuleSelection {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Ok(Selection(vec![]));
+            return Ok(Selection(vec![]))
         }
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
@@ -1380,9 +1380,9 @@ impl RpcServerConfig {
     ///
     /// If no server is configured, no server will be be launched on [RpcServerConfig::start].
     pub fn has_server(&self) -> bool {
-        self.http_server_config.is_some()
-            || self.ws_server_config.is_some()
-            || self.ipc_server_config.is_some()
+        self.http_server_config.is_some() ||
+            self.ws_server_config.is_some() ||
+            self.ipc_server_config.is_some()
     }
 
     /// Returns the [SocketAddr] of the http server
@@ -1423,9 +1423,9 @@ impl RpcServerConfig {
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
 
         // If both are configured on the same port, we combine them into one server.
-        if self.http_addr == self.ws_addr
-            && self.http_server_config.is_some()
-            && self.ws_server_config.is_some()
+        if self.http_addr == self.ws_addr &&
+            self.http_server_config.is_some() &&
+            self.ws_server_config.is_some()
         {
             let cors = match (self.ws_cors_domains.as_ref(), self.http_cors_domains.as_ref()) {
                 (Some(ws_cors), Some(http_cors)) => {
@@ -1434,7 +1434,7 @@ impl RpcServerConfig {
                             http_cors_domains: Some(http_cors.clone()),
                             ws_cors_domains: Some(ws_cors.clone()),
                         }
-                        .into());
+                        .into())
                     }
                     Some(ws_cors)
                 }
@@ -1471,7 +1471,7 @@ impl RpcServerConfig {
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
                 jwt_secret,
-            });
+            })
         }
 
         let mut http_local_addr = None;
@@ -1670,7 +1670,7 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true);
+            return http.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
@@ -1685,7 +1685,7 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true);
+            return ws.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
@@ -1700,7 +1700,7 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, jsonrpsee::core::error::Error> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true);
+            return ipc.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
@@ -1995,8 +1995,8 @@ impl RpcServerHandle {
                 "Bearer {}",
                 secret
                     .encode(&Claims {
-                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
-                            + Duration::from_secs(60))
+                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
+                            Duration::from_secs(60))
                         .as_secs(),
                         exp: None,
                     })
