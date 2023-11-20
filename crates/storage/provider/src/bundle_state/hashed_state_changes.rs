@@ -17,11 +17,8 @@ impl HashedStateChanges {
     pub fn write_to_db<TX: DbTxMut + DbTx>(self, tx: &TX) -> Result<(), DatabaseError> {
         // Collect hashed account changes.
         let mut hashed_accounts = BTreeMap::<B256, Option<Account>>::default();
-        for hashed_address in self.0.destroyed_accounts {
-            hashed_accounts.insert(hashed_address, None);
-        }
-        for (hashed_address, account) in self.0.accounts {
-            hashed_accounts.insert(hashed_address, Some(account));
+        for (hashed_address, account) in self.0.accounts() {
+            hashed_accounts.insert(hashed_address, account);
         }
 
         // Write hashed account updates.
@@ -36,16 +33,11 @@ impl HashedStateChanges {
 
         // Collect hashed storage changes.
         let mut hashed_storages = BTreeMap::<B256, (bool, BTreeMap<B256, U256>)>::default();
-        for (hashed_address, storage) in self.0.storages {
-            let entry = hashed_storages.entry(hashed_address).or_default();
-            if storage.wiped {
-                entry.0 |= storage.wiped;
-            }
-            for (hashed_slot, value) in storage.non_zero_valued_storage {
+        for (hashed_address, storage) in self.0.storages() {
+            let entry = hashed_storages.entry(*hashed_address).or_default();
+            entry.0 |= storage.wiped();
+            for (hashed_slot, value) in storage.storage_slots() {
                 entry.1.insert(hashed_slot, value);
-            }
-            for slot in storage.zero_valued_slots {
-                entry.1.insert(slot, U256::ZERO);
             }
         }
 

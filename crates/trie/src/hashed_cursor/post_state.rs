@@ -12,11 +12,11 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct HashedStorage {
     /// Hashed storage slots with non-zero.
-    pub non_zero_valued_storage: Vec<(B256, U256)>,
+    non_zero_valued_storage: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
-    pub zero_valued_slots: HashSet<B256>,
+    zero_valued_slots: HashSet<B256>,
     /// Whether the storage was wiped or not.
-    pub wiped: bool,
+    wiped: bool,
     /// Whether the storage entries were sorted or not.
     sorted: bool,
 }
@@ -30,6 +30,19 @@ impl HashedStorage {
             wiped,
             sorted: true, // empty is sorted
         }
+    }
+
+    /// Returns `true` if the storage was wiped.
+    pub fn wiped(&self) -> bool {
+        self.wiped
+    }
+
+    /// Returns all storage slots.
+    pub fn storage_slots<'a>(&'a self) -> impl Iterator<Item = (B256, U256)> + 'a {
+        self.zero_valued_slots
+            .iter()
+            .map(|slot| (*slot, U256::ZERO))
+            .chain(self.non_zero_valued_storage.iter().cloned())
     }
 
     /// Sorts the non zero value storage entries.
@@ -57,11 +70,11 @@ impl HashedStorage {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct HashedPostState {
     /// Map of hashed addresses to account info.
-    pub accounts: Vec<(B256, Account)>,
+    accounts: Vec<(B256, Account)>,
     /// Set of destroyed accounts.
-    pub destroyed_accounts: HashSet<B256>,
+    destroyed_accounts: HashSet<B256>,
     /// Map of hashed addresses to hashed storage.
-    pub storages: HashMap<B256, HashedStorage>,
+    storages: HashMap<B256, HashedStorage>,
     /// Whether the account and storage entries were sorted or not.
     sorted: bool,
 }
@@ -82,6 +95,18 @@ impl HashedPostState {
     pub fn sorted(mut self) -> Self {
         self.sort();
         self
+    }
+
+    /// Returns all accounts with their state.
+    pub fn accounts<'a>(&'a self) -> impl Iterator<Item = (B256, Option<Account>)> + 'a {
+        self.destroyed_accounts.iter().map(|hashed_address| (*hashed_address, None)).chain(
+            self.accounts.iter().map(|(hashed_address, account)| (*hashed_address, Some(*account))),
+        )
+    }
+
+    /// Returns all account storages.
+    pub fn storages(&self) -> impl Iterator<Item = (&B256, &HashedStorage)> {
+        self.storages.iter()
     }
 
     /// Sort account and storage entries.
