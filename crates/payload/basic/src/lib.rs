@@ -464,8 +464,8 @@ where
             // upfront with the list of transactions sent in the attributes without caring about
             // the results of the polling job, if a best payload has not already been built.
             #[cfg(feature = "optimism")]
-            if self.config.chain_spec.is_optimism()
-                && self.config.attributes.optimism_payload_attributes.no_tx_pool
+            if self.config.chain_spec.is_optimism() &&
+                self.config.attributes.optimism_payload_attributes.no_tx_pool
             {
                 let args = BuildArguments {
                     client: self.client.clone(),

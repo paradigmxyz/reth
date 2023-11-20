@@ -80,8 +80,8 @@ pub fn calculate_receipt_root(
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
     #[cfg(feature = "optimism")]
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp)
-        && !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -114,8 +114,8 @@ pub fn calculate_receipt_root_ref(
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
     #[cfg(feature = "optimism")]
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp)
-        && !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
