@@ -188,6 +188,7 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
 
     /// Additional cli arguments
     #[clap(flatten)]
+    #[clap(next_help_heading = "Extension")]
     pub ext: Ext::Node,
 }
 
