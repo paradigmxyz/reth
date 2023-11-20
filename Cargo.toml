@@ -135,8 +135,8 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { git = "https://github.com/clabby/revm", branch = "cl/canyon-hardfork" }
-revm-primitives = { git = "https://github.com/clabby/revm", branch = "cl/canyon-hardfork" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "3608d2d" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "3608d2d" }
 
 # eth
 alloy-primitives = "0.4"
