@@ -2,7 +2,7 @@
 
 /// Parameters for rollup configuration
 #[derive(Debug, clap::Args)]
-#[command(next_help_heading = "Rollup")]
+#[clap(next_help_heading = "Rollup")]
 pub struct RollupArgs {
     /// HTTP endpoint for the sequencer mempool
     #[arg(long = "rollup.sequencer-http", value_name = "HTTP_URL")]
