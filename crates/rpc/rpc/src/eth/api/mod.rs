@@ -15,8 +15,8 @@ use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnv},
-    Address, Block, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, SealedBlockWithSenders,
-    B256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, Receipt, SealedBlock, SealedBlockWithSenders,
+    TransactionSigned, B256, U256, U64,
 };
 use serde::{Deserialize, Serialize};
 
@@ -303,7 +303,7 @@ where
     pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlockWithSenders>> {
         let pending = self.pending_block_env_and_cfg()?;
         if pending.origin.is_actual_pending() {
-            return Ok(pending.origin.into_actual_pending())
+            return Ok(pending.origin.into_actual_pending());
         }
 
         // no pending block from the CL yet, so we need to build it ourselves via txpool
@@ -314,17 +314,17 @@ where
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.block_env.number.to::<u64>() == pending_block.block.number &&
-                    pending.origin.header().hash == pending_block.block.parent_hash &&
-                    now <= pending_block.expires_at
+                if pending.block_env.number.to::<u64>() == pending_block.block.number
+                    && pending.origin.header().hash == pending_block.block.parent_hash
+                    && now <= pending_block.expires_at
                 {
-                    return Ok(Some(pending_block.block.clone()))
+                    return Ok(Some(pending_block.block.clone()));
                 }
             }
 
             // if we're currently syncing, we're unable to build a pending block
             if this.network().is_syncing() {
-                return Ok(None)
+                return Ok(None);
             }
 
             // we rebuild the block
@@ -332,7 +332,7 @@ where
                 Ok(block) => block,
                 Err(err) => {
                     tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None)
+                    return Ok(None);
                 }
             };
 
@@ -482,11 +482,15 @@ pub struct FeeHistoryCacheConfig {
     ///
     /// Default is 1024.
     pub max_blocks: u64,
+    /// Percentile approximation resolution
+    ///
+    /// Default is 4 which means 0.25
+    pub resolution: u64,
 }
 
 impl Default for FeeHistoryCacheConfig {
     fn default() -> Self {
-        FeeHistoryCacheConfig { max_blocks: 1024 }
+        FeeHistoryCacheConfig { max_blocks: 1024, resolution: 4 }
     }
 }
 
@@ -516,34 +520,38 @@ impl FeeHistoryCache {
     /// Processing of the arriving blocks
     pub async fn on_new_blocks<'a, I>(&self, blocks: I)
     where
-        I: Iterator<Item = &'a Block>,
+        I: Iterator<Item = &'a SealedBlock>,
     {
         let mut entries = self.entries.write().await;
 
         for block in blocks {
-            let mut fee_history_entry = FeeHistoryEntry::new(block, block.clone().seal_slow().hash);
+            let mut fee_history_entry = FeeHistoryEntry::new(&block);
+            let percentiles = self.predefined_percentiles();
 
-            let percentiles = predefined_percentiles();
+            if let Ok(Some((transactions, receipts))) =
+                self.eth_cache.get_transactions_and_receipts(fee_history_entry.header_hash).await
+            {
+                fee_history_entry.rewards = calculate_reward_percentiles_for_block(
+                    &percentiles,
+                    &fee_history_entry,
+                    transactions,
+                    receipts,
+                )
+                .await
+                .unwrap_or_default();
 
-            fee_history_entry.rewards = calculate_reward_percentiles_for_block(
-                &percentiles,
-                &fee_history_entry,
-                self.eth_cache.clone(),
-            )
-            .await
-            .unwrap_or_default();
-
-            // calculate rewards
-            entries.insert(block.number, fee_history_entry);
+                entries.insert(block.number, fee_history_entry);
+            } else {
+                break;
+            }
         }
-
         while entries.len() > self.config.max_blocks as usize {
             entries.pop_first();
         }
         if entries.len() == 0 {
             self.upper_bound.store(0, SeqCst);
             self.lower_bound.store(0, SeqCst);
-            return
+            return;
         }
         let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
         let lower_bound = *entries.first_entry().expect("Contains at least one entry").key();
@@ -561,26 +569,35 @@ impl FeeHistoryCache {
         self.lower_bound.load(SeqCst)
     }
 
-    /// Collect fee history for given range. It will try to use a cache to take the most recent
-    /// headers or if the range is out of caching config it will fallback to the database provider
+    /// Collect fee history for given range.
+    /// This function retrieves fee history entries from the cache for the specified range.
+    /// If the requested range (star_block to end_block) is within the cache bounds,
+    /// it returns the corresponding entries.
+    /// Otherwise it returns None.
     pub async fn get_history(
         &self,
         start_block: u64,
         end_block: u64,
     ) -> RethResult<Vec<FeeHistoryEntry>> {
-        let mut result = Vec::new();
-
         let lower_bound = self.lower_bound();
         let upper_bound = self.upper_bound();
         if start_block >= lower_bound && end_block <= upper_bound {
             let entries = self.entries.read().await;
-            result = entries
+            let result = entries
                 .range(start_block..=end_block + 1)
                 .map(|(_, fee_entry)| fee_entry.clone())
                 .collect();
+            Ok(result)
+        } else {
+            Ok(Vec::new())
         }
+    }
 
-        Ok(result)
+    /// Generates predefined set of percentiles
+    pub fn predefined_percentiles(&self) -> Vec<f64> {
+        (0..=100 * self.config.resolution)
+            .map(|p| p as f64 / self.config.resolution as f64)
+            .collect()
     }
 }
 
@@ -605,8 +622,9 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
         };
 
         let blocks = provider.block_range(start_block..=last_block_number).unwrap_or_default();
+        let sealed = blocks.into_iter().map(|block| block.seal_slow()).collect::<Vec<_>>();
 
-        fee_history_cache.on_new_block(blocks.iter()).await;
+        fee_history_cache.on_new_blocks(sealed.iter()).await;
     }
 
     while let Some(event) = events.next().await {
@@ -614,19 +632,11 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
             // we're only interested in new committed blocks
             let (blocks, _) = committed.inner();
 
-            let blocks = blocks
-                .iter()
-                .map(|(_, block)| block.block.clone().unseal().clone())
-                .collect::<Vec<_>>();
+            let blocks = blocks.iter().map(|(_, v)| v.block.clone()).collect::<Vec<_>>();
 
-            fee_history_cache.on_new_block(blocks.iter()).await;
+            fee_history_cache.on_new_blocks(blocks.iter()).await;
         }
     }
-}
-
-/// Generates predefined set of percentiles
-fn predefined_percentiles() -> Vec<f64> {
-    (0..=400).map(|p| p as f64 * 0.25).collect()
 }
 
 /// Calculates reward percentiles for transactions in a block header.
@@ -637,12 +647,9 @@ fn predefined_percentiles() -> Vec<f64> {
 async fn calculate_reward_percentiles_for_block(
     percentiles: &[f64],
     fee_entry: &FeeHistoryEntry,
-    cache: EthStateCache,
+    transactions: Vec<TransactionSigned>,
+    receipts: Vec<Receipt>,
 ) -> Result<Vec<U256>, EthApiError> {
-    let (transactions, receipts) = cache
-        .get_transactions_and_receipts(fee_entry.header_hash)
-        .await?
-        .ok_or(EthApiError::InvalidBlockRange)?;
     let mut transactions = transactions
         .into_iter()
         .zip(receipts)
@@ -679,7 +686,7 @@ async fn calculate_reward_percentiles_for_block(
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
             rewards_in_block.push(U256::ZERO);
-            continue
+            continue;
         }
 
         let threshold = (fee_entry.gas_used as f64 * percentile / 100.) as u64;
@@ -704,12 +711,12 @@ pub struct FeeHistoryEntry {
 }
 
 impl FeeHistoryEntry {
-    fn new(block: &Block, hash: B256) -> Self {
+    fn new(block: &SealedBlock) -> Self {
         FeeHistoryEntry {
             base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
             gas_used: block.gas_used,
-            header_hash: hash,
+            header_hash: block.hash,
             gas_limit: block.gas_limit,
             rewards: Vec::new(),
         }
