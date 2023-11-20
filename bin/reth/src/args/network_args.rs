@@ -12,7 +12,7 @@ use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Args)]
-#[command(next_help_heading = "Networking")]
+#[clap(next_help_heading = "Networking")]
 pub struct NetworkArgs {
     /// Disable the discovery service.
     #[command(flatten)]
