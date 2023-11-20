@@ -98,7 +98,17 @@ impl BlockWithSenders {
         (!block.body.len() != senders.len()).then_some(Self { block, senders })
     }
 
+    /// Seal the block with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    #[inline]
+    pub fn seal(self, hash: B256) -> SealedBlockWithSenders {
+        let Self { block, senders } = self;
+        SealedBlockWithSenders { block: block.seal(hash), senders }
+    }
+
     /// Split Structure to its components
+    #[inline]
     pub fn into_components(self) -> (Block, Vec<Address>) {
         (self.block, self.senders)
     }
@@ -288,11 +298,13 @@ impl SealedBlockWithSenders {
         (self.block, self.senders)
     }
 
-    /// Returns [BlockWithSenders]
-    pub fn into_block_with_senders(self) -> Option<BlockWithSenders> {
-        BlockWithSenders::new(self.block.into(), self.senders)
+    /// Returns the unsealed [BlockWithSenders]
+    #[inline]
+    pub fn unseal(self) -> BlockWithSenders {
+        let Self { block, senders } = self;
+        BlockWithSenders { block: block.unseal(), senders }
     }
-    
+
     /// Returns an iterator over all transactions in the block.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {

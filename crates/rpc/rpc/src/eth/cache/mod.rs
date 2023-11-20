@@ -1,11 +1,11 @@
 //! Async caching support for eth RPC
 
 use futures::{future::Either, Stream, StreamExt};
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, B256,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_provider::{
     BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory, TransactionVariant,
 };
@@ -37,7 +37,7 @@ type BlockTransactionsResponseSender =
     oneshot::Sender<ProviderResult<Option<Vec<TransactionSigned>>>>;
 
 /// The type that can send the response to a requested [BlockWithSenders]
-type BlockWithSendersResponseSender = oneshot::Sender<RethResult<Option<BlockWithSenders>>>;
+type BlockWithSendersResponseSender = oneshot::Sender<ProviderResult<Option<BlockWithSenders>>>;
 
 /// The type that can send the response to the requested receipts of a block.
 type ReceiptsResponseSender = oneshot::Sender<ProviderResult<Option<Vec<Receipt>>>>;
@@ -185,10 +185,20 @@ impl EthStateCache {
     pub(crate) async fn get_block_with_senders(
         &self,
         block_hash: B256,
-    ) -> RethResult<Option<BlockWithSenders>> {
+    ) -> ProviderResult<Option<BlockWithSenders>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+    }
+
+    /// Requests the  [SealedBlockWithSenders] for the block hash
+    ///
+    /// Returns `None` if the block does not exist.
+    pub(crate) async fn get_sealed_block_with_senders(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        Ok(self.get_block_with_senders(block_hash).await?.map(|block| block.seal(block_hash)))
     }
 
     /// Requests the [Receipt] for the block hash
@@ -278,7 +288,6 @@ where
     Tasks: TaskSpawner + Clone + 'static,
 {
     fn on_new_block(&mut self, block_hash: B256, res: ProviderResult<Option<BlockWithSenders>>) {
-
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
             // send the response to queued senders
             for tx in queued {
@@ -477,10 +486,7 @@ where
                         }
                         CacheAction::CacheNewCanonicalChain { blocks, receipts } => {
                             for block in blocks {
-                                this.on_new_block(
-                                    block.hash,
-                                    Ok(Some(block.block.unseal().with_senders(block.senders))),
-                                );
+                                this.on_new_block(block.hash, Ok(Some(block.unseal())));
                             }
 
                             for block_receipts in receipts {

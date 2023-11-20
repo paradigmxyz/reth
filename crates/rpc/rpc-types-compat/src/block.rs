@@ -3,8 +3,8 @@
 use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
 use reth_primitives::{
-    Block as PrimitiveBlock, BlockWithSenders as PrimitiveBlockWithSenders,
-    Header as PrimitiveHeader, TransactionSignedEcRecovered, B256, U256, U64,
+    Block as PrimitiveBlock, BlockWithSenders as PrimitiveBlockWithSenders, BlockWithSenders,
+    Header as PrimitiveHeader, B256, U256, U64,
 };
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
@@ -54,7 +54,7 @@ pub fn from_block_with_tx_hashes(
 /// This will populate the `transactions` field with the _full_
 /// [Transaction](reth_rpc_types::Transaction) objects: [BlockTransactions::Full]
 pub fn from_block_full(
-    mut block: PrimitiveBlockWithSenders,
+    mut block: BlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
 ) -> Result<Block, BlockError> {
@@ -70,18 +70,17 @@ pub fn from_block_full(
     let transactions = transactions_with_senders
         .enumerate()
         .map(|(idx, (tx, sender))| {
-            let signed_tx_ec_recovered =
-                TransactionSignedEcRecovered::from_signed_transaction(tx, sender);
+            let signed_tx_ec_recovered = tx.with_signer(sender);
 
-            Ok(from_recovered_with_block_context(
+            from_recovered_with_block_context(
                 signed_tx_ec_recovered,
                 block_hash,
                 block_number,
                 base_fee_per_gas,
                 U256::from(idx),
-            ))
+            )
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
 
     Ok(from_block_with_transactions(
         block_length,

@@ -15,9 +15,9 @@ use reth_primitives::{
     snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
-    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedHeader,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
-    B256, U256,
+    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -288,6 +288,10 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
         self.provider()?.pending_block()
+    }
+
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        self.provider()?.pending_block_with_senders()
     }
 
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {

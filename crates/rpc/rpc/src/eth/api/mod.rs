@@ -15,7 +15,7 @@ use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnv},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -246,7 +246,7 @@ where
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
-        let origin = if let Some(pending) = self.provider().pending_block()? {
+        let origin = if let Some(pending) = self.provider().pending_block_with_senders()? {
             PendingBlockEnvOrigin::ActualPending(pending)
         } else {
             // no pending block from the CL yet, so we use the latest block and modify the env
@@ -281,7 +281,7 @@ where
     }
 
     /// Returns the locally built pending block
-    pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlock>> {
+    pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlockWithSenders>> {
         let pending = self.pending_block_env_and_cfg()?;
         if pending.origin.is_actual_pending() {
             return Ok(pending.origin.into_actual_pending())
