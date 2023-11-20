@@ -2082,6 +2082,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_eth_call_bundle_selection() {
+        let selection = "eth,admin,debug,eth-call-bundle".parse::<RpcModuleSelection>().unwrap();
+        assert_eq!(
+            selection,
+            RpcModuleSelection::Selection(vec![
+                RethRpcModule::Eth,
+                RethRpcModule::Admin,
+                RethRpcModule::Debug,
+                RethRpcModule::EthCallBundle,
+            ])
+        );
+    }
+
+    #[test]
     fn parse_rpc_module_selection() {
         let selection = "all".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(selection, RpcModuleSelection::All);
