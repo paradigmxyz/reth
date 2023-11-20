@@ -56,10 +56,21 @@ impl TreeState {
     /// Returns the block with matching hash from any side-chain.
     ///
     /// Caution: This will not return blocks from the canonical chain.
+    #[inline]
     pub(crate) fn block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
+        self.block_with_senders_by_hash(block_hash).map(|block| &block.block)
+    }
+    /// Returns the block with matching hash from any side-chain.
+    ///
+    /// Caution: This will not return blocks from the canonical chain.
+    #[inline]
+    pub(crate) fn block_with_senders_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> Option<&SealedBlockWithSenders> {
         let id = self.block_indices.get_blocks_chain_id(&block_hash)?;
         let chain = self.chains.get(&id)?;
-        chain.block(block_hash)
+        chain.block_with_senders(block_hash)
     }
 
     /// Returns the block's receipts with matching hash from any side-chain.
