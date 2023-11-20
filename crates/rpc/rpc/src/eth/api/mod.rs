@@ -513,7 +513,7 @@ impl FeeHistoryCache {
     }
 
     /// Processing of the arriving blocks
-    pub async fn on_new_block<'a, I>(&self, blocks: I)
+    pub async fn on_new_blocks<'a, I>(&self, blocks: I)
     where
         I: Iterator<Item = &'a Block>,
     {
