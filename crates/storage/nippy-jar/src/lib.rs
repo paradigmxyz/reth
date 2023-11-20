@@ -90,8 +90,10 @@ pub struct NippyJar<H = ()> {
     columns: usize,
     /// Optional compression algorithm applied to the data.
     compressor: Option<Compressors>,
+    #[serde(skip)]
     /// Optional filter function for data membership checks.
     filter: Option<InclusionFilters>,
+    #[serde(skip)]
     /// Optional Perfect Hashing Function (PHF) for unique offset mapping.
     phf: Option<Functions>,
     /// Index mapping PHF output to value offsets in `offsets`.
@@ -245,8 +247,35 @@ where
         let mmap = unsafe { memmap2::Mmap::map(&offsets_file)? };
         let mut offsets_reader = mmap.as_ref();
         obj.offsets = EliasFano::deserialize_from(&mut offsets_reader)?;
+        obj.max_row_size = bincode::deserialize_from(&mut offsets_reader)?;
         obj.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_reader)?;
-        obj.max_row_size = bincode::deserialize_from(offsets_reader)?;
+        obj.filter = bincode::deserialize_from(&mut offsets_reader)?;
+        obj.phf = bincode::deserialize_from(&mut offsets_reader)?;
+
+        Ok(obj)
+    }
+
+    /// Loads the file configuration and returns [`Self`] without deserializing filters related
+    /// structures.
+    ///
+    /// **The user must ensure the header type matches the one used during the jar's creation.**
+    pub fn load_without_filters(path: &Path) -> Result<Self, NippyJarError> {
+        // Read [`Self`] located at the data file.
+        let data_file = File::open(path)?;
+
+        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
+        let data_reader = unsafe { memmap2::Mmap::map(&data_file)? };
+        let mut obj: Self = bincode::deserialize_from(data_reader.as_ref())?;
+        obj.path = Some(path.to_path_buf());
+
+        // Read the offsets lists located at the index file.
+        let offsets_file = File::open(obj.index_path())?;
+
+        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
+        let mmap = unsafe { memmap2::Mmap::map(&offsets_file)? };
+        let mut offsets_reader = mmap.as_ref();
+        obj.offsets = EliasFano::deserialize_from(&mut offsets_reader)?;
+        obj.max_row_size = bincode::deserialize_from(&mut offsets_reader)?;
 
         Ok(obj)
     }
@@ -445,9 +474,13 @@ where
         debug!(target: "nippy-jar", path=?self.index_path(), "Writing offsets and offsets index to file.");
 
         let mut file = File::create(self.index_path())?;
+
         self.offsets.serialize_into(&mut file)?;
+        self.max_row_size.serialize_into(&mut file)?;
         self.offsets_index.serialize_into(&mut file)?;
-        self.max_row_size.serialize_into(file)?;
+        bincode::serialize_into(&mut file, &self.filter)?;
+        bincode::serialize_into(&mut file, &self.phf)?;
+
         Ok(())
     }
 

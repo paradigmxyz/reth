@@ -213,7 +213,7 @@ impl Command {
 
         for snap in &snapshots {
             let start_time = Instant::now();
-            let jar = NippyJar::<SegmentHeader>::load(snap.as_ref())?;
+            let jar = NippyJar::<SegmentHeader>::load_without_filters(snap.as_ref())?;
             let duration = start_time.elapsed();
             let file_size = snap.as_ref().metadata()?.len();
 

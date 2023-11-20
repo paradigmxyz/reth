@@ -143,7 +143,7 @@ impl SnapshotProvider {
         } else {
             self.map.insert(
                 key,
-                LoadedJar::new(NippyJar::load(
+                LoadedJar::new(NippyJar::load_without_filters(
                     &self.path.join(segment.filename(block_range, tx_range)),
                 )?)?,
             );
