@@ -819,7 +819,8 @@ impl TransactionSignedNoHash {
     /// Calculates the transaction hash. If used more than once, it's better to convert it to
     /// [`TransactionSigned`] first.
     pub fn hash(&self) -> B256 {
-        let mut buf = Vec::new();
+        // pre-allocate buffer for the transaction
+        let mut buf = Vec::with_capacity(128 + self.transaction.input().len());
         self.transaction.encode_with_signature(&self.signature, &mut buf, false);
         keccak256(&buf)
     }
@@ -1209,7 +1210,7 @@ impl TransactionSigned {
 
         #[cfg(feature = "optimism")]
         let signature = if tx_type == DEPOSIT_TX_TYPE_ID {
-            Signature::default()
+            Signature::optimism_deposit_tx_signature()
         } else {
             Signature::decode(data)?
         };
@@ -1358,11 +1359,10 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                 }
 
                 #[cfg(feature = "optimism")]
-                let sig = if transaction.is_deposit() {
-                    Signature { r: crate::U256::ZERO, s: crate::U256::ZERO, odd_y_parity: false }
-                } else {
-                    sig
-                };
+                let sig = transaction
+                    .is_deposit()
+                    .then(Signature::optimism_deposit_tx_signature)
+                    .unwrap_or(sig);
 
                 let mut tx =
                     TransactionSigned { hash: Default::default(), signature: sig, transaction };

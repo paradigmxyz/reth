@@ -104,8 +104,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
 
         // TODO(rakita) save last finalized block inside database but for now just take
-        // tip-max_reorg_depth
-        // task: https://github.com/paradigmxyz/reth/issues/1712
+        // `tip - max_reorg_depth`
+        // https://github.com/paradigmxyz/reth/issues/1712
         let last_finalized_block_number = if last_canonical_hashes.len() > max_reorg_depth {
             // we pick `Highest - max_reorg_depth` block as last finalized block.
             last_canonical_hashes.keys().nth_back(max_reorg_depth)
@@ -209,8 +209,20 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// Returns the block with matching hash from any side-chain.
     ///
     /// Caution: This will not return blocks from the canonical chain.
+    #[inline]
     pub fn block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
         self.state.block_by_hash(block_hash)
+    }
+
+    /// Returns the block with matching hash from any side-chain.
+    ///
+    /// Caution: This will not return blocks from the canonical chain.
+    #[inline]
+    pub fn block_with_senders_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> Option<&SealedBlockWithSenders> {
+        self.state.block_with_senders_by_hash(block_hash)
     }
 
     /// Returns the block's receipts with matching hash from any side-chain.
@@ -546,8 +558,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             let Some(chain) = self.state.chains.get(&chain_id) else { return hashes };
             hashes.extend(chain.blocks().values().map(|b| (b.number, b.hash())));
 
-            let fork_block = chain.fork_block_hash();
-            if let Some(next_chain_id) = self.block_indices().get_blocks_chain_id(&fork_block) {
+            let fork_block = chain.fork_block();
+            if let Some(next_chain_id) = self.block_indices().get_blocks_chain_id(&fork_block.hash)
+            {
                 chain_id = next_chain_id;
             } else {
                 // if there is no fork block that point to other chains, break the loop.
@@ -794,7 +807,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         // check unconnected block buffer for childs of the chains
         let mut all_chain_blocks = Vec::new();
         for (_, chain) in self.state.chains.iter() {
-            for (&number, blocks) in chain.blocks.iter() {
+            for (&number, blocks) in chain.blocks().iter() {
                 all_chain_blocks.push(BlockNumHash { number, hash: blocks.hash })
             }
         }
@@ -946,18 +959,16 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         let canonical = self.split_chain(chain_id, chain, ChainSplitTarget::Hash(*block_hash));
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
-        let mut block_fork = canonical.fork_block();
-        let mut block_fork_number = canonical.fork_block_number();
+        let mut fork_block = canonical.fork_block();
         let mut chains_to_promote = vec![canonical];
 
         // loop while fork blocks are found in Tree.
-        while let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block_fork.hash) {
-            let chain = self.state.chains.remove(&chain_id).expect("To fork to be present");
-            block_fork = chain.fork_block();
+        while let Some(chain_id) = self.block_indices().get_blocks_chain_id(&fork_block.hash) {
+            let chain = self.state.chains.remove(&chain_id).expect("fork is present");
             // canonical chain is lower part of the chain.
             let canonical =
-                self.split_chain(chain_id, chain, ChainSplitTarget::Number(block_fork_number));
-            block_fork_number = canonical.fork_block_number();
+                self.split_chain(chain_id, chain, ChainSplitTarget::Number(fork_block.number));
+            fork_block = canonical.fork_block();
             chains_to_promote.push(canonical);
         }
         durations_recorder.record_relative(MakeCanonicalAction::SplitChainForks);
@@ -989,7 +1000,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         );
 
         // if joins to the tip;
-        if new_canon_chain.fork_block_hash() == old_tip.hash {
+        if new_canon_chain.fork_block().hash == old_tip.hash {
             chain_notification =
                 CanonStateNotification::Commit { new: Arc::new(new_canon_chain.clone()) };
             // append to database

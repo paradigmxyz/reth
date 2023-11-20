@@ -42,7 +42,6 @@ impl TransactionLookupStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -50,9 +49,9 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     }
 
     /// Write transaction hash -> id entries
-    async fn execute(
+    fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
@@ -128,9 +127,9 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -165,7 +164,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 }
 
 fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<&DB>,
 ) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::TransactionLookup)?

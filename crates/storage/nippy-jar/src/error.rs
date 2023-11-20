@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 /// Errors associated with [`crate::NippyJar`].
-#[derive(Debug, Error)]
+#[derive(Error, Debug)]
 pub enum NippyJarError {
     #[error(transparent)]
     Internal(#[from] Box<dyn std::error::Error + Send + Sync>),

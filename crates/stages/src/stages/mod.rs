@@ -124,7 +124,7 @@ mod tests {
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,
                              expect_num_storage_changesets: usize| async move {
-            let provider: DatabaseProviderRW<'_, &DatabaseEnv> = factory.provider_rw().unwrap();
+            let provider: DatabaseProviderRW<&DatabaseEnv> = factory.provider_rw().unwrap();
 
             // Check execution and create receipts and changesets according to the pruning
             // configuration
@@ -139,7 +139,7 @@ mod tests {
                 prune_modes.clone(),
             );
 
-            execution_stage.execute(&provider, input).await.unwrap();
+            execution_stage.execute(&provider, input).unwrap();
             assert_eq!(
                 provider.receipts_by_block(1.into()).unwrap().unwrap().len(),
                 expect_num_receipts
@@ -163,10 +163,10 @@ mod tests {
 
             if let Some(PruneMode::Full) = prune_modes.account_history {
                 // Full is not supported
-                assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
+                assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
-                acc_indexing_stage.execute(&provider, input).await.unwrap();
-                let mut account_history: Cursor<'_, RW, AccountHistory> =
+                acc_indexing_stage.execute(&provider, input).unwrap();
+                let mut account_history: Cursor<RW, AccountHistory> =
                     provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
                 assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
             }
@@ -179,9 +179,9 @@ mod tests {
 
             if let Some(PruneMode::Full) = prune_modes.storage_history {
                 // Full is not supported
-                assert!(acc_indexing_stage.execute(&provider, input).await.is_err());
+                assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
-                storage_indexing_stage.execute(&provider, input).await.unwrap();
+                storage_indexing_stage.execute(&provider, input).unwrap();
 
                 let mut storage_history =
                     provider.tx_ref().cursor_read::<tables::StorageHistory>().unwrap();

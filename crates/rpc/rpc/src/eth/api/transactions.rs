@@ -51,7 +51,7 @@ use revm::L1BlockInfo;
 use std::ops::Div;
 
 /// Helper alias type for the state's [CacheDB]
-pub(crate) type StateCacheDB<'r> = CacheDB<StateProviderDatabase<StateProviderBox<'r>>>;
+pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
@@ -63,17 +63,17 @@ pub trait EthTransactions: Send + Sync {
     fn call_gas_limit(&self) -> u64;
 
     /// Returns the state at the given [BlockId]
-    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>>;
+    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox>;
 
     /// Executes the closure with the state that corresponds to the given [BlockId].
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        F: FnOnce(StateProviderBox<'_>) -> EthResult<T>;
+        F: FnOnce(StateProviderBox) -> EthResult<T>;
 
     /// Executes the closure with the state that corresponds to the given [BlockId] on a new task
     async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        F: FnOnce(StateProviderBox<'_>) -> EthResult<T> + Send + 'static,
+        F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
         T: Send + 'static;
 
     /// Returns the revm evm env for the requested [BlockId]
@@ -154,7 +154,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send + 'static,
+        F: FnOnce(StateCacheDB, Env) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
     /// Executes the call request at the given [BlockId].
@@ -175,7 +175,7 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<StateCacheDB<'r>> + Send + 'static;
+        I: Inspector<StateCacheDB> + Send + 'static;
 
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
@@ -209,9 +209,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
-            + Send
-            + 'static,
+        F: FnOnce(TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
     /// Fetches the transaction and the transaction's block
@@ -236,12 +234,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<R>>
     where
-        F: for<'a> FnOnce(
-                TransactionInfo,
-                TracingInspector,
-                ResultAndState,
-                StateCacheDB<'a>,
-            ) -> EthResult<R>
+        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static;
@@ -269,7 +262,7 @@ pub trait EthTransactions: Send + Sync {
                 TracingInspector,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -293,7 +286,7 @@ pub trait EthTransactions: Send + Sync {
                 TracingInspector,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -312,13 +305,13 @@ where
         self.inner.gas_cap
     }
 
-    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
+    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox> {
         self.state_at_block_id(at)
     }
 
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        F: FnOnce(StateProviderBox<'_>) -> EthResult<T>,
+        F: FnOnce(StateProviderBox) -> EthResult<T>,
     {
         let state = self.state_at(at)?;
         f(state)
@@ -326,7 +319,7 @@ where
 
     async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        F: FnOnce(StateProviderBox<'_>) -> EthResult<T> + Send + 'static,
+        F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
         self.spawn_tracing_task_with(move |this| {
@@ -595,7 +588,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(StateCacheDB<'r>, Env) -> EthResult<R> + Send + 'static,
+        F: FnOnce(StateCacheDB, Env) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
@@ -638,7 +631,7 @@ where
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<StateCacheDB<'r>> + Send + 'static,
+        I: Inspector<StateCacheDB> + Send + 'static,
     {
         self.spawn_with_call_at(request, at, overrides, move |db, env| inspect(db, env, inspector))
             .await
@@ -672,9 +665,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
-            + Send
-            + 'static,
+        F: FnOnce(TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |state| {
@@ -712,12 +703,7 @@ where
         f: F,
     ) -> EthResult<Option<R>>
     where
-        F: for<'a> FnOnce(
-                TransactionInfo,
-                TracingInspector,
-                ResultAndState,
-                StateCacheDB<'a>,
-            ) -> EthResult<R>
+        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static,
@@ -764,7 +750,7 @@ where
                 TracingInspector,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -786,7 +772,7 @@ where
                 TracingInspector,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox<'a>>>,
+                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
             ) -> EthResult<R>
             + Send
             + 'static,

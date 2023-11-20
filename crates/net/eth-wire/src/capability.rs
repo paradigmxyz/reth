@@ -236,10 +236,8 @@ pub enum SharedCapability {
     },
     /// Any other unknown capability.
     UnknownCapability {
-        /// Name of the capability.
-        name: Cow<'static, str>,
-        /// (Highest) negotiated version of the eth capability.
-        version: u8,
+        /// Shared capability.
+        cap: Capability,
         /// The message ID offset for this capability.
         ///
         /// This represents the message ID offset for the first message of the eth capability in
@@ -259,7 +257,10 @@ impl SharedCapability {
 
         match name {
             "eth" => Ok(Self::eth(EthVersion::try_from(version)?, offset)),
-            _ => Ok(Self::UnknownCapability { name: name.to_string().into(), version, offset }),
+            _ => Ok(Self::UnknownCapability {
+                cap: Capability::new(name.to_string(), version as usize),
+                offset,
+            }),
         }
     }
 
@@ -268,12 +269,20 @@ impl SharedCapability {
         Self::Eth { version, offset }
     }
 
+    /// Returns the capability.
+    pub fn capability(&self) -> Cow<'_, Capability> {
+        match self {
+            SharedCapability::Eth { version, .. } => Cow::Owned(Capability::eth(*version)),
+            SharedCapability::UnknownCapability { cap, .. } => Cow::Borrowed(cap),
+        }
+    }
+
     /// Returns the name of the capability.
     #[inline]
     pub fn name(&self) -> &str {
         match self {
             SharedCapability::Eth { .. } => "eth",
-            SharedCapability::UnknownCapability { name, .. } => name,
+            SharedCapability::UnknownCapability { cap, .. } => cap.name.as_ref(),
         }
     }
 
@@ -287,7 +296,7 @@ impl SharedCapability {
     pub fn version(&self) -> u8 {
         match self {
             SharedCapability::Eth { version, .. } => *version as u8,
-            SharedCapability::UnknownCapability { version, .. } => *version,
+            SharedCapability::UnknownCapability { cap, .. } => cap.version as u8,
         }
     }
 
@@ -348,8 +357,30 @@ impl SharedCapabilities {
     }
 
     /// Returns the negotiated eth version if it is shared.
+    #[inline]
     pub fn eth_version(&self) -> Result<u8, P2PStreamError> {
         self.eth().map(|cap| cap.version())
+    }
+
+    /// Returns true if the shared capabilities contain the given capability.
+    #[inline]
+    pub fn contains(&self, cap: &Capability) -> bool {
+        self.find(cap).is_some()
+    }
+
+    /// Returns the shared capability for the given capability.
+    #[inline]
+    pub fn find(&self, cap: &Capability) -> Option<&SharedCapability> {
+        self.0.iter().find(|c| c.version() == cap.version as u8 && c.name() == cap.name)
+    }
+
+    /// Returns the shared capability for the given capability or an error if it's not compatible.
+    #[inline]
+    pub fn ensure_matching_capability(
+        &self,
+        cap: &Capability,
+    ) -> Result<&SharedCapability, UnsupportedCapabilityError> {
+        self.find(cap).ok_or_else(|| UnsupportedCapabilityError { capability: cap.clone() })
     }
 }
 
@@ -450,6 +481,13 @@ pub enum SharedCapabilityError {
     /// id space [`MAX_RESERVED_MESSAGE_ID`].
     #[error("message id offset `{0}` is reserved")]
     ReservedMessageIdOffset(u8),
+}
+
+/// An error thrown when capabilities mismatch.
+#[derive(Debug, thiserror::Error)]
+#[error("unsupported capability {capability}")]
+pub struct UnsupportedCapabilityError {
+    capability: Capability,
 }
 
 #[cfg(test)]

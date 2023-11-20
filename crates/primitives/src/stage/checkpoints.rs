@@ -71,10 +71,7 @@ impl Compact for MerkleCheckpoint {
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let target_block = buf.get_u64();
 
         let last_account_key = B256::from_slice(&buf[..32]);
@@ -286,10 +283,7 @@ macro_rules! stage_unit_checkpoints {
                 }
             }
 
-            fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-            where
-                Self: Sized,
-            {
+            fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
                 match buf[0] {
                     $(
                         $index => {

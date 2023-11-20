@@ -355,7 +355,7 @@ where
                     inconsistent_stage_checkpoint = stage_checkpoint,
                     "Pipeline sync progress is inconsistent"
                 );
-                return self.blockchain.block_hash(first_stage_checkpoint)
+                return Ok(self.blockchain.block_hash(first_stage_checkpoint)?)
             }
         }
 
@@ -1670,7 +1670,7 @@ where
                         },
                         Err(error) => {
                             error!(target: "consensus::engine", ?error, "Error getting canonical header for continuous sync");
-                            return Some(Err(error.into()))
+                            return Some(Err(RethError::Provider(error).into()))
                         }
                     };
                     self.blockchain.set_canonical_head(max_header);
@@ -1836,7 +1836,10 @@ where
                     cx,
                     EngineContext {
                         tip_block_number: this.blockchain.canonical_tip().number,
-                        finalized_block_number: this.blockchain.finalized_block_number()?,
+                        finalized_block_number: this
+                            .blockchain
+                            .finalized_block_number()
+                            .map_err(RethError::Provider)?,
                     },
                 )? {
                     this.on_hook_result(result)?;
@@ -1908,7 +1911,10 @@ where
                     cx,
                     EngineContext {
                         tip_block_number: this.blockchain.canonical_tip().number,
-                        finalized_block_number: this.blockchain.finalized_block_number()?,
+                        finalized_block_number: this
+                            .blockchain
+                            .finalized_block_number()
+                            .map_err(RethError::Provider)?,
                     },
                     this.sync.is_pipeline_active(),
                 )? {

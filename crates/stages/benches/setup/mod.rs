@@ -47,7 +47,6 @@ pub(crate) fn stage_unwind<S: Clone + Stage<DatabaseEnv>>(
         // Clear previous run
         stage
             .unwind(&provider, unwind)
-            .await
             .map_err(|e| {
                 format!(
                     "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
@@ -67,22 +66,20 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<DatabaseEnv>>(
 ) {
     let (input, unwind) = range;
 
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let mut stage = stage.clone();
-        let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
-        let provider = factory.provider_rw().unwrap();
+    let mut stage = stage.clone();
+    let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
+    let provider = factory.provider_rw().unwrap();
 
-        StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
-        AccountHashingStage::default().unwind(&provider, unwind).await.unwrap();
+    StorageHashingStage::default().unwind(&provider, unwind).unwrap();
+    AccountHashingStage::default().unwind(&provider, unwind).unwrap();
 
-        // Clear previous run
-        stage.unwind(&provider, unwind).await.unwrap();
+    // Clear previous run
+    stage.unwind(&provider, unwind).unwrap();
 
-        AccountHashingStage::default().execute(&provider, input).await.unwrap();
-        StorageHashingStage::default().execute(&provider, input).await.unwrap();
+    AccountHashingStage::default().execute(&provider, input).unwrap();
+    StorageHashingStage::default().execute(&provider, input).unwrap();
 
-        provider.commit().unwrap();
-    });
+    provider.commit().unwrap();
 }
 
 // Helper for generating testdata for the benchmarks.
