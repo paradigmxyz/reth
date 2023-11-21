@@ -4,7 +4,7 @@ use futures::{future::Either, Stream, StreamExt};
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionSigned, B256,
+    TransactionSigned, TransactionSignedEcRecovered, B256,
 };
 use reth_provider::{
     BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory, TransactionVariant,
@@ -131,7 +131,7 @@ impl EthStateCache {
     /// Requests the [Block] for the block hash
     ///
     /// Returns `None` if the block does not exist.
-    pub(crate) async fn get_block(&self, block_hash: B256) -> ProviderResult<Option<Block>> {
+    pub async fn get_block(&self, block_hash: B256) -> ProviderResult<Option<Block>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
         let block_with_senders_res =
@@ -147,17 +147,14 @@ impl EthStateCache {
     /// Requests the [Block] for the block hash, sealed with the given block hash.
     ///
     /// Returns `None` if the block does not exist.
-    pub(crate) async fn get_sealed_block(
-        &self,
-        block_hash: B256,
-    ) -> ProviderResult<Option<SealedBlock>> {
+    pub async fn get_sealed_block(&self, block_hash: B256) -> ProviderResult<Option<SealedBlock>> {
         Ok(self.get_block(block_hash).await?.map(|block| block.seal(block_hash)))
     }
 
     /// Requests the transactions of the [Block]
     ///
     /// Returns `None` if the block does not exist.
-    pub(crate) async fn get_block_transactions(
+    pub async fn get_block_transactions(
         &self,
         block_hash: B256,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
@@ -166,8 +163,21 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
+    /// Requests the ecrecovered transactions of the [Block]
+    ///
+    /// Returns `None` if the block does not exist.
+    pub async fn get_block_transactions_ecrecovered(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<Vec<TransactionSignedEcRecovered>>> {
+        Ok(self
+            .get_block_with_senders(block_hash)
+            .await?
+            .map(|block| block.into_transactions_ecrecovered().collect()))
+    }
+
     /// Fetches both transactions and receipts for the given block hash.
-    pub(crate) async fn get_transactions_and_receipts(
+    pub async fn get_transactions_and_receipts(
         &self,
         block_hash: B256,
     ) -> ProviderResult<Option<(Vec<TransactionSigned>, Vec<Receipt>)>> {
@@ -182,7 +192,7 @@ impl EthStateCache {
     /// Requests the  [BlockWithSenders] for the block hash
     ///
     /// Returns `None` if the block does not exist.
-    pub(crate) async fn get_block_with_senders(
+    pub async fn get_block_with_senders(
         &self,
         block_hash: B256,
     ) -> ProviderResult<Option<BlockWithSenders>> {
@@ -194,7 +204,7 @@ impl EthStateCache {
     /// Requests the  [SealedBlockWithSenders] for the block hash
     ///
     /// Returns `None` if the block does not exist.
-    pub(crate) async fn get_sealed_block_with_senders(
+    pub async fn get_sealed_block_with_senders(
         &self,
         block_hash: B256,
     ) -> ProviderResult<Option<SealedBlockWithSenders>> {
@@ -204,17 +214,14 @@ impl EthStateCache {
     /// Requests the [Receipt] for the block hash
     ///
     /// Returns `None` if the block was not found.
-    pub(crate) async fn get_receipts(
-        &self,
-        block_hash: B256,
-    ) -> ProviderResult<Option<Vec<Receipt>>> {
+    pub async fn get_receipts(&self, block_hash: B256) -> ProviderResult<Option<Vec<Receipt>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetReceipts { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
     /// Fetches both receipts and block for the given block hash.
-    pub(crate) async fn get_block_and_receipts(
+    pub async fn get_block_and_receipts(
         &self,
         block_hash: B256,
     ) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
@@ -230,7 +237,7 @@ impl EthStateCache {
     ///
     /// Returns an error if the corresponding header (required for populating the envs) was not
     /// found.
-    pub(crate) async fn get_evm_env(&self, block_hash: B256) -> ProviderResult<(CfgEnv, BlockEnv)> {
+    pub async fn get_evm_env(&self, block_hash: B256) -> ProviderResult<(CfgEnv, BlockEnv)> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetEnv { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
