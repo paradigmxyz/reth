@@ -75,7 +75,7 @@ impl NodeState {
                     target,
                 };
 
-                let target = target.map(|target| format!("{target}")).unwrap_or("None".to_string());
+                let target = target.map_or("None".to_string(), |target| format!("{target}"));
                 let progress = checkpoint
                     .entities()
                     .and_then(|entities| entities.fmt_percentage())
@@ -85,10 +85,10 @@ impl NodeState {
                 info!(
                     pipeline_stages = %pipeline_stages_progress,
                     stage = %stage_id,
-                    checkpoint = checkpoint.block_number,
-                    target,
-                    progress,
-                    eta,
+                    checkpoint = %checkpoint.block_number,
+                    %target,
+                    %progress,
+                    %eta,
                     "Executing stage",
                 );
 
@@ -109,18 +109,19 @@ impl NodeState {
 
                     let target = current_stage
                         .target
-                        .map(|target| format!("{target}"))
+                        .map_or("None".to_string(), |target| format!("{target}"));
+                    let progress = checkpoint
+                        .entities()
+                        .and_then(|entities| entities.fmt_percentage())
                         .unwrap_or("None".to_string());
-                    let progress =
-                        checkpoint.entities().and_then(|entities| entities.fmt_percentage());
 
                     if done {
                         info!(
                             pipeline_stages = %pipeline_stages_progress,
                             stage = %stage_id,
-                            checkpoint = checkpoint.block_number,
-                            target,
-                            progress,
+                            checkpoint = %checkpoint.block_number,
+                            %target,
+                            %progress,
                             "Stage finished executing",
                         )
                     } else {
@@ -128,10 +129,10 @@ impl NodeState {
                         info!(
                             pipeline_stages = %pipeline_stages_progress,
                             stage = %stage_id,
-                            checkpoint = checkpoint.block_number,
-                            target,
-                            progress,
-                            eta,
+                            checkpoint = %checkpoint.block_number,
+                            %target,
+                            %progress,
+                            %eta,
                             "Stage committed progress",
                         )
                     }
@@ -302,7 +303,7 @@ where
             if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
                 &this.state.current_stage
             {
-                let target = target.map(|target| format!("{target}")).unwrap_or("None".to_string());
+                let target = target.map_or("None".to_string(), |target| format!("{target}"));
                 let progress = checkpoint
                     .entities()
                     .and_then(|entities| entities.fmt_percentage())
@@ -312,27 +313,27 @@ where
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    db_freelist,
+                    %db_freelist,
                     stage = %stage_id,
                     checkpoint = checkpoint.block_number,
-                    target,
-                    progress,
-                    eta,
+                    %target,
+                    %progress,
+                    %eta,
                     "Status"
                 );
             } else if let Some(latest_block) = this.state.latest_block {
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    db_freelist,
-                    latest_block,
+                    %db_freelist,
+                    %latest_block,
                     "Status"
                 );
             } else {
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    db_freelist,
+                    %db_freelist,
                     "Status"
                 );
             }
