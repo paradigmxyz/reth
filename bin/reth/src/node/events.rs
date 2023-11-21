@@ -3,6 +3,7 @@
 use crate::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
+use reth_db::DatabaseEnv;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
@@ -15,6 +16,7 @@ use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -26,27 +28,30 @@ const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
 /// The current high-level state of the node.
 struct NodeState {
+    db: Arc<DatabaseEnv>,
     /// Connection to the network.
     network: Option<NetworkHandle>,
     /// The stage currently being executed.
-    current_stage: Option<StageId>,
-    /// The ETA for the current stage.
-    eta: Eta,
-    /// The current checkpoint of the executing stage.
-    current_checkpoint: StageCheckpoint,
+    current_stage: Option<CurrentStage>,
     /// The latest block reached by either pipeline or consensus engine.
     latest_block: Option<BlockNumber>,
 }
 
+/// The stage currently being executed.
+struct CurrentStage {
+    stage_id: StageId,
+    eta: Eta,
+    checkpoint: StageCheckpoint,
+    target: Option<BlockNumber>,
+}
+
 impl NodeState {
-    fn new(network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
-        Self {
-            network,
-            current_stage: None,
-            eta: Eta::default(),
-            current_checkpoint: StageCheckpoint::new(0),
-            latest_block,
-        }
+    fn new(
+        db: Arc<DatabaseEnv>,
+        network: Option<NetworkHandle>,
+        latest_block: Option<BlockNumber>,
+    ) -> Self {
+        Self { db, network, current_stage: None, latest_block }
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -56,70 +61,84 @@ impl NodeState {
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
-            PipelineEvent::Running { pipeline_stages_progress, stage_id, checkpoint } => {
-                let notable = self.current_stage.is_none();
-                self.current_stage = Some(stage_id);
-                self.current_checkpoint = checkpoint.unwrap_or_default();
+            PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
+                let checkpoint = checkpoint.unwrap_or_default();
+                let current_stage = CurrentStage {
+                    stage_id,
+                    eta: match &self.current_stage {
+                        Some(current_stage) if current_stage.stage_id == stage_id => {
+                            current_stage.eta
+                        }
+                        _ => Eta::default(),
+                    },
+                    checkpoint,
+                    target,
+                };
 
-                if notable {
-                    if let Some(progress) = self.current_checkpoint.entities() {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            from = self.current_checkpoint.block_number,
-                            checkpoint = %self.current_checkpoint.block_number,
-                            %progress,
-                            eta = %self.eta.fmt_for_stage(stage_id),
-                            "Executing stage",
-                        );
-                    } else {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            from = self.current_checkpoint.block_number,
-                            checkpoint = %self.current_checkpoint.block_number,
-                            eta = %self.eta.fmt_for_stage(stage_id),
-                            "Executing stage",
-                        );
-                    }
-                }
+                let target = target.map(|target| format!("{target}")).unwrap_or("None".to_string());
+                let progress = checkpoint
+                    .entities()
+                    .and_then(|entities| entities.fmt_percentage())
+                    .unwrap_or("None".to_string());
+                let eta = current_stage.eta.fmt_for_stage(stage_id);
+
+                info!(
+                    pipeline_stages = %pipeline_stages_progress,
+                    stage = %stage_id,
+                    checkpoint = checkpoint.block_number,
+                    target,
+                    progress,
+                    eta,
+                    "Executing stage",
+                );
+
+                self.current_stage = Some(current_stage);
             }
             PipelineEvent::Ran {
                 pipeline_stages_progress,
                 stage_id,
                 result: ExecOutput { checkpoint, done },
             } => {
-                self.current_checkpoint = checkpoint;
                 if stage_id.is_finish() {
                     self.latest_block = Some(checkpoint.block_number);
                 }
-                self.eta.update(self.current_checkpoint);
 
-                let message =
-                    if done { "Stage finished executing" } else { "Stage committed progress" };
+                if let Some(current_stage) = self.current_stage.as_mut() {
+                    current_stage.checkpoint = checkpoint;
+                    current_stage.eta.update(checkpoint);
 
-                if let Some(progress) = checkpoint.entities() {
-                    info!(
-                        pipeline_stages = %pipeline_stages_progress,
-                        stage = %stage_id,
-                        checkpoint = %checkpoint.block_number,
-                        %progress,
-                        eta = %self.eta.fmt_for_stage(stage_id),
-                        "{message}",
-                    );
-                } else {
-                    info!(
-                        pipeline_stages = %pipeline_stages_progress,
-                        stage = %stage_id,
-                        checkpoint = %checkpoint.block_number,
-                        eta = %self.eta.fmt_for_stage(stage_id),
-                        "{message}",
-                    );
+                    let target = current_stage
+                        .target
+                        .map(|target| format!("{target}"))
+                        .unwrap_or("None".to_string());
+                    let progress =
+                        checkpoint.entities().and_then(|entities| entities.fmt_percentage());
+
+                    if done {
+                        info!(
+                            pipeline_stages = %pipeline_stages_progress,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target,
+                            progress,
+                            "Stage finished executing",
+                        )
+                    } else {
+                        let eta = current_stage.eta.fmt_for_stage(stage_id);
+                        info!(
+                            pipeline_stages = %pipeline_stages_progress,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target,
+                            progress,
+                            eta,
+                            "Stage committed progress",
+                        )
+                    }
                 }
 
                 if done {
                     self.current_stage = None;
-                    self.eta = Eta::default();
                 }
             }
             _ => (),
@@ -240,10 +259,11 @@ pub async fn handle_events<E>(
     network: Option<NetworkHandle>,
     latest_block_number: Option<BlockNumber>,
     events: E,
+    db: Arc<DatabaseEnv>,
 ) where
     E: Stream<Item = NodeEvent> + Unpin,
 {
-    let state = NodeState::new(network, latest_block_number);
+    let state = NodeState::new(db, network, latest_block_number);
 
     let start = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);
@@ -273,32 +293,46 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            if let Some(stage) = this.state.current_stage {
-                if let Some(progress) = this.state.current_checkpoint.entities() {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %stage,
-                        checkpoint = %this.state.current_checkpoint.block_number,
-                        %progress,
-                        eta = %this.state.eta.fmt_for_stage(stage),
-                        "Status"
-                    );
-                } else {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %stage,
-                        checkpoint = %this.state.current_checkpoint.block_number,
-                        eta = %this.state.eta.fmt_for_stage(stage),
-                        "Status"
-                    );
-                }
+            let db_freelist = this
+                .state
+                .db
+                .freelist()
+                .map_or("None".to_string(), |freelist| freelist.to_string());
+
+            if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
+                &this.state.current_stage
+            {
+                let target = target.map(|target| format!("{target}")).unwrap_or("None".to_string());
+                let progress = checkpoint
+                    .entities()
+                    .and_then(|entities| entities.fmt_percentage())
+                    .unwrap_or("None".to_string());
+                let eta = eta.fmt_for_stage(*stage_id);
+
+                info!(
+                    target: "reth::cli",
+                    connected_peers = this.state.num_connected_peers(),
+                    db_freelist,
+                    stage = %stage_id,
+                    checkpoint = checkpoint.block_number,
+                    target,
+                    progress,
+                    eta,
+                    "Status"
+                );
+            } else if let Some(latest_block) = this.state.latest_block {
+                info!(
+                    target: "reth::cli",
+                    connected_peers = this.state.num_connected_peers(),
+                    db_freelist,
+                    latest_block,
+                    "Status"
+                );
             } else {
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    latest_block = this.state.latest_block.unwrap_or(this.state.current_checkpoint.block_number),
+                    db_freelist,
                     "Status"
                 );
             }
@@ -332,7 +366,7 @@ where
 /// checkpoints reported by the pipeline.
 ///
 /// One `Eta` is only valid for a single stage.
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 struct Eta {
     /// The last stage checkpoint
     last_checkpoint: EntitiesCheckpoint,
