@@ -216,6 +216,13 @@ impl TransactionPool for NoopTransactionPool {
         }
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
+
+    fn get_transactions_by_origin(
+        &self,
+        _origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
