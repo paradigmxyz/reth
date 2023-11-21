@@ -227,11 +227,11 @@ impl BundleStateWithReceipts {
     /// Transform block number to the index of block.
     fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
-            return None;
+            return None
         }
         let index = block_number - self.first_block;
         if index >= self.receipts.len() as u64 {
-            return None;
+            return None
         }
         Some(index as usize)
     }
@@ -321,7 +321,7 @@ impl BundleStateWithReceipts {
     /// If the target block number is not included in the state block range.
     pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self) {
         if at == self.first_block {
-            return (None, self);
+            return (None, self)
         }
 
         let (mut lower_state, mut higher_state) = (self.clone(), self);

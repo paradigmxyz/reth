@@ -44,7 +44,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 block.timestamp,
             ) {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
-                return Err(error);
+                return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -62,7 +62,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((Vec::new(), 0));
+            return Ok((Vec::new(), 0))
         }
 
         let senders = self.recover_senders(&block.body, senders)?;
@@ -84,7 +84,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
