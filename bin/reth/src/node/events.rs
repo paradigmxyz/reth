@@ -294,7 +294,7 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            let db_freelist = this
+            let freelist = this
                 .state
                 .db
                 .freelist()
@@ -313,7 +313,7 @@ where
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    %db_freelist,
+                    %freelist,
                     stage = %stage_id,
                     checkpoint = checkpoint.block_number,
                     %target,
@@ -325,7 +325,7 @@ where
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    %db_freelist,
+                    %freelist,
                     %latest_block,
                     "Status"
                 );
@@ -333,7 +333,7 @@ where
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    %db_freelist,
+                    %freelist,
                     "Status"
                 );
             }
