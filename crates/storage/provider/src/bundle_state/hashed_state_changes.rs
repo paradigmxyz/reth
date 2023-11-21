@@ -8,7 +8,7 @@ use reth_primitives::{Account, StorageEntry, B256, U256};
 use reth_trie::hashed_cursor::HashedPostState;
 use std::collections::BTreeMap;
 
-/// A change to the state of the world.
+/// Changes to the hashed state.
 #[derive(Debug, Default)]
 pub struct HashedStateChanges(pub HashedPostState);
 
