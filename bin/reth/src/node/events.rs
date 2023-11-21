@@ -14,6 +14,7 @@ use reth_primitives::{
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
+    fmt::{Display, Formatter},
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -28,6 +29,9 @@ const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
 /// The current high-level state of the node.
 struct NodeState {
+    /// Database environment.
+    /// Used for freelist calculation reported in the "Status" log message.
+    /// See [EventHandler::poll].
     db: Arc<DatabaseEnv>,
     /// Connection to the network.
     network: Option<NetworkHandle>,
@@ -35,14 +39,6 @@ struct NodeState {
     current_stage: Option<CurrentStage>,
     /// The latest block reached by either pipeline or consensus engine.
     latest_block: Option<BlockNumber>,
-}
-
-/// The stage currently being executed.
-struct CurrentStage {
-    stage_id: StageId,
-    eta: Eta,
-    checkpoint: StageCheckpoint,
-    target: Option<BlockNumber>,
 }
 
 impl NodeState {
@@ -75,18 +71,16 @@ impl NodeState {
                     target,
                 };
 
-                let target = target.map_or("None".to_string(), |target| format!("{target}"));
-                let progress = checkpoint
-                    .entities()
-                    .and_then(|entities| entities.fmt_percentage())
-                    .unwrap_or("None".to_string());
+                let progress = OptionalField(
+                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
+                );
                 let eta = current_stage.eta.fmt_for_stage(stage_id);
 
                 info!(
                     pipeline_stages = %pipeline_stages_progress,
                     stage = %stage_id,
                     checkpoint = %checkpoint.block_number,
-                    %target,
+                    target = %OptionalField(target),
                     %progress,
                     %eta,
                     "Executing stage",
@@ -107,13 +101,10 @@ impl NodeState {
                     current_stage.checkpoint = checkpoint;
                     current_stage.eta.update(checkpoint);
 
-                    let target = current_stage
-                        .target
-                        .map_or("None".to_string(), |target| format!("{target}"));
-                    let progress = checkpoint
-                        .entities()
-                        .and_then(|entities| entities.fmt_percentage())
-                        .unwrap_or("None".to_string());
+                    let target = OptionalField(current_stage.target);
+                    let progress = OptionalField(
+                        checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
+                    );
 
                     if done {
                         info!(
@@ -209,6 +200,29 @@ impl NodeState {
     }
 }
 
+/// Helper type for formatting of optional fields:
+/// - If [Some(x)], then `x` is written
+/// - If [None], then `None` is written
+struct OptionalField<T: Display>(Option<T>);
+
+impl<T: Display> Display for OptionalField<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(field) = &self.0 {
+            write!(f, "{field}")
+        } else {
+            write!(f, "None")
+        }
+    }
+}
+
+/// The stage currently being executed.
+struct CurrentStage {
+    stage_id: StageId,
+    eta: Eta,
+    checkpoint: StageCheckpoint,
+    target: Option<BlockNumber>,
+}
+
 /// A node event.
 #[derive(Debug)]
 pub enum NodeEvent {
@@ -294,20 +308,14 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            let freelist = this
-                .state
-                .db
-                .freelist()
-                .map_or("None".to_string(), |freelist| freelist.to_string());
+            let freelist = OptionalField(this.state.db.freelist().ok());
 
             if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
                 &this.state.current_stage
             {
-                let target = target.map_or("None".to_string(), |target| format!("{target}"));
-                let progress = checkpoint
-                    .entities()
-                    .and_then(|entities| entities.fmt_percentage())
-                    .unwrap_or("None".to_string());
+                let progress = OptionalField(
+                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
+                );
                 let eta = eta.fmt_for_stage(*stage_id);
 
                 info!(
@@ -316,7 +324,7 @@ where
                     %freelist,
                     stage = %stage_id,
                     checkpoint = checkpoint.block_number,
-                    %target,
+                    target = %OptionalField(*target),
                     %progress,
                     %eta,
                     "Status"
