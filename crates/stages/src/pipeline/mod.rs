@@ -592,7 +592,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
@@ -602,7 +603,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -655,7 +657,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 3 },
                     stage_id: StageId::Other("A"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 3 },
@@ -665,7 +668,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
                     stage_id: StageId::Other("B"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
@@ -675,7 +679,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
                     stage_id: StageId::Other("C"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
@@ -759,7 +764,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
@@ -769,7 +775,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -849,7 +856,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
@@ -859,7 +867,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Error { stage_id: StageId::Other("B") },
                 PipelineEvent::Unwind {
@@ -877,7 +886,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    checkpoint: Some(StageCheckpoint::new(0))
+                    checkpoint: Some(StageCheckpoint::new(0)),
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
@@ -887,7 +897,8 @@ mod tests {
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    checkpoint: None
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
