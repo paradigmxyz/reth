@@ -515,7 +515,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         );
         ctx.task_executor.spawn_critical(
             "events task",
-            events::handle_events(Some(network.clone()), Some(head.number), events),
+            events::handle_events(Some(network.clone()), Some(head.number), events, db.clone()),
         );
 
         let engine_api = EngineApi::new(

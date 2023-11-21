@@ -109,12 +109,12 @@ impl ImportCommand {
         pipeline.set_tip(tip);
         debug!(target: "reth::cli", ?tip, "Tip manually set");
 
-        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let factory = ProviderFactory::new(db.clone(), self.chain.clone());
         let provider = factory.provider()?;
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(handle_events(None, latest_block_number, events));
+        tokio::spawn(handle_events(None, latest_block_number, events, db.clone()));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
