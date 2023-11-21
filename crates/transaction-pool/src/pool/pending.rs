@@ -38,7 +38,7 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     /// highest instead of lowest nonce.
     ///
     /// Sorted by their scoring value.
-    independent_descendants: BTreeSet<PendingTransaction<T>>,
+    highest_nonces: BTreeSet<PendingTransaction<T>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
     ///
@@ -65,7 +65,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             by_id: Default::default(),
             all: Default::default(),
             independent_transactions: Default::default(),
-            independent_descendants: Default::default(),
+            highest_nonces: Default::default(),
             size_of: Default::default(),
             new_transaction_notifier,
         }
@@ -79,7 +79,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns all transactions by id.
     fn clear_transactions(&mut self) -> BTreeMap<TransactionId, PendingTransaction<T>> {
         self.independent_transactions.clear();
-        self.independent_descendants.clear();
+        self.highest_nonces.clear();
         self.all.clear();
         self.size_of.reset();
         std::mem::take(&mut self.by_id)
@@ -253,13 +253,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         if let Some(ancestor) = ancestor_id.and_then(|id| self.by_id.get(&id)) {
             // the transaction already has an ancestor, so we only need to ensure that the
             // descendants set includes the highest nonce for this transaction's sender
-            self.independent_descendants.remove(ancestor);
-            self.independent_descendants.insert(tx.clone());
+            self.highest_nonces.remove(ancestor);
+            self.highest_nonces.insert(tx.clone());
         } else {
             // If there's __no__ ancestor in the pool, then this transaction is independent, this is
             // guaranteed because this pool is gapless.
             self.independent_transactions.insert(tx.clone());
-            self.independent_descendants.insert(tx.clone());
+            self.highest_nonces.insert(tx.clone());
         }
     }
 
@@ -334,9 +334,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.independent_transactions.remove(&tx);
 
         // switch out for the next ancestor if there is one
-        self.independent_descendants.remove(&tx);
+        self.highest_nonces.remove(&tx);
         if let Some(ancestor) = self.ancestor(id) {
-            self.independent_descendants.insert(ancestor.clone());
+            self.highest_nonces.insert(ancestor.clone());
         }
         Some(tx.transaction)
     }
@@ -364,7 +364,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             let mut any_non_local = true;
 
             // use descendants, so we pop a single tx per sender
-            for tx in self.independent_descendants.clone().iter() {
+            for tx in self.highest_nonces.clone().iter() {
                 if !tx.transaction.is_local() {
                     any_non_local = true;
                     if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
@@ -387,7 +387,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         // finally penalize txs whether or not they are local
         while self.size() > limit.max_size || self.len() > limit.max_txs {
             // use descendants, so we pop a single tx per sender, starting with the worst txs
-            for tx in self.independent_descendants.clone().iter() {
+            for tx in self.highest_nonces.clone().iter() {
                 if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
                     removed.push(tx)
                 };
@@ -432,11 +432,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
             "independent.len() > all.len()"
         );
         assert!(
-            self.independent_descendants.len() <= self.all.len(),
+            self.highest_nonces.len() <= self.all.len(),
             "independent_descendants.len() > all.len()"
         );
         assert!(
-            self.independent_descendants.len() == self.independent_transactions.len(),
+            self.highest_nonces.len() == self.independent_transactions.len(),
             "independent.len() = independent_descendants.len()"
         );
     }
@@ -540,7 +540,7 @@ mod tests {
         assert_eq!(pool.len(), 2);
 
         assert_eq!(pool.independent_transactions.len(), 1);
-        assert_eq!(pool.independent_descendants.len(), 1);
+        assert_eq!(pool.highest_nonces.len(), 1);
 
         let removed = pool.update_base_fee(0);
         assert!(removed.is_empty());
@@ -577,7 +577,7 @@ mod tests {
 
         // First transaction should be evicted.
         assert_eq!(
-            pool.independent_descendants.iter().next().map(|tx| *tx.transaction.hash()),
+            pool.highest_nonces.iter().next().map(|tx| *tx.transaction.hash()),
             Some(*t.hash())
         );
 
@@ -629,7 +629,7 @@ mod tests {
         let expected_independent_descendants =
             vec![d1, c3, b3, a4].iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         let actual_independent_descendants = pool
-            .independent_descendants
+            .highest_nonces
             .iter()
             .map(|tx| (tx.transaction.sender(), tx.transaction.nonce()))
             .collect::<HashSet<_>>();
