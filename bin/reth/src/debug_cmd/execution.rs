@@ -235,7 +235,7 @@ impl Command {
             &ctx.task_executor,
         )?;
 
-        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let factory = ProviderFactory::new(db.clone(), self.chain.clone());
         let provider = factory.provider()?;
 
         let latest_block_number =
@@ -252,7 +252,7 @@ impl Command {
         );
         ctx.task_executor.spawn_critical(
             "events task",
-            events::handle_events(Some(network.clone()), latest_block_number, events),
+            events::handle_events(Some(network.clone()), latest_block_number, events, db.clone()),
         );
 
         let mut current_max_block = latest_block_number.unwrap_or_default();
