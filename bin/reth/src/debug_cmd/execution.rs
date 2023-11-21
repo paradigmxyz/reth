@@ -1,6 +1,10 @@
 //! Command for debugging execution.
 use crate::{
-    args::{get_secret_key, utils::genesis_value_parser, DatabaseArgs, NetworkArgs},
+    args::{
+        get_secret_key,
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::events,
@@ -20,17 +24,14 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
 };
-use reth_network::NetworkHandle;
+use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
-use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
+use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,
-    stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
-    },
-    Pipeline, PipelineError, StageSet,
+    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
+    Pipeline, StageSet,
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -57,17 +58,11 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
@@ -107,7 +102,11 @@ impl Command {
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), db.clone())
+            .build(
+                client,
+                Arc::clone(&consensus),
+                ProviderFactory::new(db.clone(), self.chain.clone()),
+            )
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
@@ -120,6 +119,7 @@ impl Command {
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
+                    ProviderFactory::new(db.clone(), self.chain.clone()),
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,
@@ -236,7 +236,7 @@ impl Command {
         )?;
 
         let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider = factory.provider().map_err(PipelineError::Interface)?;
+        let provider = factory.provider()?;
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
@@ -271,8 +271,7 @@ impl Command {
             // Unwind the pipeline without committing.
             {
                 factory
-                    .provider_rw()
-                    .map_err(PipelineError::Interface)?
+                    .provider_rw()?
                     .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
             }
 

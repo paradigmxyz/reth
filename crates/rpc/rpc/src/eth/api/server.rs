@@ -282,6 +282,12 @@ where
         return Ok(EthApi::gas_price(self).await?)
     }
 
+    /// Handler for: `eth_blobGasPrice`
+    async fn blob_gas_price(&self) -> Result<U256> {
+        trace!(target: "rpc::eth", "Serving eth_blobGasPrice");
+        return Ok(EthApi::blob_gas_price(self).await?)
+    }
+
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
@@ -393,7 +399,7 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
         basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
-        Block, BlockNumberOrTag, Header, TransactionSigned, U256,
+        Block, BlockNumberOrTag, Header, TransactionSigned, B256, U256,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
@@ -402,7 +408,6 @@ mod tests {
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-    use revm_primitives::B256;
 
     fn build_test_eth_api<
         P: BlockReaderIdExt

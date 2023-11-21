@@ -29,7 +29,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: usize = 512;
@@ -130,7 +130,7 @@ where
         &mut self,
         peer: PeerId,
         capabilities: Arc<Capabilities>,
-        status: Status,
+        status: Arc<Status>,
         request_tx: PeerRequestSender,
         timeout: Arc<AtomicU64>,
     ) {
@@ -259,13 +259,13 @@ where
 
     /// Bans the [`IpAddr`] in the discovery service.
     pub(crate) fn ban_ip_discovery(&self, ip: IpAddr) {
-        debug!(target: "net", ?ip, "Banning discovery");
+        trace!(target: "net", ?ip, "Banning discovery");
         self.discovery.ban_ip(ip)
     }
 
     /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
     pub(crate) fn ban_discovery(&self, peer_id: PeerId, ip: IpAddr) {
-        debug!(target: "net", ?peer_id, ?ip, "Banning discovery");
+        trace!(target: "net", ?peer_id, ?ip, "Banning discovery");
         self.discovery.ban(peer_id, ip)
     }
 
@@ -420,7 +420,7 @@ where
                             // check if the error is due to a closed channel to the session
                             if res.err().map(|err| err.is_channel_closed()).unwrap_or_default() {
                                 debug!(
-                                    target : "net",
+                                    target: "net",
                                     ?id,
                                     "Request canceled, response channel from session closed."
                                 );
@@ -527,7 +527,7 @@ mod tests {
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
-        BlockBodies, EthVersion, Status,
+        BlockBodies, EthVersion,
     };
     use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_primitives::{BlockBody, Header, PeerId, B256};
@@ -572,7 +572,7 @@ mod tests {
         state.on_session_activated(
             peer_id,
             capabilities(),
-            Status::default(),
+            Arc::default(),
             peer_tx,
             Arc::new(AtomicU64::new(1)),
         );

@@ -41,7 +41,6 @@ impl TotalDifficultyStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -49,9 +48,9 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     }
 
     /// Write total difficulty entries
-    async fn execute(
+    fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
@@ -72,7 +71,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let last_header_number = input.checkpoint().block_number;
         let last_entry = cursor_td
             .seek_exact(last_header_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound { number: last_header_number })?;
+            .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
 
         let mut td: U256 = last_entry.1.into();
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
@@ -84,7 +83,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
             self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
                 StageError::Block {
-                    block: header.seal_slow(),
+                    block: Box::new(header.seal_slow()),
                     error: BlockErrorKind::Validation(error),
                 }
             })?;
@@ -99,9 +98,9 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
@@ -116,7 +115,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 }
 
 fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<'_, DB>,
+    provider: &DatabaseProviderRW<DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: provider.tx_ref().entries::<tables::HeaderTD>()? as u64,

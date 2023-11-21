@@ -1,5 +1,5 @@
+use crate::serde_helpers::num::from_int_or_hex;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use reth_primitives::serde_helper::num::from_int_or_hex;
 use serde::{Deserialize, Serialize};
 
 /// The response object for `debug_traceTransaction` with `"tracer": "callTracer"`

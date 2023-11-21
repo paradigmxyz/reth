@@ -11,31 +11,39 @@ use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
 #[derive(Debug, Args, PartialEq, Default)]
+#[clap(next_help_heading = "Builder")]
 pub struct PayloadBuilderArgs {
     /// Block extra data set by the payload builder.
-    #[arg(long = "builder.extradata", help_heading = "Builder", value_parser=ExtradataValueParser::default(),  default_value_t = default_extradata())]
+    #[arg(long = "builder.extradata", value_parser=ExtradataValueParser::default(),  default_value_t = default_extradata())]
     pub extradata: String,
 
     /// Target gas ceiling for built blocks.
-    #[arg(
-        long = "builder.gaslimit",
-        help_heading = "Builder",
-        default_value = "30000000",
-        value_name = "GAS_LIMIT"
-    )]
+    #[arg(long = "builder.gaslimit", default_value = "30000000", value_name = "GAS_LIMIT")]
     pub max_gas_limit: u64,
 
     /// The interval at which the job should build a new payload after the last (in seconds).
-    #[arg(long = "builder.interval", help_heading = "Builder", value_parser = parse_duration_from_secs, default_value = "1", value_name = "SECONDS")]
+    #[arg(long = "builder.interval", value_parser = parse_duration_from_secs, default_value = "1", value_name = "SECONDS")]
     pub interval: Duration,
 
     /// The deadline for when the payload builder job should resolve.
-    #[arg(long = "builder.deadline", help_heading = "Builder", value_parser = parse_duration_from_secs, default_value = "12", value_name = "SECONDS")]
+    #[arg(long = "builder.deadline", value_parser = parse_duration_from_secs, default_value = "12", value_name = "SECONDS")]
     pub deadline: Duration,
 
     /// Maximum number of tasks to spawn for building a payload.
-    #[arg(long = "builder.max-tasks", help_heading = "Builder", default_value = "3", value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
+    #[arg(long = "builder.max-tasks", default_value = "3", value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
     pub max_payload_tasks: usize,
+
+    /// By default the pending block equals the latest block
+    /// to save resources and not leak txs from the tx-pool,
+    /// this flag enables computing of the pending block
+    /// from the tx-pool instead.
+    ///
+    /// If `compute_pending_block` is not enabled, the payload builder
+    /// will use the payload attributes from the latest block. Note
+    /// that this flag is not yet functional.
+    #[cfg(feature = "optimism")]
+    #[arg(long = "rollup.compute-pending-block")]
+    pub compute_pending_block: bool,
 }
 
 impl PayloadBuilderConfig for PayloadBuilderArgs {
@@ -57,6 +65,11 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
 
     fn max_payload_tasks(&self) -> usize {
         self.max_payload_tasks
+    }
+
+    #[cfg(feature = "optimism")]
+    fn compute_pending_block(&self) -> bool {
+        self.compute_pending_block
     }
 }
 

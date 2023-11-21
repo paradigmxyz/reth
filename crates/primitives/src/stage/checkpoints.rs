@@ -71,10 +71,7 @@ impl Compact for MerkleCheckpoint {
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let target_block = buf.get_u64();
 
         let last_account_key = B256::from_slice(&buf[..32]);
@@ -174,7 +171,7 @@ pub struct EntitiesCheckpoint {
 
 impl Display for EntitiesCheckpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.1}%", 100.0 * self.processed as f64 / self.total as f64)
+        write!(f, "{:.2}%", 100.0 * self.processed as f64 / self.total as f64)
     }
 }
 
@@ -246,15 +243,6 @@ impl StageCheckpoint {
     }
 }
 
-impl Display for StageCheckpoint {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.entities() {
-            Some(entities) => entities.fmt(f),
-            None => write!(f, "{}", self.block_number),
-        }
-    }
-}
-
 // TODO(alexey): add a merkle checkpoint. Currently it's hard because [`MerkleCheckpoint`]
 //  is not a Copy type.
 /// Stage-specific checkpoint metrics.
@@ -295,10 +283,7 @@ macro_rules! stage_unit_checkpoints {
                 }
             }
 
-            fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-            where
-                Self: Sized,
-            {
+            fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
                 match buf[0] {
                     $(
                         $index => {

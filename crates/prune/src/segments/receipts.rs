@@ -3,7 +3,7 @@ use crate::{
     PrunerError,
 };
 use reth_db::{database::Database, tables};
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
@@ -31,7 +31,7 @@ impl<DB: Database> Segment<DB> for Receipts {
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let tx_range = match input.get_next_tx_num_range(provider)? {
@@ -71,9 +71,9 @@ impl<DB: Database> Segment<DB> for Receipts {
 
     fn save_checkpoint(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         checkpoint: PruneCheckpoint,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         provider.save_prune_checkpoint(PruneSegment::Receipts, checkpoint)?;
 
         // `PruneSegment::Receipts` overrides `PruneSegment::ContractLogs`, so we can preemptively

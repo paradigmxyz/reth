@@ -11,9 +11,9 @@ description = "Network interfaces"
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-eth-wire = { path = "../eth-wire" }
+reth-eth-wire.workspace = true
 reth-rpc-types.workspace = true
-reth-discv4 = { path = "../discv4" }
+reth-discv4.workspace = true
 
 # io
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -26,3 +26,4 @@ tokio = { workspace = true, features = ["sync"] }
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
+optimism = []

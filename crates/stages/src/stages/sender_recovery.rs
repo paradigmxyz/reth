@@ -16,9 +16,8 @@ use reth_primitives::{
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
 };
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::mpsc};
 use thiserror::Error;
-use tokio::sync::mpsc;
 use tracing::*;
 
 /// The sender recovery stage iterates over existing transactions,
@@ -44,7 +43,6 @@ impl Default for SenderRecoveryStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -56,9 +54,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
-    async fn execute(
+    fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -110,7 +108,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
         for chunk in &tx_walker.chunks(chunk_size) {
             // An _unordered_ channel to receive results from a rayon job
-            let (recovered_senders_tx, recovered_senders_rx) = mpsc::unbounded_channel();
+            let (recovered_senders_tx, recovered_senders_rx) = mpsc::channel();
             channels.push(recovered_senders_rx);
             // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
             let chunk: Vec<_> = chunk.collect();
@@ -128,8 +126,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         }
 
         // Iterate over channels and append the sender in the order that they are received.
-        for mut channel in channels {
-            while let Some(recovered) = channel.recv().await {
+        for channel in channels {
+            while let Ok(recovered) = channel.recv() {
                 let (tx_id, sender) = match recovered {
                     Ok(result) => result,
                     Err(error) => {
@@ -146,7 +144,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                                     .sealed_header(block_number)?
                                     .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
                                 return Err(StageError::Block {
-                                    block: sealed_header,
+                                    block: Box::new(sealed_header),
                                     error: BlockErrorKind::Validation(
                                         consensus::ConsensusError::TransactionSignerRecoveryError,
                                     ),
@@ -168,9 +166,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
@@ -209,7 +207,7 @@ fn recover_sender(
 }
 
 fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<&DB>,
 ) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::SenderRecovery)?
@@ -228,14 +226,16 @@ fn stage_checkpoint<DB: Database>(
 #[error(transparent)]
 enum SenderRecoveryStageError {
     /// A transaction failed sender recovery
-    FailedRecovery(FailedSenderRecoveryError),
+    #[error(transparent)]
+    FailedRecovery(#[from] FailedSenderRecoveryError),
 
     /// A different type of stage error occurred
+    #[error(transparent)]
     StageError(#[from] StageError),
 }
 
 #[derive(Error, Debug)]
-#[error("Sender recovery failed for transaction {tx}.")]
+#[error("sender recovery failed for transaction {tx}")]
 struct FailedSenderRecoveryError {
     /// The transaction that failed sender recovery
     tx: TxNumber,

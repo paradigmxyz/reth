@@ -94,7 +94,7 @@ pub trait XdgPath {
 /// # Example
 ///
 /// ```
-/// use reth::dirs::{PlatformPath, DataDirPath};
+/// use reth::dirs::{DataDirPath, PlatformPath};
 /// use std::str::FromStr;
 ///
 /// // Resolves to the platform-specific database path
@@ -260,26 +260,49 @@ impl<D> ChainPath<D> {
     }
 
     /// Returns the path to the db directory for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/db`
     pub fn db_path(&self) -> PathBuf {
         self.0.join("db").into()
     }
 
+    /// Returns the path to the snapshots directory for this chain.
+    pub fn snapshots_path(&self) -> PathBuf {
+        self.0.join("snapshots").into()
+    }
+
     /// Returns the path to the reth p2p secret key for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/discovery-secret`
     pub fn p2p_secret_path(&self) -> PathBuf {
         self.0.join("discovery-secret").into()
     }
 
     /// Returns the path to the known peers file for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/known-peers.json`
     pub fn known_peers_path(&self) -> PathBuf {
         self.0.join("known-peers.json").into()
     }
 
+    /// Returns the path to the blobstore directory for this chain where blobs of unfinalized
+    /// transactions are stored.
+    ///
+    /// `<DIR>/<CHAIN_ID>/blobstore`
+    pub fn blobstore_path(&self) -> PathBuf {
+        self.0.join("blobstore").into()
+    }
+
     /// Returns the path to the config file for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/reth.toml`
     pub fn config_path(&self) -> PathBuf {
         self.0.join("reth.toml").into()
     }
 
     /// Returns the path to the jwtsecret file for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/jwt.hex`
     pub fn jwt_path(&self) -> PathBuf {
         self.0.join("jwt.hex").into()
     }

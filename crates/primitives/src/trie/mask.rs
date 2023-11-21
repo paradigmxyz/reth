@@ -72,10 +72,7 @@ impl Compact for TrieMask {
         2
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let mask = buf.get_u16();
         (Self(mask), buf)
     }

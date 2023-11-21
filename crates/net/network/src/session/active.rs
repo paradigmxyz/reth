@@ -40,7 +40,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
 
-/// Constants for timeout updating
+// Constants for timeout updating.
 
 /// Minimum timeout value
 const MINIMUM_TIMEOUT: Duration = Duration::from_secs(2);
@@ -50,6 +50,11 @@ const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
 const SAMPLE_IMPACT: f64 = 0.1;
 /// Amount of RTTs before timeout
 const TIMEOUT_SCALING: u32 = 3;
+
+/// The type of the underlying peer network connection.
+// This type is boxed because the underlying stream is ~6KB,
+// mostly coming from `P2PStream`'s `snap::Encoder` (2072), and `ECIESStream` (3600).
+pub type PeerConnection = Box<EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>>;
 
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the
@@ -65,7 +70,7 @@ pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.
-    pub(crate) conn: EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>,
+    pub(crate) conn: PeerConnection,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -274,7 +279,7 @@ impl ActiveSession {
                 unreachable!("Not emitted by network")
             }
             PeerMessage::Other(other) => {
-                debug!(target : "net::session", message_id=%other.id, "Ignoring unsupported message");
+                debug!(target: "net::session", message_id=%other.id, "Ignoring unsupported message");
             }
         }
     }
@@ -294,7 +299,7 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {
-                debug!(target : "net", ?err, "Failed to respond to received request");
+                debug!(target: "net", ?err, "Failed to respond to received request");
             }
         }
     }
@@ -312,7 +317,7 @@ impl ActiveSession {
             Ok(_) => Ok(()),
             Err(err) => {
                 trace!(
-                    target : "net",
+                    target: "net",
                     %err,
                     "no capacity for incoming broadcast",
                 );
@@ -338,7 +343,7 @@ impl ActiveSession {
             Ok(_) => Ok(()),
             Err(err) => {
                 trace!(
-                    target : "net",
+                    target: "net",
                     %err,
                     "no capacity for incoming request",
                 );
@@ -760,8 +765,6 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 }
 #[cfg(test)]
 mod tests {
-    #![allow(dead_code)]
-
     use super::*;
     use crate::session::{
         config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
@@ -770,7 +773,8 @@ mod tests {
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        GetBlockBodies, HelloMessage, Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        GetBlockBodies, HelloMessageWithProtocols, Status, StatusBuilder, UnauthedEthStream,
+        UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
@@ -779,18 +783,18 @@ mod tests {
     use tokio::{net::TcpListener, sync::mpsc};
 
     /// Returns a testing `HelloMessage` and new secretkey
-    fn eth_hello(server_key: &SecretKey) -> HelloMessage {
-        HelloMessage::builder(pk2id(&server_key.public_key(SECP256K1))).build()
+    fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
+        HelloMessageWithProtocols::builder(pk2id(&server_key.public_key(SECP256K1))).build()
     }
 
     struct SessionBuilder {
-        remote_capabilities: Arc<Capabilities>,
+        _remote_capabilities: Arc<Capabilities>,
         active_session_tx: mpsc::Sender<ActiveSessionMessage>,
         active_session_rx: ReceiverStream<ActiveSessionMessage>,
         to_sessions: Vec<mpsc::Sender<SessionCommand>>,
         secret_key: SecretKey,
         local_peer_id: PeerId,
-        hello: HelloMessage,
+        hello: HelloMessageWithProtocols,
         status: Status,
         fork_filter: ForkFilter,
         next_id: usize,
@@ -914,7 +918,7 @@ mod tests {
 
             Self {
                 next_id: 0,
-                remote_capabilities: Arc::new(Capabilities::from(vec![])),
+                _remote_capabilities: Arc::new(Capabilities::from(vec![])),
                 active_session_tx,
                 active_session_rx: ReceiverStream::new(active_session_rx),
                 to_sessions: vec![],

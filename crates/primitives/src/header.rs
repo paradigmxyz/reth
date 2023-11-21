@@ -219,11 +219,13 @@ impl Header {
     /// Seal the header with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
+    #[inline]
     pub fn seal(self, hash: B256) -> SealedHeader {
         SealedHeader { header: self, hash }
     }
 
     /// Calculate hash and seal the Header so that it can't be changed.
+    #[inline]
     pub fn seal_slow(self) -> SealedHeader {
         let hash = self.hash_slow();
         self.seal(hash)

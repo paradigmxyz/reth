@@ -146,10 +146,10 @@ impl<'a> Arbitrary<'a> for IntegerList {
 #[derive(Debug, thiserror::Error)]
 pub enum EliasFanoError {
     /// The provided input is invalid.
-    #[error("The provided input is invalid.")]
+    #[error("the provided input is invalid")]
     InvalidInput,
     /// Failed to deserialize data into type.
-    #[error("Failed to deserialize data into type.")]
+    #[error("failed to deserialize data into type")]
     FailedDeserialize,
 }
 

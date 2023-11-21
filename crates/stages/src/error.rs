@@ -11,21 +11,21 @@ use tokio::sync::mpsc::error::SendError;
 #[derive(Error, Debug)]
 pub enum BlockErrorKind {
     /// The block encountered a validation error.
-    #[error("Validation error: {0}")]
-    Validation(#[source] consensus::ConsensusError),
+    #[error("validation error: {0}")]
+    Validation(#[from] consensus::ConsensusError),
     /// The block encountered an execution error.
-    #[error("Execution error: {0}")]
-    Execution(#[source] executor::BlockExecutionError),
+    #[error("execution error: {0}")]
+    Execution(#[from] executor::BlockExecutionError),
 }
 
 /// A stage execution error.
 #[derive(Error, Debug)]
 pub enum StageError {
     /// The stage encountered an error related to a block.
-    #[error("Stage encountered a block error in block {number}: {error}.", number = block.number)]
+    #[error("stage encountered an error in block #{number}: {error}", number = block.number)]
     Block {
         /// The block that caused the error.
-        block: SealedHeader,
+        block: Box<SealedHeader>,
         /// The specific error type, either consensus or execution error.
         #[source]
         error: BlockErrorKind,
@@ -33,7 +33,9 @@ pub enum StageError {
     /// The stage encountered a downloader error where the responses cannot be attached to the
     /// current head.
     #[error(
-        "Stage encountered inconsistent chain. Downloaded header #{header_number} ({header_hash:?}) is detached from local head #{head_number} ({head_hash:?}). Details: {error}.",
+        "stage encountered inconsistent chain: \
+         downloaded header #{header_number} ({header_hash}) is detached from \
+         local head #{head_number} ({head_hash}): {error}",
         header_number = header.number,
         header_hash = header.hash,
         head_number = local_head.number,
@@ -41,30 +43,38 @@ pub enum StageError {
     )]
     DetachedHead {
         /// The local head we attempted to attach to.
-        local_head: SealedHeader,
+        local_head: Box<SealedHeader>,
         /// The header we attempted to attach.
-        header: SealedHeader,
+        header: Box<SealedHeader>,
         /// The error that occurred when attempting to attach the header.
+        #[source]
         error: Box<consensus::ConsensusError>,
     },
+    /// The headers stage is missing sync gap.
+    #[error("missing sync gap")]
+    MissingSyncGap,
     /// The stage encountered a database error.
-    #[error("An internal database error occurred: {0}")]
+    #[error("internal database error occurred: {0}")]
     Database(#[from] DbError),
     /// Invalid pruning configuration
     #[error(transparent)]
     PruningConfiguration(#[from] reth_primitives::PruneSegmentError),
     /// Invalid checkpoint passed to the stage
-    #[error("Invalid stage checkpoint: {0}")]
+    #[error("invalid stage checkpoint: {0}")]
     StageCheckpoint(u64),
+    /// Missing download buffer on stage execution.
+    /// Returned if stage execution was called without polling for readiness.
+    #[error("missing download buffer")]
+    MissingDownloadBuffer,
     /// Download channel closed
-    #[error("Download channel closed")]
+    #[error("download channel closed")]
     ChannelClosed,
     /// The stage encountered a database integrity error.
-    #[error("A database integrity error occurred: {0}")]
+    #[error("database integrity error occurred: {0}")]
     DatabaseIntegrity(#[from] ProviderError),
     /// Invalid download response. Applicable for stages which
     /// rely on external downloaders
-    #[error("Invalid download response: {0}")]
+    #[error("invalid download response: {0}")]
     Download(#[from] DownloadError),
     /// Internal error
     #[error(transparent)]
@@ -91,6 +101,8 @@ impl StageError {
                 StageError::Download(_) |
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageCheckpoint(_) |
+                StageError::MissingDownloadBuffer |
+                StageError::MissingSyncGap |
                 StageError::ChannelClosed |
                 StageError::Fatal(_)
         )
@@ -101,16 +113,16 @@ impl StageError {
 #[derive(Error, Debug)]
 pub enum PipelineError {
     /// The pipeline encountered an irrecoverable error in one of the stages.
-    #[error("A stage encountered an irrecoverable error.")]
+    #[error(transparent)]
     Stage(#[from] StageError),
     /// The pipeline encountered a database error.
-    #[error("A database error occurred.")]
+    #[error(transparent)]
     Database(#[from] DbError),
-    /// The pipeline encountered an irrecoverable error in one of the stages.
-    #[error("An interface error occurred.")]
-    Interface(#[from] RethError),
+    /// Provider error.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
     /// The pipeline encountered an error while trying to send an event.
-    #[error("The pipeline encountered an error while trying to send an event.")]
+    #[error("pipeline encountered an error while trying to send an event")]
     Channel(#[from] SendError<PipelineEvent>),
     /// The stage encountered an internal error.
     #[error(transparent)]

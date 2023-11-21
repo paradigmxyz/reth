@@ -6,8 +6,9 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     },
     eip4844::calculate_excess_blob_gas,
-    BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock, SealedHeader,
-    Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
+    BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
+    SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
+    TxLegacy,
 };
 use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
 use std::collections::{hash_map::Entry, HashMap};
@@ -32,9 +33,10 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::BaseFeeMissing)
     }
 
+    let wd_root_missing = header.withdrawals_root.is_none() && !chain_spec.is_optimism();
+
     // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
-        header.withdrawals_root.is_none()
+    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) && wd_root_missing
     {
         return Err(ConsensusError::WithdrawalsRootMissing)
     } else if !chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
@@ -69,7 +71,7 @@ pub fn validate_transaction_regarding_header(
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
-            if chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(at_block_number) &&
+            if !chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(at_block_number) &&
                 chain_id.is_some()
             {
                 return Err(InvalidTransactionError::OldLegacyChainId.into())
@@ -116,6 +118,8 @@ pub fn validate_transaction_regarding_header(
 
             Some(*chain_id)
         }
+        #[cfg(feature = "optimism")]
+        Transaction::Deposit(_) => None,
     };
     if let Some(chain_id) = chain_id {
         if chain_id != chain_spec.chain().id() {
@@ -200,20 +204,18 @@ pub fn validate_block_standalone(
     // Check ommers hash
     let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.ommers);
     if block.header.ommers_hash != ommers_hash {
-        return Err(ConsensusError::BodyOmmersHashDiff {
-            got: ommers_hash,
-            expected: block.header.ommers_hash,
-        })
+        return Err(ConsensusError::BodyOmmersHashDiff(
+            GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
+        ))
     }
 
     // Check transaction root
     // TODO(onbjerg): This should probably be accessible directly on [Block]
     let transaction_root = reth_primitives::proofs::calculate_transaction_root(&block.body);
     if block.header.transactions_root != transaction_root {
-        return Err(ConsensusError::BodyTransactionRootDiff {
-            got: transaction_root,
-            expected: block.header.transactions_root,
-        })
+        return Err(ConsensusError::BodyTransactionRootDiff(
+            GotExpected { got: transaction_root, expected: block.header.transactions_root }.into(),
+        ))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -224,10 +226,9 @@ pub fn validate_block_standalone(
         let header_withdrawals_root =
             block.withdrawals_root.as_ref().ok_or(ConsensusError::WithdrawalsRootMissing)?;
         if withdrawals_root != *header_withdrawals_root {
-            return Err(ConsensusError::BodyWithdrawalsRootDiff {
-                got: withdrawals_root,
-                expected: *header_withdrawals_root,
-            })
+            return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                GotExpected { got: withdrawals_root, expected: *header_withdrawals_root }.into(),
+            ))
         }
     }
 
@@ -238,11 +239,45 @@ pub fn validate_block_standalone(
         let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
         let total_blob_gas = block.blob_gas_used();
         if total_blob_gas != header_blob_gas_used {
-            return Err(ConsensusError::BlobGasUsedDiff {
-                header_blob_gas_used,
-                expected_blob_gas_used: total_blob_gas,
+            return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
+                got: header_blob_gas_used,
+                expected: total_blob_gas,
+            }))
+        }
+    }
+
+    Ok(())
+}
+
+// Check gas limit, max diff between child/parent gas_limit should be  max_diff=parent_gas/1024
+// On Optimism, the gas limit can adjust instantly, so we skip this check if the optimism
+// flag is enabled in the chain spec.
+#[inline(always)]
+fn check_gas_limit(
+    parent: &SealedHeader,
+    child: &SealedHeader,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError> {
+    let mut parent_gas_limit = parent.gas_limit;
+
+    // By consensus, gas_limit is multiplied by elasticity (*2) on
+    // on exact block that hardfork happens.
+    if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
+        parent_gas_limit = parent.gas_limit * chain_spec.base_fee_params.elasticity_multiplier;
+    }
+
+    if child.gas_limit > parent_gas_limit {
+        if child.gas_limit - parent_gas_limit >= parent_gas_limit / 1024 {
+            return Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit,
+                child_gas_limit: child.gas_limit,
             })
         }
+    } else if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
+        return Err(ConsensusError::GasLimitInvalidDecrease {
+            parent_gas_limit,
+            child_gas_limit: child.gas_limit,
+        })
     }
 
     Ok(())
@@ -263,10 +298,9 @@ pub fn validate_header_regarding_parent(
     }
 
     if parent.hash != child.parent_hash {
-        return Err(ConsensusError::ParentHashMismatch {
-            expected_parent_hash: parent.hash,
-            got_parent_hash: child.parent_hash,
-        })
+        return Err(ConsensusError::ParentHashMismatch(
+            GotExpected { got: child.parent_hash, expected: parent.hash }.into(),
+        ))
     }
 
     // timestamp in past check
@@ -280,27 +314,16 @@ pub fn validate_header_regarding_parent(
     // TODO Check difficulty increment between parent and child
     // Ace age did increment it by some formula that we need to follow.
 
-    let mut parent_gas_limit = parent.gas_limit;
-
-    // By consensus, gas_limit is multiplied by elasticity (*2) on
-    // on exact block that hardfork happens.
-    if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
-        parent_gas_limit = parent.gas_limit * chain_spec.base_fee_params.elasticity_multiplier;
-    }
-
-    // Check gas limit, max diff between child/parent gas_limit should be  max_diff=parent_gas/1024
-    if child.gas_limit > parent_gas_limit {
-        if child.gas_limit - parent_gas_limit >= parent_gas_limit / 1024 {
-            return Err(ConsensusError::GasLimitInvalidIncrease {
-                parent_gas_limit,
-                child_gas_limit: child.gas_limit,
-            })
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "optimism")] {
+            // On Optimism, the gas limit can adjust instantly, so we skip this check
+            // if the optimism feature is enabled in the chain spec.
+            if !chain_spec.is_optimism() {
+                check_gas_limit(parent, child, chain_spec)?;
+            }
+        } else {
+            check_gas_limit(parent, child, chain_spec)?;
         }
-    } else if parent_gas_limit - child.gas_limit >= parent_gas_limit / 1024 {
-        return Err(ConsensusError::GasLimitInvalidDecrease {
-            parent_gas_limit,
-            child_gas_limit: child.gas_limit,
-        })
     }
 
     // EIP-1559 check base fee
@@ -317,7 +340,10 @@ pub fn validate_header_regarding_parent(
                     .ok_or(ConsensusError::BaseFeeMissing)?
             };
         if expected_base_fee != base_fee {
-            return Err(ConsensusError::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
+            return Err(ConsensusError::BaseFeeDiff(GotExpected {
+                expected: expected_base_fee,
+                got: base_fee,
+            }))
         }
     }
 
@@ -409,8 +435,7 @@ pub fn validate_4844_header_with_parent(
         calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
-            expected: expected_excess_blob_gas,
-            got: excess_blob_gas,
+            diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
             parent_excess_blob_gas,
             parent_blob_gas_used,
         })
@@ -459,8 +484,8 @@ mod tests {
     use super::*;
     use mockall::mock;
     use reth_interfaces::{
+        provider::ProviderResult,
         test_utils::generators::{self, Rng},
-        RethResult,
     };
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
@@ -473,13 +498,13 @@ mod tests {
         WithdrawalsProvider {}
 
         impl WithdrawalsProvider for WithdrawalsProvider {
-            fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> ;
+            fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> ;
 
             fn withdrawals_by_block(
                 &self,
                 _id: BlockHashOrNumber,
                 _timestamp: u64,
-            ) -> RethResult<Option<Vec<Withdrawal>>> ;
+            ) -> ProviderResult<Option<Vec<Withdrawal>>> ;
         }
     }
 
@@ -512,45 +537,52 @@ mod tests {
     }
 
     impl AccountReader for Provider {
-        fn basic_account(&self, _address: Address) -> RethResult<Option<Account>> {
+        fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
             Ok(self.account)
         }
     }
 
     impl HeaderProvider for Provider {
-        fn is_known(&self, _block_hash: &BlockHash) -> RethResult<bool> {
+        fn is_known(&self, _block_hash: &BlockHash) -> ProviderResult<bool> {
             Ok(self.is_known)
         }
 
-        fn header(&self, _block_number: &BlockHash) -> RethResult<Option<Header>> {
+        fn header(&self, _block_number: &BlockHash) -> ProviderResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_by_number(&self, _num: u64) -> RethResult<Option<Header>> {
+        fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Header>> {
             Ok(self.parent.clone())
         }
 
-        fn header_td(&self, _hash: &BlockHash) -> RethResult<Option<U256>> {
+        fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
             Ok(None)
         }
 
-        fn header_td_by_number(&self, _number: BlockNumber) -> RethResult<Option<U256>> {
+        fn header_td_by_number(&self, _number: BlockNumber) -> ProviderResult<Option<U256>> {
             Ok(None)
         }
 
-        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
-            Ok(vec![])
-        }
-
-        fn sealed_headers_range(
+        fn headers_range(
             &self,
             _range: impl RangeBounds<BlockNumber>,
-        ) -> RethResult<Vec<SealedHeader>> {
+        ) -> ProviderResult<Vec<Header>> {
             Ok(vec![])
         }
 
-        fn sealed_header(&self, _block_number: BlockNumber) -> RethResult<Option<SealedHeader>> {
+        fn sealed_header(
+            &self,
+            _block_number: BlockNumber,
+        ) -> ProviderResult<Option<SealedHeader>> {
             Ok(None)
+        }
+
+        fn sealed_headers_while(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+            _predicate: impl FnMut(&SealedHeader) -> bool,
+        ) -> ProviderResult<Vec<SealedHeader>> {
+            Ok(vec![])
         }
     }
 
@@ -559,11 +591,11 @@ mod tests {
             &self,
             _id: BlockHashOrNumber,
             _timestamp: u64,
-        ) -> RethResult<Option<Vec<Withdrawal>>> {
+        ) -> ProviderResult<Option<Vec<Withdrawal>>> {
             self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
         }
 
-        fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> {
+        fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
             self.withdrawals_provider.latest_withdrawal()
         }
     }
@@ -811,15 +843,96 @@ mod tests {
 
         let block = SealedBlock::new(header, body);
 
-        // 10 blobs times the blob gas per blob
+        // 10 blobs times the blob gas per blob.
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
 
         // validate blob, it should fail blob gas used validation
         assert_eq!(
             validate_block_standalone(&block, &chain_spec),
-            Err(ConsensusError::BlobGasUsedDiff {
-                header_blob_gas_used: 1,
-                expected_blob_gas_used
+            Err(ConsensusError::BlobGasUsedDiff(GotExpected {
+                got: 1,
+                expected: expected_blob_gas_used
+            }))
+        );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_increase() {
+        let parent = SealedHeader {
+            header: Header { gas_limit: 1024 * 10, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit + 5, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_increase_exceeding_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header {
+                gas_limit: parent.header.gas_limit + parent.header.gas_limit / 1024 + 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            check_gas_limit(&parent, &child, &chain_spec),
+            Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
+            })
+        );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_decrease_within_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header { gas_limit: parent.header.gas_limit - 5, ..Default::default() },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(check_gas_limit(&parent, &child, &chain_spec), Ok(()));
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_decrease_exceeding_limit() {
+        let gas_limit = 1024 * 10;
+        let parent = SealedHeader {
+            header: Header { gas_limit, ..Default::default() },
+            ..Default::default()
+        };
+        let child = SealedHeader {
+            header: Header {
+                gas_limit: parent.header.gas_limit - parent.header.gas_limit / 1024 - 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let chain_spec = ChainSpec::default();
+
+        assert_eq!(
+            check_gas_limit(&parent, &child, &chain_spec),
+            Err(ConsensusError::GasLimitInvalidDecrease {
+                parent_gas_limit: parent.header.gas_limit,
+                child_gas_limit: child.header.gas_limit,
             })
         );
     }

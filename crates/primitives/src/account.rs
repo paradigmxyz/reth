@@ -1,8 +1,10 @@
-use crate::{B256, KECCAK_EMPTY, U256};
+use crate::{
+    revm_primitives::{Bytecode as RevmBytecode, BytecodeState, Bytes, JumpMap},
+    B256, KECCAK_EMPTY, U256,
+};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
-use revm_primitives::{Bytecode as RevmBytecode, BytecodeState, Bytes, JumpMap};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -96,10 +98,7 @@ impl Compact for Bytecode {
         len + self.0.bytecode.len() + 4
     }
 
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let len = buf.read_u32::<BigEndian>().expect("could not read bytecode length");
         let bytes = Bytes::from(buf.copy_to_bytes(len as usize));
         let variant = buf.read_u8().expect("could not read bytecode variant");

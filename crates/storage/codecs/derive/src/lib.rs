@@ -148,8 +148,8 @@ pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     let tests = arbitrary::maybe_generate_tests(args, &ast);
 
     // Avoid duplicate names
-    let prop_import = format_ident!("{}PropTestArbitratry", ast.ident);
-    let arb_import = format_ident!("{}Arbitratry", ast.ident);
+    let prop_import = format_ident!("{}PropTestArbitrary", ast.ident);
+    let arb_import = format_ident!("{}Arbitrary", ast.ident);
 
     quote! {
         #[cfg(any(test, feature = "arbitrary"))]

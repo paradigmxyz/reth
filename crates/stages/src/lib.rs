@@ -22,8 +22,11 @@
 //! # use reth_primitives::{PeerId, MAINNET, B256};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
-//! # use reth_stages::stages::HeaderSyncMode;
 //! # use tokio::sync::watch;
+//! # use reth_provider::ProviderFactory;
+//! # use reth_provider::HeaderSyncMode;
+//! #
+//! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
 //! #    Arc::new(TestHeadersClient::default()),
@@ -33,18 +36,23 @@
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::ZERO, vec![]).into()) }),
 //! #    consensus.clone(),
-//! #    db.clone()
+//! #    ProviderFactory::new(db.clone(), MAINNET.clone())
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
-//! # let factory = Factory::new(MAINNET.clone());
+//! # let factory = Factory::new(chain_spec.clone());
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
-//!     .add_stages(
-//!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, factory)
-//!     )
-//!     .build(db, MAINNET.clone());
+//!     .add_stages(DefaultStages::new(
+//!         ProviderFactory::new(db.clone(), chain_spec.clone()),
+//!         HeaderSyncMode::Tip(tip_rx),
+//!         consensus,
+//!         headers_downloader,
+//!         bodies_downloader,
+//!         factory,
+//!     ))
+//!     .build(db, chain_spec.clone());
 //! ```
 //!
 //! ## Feature Flags

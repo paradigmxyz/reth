@@ -3,6 +3,7 @@
 use crate::{
     consensus::ConsensusError,
     executor::{BlockExecutionError, BlockValidationError},
+    provider::ProviderError,
 };
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
@@ -11,37 +12,37 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 #[allow(missing_docs)]
 pub enum BlockchainTreeError {
     /// Thrown if the block number is lower than the last finalized block number.
-    #[error("Block number is lower than the last finalized block number #{last_finalized}")]
+    #[error("block number is lower than the last finalized block number #{last_finalized}")]
     PendingBlockIsFinalized {
         /// The block number of the last finalized block.
         last_finalized: BlockNumber,
     },
     /// Thrown if no side chain could be found for the block.
-    #[error("BlockChainId can't be found in BlockchainTree with internal index {chain_id}")]
+    #[error("blockChainId can't be found in BlockchainTree with internal index {chain_id}")]
     BlockSideChainIdConsistency {
         /// The internal identifier for the side chain.
         chain_id: u64,
     },
     /// Thrown if a canonical chain header cannot be found.
-    #[error("Canonical chain header #{block_hash} can't be found ")]
+    #[error("canonical chain header {block_hash} can't be found")]
     CanonicalChain {
         /// The block hash of the missing canonical chain header.
         block_hash: BlockHash,
     },
     /// Thrown if a block number cannot be found in the blockchain tree chain.
-    #[error("Block number #{block_number} not found in blockchain tree chain")]
+    #[error("block number #{block_number} not found in blockchain tree chain")]
     BlockNumberNotFoundInChain {
         /// The block number that could not be found.
         block_number: BlockNumber,
     },
     /// Thrown if a block hash cannot be found in the blockchain tree chain.
-    #[error("Block hash {block_hash} not found in blockchain tree chain")]
+    #[error("block hash {block_hash} not found in blockchain tree chain")]
     BlockHashNotFoundInChain {
         /// The block hash that could not be found.
         block_hash: BlockHash,
     },
     // Thrown if the block failed to buffer
-    #[error("Block with hash {block_hash:?} failed to buffer")]
+    #[error("block with hash {block_hash} failed to buffer")]
     BlockBufferingFailed {
         /// The block hash of the block that failed to buffer.
         block_hash: BlockHash,
@@ -62,10 +63,10 @@ pub enum CanonicalError {
     #[error(transparent)]
     BlockchainTree(#[from] BlockchainTreeError),
     /// Error indicating a transaction reverted during execution.
-    #[error("Transaction error on revert: {inner:?}")]
+    #[error("transaction error on revert: {inner}")]
     CanonicalRevert { inner: String },
     /// Error indicating a transaction failed to commit during execution.
-    #[error("Transaction error on commit: {inner:?}")]
+    #[error("transaction error on commit: {inner}")]
     CanonicalCommit { inner: String },
 }
 
@@ -190,23 +191,26 @@ impl InsertBlockErrorData {
 #[derive(Debug, thiserror::Error)]
 pub enum InsertBlockErrorKind {
     /// Failed to recover senders for the block
-    #[error("Failed to recover senders for block")]
+    #[error("failed to recover senders for block")]
     SenderRecovery,
     /// Block violated consensus rules.
     #[error(transparent)]
-    Consensus(ConsensusError),
+    Consensus(#[from] ConsensusError),
     /// Block execution failed.
     #[error(transparent)]
-    Execution(BlockExecutionError),
+    Execution(#[from] BlockExecutionError),
     /// Block violated tree invariants.
     #[error(transparent)]
     Tree(#[from] BlockchainTreeError),
+    /// Provider error.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
     /// An internal error occurred, like interacting with the database.
-    #[error("Internal error")]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
     /// Canonical error.
     #[error(transparent)]
-    Canonical(CanonicalError),
+    Canonical(#[from] CanonicalError),
     /// BlockchainTree error.
     #[error(transparent)]
     BlockchainTree(BlockchainTreeError),
@@ -243,6 +247,8 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::CanonicalCommit { .. } |
                     BlockExecutionError::AppendChainDoesntConnect { .. } |
                     BlockExecutionError::UnavailableForTest => false,
+                    #[cfg(feature = "optimism")]
+                    BlockExecutionError::OptimismBlockExecution(_) => false,
                 }
             }
             InsertBlockErrorKind::Tree(err) => {
@@ -258,7 +264,7 @@ impl InsertBlockErrorKind {
                     BlockchainTreeError::BlockBufferingFailed { .. } => false,
                 }
             }
-            InsertBlockErrorKind::Internal(_) => {
+            InsertBlockErrorKind::Provider(_) | InsertBlockErrorKind::Internal(_) => {
                 // any other error, such as database errors, are considered internal errors
                 false
             }
@@ -330,7 +336,6 @@ impl From<crate::RethError> for InsertBlockErrorKind {
             RethError::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             RethError::Custom(err) => InsertBlockErrorKind::Internal(err.into()),
             RethError::Canonical(err) => InsertBlockErrorKind::Canonical(err),
-            RethError::BlockchainTree(err) => InsertBlockErrorKind::BlockchainTree(err),
         }
     }
 }

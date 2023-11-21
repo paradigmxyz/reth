@@ -15,7 +15,7 @@ pub enum SecretKeyError {
     SecretKeyDecodeError(#[from] SecretKeyBaseError),
     #[error(transparent)]
     SecretKeyFsPathError(#[from] FsPathError),
-    #[error("Failed to access key file {secret_file:?}: {error}")]
+    #[error("failed to access key file {secret_file:?}: {error}")]
     FailedToAccessKeyFile { error: io::Error, secret_file: PathBuf },
 }
 

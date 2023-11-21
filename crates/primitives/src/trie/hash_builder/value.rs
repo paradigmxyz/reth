@@ -29,10 +29,7 @@ impl Compact for HashBuilderValue {
         }
     }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         match buf[0] {
             0 => {
                 let (hash, buf) = B256::from_compact(&buf[1..], 32);

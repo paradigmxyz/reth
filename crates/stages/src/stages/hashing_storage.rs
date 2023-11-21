@@ -44,7 +44,6 @@ impl Default for StorageHashingStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -52,9 +51,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     }
 
     /// Execute the stage.
-    async fn execute(
+    fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
@@ -175,7 +174,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
-            let storages = provider.plainstate_storages(lists)?;
+            let storages = provider.plain_state_storages(lists)?;
             provider.insert_storage_for_hashing(storages)?;
         }
 
@@ -191,9 +190,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
@@ -214,7 +213,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 }
 
 fn stage_checkpoint_progress<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<&DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: provider.tx_ref().entries::<tables::HashedStorage>()? as u64,

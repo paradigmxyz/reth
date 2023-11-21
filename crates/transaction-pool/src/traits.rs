@@ -306,6 +306,27 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Local]
+    fn get_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Local)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Private]
+    fn get_private_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Private)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::External]
+    fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::External)
+    }
+
     /// Returns a set of all senders of transactions in the pool
     fn unique_senders(&self) -> HashSet<Address>;
 
@@ -755,6 +776,10 @@ pub trait PoolTransaction:
 
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64>;
+
+    /// Returns whether or not the transaction is an Optimism Deposited transaction.
+    #[cfg(feature = "optimism")]
+    fn is_deposit(&self) -> bool;
 }
 
 /// An extension trait that provides additional interfaces for the
@@ -828,6 +853,8 @@ impl EthPooledTransaction {
                 blob_sidecar = EthBlobTransactionSidecar::Missing;
                 U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit)
             }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => U256::ZERO,
         };
         let mut cost: U256 = transaction.value().into();
         cost += gas_cost;
@@ -910,7 +937,13 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
             Transaction::Eip4844(tx) => tx.max_fee_per_gas,
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => 0,
         }
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.transaction.access_list()
     }
 
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
@@ -922,6 +955,8 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => None,
         }
     }
 
@@ -929,16 +964,12 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.max_fee_per_blob_gas()
     }
 
-    fn access_list(&self) -> Option<&AccessList> {
-        self.transaction.access_list()
-    }
-
     /// Returns the effective tip for this transaction.
     ///
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
     /// For legacy transactions: `gas_price - base_fee`.
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(base_fee)
+        self.transaction.effective_tip_per_gas(Some(base_fee))
     }
 
     /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
@@ -975,6 +1006,12 @@ impl PoolTransaction for EthPooledTransaction {
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64> {
         self.transaction.chain_id()
+    }
+
+    /// Returns whether or not the transaction is an Optimism Deposited transaction.
+    #[cfg(feature = "optimism")]
+    fn is_deposit(&self) -> bool {
+        matches!(self.transaction.transaction, Transaction::Deposit(_))
     }
 }
 
@@ -1013,7 +1050,7 @@ impl FromRecoveredTransaction for EthPooledTransaction {
 }
 
 impl FromRecoveredPooledTransaction for EthPooledTransaction {
-    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
         EthPooledTransaction::from(tx)
     }
 }
@@ -1031,6 +1068,10 @@ pub struct PoolSize {
     pub pending: usize,
     /// Reported size of transactions in the _pending_ sub-pool.
     pub pending_size: usize,
+    /// Number of transactions in the _blob_ pool.
+    pub blob: usize,
+    /// Reported size of transactions in the _blob_ pool.
+    pub blob_size: usize,
     /// Number of transactions in the _basefee_ pool.
     pub basefee: usize,
     /// Reported size of transactions in the _basefee_ sub-pool.
@@ -1051,7 +1092,7 @@ impl PoolSize {
     /// Asserts that the invariants of the pool size are met.
     #[cfg(test)]
     pub(crate) fn assert_invariants(&self) {
-        assert_eq!(self.total, self.pending + self.basefee + self.queued);
+        assert_eq!(self.total, self.pending + self.basefee + self.queued + self.blob);
     }
 }
 
@@ -1108,6 +1149,22 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
     /// Create a new stream that yields full transactions from the subpool
     pub fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
         Self { st, subpool }
+    }
+
+    /// Tries to receive the next value for this stream.
+    pub fn try_recv(
+        &mut self,
+    ) -> Result<NewTransactionEvent<Tx>, tokio::sync::mpsc::error::TryRecvError> {
+        loop {
+            match self.st.try_recv() {
+                Ok(event) => {
+                    if event.subpool == self.subpool {
+                        return Ok(event)
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 }
 

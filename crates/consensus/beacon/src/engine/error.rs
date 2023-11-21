@@ -13,13 +13,13 @@ pub type BeaconEngineResult<Ok> = Result<Ok, BeaconConsensusEngineError>;
 #[derive(Debug, thiserror::Error)]
 pub enum BeaconConsensusEngineError {
     /// Pipeline channel closed.
-    #[error("Pipeline channel closed")]
+    #[error("pipeline channel closed")]
     PipelineChannelClosed,
     /// Pipeline error.
     #[error(transparent)]
     Pipeline(#[from] Box<PipelineError>),
     /// Pruner channel closed.
-    #[error("Pruner channel closed")]
+    #[error("pruner channel closed")]
     PrunerChannelClosed,
     /// Hook error.
     #[error(transparent)]
@@ -50,7 +50,7 @@ impl From<reth_interfaces::db::DatabaseError> for BeaconConsensusEngineError {
 #[derive(Debug, thiserror::Error)]
 pub enum BeaconForkChoiceUpdateError {
     /// Thrown when a forkchoice update resulted in an error.
-    #[error("Forkchoice update error: {0}")]
+    #[error("forkchoice update error: {0}")]
     ForkchoiceUpdateError(#[from] ForkchoiceUpdateError),
     /// Internal errors, for example, error while reading from the database.
     #[error(transparent)]

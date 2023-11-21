@@ -22,9 +22,10 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     fn insert_block_without_senders(
         &self,
         block: SealedBlock,
+        validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         match block.try_seal_with_senders() {
-            Ok(block) => self.insert_block(block),
+            Ok(block) => self.insert_block(block, validation_kind),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
@@ -43,10 +44,17 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Buffer block with senders
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError>;
 
-    /// Insert block with senders
+    /// Inserts block with senders
+    ///
+    /// The `validation_kind` parameter controls which validation checks are performed.
+    ///
+    /// Caution: If the block was received from the consensus layer, this should always be called
+    /// with [BlockValidationKind::Exhaustive] to validate the state root, if possible to adhere to
+    /// the engine API spec.
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
+        validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
@@ -90,6 +98,48 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
 
     /// Unwind tables and put it inside state
     fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()>;
+}
+
+/// Represents the kind of validation that should be performed when inserting a block.
+///
+/// The motivation for this is that the engine API spec requires that block's state root is
+/// validated when received from the CL.
+///
+/// This step is very expensive due to how changesets are stored in the database, so we want to
+/// avoid doing it if not necessary. Blocks can also originate from the network where this step is
+/// not required.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlockValidationKind {
+    /// All validation checks that can be performed.
+    ///
+    /// This includes validating the state root, if possible.
+    ///
+    /// Note: This should always be used when inserting blocks that originate from the consensus
+    /// layer.
+    #[default]
+    Exhaustive,
+    /// Perform all validation checks except for state root validation.
+    SkipStateRootValidation,
+}
+
+impl BlockValidationKind {
+    /// Returns true if the state root should be validated if possible.
+    pub fn is_exhaustive(&self) -> bool {
+        matches!(self, BlockValidationKind::Exhaustive)
+    }
+}
+
+impl std::fmt::Display for BlockValidationKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlockValidationKind::Exhaustive => {
+                write!(f, "Exhaustive")
+            }
+            BlockValidationKind::SkipStateRootValidation => {
+                write!(f, "SkipStateRootValidation")
+            }
+        }
+    }
 }
 
 /// All possible outcomes of a canonicalization attempt of [BlockchainTreeEngine::make_canonical].
@@ -187,6 +237,12 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// disconnected from the canonical chain.
     fn block_by_hash(&self, hash: BlockHash) -> Option<SealedBlock>;
 
+    /// Returns the block with matching hash from the tree, if it exists.
+    ///
+    /// Caution: This will not return blocks from the canonical chain or buffered blocks that are
+    /// disconnected from the canonical chain.
+    fn block_with_senders_by_hash(&self, hash: BlockHash) -> Option<SealedBlockWithSenders>;
+
     /// Returns the _buffered_ (disconnected) block with matching hash from the internal buffer if
     /// it exists.
     ///
@@ -243,6 +299,11 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Returns the pending block if there is one.
     fn pending_block(&self) -> Option<SealedBlock> {
         self.block_by_hash(self.pending_block_num_hash()?.hash)
+    }
+
+    /// Returns the pending block if there is one.
+    fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders> {
+        self.block_with_senders_by_hash(self.pending_block_num_hash()?.hash)
     }
 
     /// Returns the pending block and its receipts in one call.

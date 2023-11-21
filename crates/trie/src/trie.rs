@@ -21,6 +21,7 @@ use std::{
     collections::{HashMap, HashSet},
     ops::RangeInclusive,
 };
+use tracing::{debug, trace};
 
 /// StateRoot is used to compute the root node of a state trie.
 #[derive(Debug)]
@@ -143,7 +144,7 @@ impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError> {
-        tracing::debug!(target: "loader", "incremental state root");
+        debug!(target: "trie::loader", ?range, "incremental state root");
         Self::incremental_root_calculator(tx, range)?.root()
     }
 
@@ -159,7 +160,7 @@ impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
-        tracing::debug!(target: "loader", "incremental state root");
+        debug!(target: "trie::loader", ?range, "incremental state root");
         Self::incremental_root_calculator(tx, range)?.root_with_updates()
     }
 
@@ -173,7 +174,7 @@ impl<'a, TX: DbTx> StateRoot<'a, TX, &'a TX> {
         tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError> {
-        tracing::debug!(target: "loader", "incremental state root with progress");
+        debug!(target: "trie::loader", ?range, "incremental state root with progress");
         Self::incremental_root_calculator(tx, range)?.root_with_progress()
     }
 }
@@ -222,7 +223,7 @@ where
     }
 
     fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
-        tracing::debug!(target: "loader", "calculating state root");
+        trace!(target: "trie::loader", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
 
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
@@ -432,7 +433,7 @@ where
         &self,
         retain_updates: bool,
     ) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
-        tracing::debug!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
+        trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
         let mut hashed_storage_cursor = self.hashed_cursor_factory.hashed_storage_cursor()?;
 
         // short circuit on empty storage
@@ -480,7 +481,7 @@ where
         trie_updates.extend(walker_updates.into_iter());
         trie_updates.extend_with_storage_updates(self.hashed_address, hash_builder_updates);
 
-        tracing::debug!(target: "trie::storage_root", ?root, hashed_address = ?self.hashed_address, "calculated storage root");
+        trace!(target: "trie::storage_root", ?root, hashed_address = ?self.hashed_address, "calculated storage root");
         Ok((root, storage_slots_walked, trie_updates))
     }
 }
@@ -1138,7 +1139,7 @@ mod tests {
     #[test]
     fn account_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.db(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
         let expected = extension_node_trie(&tx);
@@ -1164,7 +1165,7 @@ mod tests {
 
     fn account_trie_around_extension_node_with_dbtrie() {
         let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.db(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
         let expected = extension_node_trie(&tx);
@@ -1227,7 +1228,7 @@ mod tests {
     #[test]
     fn storage_trie_around_extension_node() {
         let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.db(), MAINNET.clone());
         let tx = factory.provider_rw().unwrap();
 
         let hashed_address = B256::random();
@@ -1253,7 +1254,7 @@ mod tests {
     }
 
     fn extension_node_storage_trie(
-        tx: &DatabaseProviderRW<'_, &DatabaseEnv>,
+        tx: &DatabaseProviderRW<&DatabaseEnv>,
         hashed_address: B256,
     ) -> (B256, HashMap<Nibbles, BranchNodeCompact>) {
         let value = U256::from(1);
@@ -1281,7 +1282,7 @@ mod tests {
         (root, updates)
     }
 
-    fn extension_node_trie(tx: &DatabaseProviderRW<'_, &DatabaseEnv>) -> B256 {
+    fn extension_node_trie(tx: &DatabaseProviderRW<&DatabaseEnv>) -> B256 {
         let a =
             Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(B256::random()) };
         let val = encode_account(a, None);

@@ -557,6 +557,13 @@ where
         if let Some(ref attrs) = payload_attrs {
             let attr_validation_res = self.validate_version_specific_fields(version, &attrs.into());
 
+            #[cfg(feature = "optimism")]
+            if attrs.optimism_payload_attributes.gas_limit.is_none() &&
+                self.inner.chain_spec.is_optimism()
+            {
+                return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
+            }
+
             // From the engine API spec:
             //
             // Client software MUST ensure that payloadAttributes.timestamp is greater than
@@ -805,6 +812,7 @@ mod tests {
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
+    use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
     use std::sync::Arc;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -837,7 +845,9 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         tokio::spawn(async move {
-            api.new_payload_v1(SealedBlock::default().into()).await.unwrap();
+            api.new_payload_v1(execution_payload_from_sealed_block(SealedBlock::default()))
+                .await
+                .unwrap();
         });
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }

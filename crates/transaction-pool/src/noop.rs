@@ -12,11 +12,11 @@ use crate::{
     },
     validate::ValidTransaction,
     AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
-    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
-    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
-    TransactionValidator, ValidPoolTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PooledTransactionsElement,
+    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
+    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash};
+use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -51,7 +51,7 @@ impl TransactionPool for NoopTransactionPool {
         transaction: Self::Transaction,
     ) -> PoolResult<TransactionEvents> {
         let hash = *transaction.hash();
-        Err(PoolError::Other(hash, Box::new(NoopInsertError::new(transaction))))
+        Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
     }
 
     async fn add_transaction(
@@ -60,7 +60,7 @@ impl TransactionPool for NoopTransactionPool {
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let hash = *transaction.hash();
-        Err(PoolError::Other(hash, Box::new(NoopInsertError::new(transaction))))
+        Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
     }
 
     async fn add_transactions(
@@ -72,7 +72,7 @@ impl TransactionPool for NoopTransactionPool {
             .into_iter()
             .map(|transaction| {
                 let hash = *transaction.hash();
-                Err(PoolError::Other(hash, Box::new(NoopInsertError::new(transaction))))
+                Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
             })
             .collect())
     }
@@ -216,6 +216,13 @@ impl TransactionPool for NoopTransactionPool {
         }
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
+
+    fn get_transactions_by_origin(
+        &self,
+        _origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
@@ -235,6 +242,14 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        #[cfg(feature = "optimism")]
+        if transaction.is_deposit() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                reth_primitives::InvalidTransactionError::TxTypeNotSupported.into(),
+            )
+        }
+
         TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
@@ -264,7 +279,7 @@ impl<T> Default for MockTransactionValidator<T> {
 
 /// An error that contains the transaction that failed to be inserted into the noop pool.
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("Can't insert transaction into the noop pool that does nothing.")]
+#[error("can't insert transaction into the noop pool that does nothing")]
 pub struct NoopInsertError {
     tx: EthPooledTransaction,
 }

@@ -32,7 +32,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         // Contract log filtering removes every receipt possible except the ones in the list. So,

@@ -5,20 +5,21 @@ use clap::Args;
 use reth_config::Config;
 use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_net_nat::NatResolver;
-use reth_network::{HelloMessage, NetworkConfigBuilder};
+use reth_network::{HelloMessageWithProtocols, NetworkConfigBuilder};
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
 use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Args)]
-#[command(next_help_heading = "Networking")]
+#[clap(next_help_heading = "Networking")]
 pub struct NetworkArgs {
     /// Disable the discovery service.
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
-    /// Target trusted peer enodes
+    /// Comma separated enode URLs of trusted peers for P2P connections.
+    ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
     #[arg(long, value_delimiter = ',')]
     pub trusted_peers: Vec<NodeRecord>,
@@ -27,7 +28,7 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub trusted_only: bool,
 
-    /// Bootnodes to connect to initially.
+    /// Comma separated enode URLs for P2P discovery bootstrap.
     ///
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
@@ -107,8 +108,9 @@ impl NetworkArgs {
 
         // Configure node identity
         let peer_id = network_config_builder.get_peer_id();
-        network_config_builder = network_config_builder
-            .hello_message(HelloMessage::builder(peer_id).client_version(&self.identity).build());
+        network_config_builder = network_config_builder.hello_message(
+            HelloMessageWithProtocols::builder(peer_id).client_version(&self.identity).build(),
+        );
 
         self.discovery.apply_to_builder(network_config_builder)
     }

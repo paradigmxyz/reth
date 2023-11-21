@@ -2,8 +2,9 @@ use crate::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
     serde_helper::{
-        deserialize_json_u256, deserialize_json_u256_opt, deserialize_storage_map,
+        json_u256::{deserialize_json_ttd_opt, deserialize_json_u256},
         num::{u64_hex_or_decimal, u64_hex_or_decimal_opt},
+        storage::deserialize_storage_map,
     },
     trie::{HashBuilder, Nibbles},
     Account, Address, Bytes, B256, KECCAK_EMPTY, U256,
@@ -330,7 +331,7 @@ pub struct ChainConfig {
     /// Total difficulty reached that triggers the merge consensus upgrade.
     #[serde(
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_json_u256_opt"
+        deserialize_with = "deserialize_json_ttd_opt"
     )]
     pub terminal_total_difficulty: Option<U256>,
 

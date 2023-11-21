@@ -4,7 +4,6 @@ use crate::{
     eth::{Filter, Transaction},
     Log, RichHeader,
 };
-
 use alloy_primitives::B256;
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 

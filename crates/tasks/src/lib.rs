@@ -47,7 +47,7 @@ pub mod shutdown;
 ///
 /// ```
 /// # async fn t() {
-///  use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+/// use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 /// let executor = TokioTaskExecutor::default();
 ///
 /// let task = executor.spawn(Box::pin(async {

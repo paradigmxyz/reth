@@ -5,6 +5,7 @@ use reth_provider::{
     StateProvider, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
+use reth_rpc_types_compat::log::from_primitive_log;
 
 use std::path::Path;
 
@@ -197,7 +198,8 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     {
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
-            if filter_params.filter_address(log) && filter_params.filter_topics(log) {
+            let log = from_primitive_log(log.clone());
+            if filter_params.filter_address(&log) && filter_params.filter_topics(&log) {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")
             }

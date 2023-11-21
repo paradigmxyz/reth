@@ -10,10 +10,11 @@ use reth_db::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_interfaces::RethResult;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
 };
+use reth_trie::updates::TrieUpdates;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -61,9 +62,9 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
     }
 
     /// Lookup an account in the AccountHistory table
-    pub fn account_history_lookup(&self, address: Address) -> RethResult<HistoryInfo> {
+    pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
         // history key to search IntegerList of block number changesets.
@@ -80,9 +81,9 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         &self,
         address: Address,
         storage_key: StorageKey,
-    ) -> RethResult<HistoryInfo> {
+    ) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number).into())
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
         // history key to search IntegerList of block number changesets.
@@ -99,7 +100,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         key: K,
         key_filter: impl Fn(&K) -> bool,
         lowest_available_block_number: Option<BlockNumber>,
-    ) -> RethResult<HistoryInfo>
+    ) -> ProviderResult<HistoryInfo>
     where
         T: Table<Key = K, Value = BlockNumberList>,
     {
@@ -153,7 +154,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> AccountReader for HistoricalStateProviderRef<'b, TX> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
+    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         match self.account_history_lookup(address)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
@@ -175,7 +176,7 @@ impl<'b, TX: DbTx> AccountReader for HistoricalStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
     /// Get block hash by number.
-    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
+    fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.tx.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
     }
 
@@ -183,7 +184,7 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<B256>> {
+    ) -> ProviderResult<Vec<B256>> {
         let range = start..end;
         self.tx
             .cursor_read::<tables::CanonicalHeaders>()
@@ -191,15 +192,22 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
                 cursor
                     .walk_range(range)?
                     .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-                    .collect::<RethResult<Vec<_>>>()
+                    .collect::<ProviderResult<Vec<_>>>()
             })?
             .map_err(Into::into)
     }
 }
 
 impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn state_root(&self, _post_state: &BundleStateWithReceipts) -> RethResult<B256> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
+    fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
+    }
+
+    fn state_root_with_updates(
+        &self,
+        _bundle_state: &BundleStateWithReceipts,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }
 
@@ -209,7 +217,7 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
         &self,
         address: Address,
         storage_key: StorageKey,
-    ) -> RethResult<Option<StorageValue>> {
+    ) -> ProviderResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
@@ -217,10 +225,10 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
                     .cursor_dup_read::<tables::StorageChangeSet>()?
                     .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
                     .filter(|entry| entry.key == storage_key)
-                    .ok_or(ProviderError::StorageChangesetNotFound {
+                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
                         block_number: changeset_block_number,
                         address,
-                        storage_key,
+                        storage_key: Box::new(storage_key),
                     })?
                     .value,
             )),
@@ -235,13 +243,13 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
     /// Get account and storage proofs.
-    fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock.into())
+    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }
 
@@ -566,11 +574,11 @@ mod tests {
         );
         assert_eq!(
             provider.account_history_lookup(ADDRESS),
-            Err(ProviderError::StateAtBlockPruned(provider.block_number).into())
+            Err(ProviderError::StateAtBlockPruned(provider.block_number))
         );
         assert_eq!(
             provider.storage_history_lookup(ADDRESS, STORAGE),
-            Err(ProviderError::StateAtBlockPruned(provider.block_number).into())
+            Err(ProviderError::StateAtBlockPruned(provider.block_number))
         );
 
         // provider block_number == lowest available block number,

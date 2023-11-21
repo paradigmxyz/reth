@@ -10,7 +10,7 @@ use reth_primitives::{
     hex,
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
-    BlockNumber, SealedHeader, B256,
+    BlockNumber, GotExpected, SealedHeader, B256,
 };
 use reth_provider::{
     DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
@@ -77,31 +77,10 @@ impl MerkleStage {
         Self::Execution { clean_threshold }
     }
 
-    /// Check that the computed state root matches the root in the expected header.
-    fn validate_state_root(
-        &self,
-        got: B256,
-        expected: SealedHeader,
-        target_block: BlockNumber,
-    ) -> Result<(), StageError> {
-        if got == expected.state_root {
-            Ok(())
-        } else {
-            warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root");
-            Err(StageError::Block {
-                block: expected.clone(),
-                error: BlockErrorKind::Validation(consensus::ConsensusError::BodyStateRootDiff {
-                    got,
-                    expected: expected.state_root,
-                }),
-            })
-        }
-    }
-
     /// Gets the hashing progress
     pub fn get_execution_checkpoint<DB: Database>(
         &self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
     ) -> Result<Option<MerkleCheckpoint>, StageError> {
         let buf =
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
@@ -117,7 +96,7 @@ impl MerkleStage {
     /// Saves the hashing progress
     pub fn save_execution_checkpoint<DB: Database>(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         checkpoint: Option<MerkleCheckpoint>,
     ) -> Result<(), StageError> {
         let mut buf = vec![];
@@ -134,7 +113,6 @@ impl MerkleStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for MerkleStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -147,9 +125,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     }
 
     /// Execute the stage.
-    async fn execute(
+    fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let threshold = match self {
@@ -271,7 +249,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         // Reset the checkpoint
         self.save_execution_checkpoint(provider, None)?;
 
-        self.validate_state_root(trie_root, target_block.seal_slow(), to_block)?;
+        validate_state_root(trie_root, target_block.seal_slow(), to_block)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
@@ -281,9 +259,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<&DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -321,7 +299,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             let target = provider
                 .header_by_number(input.unwind_to)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
-            self.validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
+            validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
             updates.flush(provider.tx_ref())?;
@@ -332,6 +310,26 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+    }
+}
+
+/// Check that the computed state root matches the root in the expected header.
+#[inline]
+fn validate_state_root(
+    got: B256,
+    expected: SealedHeader,
+    target_block: BlockNumber,
+) -> Result<(), StageError> {
+    if got == expected.state_root {
+        Ok(())
+    } else {
+        warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root");
+        Err(StageError::Block {
+            error: BlockErrorKind::Validation(consensus::ConsensusError::BodyStateRootDiff(
+                GotExpected { got, expected: expected.state_root }.into(),
+            )),
+            block: Box::new(expected),
+        })
     }
 }
 

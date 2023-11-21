@@ -15,14 +15,13 @@ pub const DB_VERSION: u64 = 1;
 #[allow(missing_docs)]
 #[derive(thiserror::Error, Debug)]
 pub enum DatabaseVersionError {
-    #[error("Unable to determine the version of the database, file is missing.")]
+    #[error("unable to determine the version of the database, file is missing")]
     MissingFile,
-    #[error("Unable to determine the version of the database, file is malformed.")]
+    #[error("unable to determine the version of the database, file is malformed")]
     MalformedFile,
     #[error(
-    "Breaking database change detected. \
-            Your database version (v{version}) is incompatible with the latest database version (v{}).",
-        DB_VERSION.to_string()
+        "breaking database change detected: your database version (v{version}) \
+         is incompatible with the latest database version (v{DB_VERSION})"
     )]
     VersionMismatch { version: u64 },
     #[error("IO error occurred while reading {path}: {err}")]
