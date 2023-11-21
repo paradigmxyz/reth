@@ -1,22 +1,18 @@
 //! Serde helpers for primitive types.
 
-use alloy_primitives::U256;
-use serde::{Deserialize, Deserializer, Serializer};
+use alloy_primitives::B256;
+use serde::Serializer;
 
 pub mod json_u256;
+pub use json_u256::JsonU256;
+
+/// Helpers for dealing with numbers.
 pub mod num;
+pub use num::*;
+
 /// Storage related helpers.
 pub mod storage;
-pub mod u64_hex;
-
-/// Deserializes the input into a U256, accepting both 0x-prefixed hex and decimal strings with
-/// arbitrary precision, defined by serde_json's [`Number`](serde_json::Number).
-pub fn from_int_or_hex<'de, D>(deserializer: D) -> Result<U256, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    num::NumberOrHexU256::deserialize(deserializer)?.try_into_u256()
-}
+pub use storage::JsonStorageKey;
 
 /// Serialize a byte vec as a hex string _without_ the "0x" prefix.
 ///
@@ -27,4 +23,12 @@ where
     T: AsRef<[u8]>,
 {
     s.serialize_str(&alloy_primitives::hex::encode(x.as_ref()))
+}
+
+/// Serialize a [B256] as a hex string _without_ the "0x" prefix.
+pub fn serialize_b256_hex_string_no_prefix<S>(x: &B256, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    s.serialize_str(&format!("{x:x}"))
 }
