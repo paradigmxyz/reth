@@ -6,7 +6,7 @@ use fnv::FnvHashMap;
 use reth_primitives::Address;
 use std::{
     cmp::Ordering,
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, BinaryHeap, HashSet},
     ops::Deref,
     sync::Arc,
 };
@@ -27,7 +27,7 @@ pub(crate) struct ParkedPool<T: ParkedOrd> {
     /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: FnvHashMap<TransactionId, ParkedPoolTransaction<T>>,
+    by_id: BTreeMap<TransactionId, ParkedPoolTransaction<T>>,
     /// A map between the sender, along with its [TransactionId]s and submission_ids
     by_sender: FnvHashMap<Address, BTreeSet<EvictionEntry>>,
     /// All transactions sorted by their order function.
@@ -131,20 +131,34 @@ impl<T: ParkedOrd> ParkedPool<T> {
     ///
     /// Similar to `Heartbeat` in Geth
     pub(crate) fn get_senders_by_submission_id(&self) -> Vec<Address> {
-        // iterate through by_values, and get the last submission id for each sender
-        let mut senders = self
-            .by_sender
+        // iterate through by_id, and get the last submission id for each sender
+        let senders = self
+            .by_id
             .iter()
-            .map(|(addr, entries)| {
-                // SAFETY: `entries` should never be empty
-                (addr, entries.last().unwrap().submission_id)
+            .fold(Vec::new(), |mut set: Vec<(u64, Address)>, (id, tx)| {
+                if let Some(last) = set.last_mut() {
+                    // TODO: keep track of last submission id
+                    // sort by last
+                    if last.1 == tx.transaction.sender() {
+                        if last.0 < tx.submission_id {
+                            // update last submission id
+                            last.0 = tx.submission_id;
+                        }
+                    } else {
+                        // new entry
+                        set.push((tx.submission_id, tx.transaction.sender()));
+                    }
+                } else {
+                    // first entry
+                    set.push((tx.submission_id, tx.transaction.sender()));
+                }
+                set
             })
-            .collect::<Vec<_>>();
+            .into_iter()
+            .collect::<BinaryHeap<_>>();
 
         // sort s.t. senders with older submission ids are first
-        senders.sort_by(|a, b| b.1.cmp(&a.1));
-
-        senders.into_iter().map(|(addr, _)| *addr).collect()
+        senders.into_sorted_vec().into_iter().map(|(_, addr)| addr).collect()
     }
 
     /// Truncates the pool by dropping transactions, first dropping transactions from senders that
@@ -333,8 +347,8 @@ impl<T: ParkedOrd> Ord for ParkedPoolTransaction<T> {
 /// Includes a [TransactionId] and `submission_id`, used for eviction.
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct EvictionEntry {
-    id: TransactionId,
-    submission_id: u64,
+    pub id: TransactionId,
+    pub submission_id: u64,
 }
 
 impl Ord for EvictionEntry {
@@ -590,5 +604,71 @@ mod tests {
         // get the inner txs from the parked txs
         let parked = parked.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(parked, expected_parked);
+    }
+
+    #[test]
+    fn test_senders_by_submission_id() {
+        // this test ensures that we evict from the pending pool by sender
+        let mut f = MockTransactionFactory::default();
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+
+        let a = address!("000000000000000000000000000000000000000a");
+        let b = address!("000000000000000000000000000000000000000b");
+        let c = address!("000000000000000000000000000000000000000c");
+        let d = address!("000000000000000000000000000000000000000d");
+
+        // create a chain of transactions by sender A, B, C
+        let a1 = MockTransaction::eip1559().with_sender(a);
+        let a2 = a1.clone().with_nonce(1);
+        let a3 = a1.clone().with_nonce(2);
+        let a4 = a1.clone().with_nonce(3);
+
+        let b1 = MockTransaction::eip1559().with_sender(b);
+        let b2 = b1.clone().with_nonce(1);
+        let b3 = b1.clone().with_nonce(2);
+
+        // C has the same number of txs as B
+        let c1 = MockTransaction::eip1559().with_sender(c);
+        let c2 = c1.clone().with_nonce(1);
+        let c3 = c1.clone().with_nonce(2);
+
+        let d1 = MockTransaction::eip1559().with_sender(d);
+
+        let all_txs = vec![
+            a1.clone(),
+            a2.clone(),
+            a3.clone(),
+            a4.clone(),
+            b1.clone(),
+            b2.clone(),
+            b3.clone(),
+            c1.clone(),
+            c2.clone(),
+            c3.clone(),
+            d1.clone(),
+        ];
+
+        // add all the transactions to the pool
+        for tx in all_txs {
+            pool.add_transaction(f.validated_arc(tx));
+        }
+
+        // get senders by submission id - a4, b3, c3, d1
+        let senders = pool.get_senders_by_submission_id();
+        assert_eq!(senders.len(), 4);
+        assert_eq!(senders, vec![a, b, c, d]);
+
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+        let all_txs = vec![a1, b1, c1, d1, a2, b2, c2, a3, b3, c3, a4];
+
+        // add all the transactions to the pool
+        for tx in all_txs {
+            pool.add_transaction(f.validated_arc(tx));
+        }
+
+        // get senders by submission id - a4, b3, c3, d1
+        let senders = pool.get_senders_by_submission_id();
+        assert_eq!(senders.len(), 4);
+        assert_eq!(senders, vec![d, b, c, a]);
     }
 }

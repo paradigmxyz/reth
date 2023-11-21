@@ -120,6 +120,12 @@ impl TransactionId {
     pub(crate) fn next_nonce(&self) -> u64 {
         self.nonce + 1
     }
+
+    /// Returns the `TransactionId` with the same sender, but with a nonce of zero.
+    #[inline]
+    pub(crate) fn first_transaction(&self) -> TransactionId {
+        TransactionId::new(self.sender, 0)
+    }
 }
 
 #[cfg(test)]
