@@ -486,6 +486,7 @@ mod tests {
         // two dependent tx in the pool with decreasing fee
 
         {
+            // TODO: test change might not be intended, re review
             let mut pool2 = pool.clone();
             let removed = pool2.enforce_basefee(root_tx.max_fee_per_gas() as u64);
             assert_eq!(removed.len(), 1);
