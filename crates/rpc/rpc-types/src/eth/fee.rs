@@ -36,7 +36,7 @@ pub struct FeeHistory {
     ///
     /// # Note
     ///
-    /// Empty list is skipped only for compatability with Erigon and Geth.
+    /// Empty list is skipped only for compatibility with Erigon and Geth.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub base_fee_per_gas: Vec<U256>,
     /// An array of block gas used ratios. These are calculated as the ratio
