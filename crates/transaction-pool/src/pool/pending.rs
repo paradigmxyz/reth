@@ -250,13 +250,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// transaction is being _added_ to the pool.
     fn update_independents(&mut self, tx: &PendingTransaction<T>, tx_id: &TransactionId) {
         let ancestor_id = tx_id.unchecked_ancestor();
-        if ancestor_id.and_then(|id| self.by_id.get(&id)).is_some() {
+        if let Some(ancestor) = ancestor_id.and_then(|id| self.by_id.get(&id)) {
             // the transaction already has an ancestor, so we only need to ensure that the
             // descendants set includes the highest nonce for this transaction's sender
-            self.independent_descendants.retain(|d| {
-                d.transaction.sender() != tx.transaction.sender() ||
-                    d.transaction.nonce() >= tx.transaction.nonce()
-            });
+            self.independent_descendants.remove(ancestor);
             self.independent_descendants.insert(tx.clone());
         } else {
             // If there's __no__ ancestor in the pool, then this transaction is independent, this is
