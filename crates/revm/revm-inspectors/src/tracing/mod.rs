@@ -282,8 +282,7 @@ impl TracingInspector {
             .record_memory_snapshots
             .then(|| RecordedMemory::new(interp.shared_memory.context_memory().to_vec()))
             .unwrap_or_default();
-        let stack =
-            self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
+        let stack = self.config.record_stack_snapshots.then(|| interp.stack.clone());
 
         let op = OpCode::new(interp.current_opcode())
             .or_else(|| {
@@ -326,9 +325,12 @@ impl TracingInspector {
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
 
-        if interp.stack.len() > step.stack.len() {
-            // if the stack grew, we need to record the new values
-            step.push_stack = Some(interp.stack.data()[step.stack.len()..].to_vec());
+        if let Some(stack) = step.stack.as_ref() {
+            // only check stack changes if record stack snapshots is enabled: if stack is Some
+            if interp.stack.len() > stack.len() {
+                // if the stack grew, we need to record the new values
+                step.push_stack = Some(interp.stack.data()[stack.len()..].to_vec());
+            }
         }
 
         if self.config.record_memory_snapshots {
