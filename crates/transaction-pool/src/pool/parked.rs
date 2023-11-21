@@ -2,11 +2,10 @@ use crate::{
     identifier::TransactionId, pool::size::SizeTracker, PoolTransaction, SubPoolLimit,
     ValidPoolTransaction,
 };
-use fnv::FnvHashMap;
 use reth_primitives::Address;
 use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, BinaryHeap, HashSet},
+    cmp::{Ordering, Reverse},
+    collections::{BTreeMap, BTreeSet, BinaryHeap},
     ops::Deref,
     sync::Arc,
 };
@@ -28,8 +27,6 @@ pub(crate) struct ParkedPool<T: ParkedOrd> {
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: BTreeMap<TransactionId, ParkedPoolTransaction<T>>,
-    /// A map between the sender, along with its [TransactionId]s and submission_ids
-    by_sender: FnvHashMap<Address, BTreeSet<EvictionEntry>>,
     /// All transactions sorted by their order function.
     ///
     /// The higher, the better.
@@ -61,13 +58,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.size_of += tx.size();
 
         // update or create sender entry
-        self.by_sender
-            .entry(tx.sender())
-            .and_modify(|entries| {
-                entries.insert(EvictionEntry { id, submission_id });
-            })
-            .or_insert(BTreeSet::from([EvictionEntry { id, submission_id }]));
-
         let transaction = ParkedPoolTransaction { submission_id, transaction: tx.into() };
 
         self.by_id.insert(id, transaction.clone());
@@ -90,14 +80,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
         let tx = self.by_id.remove(id)?;
         self.best.remove(&tx);
 
-        // remove from by_sender, if there are no more elements in btreeset
-        if let Some(entries) = self.by_sender.get_mut(&tx.transaction.sender()) {
-            entries.remove(&EvictionEntry { id: *id, submission_id: tx.submission_id });
-            if entries.is_empty() {
-                self.by_sender.remove(&tx.transaction.sender());
-            }
-        }
-
         // keep track of size
         self.size_of -= tx.transaction.size();
 
@@ -109,19 +91,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
         &self,
         sender: &Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let Some(tx_ids) = self.by_sender.get(sender) else {
-            // no transactions for this sender
-            return Vec::new()
-        };
-
-        let tx_ids = tx_ids.iter().map(|entry| entry.id).collect::<HashSet<_>>();
-
-        let mut txs = Vec::new();
-        for tx_id in tx_ids {
-            let tx = self.by_id.get(&tx_id).expect("transaction exists");
-            txs.push(tx.transaction.clone().into());
-        }
-        txs
+        self.by_id
+            .values()
+            .filter(|tx| tx.transaction.sender() == *sender)
+            .map(|tx| tx.transaction.clone().into())
+            .collect()
     }
 
     /// Returns addresses sorted by their last submission id. Addresses with older last submission
@@ -135,30 +109,30 @@ impl<T: ParkedOrd> ParkedPool<T> {
         let senders = self
             .by_id
             .iter()
-            .fold(Vec::new(), |mut set: Vec<(u64, Address)>, (id, tx)| {
+            .fold(Vec::new(), |mut set: Vec<Reverse<(u64, Address)>>, (_, tx)| {
                 if let Some(last) = set.last_mut() {
-                    // TODO: keep track of last submission id
                     // sort by last
-                    if last.1 == tx.transaction.sender() {
-                        if last.0 < tx.submission_id {
+                    if last.0 .1 == tx.transaction.sender() {
+                        if last.0 .0 < tx.submission_id {
                             // update last submission id
-                            last.0 = tx.submission_id;
+                            last.0 .0 = tx.submission_id;
                         }
                     } else {
                         // new entry
-                        set.push((tx.submission_id, tx.transaction.sender()));
+                        set.push(Reverse((tx.submission_id, tx.transaction.sender())));
                     }
                 } else {
                     // first entry
-                    set.push((tx.submission_id, tx.transaction.sender()));
+                    set.push(Reverse((tx.submission_id, tx.transaction.sender())));
                 }
                 set
             })
             .into_iter()
+            // sort by submission id
             .collect::<BinaryHeap<_>>();
 
         // sort s.t. senders with older submission ids are first
-        senders.into_sorted_vec().into_iter().map(|(_, addr)| addr).collect()
+        senders.into_sorted_vec().into_iter().map(|Reverse((_, addr))| addr).collect()
     }
 
     /// Truncates the pool by dropping transactions, first dropping transactions from senders that
@@ -297,7 +271,6 @@ impl<T: ParkedOrd> Default for ParkedPool<T> {
     fn default() -> Self {
         Self {
             submission_id: 0,
-            by_sender: Default::default(),
             by_id: Default::default(),
             best: Default::default(),
             size_of: Default::default(),
@@ -347,8 +320,8 @@ impl<T: ParkedOrd> Ord for ParkedPoolTransaction<T> {
 /// Includes a [TransactionId] and `submission_id`, used for eviction.
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct EvictionEntry {
-    pub id: TransactionId,
-    pub submission_id: u64,
+    id: TransactionId,
+    submission_id: u64,
 }
 
 impl Ord for EvictionEntry {
@@ -500,7 +473,7 @@ mod tests {
         let root_tx = f.validated_arc(t.clone());
         pool.add_transaction(root_tx.clone());
 
-        let descendant_tx = f.validated_arc(t.inc_nonce().inc_price());
+        let descendant_tx = f.validated_arc(t.inc_nonce().decr_price());
         pool.add_transaction(descendant_tx.clone());
 
         assert!(pool.by_id.contains_key(root_tx.id()));
@@ -509,21 +482,21 @@ mod tests {
 
         let removed = pool.enforce_basefee(u64::MAX);
         assert!(removed.is_empty());
-
+        assert_eq!(pool.len(), 2);
         // two dependent tx in the pool with decreasing fee
 
         {
             let mut pool2 = pool.clone();
-            let removed = pool2.enforce_basefee(descendant_tx.max_fee_per_gas() as u64);
+            let removed = pool2.enforce_basefee(root_tx.max_fee_per_gas() as u64);
             assert_eq!(removed.len(), 1);
             assert_eq!(pool2.len(), 1);
-            // descendant got popped
-            assert!(pool2.by_id.contains_key(root_tx.id()));
-            assert!(!pool2.by_id.contains_key(descendant_tx.id()));
+            // root got popped - descendant should be skipped
+            assert!(!pool2.by_id.contains_key(root_tx.id()));
+            assert!(pool2.by_id.contains_key(descendant_tx.id()));
         }
 
-        // remove root transaction via root tx fee
-        let removed = pool.enforce_basefee(root_tx.max_fee_per_gas() as u64);
+        // remove root transaction via descendant tx fee
+        let removed = pool.enforce_basefee(descendant_tx.max_fee_per_gas() as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
     }
@@ -653,10 +626,10 @@ mod tests {
             pool.add_transaction(f.validated_arc(tx));
         }
 
-        // get senders by submission id - a4, b3, c3, d1
+        // get senders by submission id - a4, b3, c3, d1, reversed
         let senders = pool.get_senders_by_submission_id();
         assert_eq!(senders.len(), 4);
-        assert_eq!(senders, vec![a, b, c, d]);
+        assert_eq!(senders, vec![d, c, b, a]);
 
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
         let all_txs = vec![a1, b1, c1, d1, a2, b2, c2, a3, b3, c3, a4];
@@ -666,9 +639,8 @@ mod tests {
             pool.add_transaction(f.validated_arc(tx));
         }
 
-        // get senders by submission id - a4, b3, c3, d1
         let senders = pool.get_senders_by_submission_id();
         assert_eq!(senders.len(), 4);
-        assert_eq!(senders, vec![d, b, c, a]);
+        assert_eq!(senders, vec![a, c, b, d]);
     }
 }
