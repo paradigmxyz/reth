@@ -429,8 +429,6 @@ impl CallTraceNode {
     }
 
     /// Converts this call trace into an _empty_ geth [CallFrame]
-    ///
-    /// Caution: this does not include any of the child calls
     pub(crate) fn geth_empty_call_frame(&self, include_logs: bool) -> CallFrame {
         let mut call_frame = CallFrame {
             typ: self.trace.kind.to_string(),
@@ -485,9 +483,6 @@ pub(crate) struct CallTraceStepStackItem<'a> {
 }
 
 /// Ordering enum for calls and logs
-///
-/// i.e. if Call 0 occurs before Log 0, it will be pushed into the `CallTraceNode`'s ordering before
-/// the log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LogCallOrder {
     Log(usize),
@@ -516,7 +511,7 @@ pub(crate) struct CallTraceStep {
     /// Current contract address
     pub(crate) contract: Address,
     /// Stack before step execution
-    pub(crate) stack: Stack,
+    pub(crate) stack: Option<Stack>,
     /// The new stack items placed by this step if any
     pub(crate) push_stack: Option<Vec<U256>>,
     /// All allocated memory in a step
@@ -568,7 +563,7 @@ impl CallTraceStep {
         };
 
         if opts.is_stack_enabled() {
-            log.stack = Some(self.stack.data().clone());
+            log.stack = self.stack.as_ref().map(|stack| stack.data().clone());
         }
 
         if opts.is_memory_enabled() {
