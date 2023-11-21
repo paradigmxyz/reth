@@ -5,10 +5,7 @@ use crate::{
 use bytes::{Buf, BufMut};
 use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::{Display, Formatter},
-    ops::RangeInclusive,
-};
+use std::ops::RangeInclusive;
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -169,9 +166,16 @@ pub struct EntitiesCheckpoint {
     pub total: u64,
 }
 
-impl Display for EntitiesCheckpoint {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.2}%", 100.0 * self.processed as f64 / self.total as f64)
+impl EntitiesCheckpoint {
+    /// Formats entities checkpoint as percentage, i.e. `processed / total`.
+    ///
+    /// Return [None] if `total == 0`.
+    pub fn fmt_percentage(&self) -> Option<String> {
+        if self.total == 0 {
+            return None
+        }
+
+        Some(format!("{:.2}%", 100.0 * self.processed as f64 / self.total as f64))
     }
 }
 
