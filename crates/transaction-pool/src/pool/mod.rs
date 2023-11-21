@@ -695,6 +695,14 @@ where
         self.pool.read().get_transactions_by_sender(sender_id)
     }
 
+    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    pub(crate) fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pool.read().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
+    }
+
     /// Returns all the transactions belonging to the hashes.
     ///
     /// If no transaction exists, it is skipped.
