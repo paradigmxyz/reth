@@ -134,7 +134,7 @@ impl TracingInspector {
     ) -> bool {
         if data.precompiles.contains(to) {
             // only if this is _not_ the root call
-            return self.is_deep() && value == U256::ZERO;
+            return self.is_deep() && value == U256::ZERO
         }
         false
     }

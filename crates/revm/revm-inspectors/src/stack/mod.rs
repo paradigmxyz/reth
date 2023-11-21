@@ -141,7 +141,7 @@ where
             if let Some((interp_result, range)) = inspector.call(context, inputs) {
                 // Allow inspectors to exit early
                 if interp_result.result != InstructionResult::Continue {
-                    return Some((interp_result, range));
+                    return Some((interp_result, range))
                 }
             }
         });
@@ -170,7 +170,7 @@ where
                 (new_result.result == InstructionResult::Revert &&
                     new_result.output != result.output)
             {
-                return new_result;
+                return new_result
             }
         });
 
@@ -187,7 +187,7 @@ where
             if let Some((interp_result, range)) = inspector.create(context, inputs) {
                 // Allow inspectors to exit early
                 if interp_result.result != InstructionResult::Continue {
-                    return Some((interp_result, range));
+                    return Some((interp_result, range))
                 }
             }
         });
@@ -212,7 +212,7 @@ where
             let (new_result, new_address) = inspector.create_end(context, result.clone(), address);
 
             if new_result.result != result.result {
-                return (new_result, new_address);
+                return (new_result, new_address)
             }
         });
 

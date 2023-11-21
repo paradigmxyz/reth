@@ -94,7 +94,7 @@ impl JsInspector {
             .cloned()
             .ok_or(JsInspectorError::ResultFunctionMissing)?;
         if !result_fn.is_callable() {
-            return Err(JsInspectorError::ResultFunctionMissing);
+            return Err(JsInspectorError::ResultFunctionMissing)
         }
 
         let fault_fn = obj
@@ -103,7 +103,7 @@ impl JsInspector {
             .cloned()
             .ok_or(JsInspectorError::ResultFunctionMissing)?;
         if !result_fn.is_callable() {
-            return Err(JsInspectorError::ResultFunctionMissing);
+            return Err(JsInspectorError::ResultFunctionMissing)
         }
 
         let enter_fn = obj.get("enter", &mut ctx)?.as_object().cloned().filter(|o| o.is_callable());
@@ -115,7 +115,7 @@ impl JsInspector {
 
         if let Some(setup_fn) = obj.get("setup", &mut ctx)?.as_object() {
             if !setup_fn.is_callable() {
-                return Err(JsInspectorError::SetupFunctionNotCallable);
+                return Err(JsInspectorError::SetupFunctionNotCallable)
             }
 
             // call setup()
@@ -274,7 +274,7 @@ impl JsInspector {
     /// Registers the precompiles in the JS context
     fn register_precompiles(&mut self, precompiles: &Precompiles) {
         if !self.precompiles_registered {
-            return;
+            return
         }
         let precompiles = PrecompileList(precompiles.addresses().copied().collect());
 
@@ -290,7 +290,7 @@ where
 {
     fn step(&mut self, interp: &mut Interpreter, data: &mut RevmEvmContext<'_, DB>) {
         if self.step_fn.is_none() {
-            return;
+            return
         }
 
         let (db, _db_guard) =
@@ -327,7 +327,7 @@ where
 
     fn step_end(&mut self, interp: &mut Interpreter, data: &mut RevmEvmContext<'_, DB>) {
         if self.step_fn.is_none() {
-            return;
+            return
         }
 
         if matches!(interp.instruction_result, return_revert!()) {
@@ -393,7 +393,7 @@ where
                         gas: Gas::new(0),
                     },
                     0..0,
-                ));
+                ))
             }
         }
 
@@ -423,7 +423,7 @@ where
                     result: InstructionResult::Revert,
                     output: err.to_string().into(),
                     gas: Gas::new(0),
-                };
+                }
             }
         }
 
@@ -463,7 +463,7 @@ where
                         output: err.to_string().into(),
                     },
                     None,
-                ));
+                ))
             }
         }
 
@@ -497,7 +497,7 @@ where
                         output: err.to_string().into(),
                     },
                     None,
-                );
+                )
             }
         }
 
