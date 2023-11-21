@@ -418,8 +418,8 @@ impl Eta {
     }
 }
 
-impl std::fmt::Display for Eta {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Eta {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some((eta, last_checkpoint_time)) = self.eta.zip(self.last_checkpoint_time) {
             let remaining = eta.checked_sub(last_checkpoint_time.elapsed());
 
