@@ -52,7 +52,8 @@ members = [
     "examples/rpc-db",
     "examples/manual-p2p",
     "examples/beacon-api-sse",
-    "examples/trace-transaction-cli"
+    "examples/trace-transaction-cli",
+    "examples/count-opcodes"
 ]
 default-members = ["bin/reth"]
 

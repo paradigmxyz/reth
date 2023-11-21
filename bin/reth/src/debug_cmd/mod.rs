@@ -4,7 +4,6 @@ use clap::{Parser, Subcommand};
 use crate::runner::CliContext;
 
 mod build_block;
-mod count_opcodes;
 mod execution;
 mod in_memory_merkle;
 mod merkle;
@@ -27,8 +26,6 @@ pub enum Subcommands {
     InMemoryMerkle(in_memory_merkle::Command),
     /// Debug block building.
     BuildBlock(build_block::Command),
-    /// Script for counting opcodes occurrencies
-    CountOpcodes(count_opcodes::Command),
 }
 
 impl Command {
@@ -39,7 +36,6 @@ impl Command {
             Subcommands::Merkle(command) => command.execute(ctx).await,
             Subcommands::InMemoryMerkle(command) => command.execute(ctx).await,
             Subcommands::BuildBlock(command) => command.execute(ctx).await,
-            Subcommands::CountOpcodes(command) => command.execute().await,
         }
     }
 }

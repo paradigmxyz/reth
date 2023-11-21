@@ -1,0 +1,17 @@
+[package]
+name = "count-opcodes"
+version = "0.0.1"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+reth-db.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-revm.workspace = true
+
+comfy-table = "7.0"
+eyre.workspace = true
+dirs = "5.0.1"

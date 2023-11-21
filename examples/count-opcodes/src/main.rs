@@ -1,12 +1,22 @@
-//! `reth debug count-opcodes` comamnd. Tool to count opcodes occurrencies.
-use crate::primitives::Bytes;
-use clap::Parser;
+//! Example of how to count opcodes occurrencies. This is useful to get a good amount of insight
+//! into what is most found inside bytecode.
+//!
+//! This example requires you to have a Sepolia db inside the default folder for MacOS. If you are
+//! using a different OS or you don't have a Sepolia db, just change the db location.
+//!
+//! Run with
+//!
+//! ```not_rust
+//! cargo run -p count_opcodes
+//! ```
+
 use comfy_table::{Cell, Row, Table};
+use dirs::home_dir;
 use reth_db::{open_db_read_only, tables};
-use reth_primitives::ChainSpecBuilder;
+use reth_primitives::{Bytes, ChainSpecBuilder};
 use reth_provider::ProviderFactory;
 use reth_revm::interpreter::{opcode, OpCode};
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 macro_rules! opcodes_tuples_vec {
     ($map:expr) => {{
@@ -24,42 +34,35 @@ macro_rules! opcodes_tuples_vec {
     }};
 }
 
-/// `reth count-opcodes` command
-#[derive(Debug, Parser)]
-pub struct Command {
-    /// The database path.
-    #[arg(long, value_name = "DB_DIR", verbatim_doc_comment)]
-    db_dir: PathBuf,
-    /// The top `take` opcodes to display.
-    #[arg(long, value_name = "TAKE_SIZE", verbatim_doc_comment, default_value = "10")]
-    take: usize,
-}
+#[tokio::main]
+pub async fn main() -> eyre::Result<()> {
+    // db path. Change it if you don't have a sepolia db or you are not on MacOS.
+    let mut db_dir = home_dir().expect("Home directory not found");
+    db_dir.push("Library/Application Support/reth/sepolia/db");
+    // read db
+    let db = Arc::new(open_db_read_only(db_dir.as_path(), None)?);
+    // create spec
+    let spec = Arc::new(ChainSpecBuilder::mainnet().build());
+    // create db provider
+    let factory = ProviderFactory::new(db.clone(), spec.clone());
+    let provider = factory.provider()?;
 
-impl Command {
-    /// Execute `count-opcodes` command
-    pub async fn execute(&self) -> eyre::Result<()> {
-        // read db
-        let db = Arc::new(open_db_read_only(self.db_dir.as_path(), None)?);
-        // create spec
-        let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-        // create db provider
-        let factory = ProviderFactory::new(db.clone(), spec.clone());
-        let provider = factory.provider()?;
+    // get bytecodes table
+    let bytecodes = provider.table::<tables::Bytecodes>()?;
 
-        // get bytecodes table
-        let bytecodes = provider.table::<tables::Bytecodes>()?;
+    let mut opcode_counter = OpCodeCounter::new();
 
-        let mut opcode_counter = OpCodeCounter::new();
-
-        for (_address, bytecode) in bytecodes {
-            let filtered_bytes = filter_bytecode_bytes(bytecode.bytes());
-            opcode_counter.count_sequences(&filtered_bytes);
-        }
-
-        opcode_counter.print_counts(self.take);
-
-        Ok(())
+    for (_address, bytecode) in bytecodes {
+        let filtered_bytes = filter_bytecode_bytes(bytecode.bytes());
+        opcode_counter.count_sequences(&filtered_bytes);
     }
+
+    // take only top 10
+    let take = 10;
+
+    opcode_counter.print_counts(take);
+
+    Ok(())
 }
 
 /// Takes bytecode bytes and returns filtered bytes without `PUSH` data
