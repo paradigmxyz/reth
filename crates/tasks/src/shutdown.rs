@@ -7,9 +7,62 @@ use futures_util::{
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    sync::{atomic::AtomicUsize, Arc},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
+
+/// A Future that resolves when the shutdown event has been fired.
+///
+/// The [TaskManager](crate)
+#[derive(Debug)]
+pub struct GracefulShutdown {
+    shutdown: Shutdown,
+    guard: Option<GracefulShutdownGuard>,
+}
+
+impl GracefulShutdown {
+    pub(crate) fn new(shutdown: Shutdown, guard: GracefulShutdownGuard) -> Self {
+        Self { shutdown, guard: Some(guard) }
+    }
+}
+
+impl Future for GracefulShutdown {
+    type Output = GracefulShutdownGuard;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        ready!(self.shutdown.poll_unpin(cx));
+        Poll::Ready(self.get_mut().guard.take().expect("Future polled after completion"))
+    }
+}
+
+impl Clone for GracefulShutdown {
+    fn clone(&self) -> Self {
+        Self {
+            shutdown: self.shutdown.clone(),
+            guard: self.guard.as_ref().map(|g| GracefulShutdownGuard::new(Arc::clone(&g.0))),
+        }
+    }
+}
+
+/// A guard that fires once dropped to signal the [TaskManager](crate::TaskManager) that the
+/// [GracefulShutdown] has completed.
+#[derive(Debug)]
+#[must_use = "if unused the task will not be gracefully shutdown"]
+pub struct GracefulShutdownGuard(Arc<AtomicUsize>);
+
+impl GracefulShutdownGuard {
+    pub(crate) fn new(counter: Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self(counter)
+    }
+}
+
+impl Drop for GracefulShutdownGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
 
 /// A Future that resolves when the shutdown event has been fired.
 #[derive(Debug, Clone)]
