@@ -5,14 +5,13 @@ use reth_db::database::Database;
 use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{
     snapshot::{iter_snapshots, HighestSnapshots},
-    BlockNumber, ChainSpec, TxNumber,
+    BlockNumber, TxNumber,
 };
 use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt};
 use std::{
     collections::HashMap,
     ops::RangeInclusive,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use tokio::sync::watch;
 use tracing::warn;
@@ -94,15 +93,14 @@ impl SnapshotTargets {
 impl<DB: Database> Snapshotter<DB> {
     /// Creates a new [Snapshotter].
     pub fn new(
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         snapshots_path: impl AsRef<Path>,
-        chain_spec: Arc<ChainSpec>,
         block_interval: u64,
     ) -> RethResult<Self> {
         let (highest_snapshots_notifier, highest_snapshots_tracker) = watch::channel(None);
 
         let mut snapshotter = Self {
-            provider_factory: ProviderFactory::new(db, chain_spec),
+            provider_factory,
             snapshots_path: snapshots_path.as_ref().into(),
             highest_snapshots: HighestSnapshots::default(),
             highest_snapshots_notifier,
@@ -329,16 +327,14 @@ mod tests {
         test_utils::{generators, generators::random_block_range},
         RethError,
     };
-    use reth_primitives::{snapshot::HighestSnapshots, B256, MAINNET};
-    use reth_stages::test_utils::TestTransaction;
+    use reth_primitives::{snapshot::HighestSnapshots, B256};
+    use reth_stages::test_utils::TestStageDB;
 
     #[test]
     fn new() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let snapshots_dir = tempfile::TempDir::new().unwrap();
-        let snapshotter =
-            Snapshotter::new(tx.inner_raw(), snapshots_dir.into_path(), MAINNET.clone(), 2)
-                .unwrap();
+        let snapshotter = Snapshotter::new(db.factory, snapshots_dir.into_path(), 2).unwrap();
 
         assert_eq!(
             *snapshotter.highest_snapshot_receiver().borrow(),
@@ -348,16 +344,14 @@ mod tests {
 
     #[test]
     fn get_snapshot_targets() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let snapshots_dir = tempfile::TempDir::new().unwrap();
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
-        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
-        let mut snapshotter =
-            Snapshotter::new(tx.inner_raw(), snapshots_dir.into_path(), MAINNET.clone(), 2)
-                .unwrap();
+        let mut snapshotter = Snapshotter::new(db.factory, snapshots_dir.into_path(), 2).unwrap();
 
         // Snapshot targets has data per part up to the passed finalized block number,
         // respecting the block interval

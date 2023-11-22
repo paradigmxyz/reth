@@ -42,7 +42,7 @@ mod tests {
     use crate::{
         stage::Stage,
         stages::{ExecutionStage, IndexAccountHistoryStage, IndexStorageHistoryStage},
-        test_utils::TestTransaction,
+        test_utils::TestStageDB,
         ExecInput,
     };
     use alloy_rlp::Decodable;
@@ -50,17 +50,17 @@ mod tests {
         cursor::DbCursorRO,
         mdbx::{cursor::Cursor, RW},
         tables,
+        test_utils::TempDatabase,
         transaction::{DbTx, DbTxMut},
         AccountHistory, DatabaseEnv,
     };
     use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
-        PruneModes, SealedBlock, MAINNET, U256,
+        PruneModes, SealedBlock, U256,
     };
     use reth_provider::{
-        AccountExtReader, BlockWriter, DatabaseProviderRW, ProviderFactory, ReceiptProvider,
-        StorageReader,
+        AccountExtReader, BlockWriter, ProviderFactory, ReceiptProvider, StorageReader,
     };
     use reth_revm::Factory;
     use std::sync::Arc;
@@ -68,18 +68,17 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_prune() {
-        let test_tx = TestTransaction::default();
-        let factory = Arc::new(ProviderFactory::new(test_tx.tx.db(), MAINNET.clone()));
+        let test_db = TestStageDB::default();
 
-        let provider = factory.provider_rw().unwrap();
+        let provider_rw = test_db.factory.provider_rw().unwrap();
         let tip = 66;
         let input = ExecInput { target: Some(tip), checkpoint: None };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis, None, None).unwrap();
-        provider.insert_block(block.clone(), None, None).unwrap();
+        provider_rw.insert_block(genesis, None, None).unwrap();
+        provider_rw.insert_block(block.clone(), None, None).unwrap();
 
         // Fill with bogus blocks to respect PruneMode distance.
         let mut head = block.hash;
@@ -87,22 +86,22 @@ mod tests {
         for block_number in 2..=tip {
             let nblock = random_block(&mut rng, block_number, Some(head), Some(0), Some(0));
             head = nblock.hash;
-            provider.insert_block(nblock, None, None).unwrap();
+            provider_rw.insert_block(nblock, None, None).unwrap();
         }
-        provider.commit().unwrap();
+        provider_rw.commit().unwrap();
 
         // insert pre state
-        let provider = factory.provider_rw().unwrap();
+        let provider_rw = test_db.factory.provider_rw().unwrap();
         let code = hex!("5a465a905090036002900360015500");
         let code_hash = keccak256(hex!("5a465a905090036002900360015500"));
-        provider
+        provider_rw
             .tx_ref()
             .put::<tables::PlainAccountState>(
                 address!("1000000000000000000000000000000000000000"),
                 Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
             )
             .unwrap();
-        provider
+        provider_rw
             .tx_ref()
             .put::<tables::PlainAccountState>(
                 address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
@@ -113,18 +112,18 @@ mod tests {
                 },
             )
             .unwrap();
-        provider
+        provider_rw
             .tx_ref()
             .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into()))
             .unwrap();
-        provider.commit().unwrap();
+        provider_rw.commit().unwrap();
 
-        let check_pruning = |factory: Arc<ProviderFactory<_>>,
+        let check_pruning = |factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
                              prune_modes: PruneModes,
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,
                              expect_num_storage_changesets: usize| async move {
-            let provider: DatabaseProviderRW<&DatabaseEnv> = factory.provider_rw().unwrap();
+            let provider = factory.provider_rw().unwrap();
 
             // Check execution and create receipts and changesets according to the pruning
             // configuration
@@ -195,34 +194,34 @@ mod tests {
         // In an unpruned configuration there is 1 receipt, 3 changed accounts and 1 changed
         // storage.
         let mut prune = PruneModes::none();
-        check_pruning(factory.clone(), prune.clone(), 1, 3, 1).await;
+        check_pruning(test_db.factory.clone(), prune.clone(), 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Full);
         prune.account_history = Some(PruneMode::Full);
         prune.storage_history = Some(PruneMode::Full);
         // This will result in error for account_history and storage_history, which is caught.
-        check_pruning(factory.clone(), prune.clone(), 0, 0, 0).await;
+        check_pruning(test_db.factory.clone(), prune.clone(), 0, 0, 0).await;
 
         prune.receipts = Some(PruneMode::Before(1));
         prune.account_history = Some(PruneMode::Before(1));
         prune.storage_history = Some(PruneMode::Before(1));
-        check_pruning(factory.clone(), prune.clone(), 1, 3, 1).await;
+        check_pruning(test_db.factory.clone(), prune.clone(), 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Before(2));
         prune.account_history = Some(PruneMode::Before(2));
         prune.storage_history = Some(PruneMode::Before(2));
         // The one account is the miner
-        check_pruning(factory.clone(), prune.clone(), 0, 1, 0).await;
+        check_pruning(test_db.factory.clone(), prune.clone(), 0, 1, 0).await;
 
         prune.receipts = Some(PruneMode::Distance(66));
         prune.account_history = Some(PruneMode::Distance(66));
         prune.storage_history = Some(PruneMode::Distance(66));
-        check_pruning(factory.clone(), prune.clone(), 1, 3, 1).await;
+        check_pruning(test_db.factory.clone(), prune.clone(), 1, 3, 1).await;
 
         prune.receipts = Some(PruneMode::Distance(64));
         prune.account_history = Some(PruneMode::Distance(64));
         prune.storage_history = Some(PruneMode::Distance(64));
         // The one account is the miner
-        check_pruning(factory.clone(), prune.clone(), 0, 1, 0).await;
+        check_pruning(test_db.factory.clone(), prune.clone(), 0, 1, 0).await;
     }
 }

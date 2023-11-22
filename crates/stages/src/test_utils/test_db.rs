@@ -9,7 +9,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
 };
-use reth_interfaces::{test_utils::generators::ChangeSet, RethResult};
+use reth_interfaces::{provider::ProviderResult, test_utils::generators::ChangeSet, RethResult};
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
     TxHash, TxNumber, B256, MAINNET, U256,
@@ -18,80 +18,50 @@ use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, HistoryWriter, Provi
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
-    ops::RangeInclusive,
+    ops::{Deref, RangeInclusive},
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-/// The [TestTransaction] is used as an internal
-/// database for testing stage implementation.
-///
-/// ```rust,ignore
-/// let tx = TestTransaction::default();
-/// stage.execute(&mut tx.container(), input);
-/// ```
+/// Test database that is used for testing stage implementations.
 #[derive(Debug)]
-pub struct TestTransaction {
-    /// DB
-    pub tx: Arc<TempDatabase<DatabaseEnv>>,
-    pub path: Option<PathBuf>,
+pub struct TestStageDB {
     pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
 }
 
-impl Default for TestTransaction {
+impl Default for TestStageDB {
     /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        let tx = create_test_rw_db();
-        Self { tx: tx.clone(), path: None, factory: ProviderFactory::new(tx, MAINNET.clone()) }
+        Self { factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone()) }
     }
 }
 
-impl TestTransaction {
+impl TestStageDB {
     pub fn new(path: &Path) -> Self {
-        let tx = create_test_rw_db_with_path(path);
-        Self {
-            tx: tx.clone(),
-            path: Some(path.to_path_buf()),
-            factory: ProviderFactory::new(tx, MAINNET.clone()),
-        }
-    }
-
-    /// Return a database wrapped in [DatabaseProviderRW].
-    pub fn inner_rw(&self) -> DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>> {
-        self.factory.provider_rw().expect("failed to create db container")
-    }
-
-    /// Return a database wrapped in [DatabaseProviderRO].
-    pub fn inner(&self) -> DatabaseProviderRO<Arc<TempDatabase<DatabaseEnv>>> {
-        self.factory.provider().expect("failed to create db container")
-    }
-
-    /// Get a pointer to an internal database.
-    pub fn inner_raw(&self) -> Arc<TempDatabase<DatabaseEnv>> {
-        self.tx.clone()
+        Self { factory: ProviderFactory::new(create_test_rw_db_with_path(path), MAINNET.clone()) }
     }
 
     /// Invoke a callback with transaction committing it afterwards
-    pub fn commit<F>(&self, f: F) -> Result<(), DbError>
+    pub fn commit<F>(&self, f: F) -> ProviderResult<()>
     where
-        F: FnOnce(&<DatabaseEnv as Database>::TXMut) -> Result<(), DbError>,
+        F: FnOnce(&<DatabaseEnv as Database>::TXMut) -> ProviderResult<()>,
     {
-        let mut tx = self.inner_rw();
+        let mut tx = self.factory.provider_rw()?;
         f(tx.tx_ref())?;
         tx.commit().expect("failed to commit");
         Ok(())
     }
 
     /// Invoke a callback with a read transaction
-    pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
+    pub fn query<F, Ok>(&self, f: F) -> ProviderResult<Ok>
     where
-        F: FnOnce(&<DatabaseEnv as Database>::TX) -> Result<R, DbError>,
+        F: FnOnce(&<DatabaseEnv as Database>::TX) -> ProviderResult<Ok>,
     {
-        f(self.inner().tx_ref())
+        f(self.factory.provider()?.tx_ref())
     }
 
     /// Check if the table is empty
-    pub fn table_is_empty<T: Table>(&self) -> Result<bool, DbError> {
+    pub fn table_is_empty<T: Table>(&self) -> ProviderResult<bool> {
         self.query(|tx| {
             let last = tx.cursor_read::<T>()?.last()?;
             Ok(last.is_none())
@@ -99,70 +69,21 @@ impl TestTransaction {
     }
 
     /// Return full table as Vec
-    pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DbError>
+    pub fn table<T: Table>(&self) -> ProviderResult<Vec<KeyValue<T>>>
     where
         T::Key: Default + Ord,
     {
         self.query(|tx| {
-            tx.cursor_read::<T>()?
+            Ok(tx
+                .cursor_read::<T>()?
                 .walk(Some(T::Key::default()))?
-                .collect::<Result<Vec<_>, DbError>>()
-        })
-    }
-
-    /// Map a collection of values and store them in the database.
-    /// This function commits the transaction before exiting.
-    ///
-    /// ```rust,ignore
-    /// let tx = TestTransaction::default();
-    /// tx.map_put::<Table, _, _>(&items, |item| item)?;
-    /// ```
-    #[allow(dead_code)]
-    pub fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), DbError>
-    where
-        T: Table,
-        S: Clone,
-        F: FnMut(&S) -> TableRow<T>,
-    {
-        self.commit(|tx| {
-            values.iter().try_for_each(|src| {
-                let (k, v) = map(src);
-                tx.put::<T>(k, v)
-            })
-        })
-    }
-
-    /// Transform a collection of values using a callback and store
-    /// them in the database. The callback additionally accepts the
-    /// optional last element that was stored.
-    /// This function commits the transaction before exiting.
-    ///
-    /// ```rust,ignore
-    /// let tx = TestTransaction::default();
-    /// tx.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
-    /// ```
-    #[allow(dead_code)]
-    pub fn transform_append<T, S, F>(&self, values: &[S], mut transform: F) -> Result<(), DbError>
-    where
-        T: Table,
-        <T as Table>::Value: Clone,
-        S: Clone,
-        F: FnMut(&Option<<T as Table>::Value>, &S) -> TableRow<T>,
-    {
-        self.commit(|tx| {
-            let mut cursor = tx.cursor_write::<T>()?;
-            let mut last = cursor.last()?.map(|(_, v)| v);
-            values.iter().try_for_each(|src| {
-                let (k, v) = transform(&last, src);
-                last = Some(v.clone());
-                cursor.append(k, v)
-            })
+                .collect::<Result<Vec<_>, DbError>>()?)
         })
     }
 
     /// Check that there is no table entry above a given
     /// number by [Table::Key]
-    pub fn ensure_no_entry_above<T, F>(&self, num: u64, mut selector: F) -> Result<(), DbError>
+    pub fn ensure_no_entry_above<T, F>(&self, num: u64, mut selector: F) -> ProviderResult<()>
     where
         T: Table,
         F: FnMut(T::Key) -> BlockNumber,
@@ -182,7 +103,7 @@ impl TestTransaction {
         &self,
         num: u64,
         mut selector: F,
-    ) -> Result<(), DbError>
+    ) -> ProviderResult<()>
     where
         T: Table,
         F: FnMut(T::Value) -> BlockNumber,
@@ -206,17 +127,19 @@ impl TestTransaction {
 
     /// Insert ordered collection of [SealedHeader] into the corresponding tables
     /// that are supposed to be populated by the headers stage.
-    pub fn insert_headers<'a, I>(&self, headers: I) -> Result<(), DbError>
+    pub fn insert_headers<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
-        self.commit(|tx| headers.into_iter().try_for_each(|header| Self::insert_header(tx, header)))
+        self.commit(|tx| {
+            Ok(headers.into_iter().try_for_each(|header| Self::insert_header(tx, header))?)
+        })
     }
 
     /// Inserts total difficulty of headers into the corresponding tables.
     ///
     /// Superset functionality of [TestTransaction::insert_headers].
-    pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> Result<(), DbError>
+    pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
@@ -225,7 +148,7 @@ impl TestTransaction {
             headers.into_iter().try_for_each(|header| {
                 Self::insert_header(tx, header)?;
                 td += header.difficulty;
-                tx.put::<tables::HeaderTD>(header.number, td.into())
+                Ok(tx.put::<tables::HeaderTD>(header.number, td.into())?)
             })
         })
     }
@@ -234,7 +157,7 @@ impl TestTransaction {
     /// Superset functionality of [TestTransaction::insert_headers].
     ///
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
-    pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> Result<(), DbError>
+    pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> ProviderResult<()>
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
@@ -266,45 +189,45 @@ impl TestTransaction {
         })
     }
 
-    pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> Result<(), DbError>
+    pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (TxHash, TxNumber)>,
     {
         self.commit(|tx| {
             tx_hash_numbers.into_iter().try_for_each(|(tx_hash, tx_num)| {
                 // Insert into tx hash numbers table.
-                tx.put::<tables::TxHashNumber>(tx_hash, tx_num)
+                Ok(tx.put::<tables::TxHashNumber>(tx_hash, tx_num)?)
             })
         })
     }
 
     /// Insert collection of ([TxNumber], [Receipt]) into the corresponding table.
-    pub fn insert_receipts<I>(&self, receipts: I) -> Result<(), DbError>
+    pub fn insert_receipts<I>(&self, receipts: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (TxNumber, Receipt)>,
     {
         self.commit(|tx| {
             receipts.into_iter().try_for_each(|(tx_num, receipt)| {
                 // Insert into receipts table.
-                tx.put::<tables::Receipts>(tx_num, receipt)
+                Ok(tx.put::<tables::Receipts>(tx_num, receipt)?)
             })
         })
     }
 
-    pub fn insert_transaction_senders<I>(&self, transaction_senders: I) -> Result<(), DbError>
+    pub fn insert_transaction_senders<I>(&self, transaction_senders: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (TxNumber, Address)>,
     {
         self.commit(|tx| {
             transaction_senders.into_iter().try_for_each(|(tx_num, sender)| {
                 // Insert into receipts table.
-                tx.put::<tables::TxSenders>(tx_num, sender)
+                Ok(tx.put::<tables::TxSenders>(tx_num, sender)?)
             })
         })
     }
 
     /// Insert collection of ([Address], [Account]) into corresponding tables.
-    pub fn insert_accounts_and_storages<I, S>(&self, accounts: I) -> Result<(), DbError>
+    pub fn insert_accounts_and_storages<I, S>(&self, accounts: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (Address, (Account, S))>,
         S: IntoIterator<Item = StorageEntry>,
@@ -350,7 +273,7 @@ impl TestTransaction {
         &self,
         changesets: I,
         block_offset: Option<u64>,
-    ) -> Result<(), DbError>
+    ) -> ProviderResult<()>
     where
         I: IntoIterator<Item = ChangeSet>,
     {
@@ -369,14 +292,14 @@ impl TestTransaction {
 
                     // Insert into storage changeset.
                     old_storage.into_iter().try_for_each(|entry| {
-                        tx.put::<tables::StorageChangeSet>(block_address, entry)
+                        Ok(tx.put::<tables::StorageChangeSet>(block_address, entry)?)
                     })
                 })
             })
         })
     }
 
-    pub fn insert_history<I>(&self, changesets: I, block_offset: Option<u64>) -> RethResult<()>
+    pub fn insert_history<I>(&self, changesets: I, block_offset: Option<u64>) -> ProviderResult<()>
     where
         I: IntoIterator<Item = ChangeSet>,
     {
@@ -392,10 +315,10 @@ impl TestTransaction {
             }
         }
 
-        let provider = self.factory.provider_rw()?;
-        provider.insert_account_history_index(accounts)?;
-        provider.insert_storage_history_index(storages)?;
-        provider.commit()?;
+        let provider_rw = self.factory.provider_rw()?;
+        provider_rw.insert_account_history_index(accounts)?;
+        provider_rw.insert_storage_history_index(storages)?;
+        provider_rw.commit()?;
 
         Ok(())
     }

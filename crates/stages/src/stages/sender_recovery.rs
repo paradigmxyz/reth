@@ -56,7 +56,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -168,7 +168,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
@@ -207,7 +207,7 @@ fn recover_sender(
 }
 
 fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<&DB>,
+    provider: &DatabaseProviderRW<DB>,
 ) -> Result<EntitiesCheckpoint, StageError> {
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::SenderRecovery)?
@@ -250,14 +250,14 @@ mod tests {
     };
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
-        TransactionSigned, B256, MAINNET,
+        TransactionSigned, B256,
     };
-    use reth_provider::{ProviderFactory, PruneCheckpointWriter, TransactionsProvider};
+    use reth_provider::{PruneCheckpointWriter, TransactionsProvider};
 
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestStageDB, UnwindStageTestRunner,
     };
 
     stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
@@ -288,7 +288,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
+        runner.db.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -322,9 +322,9 @@ mod tests {
         // Manually seed once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner.tx.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
 
-        let total_transactions = runner.tx.table::<tables::Transactions>().unwrap().len() as u64;
+        let total_transactions = runner.db.table::<tables::Transactions>().unwrap().len() as u64;
 
         let first_input = ExecInput {
             target: Some(previous_stage),
@@ -348,7 +348,7 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
-                        processed: runner.tx.table::<tables::TxSenders>().unwrap().len() as u64,
+                        processed: runner.db.table::<tables::TxSenders>().unwrap().len() as u64,
                         total: total_transactions
                     }
                 ),
@@ -379,11 +379,11 @@ mod tests {
 
     #[test]
     fn stage_checkpoint_pruned() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
-        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -399,9 +399,9 @@ mod tests {
                 tx_number += 1;
             }
         }
-        tx.insert_transaction_senders(tx_senders).expect("insert tx hash numbers");
+        db.insert_transaction_senders(tx_senders).expect("insert tx hash numbers");
 
-        let provider = tx.inner_rw();
+        let provider = db.factory.provider_rw().unwrap();
         provider
             .save_prune_checkpoint(
                 PruneSegment::SenderRecovery,
@@ -419,10 +419,7 @@ mod tests {
             .expect("save stage checkpoint");
         provider.commit().expect("commit");
 
-        let db = tx.inner_raw();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
-        let provider = factory.provider_rw().expect("provider rw");
-
+        let provider = db.factory.provider_rw().unwrap();
         assert_eq!(
             stage_checkpoint(&provider).expect("stage checkpoint"),
             EntitiesCheckpoint {
@@ -436,13 +433,13 @@ mod tests {
     }
 
     struct SenderRecoveryTestRunner {
-        tx: TestTransaction,
+        db: TestStageDB,
         threshold: u64,
     }
 
     impl Default for SenderRecoveryTestRunner {
         fn default() -> Self {
-            Self { threshold: 1000, tx: TestTransaction::default() }
+            Self { threshold: 1000, db: TestStageDB::default() }
         }
     }
 
@@ -459,16 +456,17 @@ mod tests {
         ///    not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
-                .tx
-                .inner_rw()
+                .db
+                .factory
+                .provider_rw()?
                 .block_body_indices(block)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block));
             match body_result {
                 Ok(body) => self
-                    .tx
+                    .db
                     .ensure_no_entry_above::<tables::TxSenders, _>(body.last_tx_num(), |key| key)?,
                 Err(_) => {
-                    assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
+                    assert!(self.db.table_is_empty::<tables::TxSenders>()?);
                 }
             };
 
@@ -479,8 +477,8 @@ mod tests {
     impl StageTestRunner for SenderRecoveryTestRunner {
         type S = SenderRecoveryStage;
 
-        fn tx(&self) -> &TestTransaction {
-            &self.tx
+        fn db(&self) -> &TestStageDB {
+            &self.db
         }
 
         fn stage(&self) -> Self::S {
@@ -497,7 +495,7 @@ mod tests {
             let end = input.target();
 
             let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..2);
-            self.tx.insert_blocks(blocks.iter(), None)?;
+            self.db.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }
 
@@ -508,7 +506,7 @@ mod tests {
         ) -> Result<(), TestRunnerError> {
             match output {
                 Some(output) => {
-                    let provider = self.tx.inner();
+                    let provider = self.db.factory.provider()?;
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
 

@@ -7,11 +7,11 @@ use reth_db::database::Database;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
     stage::{StageCheckpoint, StageId},
-    BlockNumber, ChainSpec, B256,
+    BlockNumber, B256,
 };
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use reth_tokio_util::EventListeners;
-use std::{pin::Pin, sync::Arc};
+use std::pin::Pin;
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -93,10 +93,8 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 ///
 /// The [DefaultStages](crate::sets::DefaultStages) are used to fully sync reth.
 pub struct Pipeline<DB: Database> {
-    /// The Database
-    db: DB,
-    /// Chain spec
-    chain_spec: Arc<ChainSpec>,
+    /// Provider factory.
+    provider_factory: ProviderFactory<DB>,
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
@@ -141,8 +139,7 @@ where
     /// Registers progress metrics for each registered stage
     pub fn register_metrics(&mut self) -> Result<(), PipelineError> {
         let Some(metrics_tx) = &mut self.metrics_tx else { return Ok(()) };
-        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let provider = factory.provider()?;
+        let provider = self.provider_factory.provider()?;
 
         for stage in &self.stages {
             let stage_id = stage.id();
@@ -236,10 +233,8 @@ where
                 }
             }
 
-            let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-
             previous_stage = Some(
-                factory
+                self.provider_factory
                     .provider()?
                     .get_stage_checkpoint(stage_id)?
                     .unwrap_or_default()
@@ -261,8 +256,7 @@ where
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
-        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-        let mut provider_rw = factory.provider_rw()?;
+        let mut provider_rw = self.provider_factory.provider_rw()?;
 
         for stage in unwind_pipeline {
             let stage_id = stage.id();
@@ -319,7 +313,7 @@ where
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         provider_rw.commit()?;
-                        provider_rw = factory.provider_rw()?;
+                        provider_rw = self.provider_factory.provider_rw()?;
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -344,10 +338,8 @@ where
         let mut made_progress = false;
         let target = self.max_block.or(previous_stage);
 
-        let factory = ProviderFactory::new(&self.db, self.chain_spec.clone());
-
         loop {
-            let prev_checkpoint = factory.get_stage_checkpoint(stage_id)?;
+            let prev_checkpoint = self.provider_factory.get_stage_checkpoint(stage_id)?;
 
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
@@ -372,7 +364,7 @@ where
 
             if let Err(err) = stage.execute_ready(exec_input).await {
                 self.listeners.notify(PipelineEvent::Error { stage_id });
-                match on_stage_error(&factory, stage_id, prev_checkpoint, err)? {
+                match on_stage_error(&self.provider_factory, stage_id, prev_checkpoint, err)? {
                     Some(ctrl) => return Ok(ctrl),
                     None => continue,
                 };
@@ -388,7 +380,7 @@ where
                 target,
             });
 
-            let provider_rw = factory.provider_rw()?;
+            let provider_rw = self.provider_factory.provider_rw()?;
             match stage.execute(&provider_rw, exec_input) {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=
@@ -426,7 +418,9 @@ where
                 Err(err) => {
                     drop(provider_rw);
                     self.listeners.notify(PipelineEvent::Error { stage_id });
-                    if let Some(ctrl) = on_stage_error(&factory, stage_id, prev_checkpoint, err)? {
+                    if let Some(ctrl) =
+                        on_stage_error(&self.provider_factory, stage_id, prev_checkpoint, err)?
+                    {
                         return Ok(ctrl)
                     }
                 }
@@ -526,13 +520,13 @@ mod tests {
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
-    use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::{
         consensus,
         provider::ProviderError,
         test_utils::{generators, generators::random_header},
     };
-    use reth_primitives::{stage::StageCheckpoint, MAINNET};
+    use reth_primitives::stage::StageCheckpoint;
+    use reth_provider::test_utils::create_test_provider_factory;
     use tokio_stream::StreamExt;
 
     #[test]
@@ -565,7 +559,7 @@ mod tests {
     /// Runs a simple pipeline.
     #[tokio::test]
     async fn run_pipeline() {
-        let db = create_test_rw_db();
+        let provider_factory = create_test_provider_factory();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -577,7 +571,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .build(provider_factory);
         let events = pipeline.events();
 
         // Run pipeline
@@ -618,7 +612,7 @@ mod tests {
     /// Unwinds a simple pipeline.
     #[tokio::test]
     async fn unwind_pipeline() {
-        let db = create_test_rw_db();
+        let provider_factory = create_test_provider_factory();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -637,7 +631,7 @@ mod tests {
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
             .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .build(provider_factory);
         let events = pipeline.events();
 
         // Run pipeline
@@ -731,7 +725,7 @@ mod tests {
     /// Unwinds a pipeline with intermediate progress.
     #[tokio::test]
     async fn unwind_pipeline_with_intermediate_progress() {
-        let db = create_test_rw_db();
+        let provider_factory = create_test_provider_factory();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -744,7 +738,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .build(provider_factory);
         let events = pipeline.events();
 
         // Run pipeline
@@ -816,7 +810,7 @@ mod tests {
     /// - The pipeline finishes
     #[tokio::test]
     async fn run_pipeline_with_unwind() {
-        let db = create_test_rw_db();
+        let provider_factory = create_test_provider_factory();
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -841,7 +835,7 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .build(provider_factory);
         let events = pipeline.events();
 
         // Run pipeline
@@ -913,7 +907,7 @@ mod tests {
     #[tokio::test]
     async fn pipeline_error_handling() {
         // Non-fatal
-        let db = create_test_rw_db();
+        let provider_factory = create_test_provider_factory();
         let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
@@ -921,17 +915,17 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(db, MAINNET.clone());
+            .build(provider_factory);
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
 
         // Fatal
-        let db = create_test_rw_db();
+        let provider_factory = create_test_provider_factory();
         let mut pipeline = Pipeline::builder()
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))
-            .build(db, MAINNET.clone());
+            .build(provider_factory);
         let result = pipeline.run().await;
         assert_matches!(
             result,
