@@ -126,6 +126,8 @@ where
     kzg_settings: Arc<KzgSettings>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
+    ///
+    no_locals: bool,
 }
 
 // === impl EthTransactionValidatorInner ===
@@ -235,7 +237,7 @@ where
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if !origin.is_local() &&
+        if (!origin.is_local() || self.no_locals) &&
             transaction.is_eip1559() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
@@ -643,6 +645,7 @@ impl EthTransactionValidatorBuilder {
             blob_store: Box::new(blob_store),
             kzg_settings,
             _marker: Default::default(),
+            no_locals: false,
         };
 
         EthTransactionValidator { inner: Arc::new(inner) }
