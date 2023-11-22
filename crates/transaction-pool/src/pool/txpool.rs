@@ -1273,8 +1273,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn ensure_valid(
         &self,
         transaction: ValidPoolTransaction<T>,
+        pool_config: PoolConfig,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
-        if !transaction.origin.is_local() {
+        if !transaction.origin.is_local() || pool_config.tx_pool_policy.no_locals {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
             if current_txs >= self.max_account_slots {
@@ -1442,8 +1443,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
         on_chain_nonce: u64,
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
+        let value = PoolConfig::default();
 
-        let mut transaction = self.ensure_valid(transaction)?;
+        let mut transaction = self.ensure_valid(transaction, value)?;
 
         let inserted_tx_id = *transaction.id();
         let mut state = TxState::default();
