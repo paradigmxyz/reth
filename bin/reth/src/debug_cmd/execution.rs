@@ -89,7 +89,7 @@ impl Command {
         config: &Config,
         client: Client,
         consensus: Arc<dyn Consensus>,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -102,11 +102,7 @@ impl Command {
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(
-                client,
-                Arc::clone(&consensus),
-                ProviderFactory::new(db.clone(), self.chain.clone()),
-            )
+            .build(client, Arc::clone(&consensus), provider_factory.clone())
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
@@ -119,7 +115,7 @@ impl Command {
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
-                    ProviderFactory::new(db.clone(), self.chain.clone()),
+                    provider_factory.clone(),
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,
@@ -148,7 +144,7 @@ impl Command {
                     config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
                 )),
             )
-            .build(db, self.chain.clone());
+            .build(provider_factory);
 
         Ok(pipeline)
     }
@@ -206,6 +202,7 @@ impl Command {
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;
@@ -231,12 +228,11 @@ impl Command {
             &config,
             fetch_client.clone(),
             Arc::clone(&consensus),
-            db.clone(),
+            provider_factory.clone(),
             &ctx.task_executor,
         )?;
 
-        let factory = ProviderFactory::new(db.clone(), self.chain.clone());
-        let provider = factory.provider()?;
+        let provider = provider_factory.provider()?;
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
@@ -270,7 +266,7 @@ impl Command {
 
             // Unwind the pipeline without committing.
             {
-                factory
+                provider_factory
                     .provider_rw()?
                     .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
             }

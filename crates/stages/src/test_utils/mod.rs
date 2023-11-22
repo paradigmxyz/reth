@@ -10,7 +10,7 @@ pub(crate) use runner::{
 };
 
 mod test_db;
-pub use test_db::TestTransaction;
+pub use test_db::TestStageDB;
 
 mod stage;
 pub use stage::TestStage;

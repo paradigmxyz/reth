@@ -14,13 +14,12 @@
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::Factory;
 //! # use reth_primitives::MAINNET;
-//! use reth_db::test_utils::create_test_rw_db;
+//! # use reth_provider::test_utils::create_test_provider_factory;
 //!
 //! # let factory = Factory::new(MAINNET.clone());
-//! # let db = create_test_rw_db();
+//! # let provider_factory = create_test_provider_factory();
 //! // Build a pipeline with all offline stages.
-//! # let pipeline =
-//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db, MAINNET.clone());
+//! # let pipeline = Pipeline::builder().add_stages(OfflineStages::new(factory)).build(provider_factory);
 //! ```
 //!
 //! ```ignore

@@ -516,7 +516,7 @@ where
             pipeline = pipeline.with_max_block(max_block);
         }
 
-        let pipeline = pipeline.build(db.clone(), self.base_config.chain_spec.clone());
+        let pipeline = pipeline.build(provider_factory.clone());
 
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
