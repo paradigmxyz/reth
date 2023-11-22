@@ -35,7 +35,7 @@ pub struct PoolConfig {
 }
 /// `TxPoolPolicy` holds configuration settings that dictate the behavior of the transaction pool.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TxPoolPolicy {
     /// If set to `true`, local transactions (transactions originating from the local node) will
     /// not be exempt from certain checks and limitations that are applied to non-local
@@ -52,11 +52,7 @@ impl TxPoolPolicy {
     }
 }
 
-impl Default for TxPoolPolicy {
-    fn default() -> Self {
-        Self { no_locals: false }
-    }
-}
+
 impl Default for PoolConfig {
     fn default() -> Self {
         Self {
