@@ -1,16 +1,14 @@
 //! Support for integrating customizations into the CLI.
 
 use crate::cli::{
-    components::{RethNodeComponents, RethRpcComponents},
-    config::{PayloadBuilderConfig, RethRpcConfig},
+    components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
+    config::{PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig},
 };
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
-
-use crate::cli::{components::RethRpcServerHandles, config::RethNetworkConfig};
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
