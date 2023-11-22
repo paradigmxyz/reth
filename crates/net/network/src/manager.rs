@@ -26,6 +26,7 @@ use crate::{
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::{PeersHandle, PeersManager},
+    protocol::IntoRlpxSubProtocol,
     session::SessionManager,
     state::NetworkState,
     swarm::{NetworkConnectionState, Swarm, SwarmEvent},
@@ -140,6 +141,11 @@ impl<C> NetworkManager<C> {
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
     pub fn set_eth_request_handler(&mut self, tx: mpsc::Sender<IncomingEthRequest>) {
         self.to_eth_request_handler = Some(tx);
+    }
+
+    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        self.swarm.add_rlpx_sub_protocol(protocol)
     }
 
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
