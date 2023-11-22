@@ -1,3 +1,4 @@
+use crate::processor::{verify_receipt, EVMProcessor};
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     revm::compat::into_reth_log, revm_primitives::ResultAndState, Address, Block, Hardfork,
@@ -7,8 +8,6 @@ use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
 use revm::DatabaseCommit;
 use std::time::Instant;
 use tracing::{debug, trace};
-
-use crate::processor::{verify_receipt, EVMProcessor};
 
 impl<'a> BlockExecutor for EVMProcessor<'a> {
     fn execute(
@@ -69,6 +68,9 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
         let is_regolith =
             self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
+
+        super::ensure_create2_deployer(self.chain_spec().clone(), block.timestamp, self.db_mut())
+            .map_err(|_| BlockExecutionError::ProviderError)?;
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());

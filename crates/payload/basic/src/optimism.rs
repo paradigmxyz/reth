@@ -54,6 +54,13 @@ where
     let is_regolith =
         chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp);
 
+    reth_revm::optimism::ensure_create2_deployer(chain_spec.clone(), attributes.timestamp, &mut db)
+        .map_err(|_| {
+            PayloadBuilderError::Internal(RethError::Custom(
+                "Failed to force create2deployer account code".to_string(),
+            ))
+        })?;
+
     let mut receipts = Vec::new();
     for sequencer_tx in attributes.optimism_payload_attributes.transactions {
         // Check if the job was cancelled, if so we can exit early.
