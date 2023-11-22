@@ -30,7 +30,7 @@ use reth_provider::{
     PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
-use reth_revm::Factory;
+use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
@@ -45,7 +45,7 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
         Arc<DatabaseEnv>,
         ShareableBlockchainTree<
             Arc<DatabaseEnv>,
-            EitherExecutorFactory<TestExecutorFactory, Factory>,
+            EitherExecutorFactory<TestExecutorFactory, EvmProcessorFactory>,
         >,
     >,
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
@@ -481,9 +481,9 @@ where
                 executor_factory.extend(results);
                 EitherExecutorFactory::Left(executor_factory)
             }
-            TestExecutorConfig::Real => {
-                EitherExecutorFactory::Right(Factory::new(self.base_config.chain_spec.clone()))
-            }
+            TestExecutorConfig::Real => EitherExecutorFactory::Right(EvmProcessorFactory::new(
+                self.base_config.chain_spec.clone(),
+            )),
         };
 
         // Setup pipeline
