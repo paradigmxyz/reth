@@ -10,9 +10,7 @@ use reth_rpc_types::trace::{
         SelfdestructAction, TraceOutput, TransactionTrace,
     },
 };
-use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, Stack,
-};
+use revm::interpreter::{opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
@@ -511,7 +509,7 @@ pub(crate) struct CallTraceStep {
     /// Current contract address
     pub(crate) contract: Address,
     /// Stack before step execution
-    pub(crate) stack: Option<Stack>,
+    pub(crate) stack: Option<Vec<U256>>,
     /// The new stack items placed by this step if any
     pub(crate) push_stack: Option<Vec<U256>>,
     /// All allocated memory in a step
@@ -563,7 +561,7 @@ impl CallTraceStep {
         };
 
         if opts.is_stack_enabled() {
-            log.stack = self.stack.as_ref().map(|stack| stack.data().clone());
+            log.stack = self.stack.clone();
         }
 
         if opts.is_memory_enabled() {

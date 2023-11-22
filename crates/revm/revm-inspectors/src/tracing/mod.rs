@@ -282,7 +282,7 @@ impl TracingInspector {
             .record_memory_snapshots
             .then(|| RecordedMemory::new(interp.shared_memory.context_memory().to_vec()))
             .unwrap_or_default();
-        let stack = self.config.record_stack_snapshots.then(|| interp.stack.clone());
+        let stack = self.config.record_stack_snapshots.then(|| interp.stack.data().clone());
 
         let op = OpCode::new(interp.current_opcode())
             .or_else(|| {
