@@ -403,7 +403,10 @@ mod tests {
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpec,
         ChainSpecBuilder, Header, SealedHeader, MAINNET,
     };
-    use reth_provider::{test_utils::TestExecutorFactory, BundleStateWithReceipts};
+    use reth_provider::{
+        test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
+        BundleStateWithReceipts, ProviderFactory,
+    };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, sync::Arc};
@@ -451,7 +454,6 @@ mod tests {
         /// Builds the pipeline.
         fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
             reth_tracing::init_test_tracing();
-            let db = create_test_rw_db();
 
             let executor_factory = TestExecutorFactory::new(chain_spec.clone());
             executor_factory.extend(self.executor_results);
@@ -466,7 +468,7 @@ mod tests {
                 pipeline = pipeline.with_max_block(max_block);
             }
 
-            pipeline.build(db, chain_spec)
+            pipeline.build(create_test_provider_factory_with_chain_spec(chain_spec))
         }
     }
 

@@ -176,7 +176,7 @@ where
     /// starting from the tip of the chain
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let current_checkpoint = input.checkpoint();
@@ -279,7 +279,7 @@ where
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
@@ -326,7 +326,7 @@ mod tests {
 
     mod test_runner {
         use super::*;
-        use crate::test_utils::{TestRunnerError, TestTransaction};
+        use crate::test_utils::{TestRunnerError, TestStageDB};
         use reth_db::{test_utils::TempDatabase, DatabaseEnv};
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
@@ -344,7 +344,7 @@ mod tests {
             pub(crate) client: TestHeadersClient,
             channel: (watch::Sender<B256>, watch::Receiver<B256>),
             downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
-            tx: TestTransaction,
+            db: TestStageDB,
         }
 
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
@@ -361,7 +361,7 @@ mod tests {
                             1000,
                         )
                     }),
-                    tx: TestTransaction::default(),
+                    db: TestStageDB::default(),
                 }
             }
         }
@@ -369,13 +369,13 @@ mod tests {
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
             type S = HeaderStage<ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>, D>;
 
-            fn tx(&self) -> &TestTransaction {
-                &self.tx
+            fn db(&self) -> &TestStageDB {
+                &self.db
             }
 
             fn stage(&self) -> Self::S {
                 HeaderStage::new(
-                    self.tx.factory.clone(),
+                    self.db.factory.clone(),
                     (*self.downloader_factory)(),
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                 )
@@ -390,9 +390,10 @@ mod tests {
                 let mut rng = generators::rng();
                 let start = input.checkpoint().block_number;
                 let head = random_header(&mut rng, start, None);
-                self.tx.insert_headers(std::iter::once(&head))?;
+                self.db.insert_headers(std::iter::once(&head))?;
                 // patch td table for `update_head` call
-                self.tx.commit(|tx| tx.put::<tables::HeaderTD>(head.number, U256::ZERO.into()))?;
+                self.db
+                    .commit(|tx| Ok(tx.put::<tables::HeaderTD>(head.number, U256::ZERO.into())?))?;
 
                 // use previous checkpoint as seed size
                 let end = input.target.unwrap_or_default() + 1;
@@ -415,7 +416,7 @@ mod tests {
                 let initial_checkpoint = input.checkpoint().block_number;
                 match output {
                     Some(output) if output.checkpoint.block_number > initial_checkpoint => {
-                        let provider = self.tx.factory.provider()?;
+                        let provider = self.db.factory.provider()?;
                         for block_num in (initial_checkpoint..output.checkpoint.block_number).rev()
                         {
                             // look up the header hash
@@ -442,7 +443,7 @@ mod tests {
                     headers.last().unwrap().hash()
                 } else {
                     let tip = random_header(&mut generators::rng(), 0, None);
-                    self.tx.insert_headers(std::iter::once(&tip))?;
+                    self.db.insert_headers(std::iter::once(&tip))?;
                     tip.hash()
                 };
                 self.send_tip(tip);
@@ -467,7 +468,7 @@ mod tests {
                             .stream_batch_size(500)
                             .build(client.clone(), Arc::new(TestConsensus::default()))
                     }),
-                    tx: TestTransaction::default(),
+                    db: TestStageDB::default(),
                 }
             }
         }
@@ -477,10 +478,10 @@ mod tests {
                 &self,
                 block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
-                self.tx
+                self.db
                     .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
-                self.tx.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
-                self.tx.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
+                self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
+                self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
                 Ok(())
             }
 

@@ -50,7 +50,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Write total difficulty entries
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
@@ -100,7 +100,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
@@ -138,7 +138,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestStageDB, UnwindStageTestRunner,
     };
 
     stage_test_suite_ext!(TotalDifficultyTestRunner, total_difficulty);
@@ -171,7 +171,7 @@ mod tests {
                     total
                 }))
             }, done: false }) if block_number == expected_progress && processed == 1 + threshold &&
-                total == runner.tx.table::<tables::Headers>().unwrap().len() as u64
+                total == runner.db.table::<tables::Headers>().unwrap().len() as u64
         );
 
         // Execute second time
@@ -189,14 +189,14 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
-                total == runner.tx.table::<tables::Headers>().unwrap().len() as u64
+                total == runner.db.table::<tables::Headers>().unwrap().len() as u64
         );
 
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
     }
 
     struct TotalDifficultyTestRunner {
-        tx: TestTransaction,
+        db: TestStageDB,
         consensus: Arc<TestConsensus>,
         commit_threshold: u64,
     }
@@ -204,7 +204,7 @@ mod tests {
     impl Default for TotalDifficultyTestRunner {
         fn default() -> Self {
             Self {
-                tx: Default::default(),
+                db: Default::default(),
                 consensus: Arc::new(TestConsensus::default()),
                 commit_threshold: 500,
             }
@@ -214,8 +214,8 @@ mod tests {
     impl StageTestRunner for TotalDifficultyTestRunner {
         type S = TotalDifficultyStage;
 
-        fn tx(&self) -> &TestTransaction {
-            &self.tx
+        fn db(&self) -> &TestStageDB {
+            &self.db
         }
 
         fn stage(&self) -> Self::S {
@@ -234,15 +234,16 @@ mod tests {
             let mut rng = generators::rng();
             let start = input.checkpoint().block_number;
             let head = random_header(&mut rng, start, None);
-            self.tx.insert_headers(std::iter::once(&head))?;
-            self.tx.commit(|tx| {
+            self.db.insert_headers(std::iter::once(&head))?;
+            self.db.commit(|tx| {
                 let td: U256 = tx
                     .cursor_read::<tables::HeaderTD>()?
                     .last()?
                     .map(|(_, v)| v)
                     .unwrap_or_default()
                     .into();
-                tx.put::<tables::HeaderTD>(head.number, (td + head.difficulty).into())
+                tx.put::<tables::HeaderTD>(head.number, (td + head.difficulty).into())?;
+                Ok(())
             })?;
 
             // use previous progress as seed size
@@ -253,7 +254,7 @@ mod tests {
             }
 
             let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
-            self.tx.insert_headers(headers.iter())?;
+            self.db.insert_headers(headers.iter())?;
             headers.insert(0, head);
             Ok(headers)
         }
@@ -267,7 +268,7 @@ mod tests {
             let initial_stage_progress = input.checkpoint().block_number;
             match output {
                 Some(output) if output.checkpoint.block_number > initial_stage_progress => {
-                    let provider = self.tx.inner();
+                    let provider = self.db.factory.provider()?;
 
                     let mut header_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
                     let (_, mut current_header) = header_cursor
@@ -301,7 +302,7 @@ mod tests {
 
     impl TotalDifficultyTestRunner {
         fn check_no_td_above(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            self.tx.ensure_no_entry_above::<tables::HeaderTD, _>(block, |num| num)?;
+            self.db.ensure_no_entry_above::<tables::HeaderTD, _>(block, |num| num)?;
             Ok(())
         }
 

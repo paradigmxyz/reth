@@ -134,7 +134,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     /// Execute the stage.
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -266,7 +266,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
@@ -288,7 +288,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 }
 
 fn stage_checkpoint_progress<DB: Database>(
-    provider: &DatabaseProviderRW<&DB>,
+    provider: &DatabaseProviderRW<DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: provider.tx_ref().entries::<tables::HashedAccount>()? as u64,
@@ -341,7 +341,7 @@ mod tests {
                 done: true,
             }) if block_number == previous_stage &&
                 processed == total &&
-                total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
+                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
 
         // Validate the stage execution
@@ -368,7 +368,7 @@ mod tests {
         let result = rx.await.unwrap();
 
         let fifth_address = runner
-            .tx
+            .db
             .query(|tx| {
                 let (address, _) = tx
                     .cursor_read::<tables::PlainAccountState>()?
@@ -398,9 +398,9 @@ mod tests {
                 },
                 done: false
             }) if address == fifth_address &&
-                total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
+                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
-        assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 5);
+        assert_eq!(runner.db.table::<tables::HashedAccount>().unwrap().len(), 5);
 
         // second run, hash next five accounts.
         input.checkpoint = Some(result.unwrap().checkpoint);
@@ -425,9 +425,9 @@ mod tests {
                 },
                 done: true
             }) if processed == total &&
-                total == runner.tx.table::<tables::PlainAccountState>().unwrap().len() as u64
+                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
-        assert_eq!(runner.tx.table::<tables::HashedAccount>().unwrap().len(), 10);
+        assert_eq!(runner.db.table::<tables::HashedAccount>().unwrap().len(), 10);
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
@@ -437,14 +437,14 @@ mod tests {
         use super::*;
         use crate::{
             stages::hashing_account::AccountHashingStage,
-            test_utils::{StageTestRunner, TestTransaction},
+            test_utils::{StageTestRunner, TestStageDB},
             ExecInput, ExecOutput, UnwindInput,
         };
         use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
         use reth_primitives::Address;
 
         pub(crate) struct AccountHashingTestRunner {
-            pub(crate) tx: TestTransaction,
+            pub(crate) db: TestStageDB,
             commit_threshold: u64,
             clean_threshold: u64,
         }
@@ -462,7 +462,7 @@ mod tests {
             /// Iterates over PlainAccount table and checks that the accounts match the ones
             /// in the HashedAccount table
             pub(crate) fn check_hashed_accounts(&self) -> Result<(), TestRunnerError> {
-                self.tx.query(|tx| {
+                self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
                     let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccount>()?;
 
@@ -481,7 +481,7 @@ mod tests {
             /// Same as check_hashed_accounts, only that checks with the old account state,
             /// namely, the same account with nonce - 1 and balance - 1.
             pub(crate) fn check_old_hashed_accounts(&self) -> Result<(), TestRunnerError> {
-                self.tx.query(|tx| {
+                self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
                     let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccount>()?;
 
@@ -506,19 +506,15 @@ mod tests {
 
         impl Default for AccountHashingTestRunner {
             fn default() -> Self {
-                Self {
-                    tx: TestTransaction::default(),
-                    commit_threshold: 1000,
-                    clean_threshold: 1000,
-                }
+                Self { db: TestStageDB::default(), commit_threshold: 1000, clean_threshold: 1000 }
             }
         }
 
         impl StageTestRunner for AccountHashingTestRunner {
             type S = AccountHashingStage;
 
-            fn tx(&self) -> &TestTransaction {
-                &self.tx
+            fn db(&self) -> &TestStageDB {
+                &self.db
             }
 
             fn stage(&self) -> Self::S {
@@ -534,7 +530,7 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let provider = self.tx.inner_rw();
+                let provider = self.db.factory.provider_rw()?;
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
                     SeedOpts { blocks: 1..=input.target(), accounts: 0..10, txs: 0..3 },

@@ -80,26 +80,28 @@ mod tests {
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
     use reth_provider::PruneCheckpointReader;
-    use reth_stages::test_utils::TestTransaction;
+    use reth_stages::test_utils::TestStageDB;
     use std::ops::Sub;
 
     #[test]
     fn prune() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 1..=100, B256::ZERO, 2..3);
-        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let transactions = blocks.iter().flat_map(|block| &block.body).collect::<Vec<_>>();
 
-        assert_eq!(tx.table::<tables::Transactions>().unwrap().len(), transactions.len());
+        assert_eq!(db.table::<tables::Transactions>().unwrap().len(), transactions.len());
 
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let input = PruneInput {
-                previous_checkpoint: tx
-                    .inner()
+                previous_checkpoint: db
+                    .factory
+                    .provider()
+                    .unwrap()
                     .get_prune_checkpoint(PruneSegment::Transactions)
                     .unwrap(),
                 to_block,
@@ -107,15 +109,17 @@ mod tests {
             };
             let segment = Transactions::new(prune_mode);
 
-            let next_tx_number_to_prune = tx
-                .inner()
+            let next_tx_number_to_prune = db
+                .factory
+                .provider()
+                .unwrap()
                 .get_prune_checkpoint(PruneSegment::Transactions)
                 .unwrap()
                 .and_then(|checkpoint| checkpoint.tx_number)
                 .map(|tx_number| tx_number + 1)
                 .unwrap_or_default();
 
-            let provider = tx.inner_rw();
+            let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             assert_matches!(
                 result,
@@ -154,11 +158,15 @@ mod tests {
                 .checked_sub(if result.done { 0 } else { 1 });
 
             assert_eq!(
-                tx.table::<tables::Transactions>().unwrap().len(),
+                db.table::<tables::Transactions>().unwrap().len(),
                 transactions.len() - (last_pruned_tx_number + 1)
             );
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PruneSegment::Transactions).unwrap(),
+                db.factory
+                    .provider()
+                    .unwrap()
+                    .get_prune_checkpoint(PruneSegment::Transactions)
+                    .unwrap(),
                 Some(PruneCheckpoint {
                     block_number: last_pruned_block_number,
                     tx_number: Some(last_pruned_tx_number as TxNumber),

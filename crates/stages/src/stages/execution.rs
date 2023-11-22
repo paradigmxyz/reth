@@ -110,7 +110,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
@@ -228,7 +228,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// been previously executed.
     fn adjust_prune_modes<DB: Database>(
         &self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         start_block: u64,
         max_block: u64,
     ) -> Result<PruneModes, StageError> {
@@ -247,7 +247,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 }
 
 fn execution_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<&DB>,
+    provider: &DatabaseProviderRW<DB>,
     start_block: BlockNumber,
     max_block: BlockNumber,
     checkpoint: StageCheckpoint,
@@ -314,7 +314,7 @@ fn execution_checkpoint<DB: Database>(
 }
 
 fn calculate_gas_used_from_headers<DB: Database>(
-    provider: &DatabaseProviderRW<&DB>,
+    provider: &DatabaseProviderRW<DB>,
     range: RangeInclusive<BlockNumber>,
 ) -> Result<u64, DatabaseError> {
     let mut gas_total = 0;
@@ -340,7 +340,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Execute the stage
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         self.execute_inner(provider, input)
@@ -349,7 +349,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<&DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -491,7 +491,7 @@ impl ExecutionStageThresholds {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::TestTransaction;
+    use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
@@ -826,9 +826,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_selfdestruct() {
-        let test_tx = TestTransaction::default();
-        let factory = ProviderFactory::new(test_tx.tx.as_ref(), MAINNET.clone());
-        let provider = factory.provider_rw().unwrap();
+        let test_db = TestStageDB::default();
+        let provider = test_db.factory.provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
         let mut genesis_rlp = hex!("f901f8f901f3a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0c9ceb8372c88cb461724d8d3d87e8b933f6fc5f679d4841800e662f4428ffd0da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000080830f4240808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
@@ -853,7 +852,7 @@ mod tests {
             Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
 
         // set account
-        let provider = factory.provider_rw().unwrap();
+        let provider = test_db.factory.provider_rw().unwrap();
         provider.tx_ref().put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
         provider
             .tx_ref()
@@ -882,13 +881,13 @@ mod tests {
         provider.commit().unwrap();
 
         // execute
-        let provider = factory.provider_rw().unwrap();
+        let provider = test_db.factory.provider_rw().unwrap();
         let mut execution_stage = stage();
         let _ = execution_stage.execute(&provider, input).unwrap();
         provider.commit().unwrap();
 
         // assert unwind stage
-        let provider = factory.provider_rw().unwrap();
+        let provider = test_db.factory.provider_rw().unwrap();
         assert_eq!(provider.basic_account(destroyed_address), Ok(None), "Account was destroyed");
 
         assert_eq!(
@@ -898,8 +897,8 @@ mod tests {
         );
         // drops tx so that it returns write privilege to test_tx
         drop(provider);
-        let plain_accounts = test_tx.table::<tables::PlainAccountState>().unwrap();
-        let plain_storage = test_tx.table::<tables::PlainStorageState>().unwrap();
+        let plain_accounts = test_db.table::<tables::PlainAccountState>().unwrap();
+        let plain_storage = test_db.table::<tables::PlainStorageState>().unwrap();
 
         assert_eq!(
             plain_accounts,
@@ -924,8 +923,8 @@ mod tests {
         );
         assert!(plain_storage.is_empty());
 
-        let account_changesets = test_tx.table::<tables::AccountChangeSet>().unwrap();
-        let storage_changesets = test_tx.table::<tables::StorageChangeSet>().unwrap();
+        let account_changesets = test_db.table::<tables::AccountChangeSet>().unwrap();
+        let storage_changesets = test_db.table::<tables::StorageChangeSet>().unwrap();
 
         assert_eq!(
             account_changesets,

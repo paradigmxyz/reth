@@ -1,8 +1,7 @@
-use std::sync::Arc;
-
 use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageSet};
 use reth_db::database::Database;
-use reth_primitives::{stage::StageId, BlockNumber, ChainSpec, B256};
+use reth_primitives::{stage::StageId, BlockNumber, B256};
+use reth_provider::ProviderFactory;
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
@@ -68,13 +67,10 @@ where
     }
 
     /// Builds the final [`Pipeline`] using the given database.
-    ///
-    /// Note: it's expected that this is either an [Arc] or an Arc wrapper type.
-    pub fn build(self, db: DB, chain_spec: Arc<ChainSpec>) -> Pipeline<DB> {
+    pub fn build(self, provider_factory: ProviderFactory<DB>) -> Pipeline<DB> {
         let Self { stages, max_block, tip_tx, metrics_tx } = self;
         Pipeline {
-            db,
-            chain_spec,
+            provider_factory,
             stages,
             max_block,
             tip_tx,

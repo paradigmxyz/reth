@@ -47,7 +47,7 @@ impl<DB: Database> Stage<DB> for TestStage {
 
     fn execute(
         &mut self,
-        _: &DatabaseProviderRW<&DB>,
+        _: &DatabaseProviderRW<DB>,
         _input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         self.exec_outputs
@@ -57,7 +57,7 @@ impl<DB: Database> Stage<DB> for TestStage {
 
     fn unwind(
         &mut self,
-        _: &DatabaseProviderRW<&DB>,
+        _: &DatabaseProviderRW<DB>,
         _input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.unwind_outputs
