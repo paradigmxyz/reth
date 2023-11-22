@@ -453,10 +453,10 @@ impl ParityTraceBuilder {
                 }
             };
             let mut push_stack = step.push_stack.clone().unwrap_or_default();
-            for idx in (0..show_stack).rev() {
-                if let Some(stack) = step.stack.as_ref() {
+            if let Some(stack) = step.stack.as_ref() {
+                for idx in (0..show_stack).rev() {
                     if stack.len() > idx {
-                        push_stack.push(stack.peek(idx).unwrap_or_default())
+                        push_stack.push(stack[stack.len() - idx - 1])
                     }
                 }
             }
