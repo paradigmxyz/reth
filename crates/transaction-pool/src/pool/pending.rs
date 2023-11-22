@@ -356,6 +356,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        // return early if nothing needs to happen
+        if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+            return Vec::new()
+        }
+
         let mut removed = Vec::new();
 
         // penalize non-local txs if limit is still exceeded
