@@ -46,16 +46,14 @@ mod tests {
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         tables,
-        test_utils::create_test_rw_db,
         transaction::DbTxMut,
     };
-    use reth_primitives::{hex_literal::hex, MAINNET};
-    use reth_provider::ProviderFactory;
+    use reth_primitives::hex_literal::hex;
+    use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
     fn test_account_trie_order() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
         let mut cursor = provider.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
 
