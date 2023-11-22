@@ -17,8 +17,8 @@ use std::{collections::BTreeMap, sync::Arc};
 /// - The chain spec
 #[derive(Debug)]
 pub struct TreeExternals<DB, EF> {
-    /// The database, used to commit the canonical chain, or unwind it.
-    pub(crate) database: ProviderFactory<DB>,
+    /// The provider factory, used to commit the canonical chain, or unwind it.
+    pub(crate) provider_factory: ProviderFactory<DB>,
     /// The consensus engine.
     pub(crate) consensus: Arc<dyn Consensus>,
     /// The executor factory to execute blocks with.
@@ -28,11 +28,11 @@ pub struct TreeExternals<DB, EF> {
 impl<DB, EF> TreeExternals<DB, EF> {
     /// Create new tree externals.
     pub fn new(
-        database: ProviderFactory<DB>,
+        provider_factory: ProviderFactory<DB>,
         consensus: Arc<dyn Consensus>,
         executor_factory: EF,
     ) -> Self {
-        Self { database, consensus, executor_factory }
+        Self { provider_factory, consensus, executor_factory }
     }
 }
 
@@ -45,7 +45,7 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
         num_hashes: usize,
     ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
         Ok(self
-            .database
+            .provider_factory
             .provider()?
             .tx_ref()
             .cursor_read::<tables::CanonicalHeaders>()?

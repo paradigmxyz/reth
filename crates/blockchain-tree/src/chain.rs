@@ -207,7 +207,8 @@ impl AppendableChain {
 
         // get the state provider.
         let canonical_fork = bundle_state_data_provider.canonical_fork();
-        let state_provider = externals.database.history_by_block_number(canonical_fork.number)?;
+        let state_provider =
+            externals.provider_factory.history_by_block_number(canonical_fork.number)?;
 
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 

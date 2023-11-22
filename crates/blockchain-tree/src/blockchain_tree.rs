@@ -161,7 +161,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             }
 
             // check if block is inside database
-            if self.externals.database.provider()?.block_number(block.hash)?.is_some() {
+            if self.externals.provider_factory.provider()?.block_number(block.hash)?.is_some() {
                 return Ok(Some(BlockStatus::Valid))
             }
 
@@ -382,7 +382,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         let (block_status, chain) = {
             let provider = self
                 .externals
-                .database
+                .provider_factory
                 .provider()
                 .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
@@ -400,7 +400,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             // Pass the parent total difficulty to short-circuit unnecessary calculations.
             if !self
                 .externals
-                .database
+                .provider_factory
                 .chain_spec()
                 .fork(Hardfork::Paris)
                 .active_at_ttd(parent_td, U256::ZERO)
@@ -887,7 +887,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         // canonical, but in the db. If it is in a sidechain, it is not canonical. If it is not in
         // the db, then it is not canonical.
 
-        let provider = self.externals.database.provider()?;
+        let provider = self.externals.provider_factory.provider()?;
 
         let mut header = None;
         if let Some(num) = self.block_indices().get_canonical_block_number(hash) {
@@ -935,14 +935,14 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         if let Some(header) = canonical_header {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
             // TODO: this could be fetched from the chainspec first
-            let td = self.externals.database.provider()?.header_td(block_hash)?.ok_or(
+            let td = self.externals.provider_factory.provider()?.header_td(block_hash)?.ok_or(
                 CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
                     hash: *block_hash,
                 }),
             )?;
             if !self
                 .externals
-                .database
+                .provider_factory
                 .chain_spec()
                 .fork(Hardfork::Paris)
                 .active_at_ttd(td, U256::ZERO)
@@ -1104,7 +1104,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
     /// Write the given chain to the database as canonical.
     fn commit_canonical_to_database(&self, chain: Chain) -> RethResult<()> {
-        let provider_rw = self.externals.database.provider_rw()?;
+        let provider_rw = self.externals.provider_factory.provider_rw()?;
 
         let (blocks, state) = chain.into_inner();
 
@@ -1149,7 +1149,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         revert_until: BlockNumber,
     ) -> RethResult<Option<Chain>> {
         // read data that is needed for new sidechain
-        let provider_rw = self.externals.database.provider_rw()?;
+        let provider_rw = self.externals.provider_factory.provider_rw()?;
 
         let tip = provider_rw.last_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
@@ -1157,7 +1157,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider_rw
             .take_block_and_execution_range(
-                self.externals.database.chain_spec().as_ref(),
+                self.externals.provider_factory.chain_spec().as_ref(),
                 revert_range,
             )
             .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
@@ -1343,7 +1343,7 @@ mod tests {
         let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
 
         // last finalized block would be number 9.
-        setup_genesis(&externals.database, genesis);
+        setup_genesis(&externals.provider_factory, genesis);
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
