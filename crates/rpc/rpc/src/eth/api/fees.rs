@@ -13,7 +13,7 @@ use reth_transaction_pool::TransactionPool;
 
 use tracing::debug;
 
-use super::FeeHistoryEntry;
+use crate::eth::api::fee_history::FeeHistoryEntry;
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where

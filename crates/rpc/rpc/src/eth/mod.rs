@@ -14,9 +14,10 @@ mod signer;
 pub(crate) mod utils;
 
 pub use api::{
-    fee_history_cache_new_blocks_task, EthApi, EthApiSpec, EthTransactions, FeeHistoryCache,
-    FeeHistoryCacheConfig, TransactionSource, RPC_DEFAULT_GAS_CAP,
+    fee_history::{fee_history_cache_new_blocks_task, FeeHistoryCache, FeeHistoryCacheConfig},
+    EthApi, EthApiSpec, EthTransactions, TransactionSource, RPC_DEFAULT_GAS_CAP,
 };
+
 pub use bundle::EthBundle;
 pub use filter::{EthFilter, EthFilterConfig};
 pub use id_provider::EthSubscriptionIdProvider;
