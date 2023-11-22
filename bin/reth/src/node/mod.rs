@@ -259,6 +259,16 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics());
         info!(target: "reth::cli", "Database opened");
 
+        // configure snapshotter
+        let snapshotter = reth_snapshot::Snapshotter::new(
+            db.clone(),
+            data_dir.snapshots_path(),
+            self.chain.clone(),
+            self.chain.snapshot_block_interval,
+        )?;
+        let provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain))
+            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
+
         self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
@@ -281,10 +291,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            Arc::clone(&db),
+            provider_factory.clone(),
             Arc::clone(&consensus),
             Factory::new(self.chain.clone()),
-            Arc::clone(&self.chain),
         );
         let tree = BlockchainTree::new(
             tree_externals,
@@ -299,18 +308,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // fetch the head block from the database
         let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
 
-        // configure snapshotter
-        let snapshotter = reth_snapshot::Snapshotter::new(
-            db.clone(),
-            data_dir.snapshots_path(),
-            self.chain.clone(),
-            self.chain.snapshot_block_interval,
-        )?;
-
         // setup the blockchain provider
-        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain))
-            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
-        let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory, blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(head.timestamp)

@@ -142,15 +142,15 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            Arc::clone(&db),
+            provider_factory.clone(),
             Arc::clone(&consensus),
             Factory::new(self.chain.clone()),
-            Arc::clone(&self.chain),
         );
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = ShareableBlockchainTree::new(tree);
@@ -159,8 +159,8 @@ impl Command {
         let best_block =
             self.lookup_best_block(Arc::clone(&db)).wrap_err("the head block is missing")?;
 
-        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
-        let blockchain_db = BlockchainProvider::new(factory.clone(), blockchain_tree.clone())?;
+        let blockchain_db =
+            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
@@ -278,7 +278,7 @@ impl Command {
                 debug!(target: "reth::cli", ?state, "Executed block");
 
                 // Attempt to insert new block without committing
-                let provider_rw = factory.provider_rw()?;
+                let provider_rw = provider_factory.provider_rw()?;
                 provider_rw.append_blocks_with_bundle_state(
                     Vec::from([block_with_senders]),
                     state,
