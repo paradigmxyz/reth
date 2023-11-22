@@ -49,6 +49,7 @@ impl DashboardListener {
     pub(crate) fn new(events_rx: UnboundedReceiver<MetricEvent>) -> Self {
         Self {
             events_rx,
+
             #[cfg(feature = "enable_opcode_metrics")]
             revm_metric_displayer: RevmMetricTimeDisplayer::default(),
 
@@ -102,10 +103,7 @@ impl DashboardListener {
             }
             #[cfg(feature = "enable_cache_record")]
             MetricEvent::CacheDbSizeInfo { block_number, cachedb_size } => {
-                println!(
-                    "Block Number: {:?}, Cachedb Size(bytes): {:?}",
-                    block_number, cachedb_size
-                );
+                self.cache_db_displayer.update_size(block_number, cachedb_size);
             }
             #[cfg(feature = "enable_cache_record")]
             MetricEvent::CacheDbInfo { cache_db_record } => {

@@ -183,7 +183,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
 
             #[cfg(feature = "enable_execution_duration_record")]
-            duration_record.add_read_block();
+            duration_record.add_read_block_duration();
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
@@ -199,7 +199,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                     error,
                 })?;
             #[cfg(feature = "enable_execution_duration_record")]
-            duration_record.add_execute_tx();
+            duration_record.add_execute_tx_duration();
 
             // Gas and txs metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
@@ -221,7 +221,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.gas_used;
             #[cfg(feature = "enable_execution_duration_record")]
-            duration_record.add_process_state();
+            duration_record.add_process_state_duration();
 
             #[cfg(feature = "enable_cache_record")]
             {
@@ -288,7 +288,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         state.write_to_db(provider.tx_ref(), max_block)?;
 
         #[cfg(feature = "enable_execution_duration_record")]
-        duration_record.add_write_to_db();
+        duration_record.add_write_to_db_duration();
 
         #[cfg(feature = "enable_db_speed_record")]
         {
@@ -303,7 +303,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         #[cfg(feature = "enable_execution_duration_record")]
         {
-            duration_record.add_execute_inner();
+            duration_record.add_execute_inner_duration();
 
             if let Some(metrics_tx) = &mut self.metrics_tx {
                 let _ = metrics_tx.send(MetricEvent::ExecutionStageTime {

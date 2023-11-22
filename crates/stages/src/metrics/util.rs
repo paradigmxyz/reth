@@ -3,6 +3,11 @@ use minstant::Instant;
 #[cfg(any(feature = "enable_execution_duration_record", feature = "enable_db_speed_record"))]
 use std::time::Duration;
 
+#[cfg(feature = "enable_execution_duration_record")]
+pub(crate) const COL_WIDTH_MIDDLE: usize = 14;
+#[cfg(feature = "enable_execution_duration_record")]
+pub(crate) const COL_WIDTH_BIG: usize = 18;
+
 /// excution duration record
 #[cfg(feature = "enable_execution_duration_record")]
 #[derive(Debug, Clone, Copy)]
@@ -12,16 +17,16 @@ pub struct ExecutionDurationRecord {
     /// time recorder
     time_recorder: Instant,
 
-    /// tuple means:(counter of execute inner, total time of execute inner).
-    pub execute_inner: (u64, Duration),
-    /// tuple means:(counter, total time) of get block td and block_with_senders.
-    pub read_block: (u64, Duration),
-    /// tuple means:(counter, total time) of revm execute tx(execute_and_verify_receipt).
-    pub execute_tx: (u64, Duration),
-    /// tuple means:(counter, total time) of process state(state.extend)
-    pub process_state: (u64, Duration),
-    /// tuple means:(counter, total time) of write to db
-    pub write_to_db: (u64, Duration),
+    /// total time of execute inner.
+    pub execute_inner: Duration,
+    /// total time of get block td and block_with_senders.
+    pub read_block: Duration,
+    /// total time of revm execute tx(execute_and_verify_receipt).
+    pub execute_tx: Duration,
+    /// total time of process state(state.extend)
+    pub process_state: Duration,
+    /// total time of write to db
+    pub write_to_db: Duration,
 }
 
 #[cfg(feature = "enable_execution_duration_record")]
@@ -30,17 +35,19 @@ impl Default for ExecutionDurationRecord {
         Self {
             inner_recorder: Instant::now(),
             time_recorder: Instant::now(),
-            execute_inner: (0, Duration::default()),
-            read_block: (0, Duration::default()),
-            execute_tx: (0, Duration::default()),
-            process_state: (0, Duration::default()),
-            write_to_db: (0, Duration::default()),
+            execute_inner: Duration::default(),
+            read_block: Duration::default(),
+            execute_tx: Duration::default(),
+            process_state: Duration::default(),
+            write_to_db: Duration::default(),
         }
     }
 }
 
 #[cfg(feature = "enable_execution_duration_record")]
 impl ExecutionDurationRecord {
+    const SECONDS_ONE_HOUR: f64 = 60.0 * 60.0;
+
     /// start inner time recorder
     pub(crate) fn start_inner_time_recorder(&mut self) {
         self.inner_recorder = Instant::now();
@@ -50,148 +57,118 @@ impl ExecutionDurationRecord {
         self.time_recorder = Instant::now();
     }
     /// add time of execute_inner
-    pub(crate) fn add_execute_inner(&mut self) {
-        self.execute_inner.0 += 1;
-        self.execute_inner.1 =
-            self.execute_inner.1.checked_add(self.inner_recorder.elapsed()).expect("overflow");
+    pub(crate) fn add_execute_inner_duration(&mut self) {
+        self.execute_inner =
+            self.execute_inner.checked_add(self.inner_recorder.elapsed()).expect("overflow");
     }
     /// add time of get block td and block_with_senders
-    pub(crate) fn add_read_block(&mut self) {
-        self.read_block.0 += 1;
-        self.read_block.1 =
-            self.read_block.1.checked_add(self.time_recorder.elapsed()).expect("overflow");
+    pub(crate) fn add_read_block_duration(&mut self) {
+        self.read_block =
+            self.read_block.checked_add(self.time_recorder.elapsed()).expect("overflow");
     }
     /// add time of revm execute tx
-    pub(crate) fn add_execute_tx(&mut self) {
-        self.execute_tx.0 += 1;
-        self.execute_tx.1 =
-            self.execute_tx.1.checked_add(self.time_recorder.elapsed()).expect("overflow");
+    pub(crate) fn add_execute_tx_duration(&mut self) {
+        self.execute_tx =
+            self.execute_tx.checked_add(self.time_recorder.elapsed()).expect("overflow");
     }
     /// add time of process state
-    pub(crate) fn add_process_state(&mut self) {
-        self.process_state.0 += 1;
-        self.process_state.1 =
-            self.process_state.1.checked_add(self.time_recorder.elapsed()).expect("overflow");
+    pub(crate) fn add_process_state_duration(&mut self) {
+        self.process_state =
+            self.process_state.checked_add(self.time_recorder.elapsed()).expect("overflow");
     }
     /// add time of write to db
-    pub(crate) fn add_write_to_db(&mut self) {
-        self.write_to_db.0 += 1;
-        self.write_to_db.1 =
-            self.write_to_db.1.checked_add(self.time_recorder.elapsed()).expect("overflow");
+    pub(crate) fn add_write_to_db_duration(&mut self) {
+        self.write_to_db =
+            self.write_to_db.checked_add(self.time_recorder.elapsed()).expect("overflow");
     }
-
     /// add
     pub fn add(&mut self, other: ExecutionDurationRecord) {
-        self.execute_inner = (
-            self.execute_inner.0.checked_add(other.execute_inner.0).expect("overflow"),
-            self.execute_inner.1.checked_add(other.execute_inner.1).expect("overflow"),
-        );
-        self.read_block = (
-            self.read_block.0.checked_add(other.read_block.0).expect("overflow"),
-            self.read_block.1.checked_add(other.read_block.1).expect("overflow"),
-        );
-        self.execute_tx = (
-            self.execute_tx.0.checked_add(other.execute_inner.0).expect("overflow"),
-            self.execute_tx.1.checked_add(other.execute_tx.1).expect("overflow"),
-        );
-        self.process_state = (
-            self.process_state.0.checked_add(other.process_state.0).expect("overflow"),
-            self.process_state.1.checked_add(other.process_state.1).expect("overflow"),
-        );
-        self.write_to_db = (
-            self.write_to_db.0.checked_add(other.write_to_db.0).expect("overflow"),
-            self.write_to_db.1.checked_add(other.write_to_db.1).expect("overflow"),
-        );
+        self.execute_inner = self.execute_inner.checked_add(other.execute_inner).expect("overflow");
+        self.read_block = self.read_block.checked_add(other.read_block).expect("overflow");
+        self.execute_tx = self.execute_tx.checked_add(other.execute_tx).expect("overflow");
+        self.process_state = self.process_state.checked_add(other.process_state).expect("overflow");
+        self.write_to_db = self.write_to_db.checked_add(other.write_to_db).expect("overflow");
     }
 
-    /// get pure execution duation record
-    pub fn pure_record(&self) -> Self {
-        const RDTSC_OVERHEAD: u64 = 7;
+    fn execute_inner_time(&self) -> f64 {
+        self.execute_inner.as_secs_f64() / Self::SECONDS_ONE_HOUR
+    }
 
-        let mut ret = ExecutionDurationRecord::default();
+    fn fetching_block_time(&self) -> f64 {
+        self.execute_tx.as_secs_f64() / Self::SECONDS_ONE_HOUR
+    }
 
-        let rdtsc_overhead: u64 = self.execute_inner.0 * RDTSC_OVERHEAD;
-        if self.execute_inner.1.as_nanos() < rdtsc_overhead as u128 {
-            println!("rdtsc overhead too larget");
-        }
-        ret.execute_inner =
-            (self.execute_inner.0, self.execute_inner.1 - Duration::from_nanos(rdtsc_overhead));
+    fn fetching_block_time_percent(&self) -> f64 {
+        self.fetching_block_time() / self.execute_inner_time()
+    }
 
-        let rdtsc_overhead: u64 = self.read_block.0 * RDTSC_OVERHEAD;
-        if self.read_block.1.as_nanos() < rdtsc_overhead as u128 {
-            println!("rdtsc overhead too larget");
-        }
-        ret.read_block =
-            (self.read_block.0, self.read_block.1 - Duration::from_nanos(rdtsc_overhead));
+    fn execute_tx_time(&self) -> f64 {
+        self.execute_tx.as_secs_f64() / Self::SECONDS_ONE_HOUR
+    }
 
-        let rdtsc_overhead: u64 = self.execute_tx.0 * RDTSC_OVERHEAD;
-        if self.execute_tx.1.as_nanos() < rdtsc_overhead as u128 {
-            println!("rdtsc overhead too larget");
-        }
-        ret.execute_tx =
-            (self.execute_tx.0, self.execute_tx.1 - Duration::from_nanos(rdtsc_overhead));
+    fn execute_tx_time_percent(&self) -> f64 {
+        self.execute_tx_time() / self.execute_inner_time()
+    }
 
-        let rdtsc_overhead: u64 = self.process_state.0 * RDTSC_OVERHEAD;
-        if self.process_state.1.as_nanos() < rdtsc_overhead as u128 {
-            println!("rdtsc overhead too larget");
-        }
-        ret.process_state =
-            (self.process_state.0, self.process_state.1 - Duration::from_nanos(rdtsc_overhead));
+    fn process_state_time(&self) -> f64 {
+        self.process_state.as_secs_f64() / Self::SECONDS_ONE_HOUR
+    }
 
-        let rdtsc_overhead: u64 = self.write_to_db.0 * RDTSC_OVERHEAD;
-        if self.write_to_db.1.as_nanos() < rdtsc_overhead as u128 {
-            println!("rdtsc overhead too larget");
-        }
-        ret.write_to_db =
-            (self.write_to_db.0, self.write_to_db.1 - Duration::from_nanos(rdtsc_overhead));
+    fn process_state_time_percent(&self) -> f64 {
+        self.process_state_time() / self.execute_inner_time()
+    }
 
-        ret
+    fn write_to_db_time(&self) -> f64 {
+        self.write_to_db.as_secs_f64() / Self::SECONDS_ONE_HOUR
+    }
+
+    fn write_to_db_time_percent(&self) -> f64 {
+        self.write_to_db_time() / self.execute_inner_time()
+    }
+
+    fn misc_time(&self) -> f64 {
+        self.execute_inner_time() -
+            self.fetching_block_time() -
+            self.execute_tx_time() -
+            self.process_state_time() -
+            self.write_to_db_time()
+    }
+
+    fn misc_time_percent(&self) -> f64 {
+        self.misc_time() / self.execute_inner_time()
+    }
+
+    fn print_line(&self, cat: &str, time: f64, time_percent: f64) {
+        println!(
+            "{: <COL_WIDTH_BIG$}{: >COL_WIDTH_MIDDLE$.3}{: >COL_WIDTH_MIDDLE$.2}",
+            cat, time, time_percent,
+        );
     }
 
     /// print the information of the execution duration record.
-    pub fn print(&self, header: &str) {
-        let one_hour_sencods = 60.0 * 60.0;
-
-        let execute_inner_time = self.execute_inner.1.as_secs_f64() / one_hour_sencods;
-
-        let read_block_time = self.read_block.1.as_secs_f64() / one_hour_sencods;
-        let execute_tx_time = self.execute_tx.1.as_secs_f64() / one_hour_sencods;
-        let process_state_time = self.process_state.1.as_secs_f64() / one_hour_sencods;
-        let write_to_db_time = self.write_to_db.1.as_secs_f64() / one_hour_sencods;
-
-        let read_block_pct = read_block_time / execute_inner_time * 100.0;
-        let execute_tx_pct = execute_tx_time / execute_inner_time * 100.0;
-        let process_state_pct = process_state_time / execute_inner_time * 100.0;
-        let write_to_db_pct = write_to_db_time / execute_inner_time * 100.0;
-        let total_pct = read_block_pct + execute_tx_pct + process_state_pct + write_to_db_pct;
-
-        let time_decimal_place = 3;
-        let pct_decimal_place = 3;
-        let col_len = 15;
-
+    pub fn print(&self) {
         println!();
-        println!("{}", header);
-        println!("Cat.                    Time (h)              Time (%)");
+        println!("===============================Metric of execution duration==========================================================");
         println!(
-            "total            {:>col_len$.time_decimal_place$}      {:>col_len$.pct_decimal_place$}",
-            execute_inner_time, total_pct
+            "{: <COL_WIDTH_BIG$}{: >COL_WIDTH_MIDDLE$}{: >COL_WIDTH_MIDDLE$}",
+            "Cat.", "Time (h)", "Time (%)",
         );
-        println!(
-            "fetching_blocks  {:>col_len$.time_decimal_place$}      {:>col_len$.pct_decimal_place$}",
-            read_block_time, read_block_pct
+
+        self.print_line("total", self.execute_inner_time(), 100.0);
+        self.print_line("misc", self.misc_time(), self.misc_time_percent());
+        self.print_line(
+            "fetching_blocks",
+            self.fetching_block_time(),
+            self.fetching_block_time_percent(),
         );
-        println!(
-            "execution        {:>col_len$.time_decimal_place$}      {:>col_len$.pct_decimal_place$}",
-            execute_tx_time, execute_tx_pct
+        self.print_line("execution", self.execute_tx_time(), self.execute_tx_time_percent());
+        self.print_line(
+            "process_state",
+            self.process_state_time(),
+            self.process_state_time_percent(),
         );
-        println!(
-            "process_state    {:>col_len$.time_decimal_place$}      {:>col_len$.pct_decimal_place$}",
-            process_state_time, process_state_pct
-        );
-        println!(
-            "write_to_db      {:>col_len$.time_decimal_place$}      {:>col_len$.pct_decimal_place$}",
-            write_to_db_time, write_to_db_pct
-        );
+        self.print_line("write_to_db", self.write_to_db_time(), self.write_to_db_time_percent());
+
         println!();
     }
 }
@@ -312,45 +289,6 @@ impl DbSpeedRecord {
         );
         self.write_to_db_size =
             self.write_to_db_size.checked_add(other.write_to_db_size).expect("overflow");
-    }
-
-    /// get pure execution duation record
-    pub fn pure_record(&self) -> Self {
-        const RDTSC_OVERHEAD: u64 = 7;
-
-        let mut ret = self.clone();
-
-        let rdtsc_overhead: u64 = self.read_header_td_db_time.0 * RDTSC_OVERHEAD;
-        if self.read_header_td_db_time.1.as_nanos() < rdtsc_overhead as u128 {
-            println!("rdtsc overhead too larget");
-        }
-        ret.read_header_td_db_time.1 = self
-            .read_header_td_db_time
-            .1
-            .checked_sub(Duration::from_nanos(rdtsc_overhead))
-            .expect("overflow");
-
-        let rdtsc_overhead: u64 = self.read_block_with_senders_db_time.0 * RDTSC_OVERHEAD;
-        if self.read_block_with_senders_db_time.1.as_nanos() < rdtsc_overhead as u128 {
-            println!("rdtsc overhead too larget");
-        }
-        ret.read_block_with_senders_db_time.1 = self
-            .read_block_with_senders_db_time
-            .1
-            .checked_sub(Duration::from_nanos(rdtsc_overhead))
-            .expect("overflow");
-
-        let rdtsc_overhead: u64 = self.write_to_db_time.0 * RDTSC_OVERHEAD;
-        if self.write_to_db_time.1.as_nanos() < rdtsc_overhead as u128 {
-            println!("rdtsc overhead too larget");
-        }
-        ret.write_to_db_time.1 = self
-            .write_to_db_time
-            .1
-            .checked_sub(Duration::from_nanos(rdtsc_overhead))
-            .expect("overflow");
-
-        ret
     }
 
     fn cover_size_bytes_to_m(&self, bytes_size: u64) -> f64 {

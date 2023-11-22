@@ -34,8 +34,6 @@ use reth_rpc_types::{
     BlockError, Bundle, CallRequest, RichBlock, StateContext,
 };
 use reth_tasks::TaskSpawner;
-#[cfg(feature = "enable_cache_record")]
-use revm::db::CacheDbRecord;
 use revm::{
     db::{CacheDB, EmptyDB},
     primitives::Env,
@@ -587,15 +585,7 @@ where
 
         let db = if let Some(db) = db {
             let CacheDB { accounts, contracts, logs, block_hashes, .. } = db;
-            CacheDB {
-                accounts,
-                contracts,
-                logs,
-                block_hashes,
-                db: State::new(state),
-                #[cfg(feature = "enable_cache_record")]
-                cache_record: CacheDbRecord::default(),
-            }
+            CacheDB { accounts, contracts, logs, block_hashes, db: State::new(state) }
         } else {
             CacheDB::new(State::new(state))
         };

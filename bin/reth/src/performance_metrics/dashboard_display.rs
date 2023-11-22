@@ -1,17 +1,21 @@
 #[cfg(feature = "enable_opcode_metrics")]
 use super::dashboard_opcode::*;
 #[cfg(feature = "enable_opcode_metrics")]
-use lazy_static::lazy_static;
+use revm::OpCode;
+#[cfg(any(feature = "enable_opcode_metrics", feature = "enable_cache_record"))]
+use revm_utils::time_utils::convert_cycles_to_duration;
+#[cfg(feature = "enable_opcode_metrics")]
+use revm_utils::{time_utils::convert_cycles_to_ns_f64, types::RevmMetricRecord};
+#[cfg(feature = "enable_opcode_metrics")]
+use std::collections::BTreeMap;
+
+#[cfg(feature = "enable_cache_record")]
+use revm_utils::types::CacheDbRecord;
+
 #[cfg(feature = "enable_tps_gas_record")]
 use minstant::Instant;
-#[cfg(feature = "enable_opcode_metrics")]
-use revm::OpCode;
-#[cfg(feature = "enable_opcode_metrics")]
-use revm_utils::types::RevmMetricRecord;
-#[cfg(feature = "enable_opcode_metrics")]
-use std::collections::HashMap;
-#[cfg(feature = "enable_opcode_metrics")]
-use std::time::Duration;
+#[cfg(feature = "enable_tps_gas_record")]
+use std::ops::{Div, Mul};
 
 #[cfg(feature = "enable_execution_duration_record")]
 use reth_stages::ExecutionDurationRecord;
@@ -19,177 +23,166 @@ use reth_stages::ExecutionDurationRecord;
 #[cfg(feature = "enable_db_speed_record")]
 use reth_stages::DbSpeedRecord;
 
+#[cfg(feature = "enable_opcode_metrics")]
+const MGAS_TO_GAS: u64 = 1_000_000u64;
+#[cfg(any(feature = "enable_opcode_metrics", feature = "enable_cache_record"))]
+const COL_WIDTH_MIDDLE: usize = 14;
 #[cfg(feature = "enable_cache_record")]
-use revm_utils::types::CacheDbRecord;
-
-#[cfg(feature = "enable_tps_gas_record")]
-use std::ops::{Div, Mul};
-
-#[cfg(feature = "enable_opcode_metrics")]
-lazy_static! {
-    static ref OPCODE_DES_MAP: HashMap<u8, OpcodeInfo> = MERGE_MAP.iter().copied().collect();
-}
+const COL_WIDTH_BIG: usize = 20;
+#[cfg(feature = "enable_cache_record")]
+const COL_WIDTH_LARGE: usize = 30;
 
 #[cfg(feature = "enable_opcode_metrics")]
-pub(crate) const MGAS_TO_GAS: u64 = 1_000_000u64;
-
-#[cfg(feature = "enable_opcode_metrics")]
-#[derive(Debug)]
-pub(crate) struct OpcodeMergeRecord {
+struct OpcodeMergeRecord {
     count: u64,
-    duration: Duration,
+    duration: u64,
     count_percent: f64,
     duration_percent: f64,
     ave_cost: f64,
 }
 
 #[cfg(feature = "enable_opcode_metrics")]
-#[derive(Debug)]
 pub(crate) struct OpcodeStats {
     total_count: u64,
-    total_duration: Duration,
+    total_duration: u64,
     total_duration_percent: f64,
     count_percent: [f64; OPCODE_NUMBER],
     duration_percent: [f64; OPCODE_NUMBER],
     ave_cost: [f64; OPCODE_NUMBER],
     opcode_gas: [(f64, f64); OPCODE_NUMBER],
     total_gas: f64,
-    merge_records: HashMap<&'static str, OpcodeMergeRecord>,
+    merge_records: BTreeMap<&'static str, OpcodeMergeRecord>,
     opcode_record: RevmMetricRecord,
 }
 
 #[cfg(feature = "enable_opcode_metrics")]
 impl OpcodeStats {
-    pub(crate) fn print(&self, header: &str) {
-        self.print_summay(header);
+    pub(crate) fn print(&self) {
+        self.print_header();
         self.print_opcode();
         self.print_sload_percentile();
         self.print_category();
-    }
-
-    fn base_gas(&self, opcode: u8) -> u64 {
-        if !OPCODE_DES_MAP.contains_key(&opcode) {
-            return 0u64
-        }
-
-        OPCODE_DES_MAP.get(&opcode).unwrap().gas
-    }
-
-    fn print_summay(&self, header: &str) {
         println!("\n");
-        println!("{}", header);
-        // println!("Total Count     : {:>20}", self.total_count);
-        // println!("Total Time (s)  : {:>20.2}", self.total_duration.as_secs_f64());
-        // println!(
-        //     "Avg   Cost (ns) : {:>20.1}",
-        //     self.total_duration.as_nanos() as f64 / self.total_count as f64
-        // );
-        println!("");
+    }
+
+    fn base_gas(&self, opcode: u8) -> Option<u64> {
+        Some(MERGE_MAP[opcode as usize]?.1.gas)
+    }
+
+    fn print_header(&self) {
+        println!("\n===============================Metric of instruction==========================================================\n");
+    }
+
+    fn print_opcode_line(
+        &self,
+        opcode_jump: &str,
+        count: u64,
+        count_percent: f64,
+        time: f64,
+        time_percent: f64,
+        cost: f64,
+        total_gas: f64,
+        gas_percent: f64,
+        base_gas: u64,
+    ) {
+        println!(
+            "{: <COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$.3}{:>COL_WIDTH_MIDDLE$.2}{:>COL_WIDTH_MIDDLE$.3} \
+            {:>COL_WIDTH_MIDDLE$.1}{:>COL_WIDTH_MIDDLE$.2}{:>COL_WIDTH_MIDDLE$.2}{:>COL_WIDTH_MIDDLE$}",
+            opcode_jump,
+            count,
+            count_percent,
+            time,
+            time_percent,
+            cost,
+            total_gas,
+            gas_percent,
+            base_gas,
+        );
     }
 
     fn print_opcode(&self) {
-        let opcode_width = 15;
-        let count_width = 18;
-        let count_percent_width = 12;
-        let time_width = 18;
-        let time_percent_width = 12;
-        let total_gas_width = 20;
-        let total_gas_percent_width = 12;
-        let cost_width = 12;
-        let base_gas_width = 12;
-
         println!(
-            "{:opcode_width$}{:>count_width$}{:>count_percent_width$}{:>time_width$}{:>time_percent_width$} \
-            {:>total_gas_width$}{:>total_gas_percent_width$}{:>cost_width$}{:>base_gas_width$}", 
+            "{: <COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$} \
+            {:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}", 
             "Opcode", 
             "Count", 
             "Count (%)", 
             "Time (s)", 
             "Time (%)", 
+            "Cost (ns)", 
             "Total Mgas",
             "Gas (%)",
-            "Cost (ns)", 
             "Base gas");
 
-        let avg_cost = self.total_duration.as_nanos() as f64 / self.total_count as f64;
+        let avg_cost = convert_cycles_to_ns_f64(self.total_duration) / self.total_count as f64;
         println!(
-            "{:opcode_width$}{:>count_width$}{:>count_percent_width$.3}{:>time_width$.2}{:>time_percent_width$.3} \
-            {:>total_gas_width$.2}{:>total_gas_percent_width$.2}{:>cost_width$.1}{:>base_gas_width$}",
+            "{: <COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$.3}{:>COL_WIDTH_MIDDLE$.2}{:>COL_WIDTH_MIDDLE$.3} \
+            {:>COL_WIDTH_MIDDLE$.1}{:>COL_WIDTH_MIDDLE$.2}{:>COL_WIDTH_MIDDLE$.2}{:>COL_WIDTH_MIDDLE$}",
             "Overall",
             self.total_count,
             100f64,
-            self.total_duration.as_secs_f64(),
+            convert_cycles_to_duration(self.total_duration).as_secs_f64(),
             self.total_duration_percent * 100.0,
+            avg_cost,
             self.total_gas,
             100f64,
-            avg_cost,
             "NAN",
         );
 
         for i in 0..OPCODE_NUMBER {
             let op = i as u8;
-            if !OPCODE_DES_MAP.contains_key(&op) {
-                continue
-            }
             let opcode_jump = OpCode::try_from_u8(op);
             if opcode_jump.is_none() {
                 continue
             }
 
-            println!(
-                "{:opcode_width$}{:>count_width$}{:>count_percent_width$.3}{:>time_width$.2}{:>time_percent_width$.3} \
-                {:>total_gas_width$.2}{:>total_gas_percent_width$.2}{:>cost_width$.1}{:>base_gas_width$}",
+            self.print_opcode_line(
                 opcode_jump.unwrap().as_str(),
                 self.opcode_record.opcode_record[i].0,
                 self.count_percent[i] * 100.0,
-                self.opcode_record.opcode_record[i].1.as_secs_f64(),
+                convert_cycles_to_duration(self.opcode_record.opcode_record[i].1).as_secs_f64(),
                 self.duration_percent[i] * 100.0,
-                self.opcode_gas[i].0,
-                self.opcode_gas[i].1*100.0,
                 self.ave_cost[i],
-                self.base_gas(op),
+                self.opcode_gas[i].0,
+                self.opcode_gas[i].1 * 100.0,
+                self.base_gas(op).unwrap_or(0),
             );
         }
     }
     fn print_category(&self) {
-        let cat_width = 13;
-        let count_width = 18;
-        let time_width = 13;
-        let cost_width = 13;
-        let count_percent_width = 13;
-        let time_percent_width = 13;
-
         println!("\n");
         println!("==========================================================================================");
-        println!("{:cat_width$}{:>count_width$}{:>time_width$}{:>cost_width$}{:>count_percent_width$}{:>time_percent_width$}", 
+        println!("{: <COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}", 
                 "Opcode Cat.", 
                 "Count", 
-                "Time (s)", 
-                "Cost (ns)", 
                 "Count (%)", 
-                "Time (%)");
+                "Time (s)", 
+                "Time (%)",
+                "Cost (ns)", 
+        );
+
         for (k, v) in self.merge_records.iter() {
             println!(
-                "{:cat_width$}{:count_width$}{:>time_width$.2}{:>cost_width$.1}{:>count_percent_width$.3}{:>time_percent_width$.3}",
+                "{: <COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$.2}{:>COL_WIDTH_MIDDLE$.1}{:>COL_WIDTH_MIDDLE$.3}{:>COL_WIDTH_MIDDLE$.3}",
                 *k,
                 v.count,
-                v.duration.as_secs_f64(),
-                v.ave_cost,
                 v.count_percent * 100.0,
+                convert_cycles_to_duration(v.duration).as_secs_f64(),
                 v.duration_percent * 100.0,
+                v.ave_cost,
             );
         }
     }
 
     fn print_sload_percentile(&self) {
-        let total_cnt: u128 = self.opcode_record.sload_opcode_record.iter().map(|&v| v.1).sum();
+        let total_cnt: u64 = self.opcode_record.sload_opcode_record.iter().map(|&v| v.1).sum();
         println!("\n");
         println!("================================sload time percentile=====================================");
         println!("Time (us)    Percentile (%)");
         let mut max_per = 0.0;
         for value in self.opcode_record.sload_opcode_record.iter() {
             let p = value.1 as f64 / total_cnt as f64;
-            if value.0 == u128::MAX {
+            if value.0 == u64::MAX {
                 max_per = p;
                 break
             }
@@ -212,50 +205,35 @@ impl RevmMetricTimeDisplayer {
         self.revm_metric_record.update(record);
     }
 
-    fn category_name(&self, opcode: u8) -> &'static str {
-        if OPCODE_DES_MAP.contains_key(&opcode) {
-            return OPCODE_DES_MAP.get(&opcode).unwrap().category
-        }
-
-        return &"unknow"
+    fn category_name(&self, opcode: u8) -> Option<&'static str> {
+        Some(MERGE_MAP[opcode as usize]?.1.category)
     }
 
-    fn caculate_gas(&self, opcode: u8, record: &(u64, Duration, i128)) -> f64 {
-        if !OPCODE_DES_MAP.contains_key(&opcode) {
-            return 0.0
+    fn caculate_gas(&self, opcode: u8, record: &(u64, u64, i128)) -> f64 {
+        let (base_gas, static_gas) = match MERGE_MAP[opcode as usize] {
+            Some(opcode_info) => (opcode_info.1.gas, opcode_info.1.static_gas),
+            None => return 0.0,
+        };
+
+        if static_gas {
+            return base_gas.checked_mul(record.0).unwrap_or(0) as f64
         }
 
-        let opcode_info = OPCODE_DES_MAP.get(&opcode).unwrap();
-        if opcode_info.static_gas {
-            return opcode_info.gas.checked_mul(record.0).unwrap_or(0) as f64
-        }
-
-        return record.2 as f64
-    }
-
-    fn pure_metric_record(&self) -> RevmMetricRecord {
-        const RDTSC_OVERHEAD: u64 = 7;
-        let mut pure_record = self.revm_metric_record.clone();
-        for (i, v) in self.revm_metric_record.opcode_record.iter().enumerate() {
-            let rdtsc_overhead: u64 = v.0 * RDTSC_OVERHEAD;
-            if v.1.as_nanos() < rdtsc_overhead as u128 {
-                println!("rdtsc overhead too larget");
-            }
-            pure_record.opcode_record[i].1 = v.1 - Duration::from_nanos(rdtsc_overhead);
-        }
-
-        pure_record
+        record.2 as f64
     }
 
     pub(crate) fn stats(&self, metric_record: &RevmMetricRecord) -> OpcodeStats {
-        let mut merge_records: HashMap<&'static str, OpcodeMergeRecord> = HashMap::new();
+        let mut merge_records: BTreeMap<&'static str, OpcodeMergeRecord> = BTreeMap::new();
         let mut total_count: u64 = 0;
-        let total_duration: Duration = metric_record.total_time;
+        let total_duration = metric_record.total_time;
         let mut total_duration_percent: f64 = 0.0;
 
         for (i, v) in metric_record.opcode_record.iter().enumerate() {
             total_count = total_count.checked_add(v.0).expect("overflow");
-            let cat = self.category_name(i as u8);
+            let cat = match self.category_name(i as u8) {
+                Some(name) => name,
+                None => continue,
+            };
 
             merge_records
                 .entry(cat)
@@ -290,18 +268,17 @@ impl RevmMetricTimeDisplayer {
         let mut ave_cost: [f64; OPCODE_NUMBER] = [0.0; OPCODE_NUMBER];
         for (i, v) in self.revm_metric_record.opcode_record.iter().enumerate() {
             count_percent[i] = v.0 as f64 / total_count as f64;
-            duration_percent[i] = v.1.as_nanos() as f64 / total_duration.as_nanos() as f64;
+            duration_percent[i] = v.1 as f64 / total_duration as f64;
 
             total_duration_percent += duration_percent[i];
-            ave_cost[i] = v.1.as_nanos() as f64 / v.0 as f64;
+            ave_cost[i] = convert_cycles_to_ns_f64(v.1) / v.0 as f64;
             opcode_gas[i].1 = opcode_gas[i].0 / total_gas;
         }
 
         for (_, value) in merge_records.iter_mut() {
             value.count_percent = value.count as f64 / total_count as f64;
-            value.duration_percent =
-                value.duration.as_nanos() as f64 / total_duration.as_nanos() as f64;
-            value.ave_cost = value.duration.as_nanos() as f64 / value.count as f64;
+            value.duration_percent = value.duration as f64 / total_duration as f64;
+            value.ave_cost = convert_cycles_to_ns_f64(value.duration) / value.count as f64;
         }
 
         OpcodeStats {
@@ -320,11 +297,7 @@ impl RevmMetricTimeDisplayer {
 
     pub(crate) fn print(&self) {
         let stat = self.stats(&self.revm_metric_record);
-        stat.print("===============================Metric of instruction==========================================================");
-
-        let pure_metric_record = self.pure_metric_record();
-        let pure_stat = self.stats(&pure_metric_record);
-        pure_stat.print("===============================Metric of pure instruction==========================================================");
+        stat.print();
         println!("\n");
     }
 }
@@ -342,11 +315,7 @@ impl ExecutionDurationDisplayer {
     }
 
     pub(crate) fn print(&self) {
-        self.excution_duration_record.print("===============================Metric of execution duration==========================================================");
-
-        // let pure_record = self.excution_duration_record.pure_record();
-        // pure_record.print("===============================Metric of pure execution
-        // duration==========================================================");
+        self.excution_duration_record.print();
     }
 }
 
@@ -359,15 +328,12 @@ pub(crate) struct DBSpeedDisplayer {
 #[cfg(feature = "enable_db_speed_record")]
 impl DBSpeedDisplayer {
     pub(crate) fn update_db_speed_record(&mut self, record: DbSpeedRecord) {
-        self.db_speed_record.add(record);
+        self.db_speed_record = record;
     }
 
     pub(crate) fn print(&self) {
-        self.db_speed_record.print("===============================Metric of db speed==========================================================");
-
-        // let pure_record = self.db_speed_record.pure_record();
-        // pure_record.print("===============================Metric of pure db
-        // speed==========================================================");
+        let header = "===============================Metric of db speed==========================================================";
+        self.db_speed_record.print(header);
     }
 }
 
@@ -375,6 +341,7 @@ impl DBSpeedDisplayer {
 #[derive(Default, Debug)]
 pub(crate) struct CacheDBRecordDisplayer {
     cache_db_record: CacheDbRecord,
+    pre_db_size: usize,
 }
 
 #[cfg(feature = "enable_cache_record")]
@@ -383,122 +350,131 @@ impl CacheDBRecordDisplayer {
         self.cache_db_record.update(&record);
     }
 
-    fn print_header(&self, times_name: &str, percentiles_name: &str) {
-        let col_funciotns_len = 20;
-        let col_times_len = 24;
-        let col_percentage_len = 20;
-
-        println! {"{:col_funciotns_len$}{:>col_times_len$}{:>col_percentage_len$}", "CacheDb functions", times_name, percentiles_name};
+    pub(crate) fn update_size(&mut self, block_number: u64, cachedb_size: usize) {
+        if self.pre_db_size != cachedb_size {
+            println!("Block Number: {:?}, Cachedb Size(bytes): {:?}", block_number, cachedb_size);
+            self.pre_db_size = cachedb_size;
+        }
     }
 
-    fn print_line(&self, function: &str, times: u64, percentiles: f64) {
-        let col_funciotns_len = 10;
-        let col_times_len = 15;
-        let col_percentage_len = 20;
+    // fn print_header(&self, times_name: &str, percentiles_name: &str) {
+    //     let col_funciotns_len = 20;
+    //     let col_times_len = 24;
+    //     let col_percentage_len = 20;
 
+    //     println! {"{:col_funciotns_len$}{:>col_times_len$}{:>col_percentage_len$}", "CacheDb
+    // functions", times_name, percentiles_name}; }
+
+    fn print_line(&self, function: &str, hits: u64, misses: u64, misses_pct: f64) {
         println!(
-            "{:col_funciotns_len$}{:>col_times_len$}{:>col_percentage_len$.3}",
-            function, times, percentiles
+            "{: <COL_WIDTH_BIG$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_BIG$.3}",
+            function, hits, misses, misses_pct
         );
+    }
+
+    fn misses_in_basic_pencentage(&self) -> f64 {
+        self.cache_db_record.misses.basic as f64 / self.cache_db_record.total_in_basic() as f64
+    }
+
+    fn misses_in_code_by_hash_pencentage(&self) -> f64 {
+        self.cache_db_record.misses.code_by_hash as f64 /
+            self.cache_db_record.total_in_code_by_hash() as f64
+    }
+
+    fn misses_in_storage_pencentage(&self) -> f64 {
+        self.cache_db_record.misses.storage as f64 / self.cache_db_record.total_in_storage() as f64
+    }
+
+    fn misses_in_block_hash_pencentage(&self) -> f64 {
+        self.cache_db_record.misses.block_hash as f64 /
+            self.cache_db_record.total_in_block_hash() as f64
+    }
+
+    fn misses_in_load_account_pencentage(&self) -> f64 {
+        self.cache_db_record.misses.load_account as f64 /
+            self.cache_db_record.total_in_load_account() as f64
+    }
+
+    fn total_misses_pencentage(&self) -> f64 {
+        self.cache_db_record.total_miss() as f64 /
+            (self.cache_db_record.total_hits() + self.cache_db_record.total_miss()) as f64
     }
 
     pub(crate) fn print(&self) {
-        let cache_db_record = &self.cache_db_record;
-
         println!("===============================Metric of CacheDb========================================================");
-
-        let total_in_basic = cache_db_record.total_in_basic();
-        let total_in_code_by_hash = cache_db_record.total_in_code_by_hash();
-        let total_in_storage = cache_db_record.total_in_storage();
-        let total_in_block_hash = cache_db_record.total_in_block_hash();
-
-        let total_hits = cache_db_record.total_hits();
-        let total_miss = cache_db_record.total_miss();
-        let total_count = total_hits + total_miss;
-
-        let hits_in_basic_pencentage =
-            cache_db_record.hits.hits_in_basic as f64 / total_in_basic as f64;
-        let hits_in_code_by_hash_pencentage =
-            cache_db_record.hits.hits_in_code_by_hash as f64 / total_in_code_by_hash as f64;
-        let hits_in_storage_pencentage =
-            cache_db_record.hits.hits_in_storage as f64 / total_in_storage as f64;
-        let hits_in_block_hash_pencentage =
-            cache_db_record.hits.hits_in_block_hash as f64 / total_in_block_hash as f64;
-        let total_hits_pencentage = total_hits as f64 / total_count as f64;
-
         println!("===============================Hit in CacheDb===========================================================");
-        self.print_header("Hits", "Hit ratio (%)");
-        self.print_line(
-            "hit_in_basic                 ",
-            cache_db_record.hits.hits_in_basic,
-            hits_in_basic_pencentage * 100.0,
+        println!(
+            "{: <COL_WIDTH_BIG$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_MIDDLE$}{:>COL_WIDTH_BIG$}",
+            "CacheDb functions", "Hits", "Misses", "Miss ratio (%)",
         );
         self.print_line(
-            "hit_in_code_by_hash          ",
-            cache_db_record.hits.hits_in_code_by_hash,
-            hits_in_code_by_hash_pencentage * 100.0,
-        );
-        self.print_line(
-            "hit_in_storage               ",
-            cache_db_record.hits.hits_in_storage,
-            hits_in_storage_pencentage * 100.0,
-        );
-        self.print_line(
-            "hit_in_block_hash            ",
-            cache_db_record.hits.hits_in_block_hash,
-            hits_in_block_hash_pencentage * 100.0,
-        );
-        self.print_line("total hits                   ", total_hits, total_hits_pencentage * 100.0);
-
-        let misses_in_basic_pencentage =
-            cache_db_record.misses.misses_in_basic as f64 / total_in_basic as f64;
-        let misses_in_code_by_hash_pencentage =
-            cache_db_record.misses.misses_in_code_by_hash as f64 / total_in_code_by_hash as f64;
-        let misses_in_storage_pencentage =
-            cache_db_record.misses.misses_in_storage as f64 / total_in_storage as f64;
-        let misses_in_block_hash_pencentage =
-            cache_db_record.misses.misses_in_block_hash as f64 / total_in_block_hash as f64;
-        let total_misses_pencentage = total_miss as f64 / total_count as f64;
-
-        println!("===============================Miss in CacheDb===========================================================");
-        self.print_header("Misses", "Miss ratio (%)");
-        self.print_line(
-            "miss_in_basic                ",
-            cache_db_record.misses.misses_in_basic,
-            misses_in_basic_pencentage * 100.0,
-        );
-        self.print_line(
-            "miss_in_code_by_hash         ",
-            cache_db_record.misses.misses_in_code_by_hash,
-            misses_in_code_by_hash_pencentage * 100.0,
-        );
-        self.print_line(
-            "miss_in_storage              ",
-            cache_db_record.misses.misses_in_storage,
-            misses_in_storage_pencentage * 100.0,
-        );
-        self.print_line(
-            "miss_in_block_hash           ",
-            cache_db_record.misses.misses_in_block_hash,
-            misses_in_block_hash_pencentage * 100.0,
-        );
-        self.print_line(
-            "total misses                 ",
-            total_miss,
-            total_misses_pencentage * 100.0,
+            "in_basic",
+            self.cache_db_record.hits.basic,
+            self.cache_db_record.misses.basic,
+            self.misses_in_basic_pencentage(),
         );
 
-        let col_len = 20;
-        let total_penalty_times = cache_db_record.total_penalty_times();
+        self.print_line(
+            "in_code_by_hash",
+            self.cache_db_record.hits.code_by_hash,
+            self.cache_db_record.misses.code_by_hash,
+            self.misses_in_code_by_hash_pencentage(),
+        );
+
+        self.print_line(
+            "in_storage",
+            self.cache_db_record.hits.storage,
+            self.cache_db_record.misses.storage,
+            self.misses_in_storage_pencentage(),
+        );
+
+        self.print_line(
+            "in_block_hash",
+            self.cache_db_record.hits.block_hash,
+            self.cache_db_record.misses.block_hash,
+            self.misses_in_block_hash_pencentage(),
+        );
+
+        self.print_line(
+            "load_account",
+            self.cache_db_record.hits.load_account,
+            self.cache_db_record.misses.load_account,
+            self.misses_in_load_account_pencentage(),
+        );
+
+        self.print_line(
+            "total",
+            self.cache_db_record.total_hits(),
+            self.cache_db_record.total_miss(),
+            self.total_misses_pencentage(),
+        );
+
+        let total_penalty_times = self.cache_db_record.total_penalty_times();
         println!("===============================Misses penalty in CacheDb=================================================");
-        println! {"CacheDb functions                     Penalty time(min)"};
-        println! {"{:col_len$}{:col_len$.3}", "miss_penalty_in_basic       ", cache_db_record.penalty.penalty_in_basic.as_secs_f64() / 60.0};
-        println! {"{:col_len$}{:col_len$.3}", "miss_penalty_in_code_by_hash", cache_db_record.penalty.penalty_in_code_by_hash.as_secs_f64() / 60.0};
-        println! {"{:col_len$}{:col_len$.3}", "miss_penalty_in_storage     ", cache_db_record.penalty.penalty_in_storage.as_secs_f64() / 60.0};
-        println! {"{:col_len$}{:col_len$.3}", "miss_penalty_in_block_hash  ", cache_db_record.penalty.penalty_in_block_hash.as_secs_f64() / 60.0};
-        println! {"{:col_len$}{:col_len$.3}", "total penalty time          ", total_penalty_times / 60.0};
+        println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$}", "CacheDb functions", "Penalty time(min)"};
+        println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$.3}", "miss_penalty_in_basic       ", convert_cycles_to_duration(self.cache_db_record.penalty.basic).as_secs_f64() / 60.0};
+        println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$.3}", "miss_penalty_in_code_by_hash", convert_cycles_to_duration(self.cache_db_record.penalty.code_by_hash).as_secs_f64() / 60.0};
+        println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$.3}", "miss_penalty_in_storage     ", convert_cycles_to_duration(self.cache_db_record.penalty.storage).as_secs_f64() / 60.0};
+        println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$.3}", "miss_penalty_in_block_hash  ", convert_cycles_to_duration(self.cache_db_record.penalty.block_hash).as_secs_f64() / 60.0};
+        println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$.3}", "miss_penalty_in_load_account", convert_cycles_to_duration(self.cache_db_record.penalty.load_account).as_secs_f64() / 60.0};
+        println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$.3}", "total penalty time          ", convert_cycles_to_duration(total_penalty_times).as_secs_f64() / 60.0};
 
         println!();
+        println!();
+        let total_us_count = self.cache_db_record.total_miss();
+        println!("========================================Penalty percentile ===============================================");
+        println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$}", "time (us)", "Count (%)"};
+        for (i, v) in self.cache_db_record.penalty.us_percentile.iter().enumerate() {
+            println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$.6}", i+1, (*v * 100) as f64 / total_us_count as f64};
+        }
+        println!();
+        println!();
+        let total_ns_count = self.cache_db_record.penalty.us_percentile[0];
+        println!("========================================Penalty percentile ===============================================");
+        println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$}", "time (ns)", "Count (%)"};
+        for (i, v) in self.cache_db_record.penalty.ns_percentile.iter().enumerate() {
+            println! {"{: <COL_WIDTH_LARGE$}{:>COL_WIDTH_MIDDLE$.6}", i+1, (*v * 100) as f64 / total_ns_count as f64};
+        }
     }
 }
 
@@ -507,7 +483,6 @@ impl CacheDBRecordDisplayer {
 pub(crate) struct TpsAndGasRecordDisplayer {
     pub(crate) delta_txs: u128,
     pub(crate) delta_gas: u128,
-
     pub(crate) last_instant: minstant::Instant,
 }
 

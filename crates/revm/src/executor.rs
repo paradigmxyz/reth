@@ -263,7 +263,7 @@ where
 
             #[cfg(feature = "enable_opcode_metrics")]
             {
-                let mut revm_metric_record = revm_utils::instrument::get_record();
+                let mut revm_metric_record = revm_utils::instruction_metric::get_record();
                 if revm_metric_record.not_empty() {
                     self.revm_metric_record.update(&mut revm_metric_record);
                 }
@@ -300,15 +300,6 @@ where
                     logs: result.into_logs().into_iter().map(into_reth_log).collect(),
                 },
             );
-        }
-
-        #[cfg(feature = "enable_opcode_metrics")]
-        {
-            // println!("");
-            // println!("block number: {:?}, =============================== ", block.number);
-            // println!("revm result: {:?}", self.revm_metric_record);
-            // println!("====================================================");
-            // println!("");
         }
 
         Ok((post_state, cumulative_gas_used))
@@ -399,7 +390,7 @@ where
     /// Get cacheDb metric record.
     #[cfg(feature = "enable_cache_record")]
     fn get_cachedb_record(&self) -> CacheDbRecord {
-        self.evm.db.as_ref().expect("db is empty").get_metric()
+        revm_utils::cachedb_metric::get_record()
     }
 }
 

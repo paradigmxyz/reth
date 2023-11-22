@@ -9,8 +9,6 @@ use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides, CallRequest,
 };
-#[cfg(feature = "enable_cache_record")]
-use revm::db::CacheDbRecord;
 use revm::{
     db::{CacheDB, EmptyDB},
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
@@ -518,8 +516,6 @@ where
         logs: db.logs.clone(),
         block_hashes: db.block_hashes.clone(),
         db: Default::default(),
-        #[cfg(feature = "enable_cache_record")]
-        cache_record: CacheDbRecord::default(),
     }
 }
 
