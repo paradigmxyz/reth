@@ -500,14 +500,15 @@ mod tests {
         ChainSpecBuilder, PruneModes, SealedBlock, StorageEntry, B256, MAINNET, U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
-    use reth_revm::Factory;
+    use reth_revm::EvmProcessorFactory;
     use std::sync::Arc;
 
-    fn stage() -> ExecutionStage<Factory> {
-        let factory =
-            Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
+    fn stage() -> ExecutionStage<EvmProcessorFactory> {
+        let executor_factory = EvmProcessorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        ));
         ExecutionStage::new(
-            factory,
+            executor_factory,
             ExecutionStageThresholds {
                 max_blocks: Some(100),
                 max_changes: None,
@@ -684,7 +685,7 @@ mod tests {
         provider.commit().unwrap();
 
         let provider = factory.provider_rw().unwrap();
-        let mut execution_stage: ExecutionStage<Factory> = stage();
+        let mut execution_stage: ExecutionStage<EvmProcessorFactory> = stage();
         let output = execution_stage.execute(&provider, input).unwrap();
         provider.commit().unwrap();
         assert_matches!(output, ExecOutput {

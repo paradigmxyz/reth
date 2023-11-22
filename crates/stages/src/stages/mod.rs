@@ -62,7 +62,7 @@ mod tests {
     use reth_provider::{
         AccountExtReader, BlockWriter, ProviderFactory, ReceiptProvider, StorageReader,
     };
-    use reth_revm::Factory;
+    use reth_revm::EvmProcessorFactory;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -128,7 +128,9 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
+                EvmProcessorFactory::new(Arc::new(
+                    ChainSpecBuilder::mainnet().berlin_activated().build(),
+                )),
                 ExecutionStageThresholds {
                     max_blocks: Some(100),
                     max_changes: None,
