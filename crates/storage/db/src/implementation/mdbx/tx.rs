@@ -13,7 +13,17 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, Transaction, TransactionKind, WriteFlags, RW};
-use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
+use reth_tracing::tracing::warn;
+use std::{
+    backtrace::{Backtrace, BacktraceStatus},
+    marker::PhantomData,
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+/// Duration after which we emit the warning log about long-lived database transactions.
+const TRANSACTION_WARNING_DURATION: Duration = Duration::from_secs(60);
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
@@ -38,12 +48,7 @@ impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     pub fn new_with_metrics(inner: Transaction<K>, with_metrics: bool) -> Self {
         let metrics_handler = with_metrics.then(|| {
-            let handler = MetricsHandler::<K> {
-                txn_id: inner.id(),
-                start: Instant::now(),
-                close_recorded: false,
-                _marker: PhantomData,
-            };
+            let handler = MetricsHandler::<K>::new(inner.id());
             TransactionMetrics::record_open(handler.transaction_mode());
             handler
         });
@@ -94,12 +99,12 @@ impl<K: TransactionKind> Tx<K> {
         f: impl FnOnce(Self) -> R,
     ) -> R {
         if let Some(mut metrics_handler) = self.metrics_handler.take() {
-            metrics_handler.close_recorded = true;
+            let open_duration = metrics_handler.start.elapsed();
+            metrics_handler.open_duration = Some(open_duration);
 
             let start = Instant::now();
             let result = f(self);
             let close_duration = start.elapsed();
-            let open_duration = metrics_handler.start.elapsed();
 
             TransactionMetrics::record_close(
                 metrics_handler.transaction_mode(),
@@ -138,10 +143,26 @@ struct MetricsHandler<K: TransactionKind> {
     txn_id: u64,
     /// The time when transaction has started.
     start: Instant,
-    /// If true, the metric about transaction closing has already been recorded and we don't need
-    /// to do anything on [Drop::drop].
-    close_recorded: bool,
+    /// The duration a database transaction has been open.
+    ///
+    /// If [Some], the metric about transaction closing has already been recorded and we don't need
+    /// to do anything on [MetricsHandler::drop].
+    open_duration: Option<Duration>,
+    /// The backtrace of transaction opening. Filled on [Tx::new_with_metrics].
+    open_backtrace: Backtrace,
     _marker: PhantomData<K>,
+}
+
+impl<K: TransactionKind> MetricsHandler<K> {
+    fn new(txn_id: u64) -> Self {
+        Self {
+            txn_id,
+            start: Instant::now(),
+            open_duration: None,
+            open_backtrace: Backtrace::capture(),
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<K: TransactionKind> MetricsHandler<K> {
@@ -156,7 +177,16 @@ impl<K: TransactionKind> MetricsHandler<K> {
 
 impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
-        if !self.close_recorded {
+        if let Some(open_duration) = self.open_duration {
+            if open_duration > TRANSACTION_WARNING_DURATION {
+                warn!(
+                    target: "storage::db::mdbx",
+                    ?open_duration,
+                    backtrace = ?self.open_backtrace,
+                    "The database transaction was open for too long"
+                );
+            }
+        } else {
             TransactionMetrics::record_close(
                 self.transaction_mode(),
                 TransactionOutcome::Drop,
