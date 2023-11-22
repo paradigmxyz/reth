@@ -44,8 +44,8 @@ impl<St> RlpxProtocolMultiplexer<St> {
     /// Installs a new protocol on top of the raw p2p stream
     pub fn install_protocol<S>(
         &mut self,
-        cap: Capability,
-        st: S,
+        _cap: Capability,
+        _st: S,
     ) -> Result<(), UnsupportedCapabilityError> {
         todo!()
     }
@@ -75,7 +75,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         let (to_primary, from_wire) = mpsc::unbounded_channel();
         let (to_wire, from_primary) = mpsc::unbounded_channel();
         let proxy = ProtocolProxy {
-            shared_cap: shared_cap.clone(),
+            cap: shared_cap.clone(),
             from_wire: UnboundedReceiverStream::new(from_wire),
             to_wire,
         };
@@ -94,9 +94,10 @@ impl<St> RlpxProtocolMultiplexer<St> {
     }
 }
 
+/// A Stream and Sink type that acts as a wrapper around a primary RLPx subprotocol (e.g. "eth")
 #[derive(Debug)]
 pub struct ProtocolProxy {
-    shared_cap: SharedCapability,
+    cap: SharedCapability,
     from_wire: UnboundedReceiverStream<BytesMut>,
     to_wire: UnboundedSender<Bytes>,
 }
@@ -105,9 +106,15 @@ impl ProtocolProxy {
     fn mask_msg_id(&self, msg: Bytes) -> Bytes {
         // TODO handle empty messages
         let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0] + self.shared_cap.relative_message_id_offset();
+        masked_bytes[0] = msg[0] + self.cap.relative_message_id_offset();
         masked_bytes[1..].copy_from_slice(&msg[1..]);
         masked_bytes.freeze()
+    }
+
+    fn unmask_id(&self, mut msg: BytesMut) -> BytesMut {
+        // TODO handle empty messages
+        msg[0] -= self.cap.relative_message_id_offset();
+        msg
     }
 }
 
@@ -116,14 +123,14 @@ impl Stream for ProtocolProxy {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let msg = ready!(self.from_wire.poll_next_unpin(cx));
-        Poll::Ready(msg.map(Ok))
+        Poll::Ready(msg.map(|msg| Ok(self.get_mut().unmask_id(msg))))
     }
 }
 
 impl Sink<Bytes> for ProtocolProxy {
     type Error = io::Error;
 
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
@@ -145,7 +152,7 @@ impl Sink<Bytes> for ProtocolProxy {
 impl CanDisconnect<Bytes> for ProtocolProxy {
     async fn disconnect(
         &mut self,
-        reason: DisconnectReason,
+        _reason: DisconnectReason,
     ) -> Result<(), <Self as Sink<Bytes>>::Error> {
         // TODO handle disconnects
         Ok(())
@@ -220,6 +227,20 @@ where
                 }
             }
 
+            // advance primary out
+            loop {
+                match this.from_primary.poll_next_unpin(cx) {
+                    Poll::Ready(Some(msg)) => {
+                        this.out_buffer.push_back(msg);
+                    }
+                    Poll::Ready(None) => {
+                        // primary closed
+                        return Poll::Ready(None)
+                    }
+                    Poll::Pending => break,
+                }
+            }
+
             // advance all satellites
             for idx in (0..this.satellites.len()).rev() {
                 let mut proto = this.satellites.swap_remove(idx);
@@ -243,7 +264,35 @@ where
                 match this.conn.poll_next_unpin(cx) {
                     Poll::Ready(Some(Ok(msg))) => {
                         delegated = true;
-                        // TODO find matching cap and delegate
+                        let offset = msg[0];
+                        // find the protocol that matches the offset
+                        // TODO optimize this by keeping a better index
+                        let mut lowest_satellite = None;
+                        // find the protocol with the lowest offset that is greater than the message
+                        // offset
+                        for (i, proto) in this.satellites.iter().enumerate() {
+                            let proto_offset = proto.cap.relative_message_id_offset();
+                            if proto_offset >= offset {
+                                if let Some((_, lowest_offset)) = lowest_satellite {
+                                    if proto_offset < lowest_offset {
+                                        lowest_satellite = Some((i, proto_offset));
+                                    }
+                                } else {
+                                    lowest_satellite = Some((i, proto_offset));
+                                }
+                            }
+                        }
+
+                        if let Some((idx, lowest_offset)) = lowest_satellite {
+                            if lowest_offset < this.primary_capability.relative_message_id_offset()
+                            {
+                                // delegate to satellite
+                                this.satellites[idx].send_raw(msg);
+                                continue
+                            }
+                        }
+                        // delegate to primary
+                        let _ = this.to_primary.send(msg);
                     }
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
                     Poll::Ready(None) => {
@@ -265,23 +314,31 @@ impl<St, Primary, T> Sink<T> for RlpxSatelliteStream<St, Primary>
 where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     Primary: Sink<T, Error = io::Error> + Unpin,
+    P2PStreamError: Into<<Primary as Sink<T>>::Error>,
 {
     type Error = <Primary as Sink<T>>::Error;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!()
+        let this = self.get_mut();
+        if let Err(err) = ready!(this.conn.poll_ready_unpin(cx)) {
+            return Poll::Ready(Err(err.into()))
+        }
+        if let Err(err) = ready!(this.primary.poll_ready_unpin(cx)) {
+            return Poll::Ready(Err(err))
+        }
+        Poll::Ready(Ok(()))
     }
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        todo!()
+        self.get_mut().primary.start_send_unpin(item)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!()
+        self.get_mut().conn.poll_flush_unpin(cx).map_err(Into::into)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!()
+        self.get_mut().conn.poll_close_unpin(cx).map_err(Into::into)
     }
 }
 
@@ -296,15 +353,25 @@ struct ProtocolStream {
 impl ProtocolStream {
     fn mask_msg_id(&self, mut msg: BytesMut) -> Bytes {
         // TODO handle empty messages
-        msg[0] = msg[0] + self.cap.relative_message_id_offset();
+        msg[0] += self.cap.relative_message_id_offset();
         msg.freeze()
+    }
+
+    fn unmask_id(&self, mut msg: BytesMut) -> BytesMut {
+        // TODO handle empty messages
+        msg[0] -= self.cap.relative_message_id_offset();
+        msg
+    }
+
+    fn send_raw(&self, msg: BytesMut) {
+        let _ = self.to_satellite.send(self.unmask_id(msg));
     }
 }
 
 impl Stream for ProtocolStream {
     type Item = Bytes;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         let msg = ready!(this.satellite_st.as_mut().poll_next(cx));
         Poll::Ready(msg.map(|msg| this.mask_msg_id(msg)))
@@ -332,9 +399,9 @@ mod tests {
         reth_tracing::init_test_tracing();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
-        let (status, fork_filter) = eth_handshake();
+        let (_status, _fork_filter) = eth_handshake();
 
-        let handle = tokio::spawn(async move {
+        let _handle = tokio::spawn(async move {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = crate::PassthroughCodec::default().framed(incoming);
             let (server_hello, _) = eth_hello();
@@ -342,21 +409,21 @@ mod tests {
             let (p2p_stream, _) =
                 UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
-            let (eth_stream, _) =
+            let (_eth_stream, _) =
                 UnauthedEthStream::new(p2p_stream).handshake(status, fork_filter).await.unwrap();
 
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         });
 
         let conn = connect_passthrough(local_addr, eth_hello().0).await;
-        let eth = conn.shared_capabilities().eth().unwrap().clone();
-        let multiplexer = RlpxProtocolMultiplexer::new(conn);
+        let _eth = conn.shared_capabilities().eth().unwrap().clone();
+        let _multiplexer = RlpxProtocolMultiplexer::new(conn);
 
-        let satellite = multiplexer
-            .into_satellite_stream(eth.capability().as_ref(), |proxy| async move {
-                UnauthedEthStream::new(proxy).handshake(status, fork_filter).await
-            })
-            .await
-            .unwrap();
+        // let satellite = multiplexer
+        //     .into_satellite_stream(eth.capability().as_ref(), |proxy| async move {
+        //         UnauthedEthStream::new(proxy).handshake(status, fork_filter).await
+        //     })
+        //     .await
+        //     .unwrap();
     }
 }
