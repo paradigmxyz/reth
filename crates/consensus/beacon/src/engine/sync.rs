@@ -404,7 +404,8 @@ mod tests {
         ChainSpecBuilder, Header, SealedHeader, MAINNET,
     };
     use reth_provider::{
-        test_utils::TestExecutorFactory, BundleStateWithReceipts, ProviderFactory,
+        test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
+        BundleStateWithReceipts, ProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_tasks::TokioTaskExecutor;
@@ -467,7 +468,7 @@ mod tests {
                 pipeline = pipeline.with_max_block(max_block);
             }
 
-            pipeline.build(ProviderFactory::new(create_test_rw_db(), chain_spec))
+            pipeline.build(create_test_provider_factory_with_chain_spec(chain_spec))
         }
     }
 
