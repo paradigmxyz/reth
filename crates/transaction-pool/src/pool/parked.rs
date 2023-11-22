@@ -516,18 +516,18 @@ mod tests {
         // TODO: make creating these mock tx chains easier
         // create a chain of transactions by sender A, B, C
         let a1 = MockTransaction::eip1559().with_sender(a);
-        let a2 = a1.clone().with_nonce(1);
-        let a3 = a1.clone().with_nonce(2);
-        let a4 = a1.clone().with_nonce(3);
+        let a2 = a1.next();
+        let a3 = a2.next();
+        let a4 = a3.next();
 
         let b1 = MockTransaction::eip1559().with_sender(b);
-        let b2 = b1.clone().with_nonce(1);
-        let b3 = b1.clone().with_nonce(2);
+        let b2 = b1.next();
+        let b3 = b2.next();
 
         // C has the same number of txs as B
         let c1 = MockTransaction::eip1559().with_sender(c);
-        let c2 = c1.clone().with_nonce(1);
-        let c3 = c1.clone().with_nonce(2);
+        let c2 = c1.next();
+        let c3 = c2.next();
 
         let d1 = MockTransaction::eip1559().with_sender(d);
 
@@ -593,18 +593,18 @@ mod tests {
 
         // create a chain of transactions by sender A, B, C
         let a1 = MockTransaction::eip1559().with_sender(a);
-        let a2 = a1.clone().with_nonce(1);
-        let a3 = a1.clone().with_nonce(2);
-        let a4 = a1.clone().with_nonce(3);
+        let a2 = a1.next();
+        let a3 = a2.next();
+        let a4 = a3.next();
 
         let b1 = MockTransaction::eip1559().with_sender(b);
-        let b2 = b1.clone().with_nonce(1);
-        let b3 = b1.clone().with_nonce(2);
+        let b2 = b1.next();
+        let b3 = b2.next();
 
         // C has the same number of txs as B
         let c1 = MockTransaction::eip1559().with_sender(c);
-        let c2 = c1.clone().with_nonce(1);
-        let c3 = c1.clone().with_nonce(2);
+        let c2 = c1.next();
+        let c3 = c2.next();
 
         let d1 = MockTransaction::eip1559().with_sender(d);
 
