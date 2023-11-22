@@ -15,7 +15,7 @@ use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, Transaction, TransactionKind, WriteFlags, RW};
 use reth_tracing::tracing::warn;
 use std::{
-    backtrace::{Backtrace, BacktraceStatus},
+    backtrace::Backtrace,
     marker::PhantomData,
     str::FromStr,
     sync::Arc,
