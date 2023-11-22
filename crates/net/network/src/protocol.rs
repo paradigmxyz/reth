@@ -14,8 +14,8 @@ use std::{
     task::{Context, Poll},
 };
 
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use reth_eth_wire::multiplex::ProtocolConnection;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.

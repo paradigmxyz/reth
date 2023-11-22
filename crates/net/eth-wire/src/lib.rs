@@ -29,6 +29,9 @@ pub mod types;
 pub use types::*;
 
 #[cfg(test)]
+pub mod test_utils;
+
+#[cfg(test)]
 pub use tokio_util::codec::{
     LengthDelimitedCodec as PassthroughCodec, LengthDelimitedCodecError as PassthroughCodecError,
 };
