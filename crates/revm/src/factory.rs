@@ -7,14 +7,14 @@ use reth_primitives::ChainSpec;
 use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
 use std::sync::Arc;
 
-/// Factory that spawn Executor.
+/// Factory for creating [EVMProcessor].
 #[derive(Clone, Debug)]
-pub struct Factory {
+pub struct EvmProcessorFactory {
     chain_spec: Arc<ChainSpec>,
     stack: Option<InspectorStack>,
 }
 
-impl Factory {
+impl EvmProcessorFactory {
     /// Create new factory
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec, stack: None }
@@ -33,7 +33,7 @@ impl Factory {
     }
 }
 
-impl ExecutorFactory for Factory {
+impl ExecutorFactory for EvmProcessorFactory {
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
         sp: SP,

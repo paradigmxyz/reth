@@ -64,7 +64,7 @@ use reth_provider::{
     HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::{segments::SegmentSet, Pruner};
-use reth_revm::Factory;
+use reth_revm::EvmProcessorFactory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_snapshot::HighestSnapshotsTracker;
@@ -295,7 +295,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             Arc::clone(&consensus),
-            Factory::new(self.chain.clone()),
+            EvmProcessorFactory::new(self.chain.clone()),
         );
         let tree = BlockchainTree::new(
             tree_externals,
@@ -873,7 +873,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         use reth_revm_inspectors::stack::InspectorStackConfig;
-        let factory = reth_revm::Factory::new(self.chain.clone());
+        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {
             use_printer_tracer: self.debug.print_inspector,
