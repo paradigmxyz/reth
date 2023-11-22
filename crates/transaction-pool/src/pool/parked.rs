@@ -142,8 +142,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut removed = Vec::new();
+        if self.len() <= limit.max_txs {
+            // if we are below the limits, we don't need to drop anything
+            return Vec::new()
+        }
 
+        let mut removed = Vec::new();
         let mut addresses = self.get_senders_by_submission_id();
         let queued = self.len();
         let mut drop = queued - limit.max_txs;

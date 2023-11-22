@@ -88,7 +88,12 @@ fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTrans
 fn txpool_truncate(c: &mut Criterion) {
     let mut group = c.benchmark_group("Transaction Pool Truncate");
 
-    for senders in [5, 10, 20, 100, 1000] {
+    // the first few benchmarks (5, 10, 20, 100) should cause the txpool to hit the max tx limit,
+    // so they are there to make sure we do not regress on best-case performance.
+    //
+    // the last few benchmarks (1000, 2000) should hit the max tx limit, at least for large enough
+    // depth, so these should benchmark closer to real-world performance
+    for senders in [5, 10, 20, 100, 1000, 2000] {
         // the max we'll be benching is 20, because MAX_ACCOUNT_SLOTS so far is 16. So 20 should be
         // a reasonable worst-case benchmark
         for max_depth in [5, 10, 20] {
