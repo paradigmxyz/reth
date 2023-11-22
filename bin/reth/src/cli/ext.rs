@@ -35,11 +35,12 @@ impl RethCliExt for () {
 ///
 /// The functions are invoked during the initialization of the node command in the following order:
 ///
-/// 1. [on_components_initialized](RethNodeCommandConfig::on_components_initialized)
-/// 2. [spawn_payload_builder_service](RethNodeCommandConfig::spawn_payload_builder_service)
-/// 3. [extend_rpc_modules](RethNodeCommandConfig::extend_rpc_modules)
-/// 4. [on_rpc_server_started](RethNodeCommandConfig::on_rpc_server_started)
-/// 5. [on_node_started](RethNodeCommandConfig::on_node_started)
+/// 1. [configure_network](RethNodeCommandConfig::configure_network)
+/// 2. [on_components_initialized](RethNodeCommandConfig::on_components_initialized)
+/// 3. [spawn_payload_builder_service](RethNodeCommandConfig::spawn_payload_builder_service)
+/// 4. [extend_rpc_modules](RethNodeCommandConfig::extend_rpc_modules)
+/// 5. [on_rpc_server_started](RethNodeCommandConfig::on_rpc_server_started)
+/// 6. [on_node_started](RethNodeCommandConfig::on_node_started)
 pub trait RethNodeCommandConfig: fmt::Debug {
     /// Invoked with the network configuration before the network is configured.
     ///
