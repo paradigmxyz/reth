@@ -69,10 +69,10 @@ where
     /// Builds the final [`Pipeline`] using the given database.
     ///
     /// Note: it's expected that this is either an [Arc] or an Arc wrapper type.
-    pub fn build(self, db: ProviderFactory<DB>) -> Pipeline<DB> {
+    pub fn build(self, provider_factory: ProviderFactory<DB>) -> Pipeline<DB> {
         let Self { stages, max_block, tip_tx, metrics_tx } = self;
         Pipeline {
-            provider_factory: db,
+            provider_factory,
             stages,
             max_block,
             tip_tx,
