@@ -43,12 +43,16 @@ pub struct TxPoolArgs {
     /// Price bump percentage to replace an already existing blob transaction
     #[arg(long = "blobpool.pricebump", default_value_t = REPLACE_BLOB_PRICE_BUMP)]
     pub blob_transaction_price_bump: u128,
+    /// Flag to disable local transaction exemptions.
+    #[arg(long = "txpool.nolocals")]
+    pub no_locals: bool,
 }
 
 impl TxPoolArgs {
     /// Returns transaction pool configuration.
     pub fn pool_config(&self) -> PoolConfig {
         PoolConfig {
+            tx_pool_policy: TxPoolPolicy { no_locals: self.no_locals },
             pending_limit: SubPoolLimit {
                 max_txs: self.pending_max_count,
                 max_size: self.pending_max_size * 1024 * 1024,
