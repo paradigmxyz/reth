@@ -116,6 +116,12 @@ where
     }
 }
 
+impl IntoRlpxSubProtocol for RlpxSubProtocol {
+    fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol {
+        self
+    }
+}
+
 /// Additional RLPx-based sub-protocols.
 #[derive(Debug, Default)]
 pub struct RlpxSubProtocols {

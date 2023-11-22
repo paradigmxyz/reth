@@ -49,9 +49,7 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_network::{
-    error::NetworkError, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager,
-};
+use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -353,25 +351,34 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             secret_key,
             default_peers_path.clone(),
         );
-        let network = self
-            .start_network(
-                network_config,
-                &ctx.task_executor,
-                transaction_pool.clone(),
-                default_peers_path,
-            )
-            .await?;
-        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
-        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
-        let network_client = network.fetch_client().await?;
+
+        let network_client = network_config.client.clone();
+        let mut network_builder = NetworkManager::builder(network_config).await?;
 
         let components = RethNodeComponentsImpl {
             provider: blockchain_db.clone(),
             pool: transaction_pool.clone(),
-            network: network.clone(),
+            network: network_builder.handle(),
             task_executor: ctx.task_executor.clone(),
             events: blockchain_db.clone(),
         };
+
+        // allow network modifications
+        self.ext.configure_network(network_builder.network_mut(), &components)?;
+
+        // launch network
+        let network = self.start_network(
+            network_builder,
+            &ctx.task_executor,
+            transaction_pool.clone(),
+            network_client,
+            default_peers_path,
+        );
+
+        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
+        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
+        let network_client = network.fetch_client().await?;
+
         self.ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
@@ -695,23 +702,20 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
     /// to that network.
-    async fn start_network<C, Pool>(
+    fn start_network<C, Pool>(
         &self,
-        config: NetworkConfig<C>,
+        builder: NetworkBuilder<C, (), ()>,
         task_executor: &TaskExecutor,
         pool: Pool,
+        client: C,
         default_peers_path: PathBuf,
-    ) -> Result<NetworkHandle, NetworkError>
+    ) -> NetworkHandle
     where
         C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Unpin + 'static,
     {
-        let client = config.client.clone();
-        let (handle, network, txpool, eth) = NetworkManager::builder(config)
-            .await?
-            .transactions(pool)
-            .request_handler(client)
-            .split_with_handle();
+        let (handle, network, txpool, eth) =
+            builder.transactions(pool).request_handler(client).split_with_handle();
 
         task_executor.spawn_critical("p2p txpool", txpool);
         task_executor.spawn_critical("p2p eth request handler", eth);
@@ -721,7 +725,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             run_network_until_shutdown(shutdown, network, known_peers_file)
         });
 
-        Ok(handle)
+        handle
     }
 
     /// Fetches the head block from the database.
