@@ -142,7 +142,6 @@ mod tests {
                 f(cs).build()
             }
 
-            // TODO: Enable once `reth` has been updated to a revm version that knows about Canyon.
             assert_eq!(
                 revm_spec(&op_cs(|cs| cs.canyon_activated()), Head::default()),
                 revm_primitives::CANYON
