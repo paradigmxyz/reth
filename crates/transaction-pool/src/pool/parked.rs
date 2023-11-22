@@ -19,8 +19,9 @@ use std::{
 ///
 /// Note: This type is generic over [ParkedPool] which enforces that the underlying transaction type
 /// is [ValidPoolTransaction] wrapped in an [Arc].
+#[allow(missing_debug_implementations)]
 #[derive(Clone)]
-pub(crate) struct ParkedPool<T: ParkedOrd> {
+pub struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions were submitted to the pool.
@@ -45,7 +46,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// # Panics
     ///
     /// If the transaction is already included.
-    pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
+    pub fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
         let id = *tx.id();
         assert!(
             !self.by_id.contains_key(&id),
@@ -137,7 +138,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
     /// Truncates the pool by dropping transactions, first dropping transactions from senders that
     /// have not recently submitted a transaction.
-    pub(crate) fn truncate_pool(
+    pub fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
@@ -339,7 +340,7 @@ impl PartialOrd for EvictionEntry {
 /// Helper trait used for custom `Ord` wrappers around a transaction.
 ///
 /// This is effectively a wrapper for `Arc<ValidPoolTransaction>` with custom `Ord` implementation.
-pub(crate) trait ParkedOrd:
+pub trait ParkedOrd:
     Ord
     + Clone
     + From<Arc<ValidPoolTransaction<Self::Transaction>>>
@@ -404,7 +405,7 @@ macro_rules! impl_ord_wrapper {
 ///
 /// Caution: This assumes all transaction in the `BaseFee` sub-pool have a fee value.
 #[derive(Debug)]
-pub(crate) struct BasefeeOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
+pub struct BasefeeOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
 
 impl_ord_wrapper!(BasefeeOrd);
 

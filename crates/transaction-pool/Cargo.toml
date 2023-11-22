@@ -66,6 +66,11 @@ test-utils = ["rand", "paste", "serde"]
 arbitrary = ["proptest", "reth-primitives/arbitrary"]
 
 [[bench]]
+name = "truncate"
+required-features = ["test-utils", "arbitrary"]
+harness = false
+
+[[bench]]
 name = "reorder"
 required-features = ["test-utils", "arbitrary"]
 harness = false
