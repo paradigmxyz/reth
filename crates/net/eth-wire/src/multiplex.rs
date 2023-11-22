@@ -9,11 +9,13 @@
 
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
+    errors::P2PStreamError,
     CanDisconnect, DisconnectReason, P2PStream,
 };
 use bytes::{Bytes, BytesMut};
-use futures::{Sink, Stream, StreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
 use std::{
+    collections::VecDeque,
     fmt,
     future::Future,
     io,
@@ -87,6 +89,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
             primary,
             primary_capability: shared_cap,
             satellites: protocols,
+            out_buffer: Default::default(),
         })
     }
 }
@@ -96,6 +99,16 @@ pub struct ProtocolProxy {
     shared_cap: SharedCapability,
     from_wire: UnboundedReceiverStream<BytesMut>,
     to_wire: UnboundedSender<Bytes>,
+}
+
+impl ProtocolProxy {
+    fn mask_msg_id(&self, msg: Bytes) -> Bytes {
+        // TODO handle empty messages
+        let mut masked_bytes = BytesMut::zeroed(msg.len());
+        masked_bytes[0] = msg[0] + self.shared_cap.relative_message_id_offset();
+        masked_bytes[1..].copy_from_slice(&msg[1..]);
+        masked_bytes.freeze()
+    }
 }
 
 impl Stream for ProtocolProxy {
@@ -115,14 +128,15 @@ impl Sink<Bytes> for ProtocolProxy {
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        self.to_wire.send(item).map_err(|_| io::ErrorKind::BrokenPipe.into())
+        let msg = self.mask_msg_id(item);
+        self.to_wire.send(msg).map_err(|_| io::ErrorKind::BrokenPipe.into())
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -133,7 +147,8 @@ impl CanDisconnect<Bytes> for ProtocolProxy {
         &mut self,
         reason: DisconnectReason,
     ) -> Result<(), <Self as Sink<Bytes>>::Error> {
-        todo!()
+        // TODO handle disconnects
+        Ok(())
     }
 }
 
@@ -164,19 +179,85 @@ pub struct RlpxSatelliteStream<St, Primary> {
     primary: Primary,
     primary_capability: SharedCapability,
     satellites: Vec<ProtocolStream>,
+    out_buffer: VecDeque<Bytes>,
 }
 
 impl<St, Primary> RlpxSatelliteStream<St, Primary> {}
 
-impl<St, Primary> Stream for RlpxSatelliteStream<St, Primary>
+impl<St, Primary, PrimaryErr> Stream for RlpxSatelliteStream<St, Primary>
 where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
-    Primary: Stream + Unpin,
+    Primary: TryStream<Error = PrimaryErr> + Unpin,
+    P2PStreamError: Into<PrimaryErr>,
 {
-    type Item = <Primary as Stream>::Item;
+    type Item = Result<Primary::Ok, Primary::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        todo!()
+        let this = self.get_mut();
+
+        loop {
+            // first drain the primary stream
+            if let Poll::Ready(Some(msg)) = this.primary.try_poll_next_unpin(cx) {
+                return Poll::Ready(Some(msg))
+            }
+
+            let mut out_ready = true;
+            loop {
+                match this.conn.poll_ready_unpin(cx) {
+                    Poll::Ready(_) => {
+                        if let Some(msg) = this.out_buffer.pop_front() {
+                            if let Err(err) = this.conn.start_send_unpin(msg) {
+                                return Poll::Ready(Some(Err(err.into())))
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    Poll::Pending => {
+                        out_ready = false;
+                        break
+                    }
+                }
+            }
+
+            // advance all satellites
+            for idx in (0..this.satellites.len()).rev() {
+                let mut proto = this.satellites.swap_remove(idx);
+                loop {
+                    match proto.poll_next_unpin(cx) {
+                        Poll::Ready(Some(msg)) => {
+                            this.out_buffer.push_back(msg);
+                        }
+                        Poll::Ready(None) => return Poll::Ready(None),
+                        Poll::Pending => {
+                            this.satellites.push(proto);
+                            break
+                        }
+                    }
+                }
+            }
+
+            let mut delegated = false;
+            loop {
+                // pull messages from connection
+                match this.conn.poll_next_unpin(cx) {
+                    Poll::Ready(Some(Ok(msg))) => {
+                        delegated = true;
+                        // TODO find matching cap and delegate
+                    }
+                    Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
+                    Poll::Ready(None) => {
+                        // connection closed
+                        return Poll::Ready(None)
+                    }
+                    Poll::Pending => break,
+                }
+            }
+
+            if !delegated || !out_ready || this.out_buffer.is_empty() {
+                return Poll::Pending
+            }
+        }
     }
 }
 
@@ -210,6 +291,24 @@ struct ProtocolStream {
     /// the channel shared with the satellite stream
     to_satellite: UnboundedSender<BytesMut>,
     satellite_st: Pin<Box<dyn Stream<Item = BytesMut>>>,
+}
+
+impl ProtocolStream {
+    fn mask_msg_id(&self, mut msg: BytesMut) -> Bytes {
+        // TODO handle empty messages
+        msg[0] = msg[0] + self.cap.relative_message_id_offset();
+        msg.freeze()
+    }
+}
+
+impl Stream for ProtocolStream {
+    type Item = Bytes;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let msg = ready!(this.satellite_st.as_mut().poll_next(cx));
+        Poll::Ready(msg.map(|msg| this.mask_msg_id(msg)))
+    }
 }
 
 impl fmt::Debug for ProtocolStream {
