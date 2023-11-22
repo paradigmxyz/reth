@@ -30,7 +30,7 @@ pub struct TestStageDB {
 }
 
 impl Default for TestStageDB {
-    /// Create a new instance of [TestTransaction]
+    /// Create a new instance of [TestStageDB]
     fn default() -> Self {
         Self { factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone()) }
     }
@@ -138,7 +138,7 @@ impl TestStageDB {
 
     /// Inserts total difficulty of headers into the corresponding tables.
     ///
-    /// Superset functionality of [TestTransaction::insert_headers].
+    /// Superset functionality of [TestStageDB::insert_headers].
     pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
         I: Iterator<Item = &'a SealedHeader>,
@@ -154,7 +154,7 @@ impl TestStageDB {
     }
 
     /// Insert ordered collection of [SealedBlock] into corresponding tables.
-    /// Superset functionality of [TestTransaction::insert_headers].
+    /// Superset functionality of [TestStageDB::insert_headers].
     ///
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
     pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> ProviderResult<()>
