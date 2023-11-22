@@ -10,9 +10,7 @@ use reth_rpc_types::trace::{
         SelfdestructAction, TraceOutput, TransactionTrace,
     },
 };
-use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode,
-};
+use revm::interpreter::{opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
