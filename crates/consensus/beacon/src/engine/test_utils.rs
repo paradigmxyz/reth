@@ -519,12 +519,7 @@ where
         let pipeline = pipeline.build(db.clone(), self.base_config.chain_spec.clone());
 
         // Setup blockchain tree
-        let externals = TreeExternals::new(
-            db.clone(),
-            consensus,
-            executor_factory,
-            self.base_config.chain_spec.clone(),
-        );
+        let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let tree = ShareableBlockchainTree::new(
             BlockchainTree::new(externals, config, None).expect("failed to create tree"),
