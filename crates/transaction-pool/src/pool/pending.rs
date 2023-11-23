@@ -357,9 +357,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// If the `local` flag is unset, then only non-local transactions will be removed.
     pub(crate) fn transactions_to_remove(
         &self,
-        limit: SubPoolLimit,
+        limit: &SubPoolLimit,
         local: bool,
-    ) -> Vec<&PendingTransaction<T>> {
+    ) -> Vec<TransactionId> {
         // this serves as a termination condition for the loop - it represents the number of
         // _valid_ unique senders that might have descendants in the pool.
         //
@@ -393,7 +393,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             }
 
             total_size += tx.transaction.size();
-            removed.push(tx);
+            removed.push(*tx.transaction.id());
         }
 
         // index of first tx to check
@@ -415,7 +415,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     break 'outer
                 }
 
-                let ancestor = self.ancestor(removed[i].transaction.id());
+                let ancestor = self.ancestor(&removed[i]);
                 match ancestor {
                     Some(tx) => {
                         if !local && tx.transaction.is_local() {
@@ -424,7 +424,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                         }
 
                         total_size += tx.transaction.size();
-                        removed.push(tx);
+                        removed.push(*tx.transaction.id());
                         removed_idx += 1;
                     }
                     None => {
@@ -448,52 +448,22 @@ impl<T: TransactionOrdering> PendingPool<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
 
-        // penalize non-local txs if limit is still exceeded
-        loop {
-            // return early if the pool is under limits
-            if self.size() <= limit.max_size && self.len() <= limit.max_txs {
-                break
-            }
-
-            // flag to break out of the loop if all are local
-            let mut any_non_local = true;
-
-            // use descendants, so we pop a single tx per sender
-            for tx in self.highest_nonces.clone().iter() {
-                if !tx.transaction.is_local() {
-                    any_non_local = true;
-                    if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
-                        removed.push(tx)
-                    };
-                }
-
-                if self.size() <= limit.max_size && self.len() <= limit.max_txs {
-                    break
-                }
-            }
-
-            // this means there are only local txs left as the highest nonce txs for each sender -
-            // we need to not start removing local txs
-            if !any_non_local {
-                break
+        let to_remove = self.transactions_to_remove(&limit, false);
+        for txid in to_remove {
+            if let Some(tx) = self.remove_transaction(&txid) {
+                removed.push(tx);
             }
         }
 
-        // finally penalize txs whether or not they are local
-        loop {
-            if self.size() <= limit.max_size && self.len() <= limit.max_txs {
-                break
-            }
+        if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+            return removed
+        }
 
-            // use descendants, so we pop a single tx per sender, starting with the worst txs
-            for tx in self.highest_nonces.clone().iter() {
-                if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
-                    removed.push(tx)
-                };
-
-                if self.size() <= limit.max_size && self.len() <= limit.max_txs {
-                    break
-                }
+        // now repeat for local transactions
+        let to_remove = self.transactions_to_remove(&limit, true);
+        for txid in to_remove {
+            if let Some(tx) = self.remove_transaction(&txid) {
+                removed.push(tx);
             }
         }
 
@@ -804,12 +774,15 @@ mod tests {
         let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
 
         // make sure to_remove is the same thing as expected
-        let to_remove = pool.transactions_to_remove(pool_limit.clone(), false);
-        let to_remove_mapped = to_remove
-            .into_iter()
-            .map(|tx| (tx.transaction.sender(), tx.transaction.nonce()))
+        let to_remove = pool.transactions_to_remove(&pool_limit, false);
+        let to_remove_mapped =
+            to_remove.into_iter().map(|id| (id.sender, id.nonce)).collect::<HashSet<_>>();
+        let expected_removed_mapped = expected_removed
+            .clone()
+            .iter()
+            .map(|(addr, nonce)| (f.ids.sender_id(addr).unwrap(), *nonce))
             .collect::<HashSet<_>>();
-        assert_eq!(to_remove_mapped, expected_removed);
+        assert_eq!(to_remove_mapped, expected_removed_mapped);
 
         // truncate the pool
         let removed = pool.truncate_pool(pool_limit);
