@@ -69,6 +69,10 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         let is_regolith =
             self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
 
+        // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
+        // blocks will always have at least a single transaction in them (the L1 info transaction),
+        // so we can safely assume that this will always be triggered upon the transition and that
+        // the above check for empty blocks will never be hit on OP chains.
         super::ensure_create2_deployer(self.chain_spec().clone(), block.timestamp, self.db_mut())
             .map_err(|_| BlockExecutionError::ProviderError)?;
 
