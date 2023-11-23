@@ -230,16 +230,17 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                     let _ = metrics_tx
                         .send(MetricEvent::CacheDbSizeInfo { block_number, cachedb_size });
                 }
-            }
 
-            #[cfg(feature = "enable_test_max_th")]
-            {
-                println!(
-                    "block_number: {:?}, start_block: {:?}, state.size_hint: {:?}",
+                #[cfg(feature = "enable_test_max_th")]
+                {
+                    println!(
+                    "block_number: {:?}, start_block: {:?}, state.size_hint: {:?}, cache_size: {:?}",
                     block_number,
                     start_block,
-                    state.size_hint()
+                    state.size_hint(),
+                    cachedb_size,
                 );
+                }
             }
 
             // Check if we should commit now
