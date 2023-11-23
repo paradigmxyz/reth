@@ -1,8 +1,8 @@
 use reth_interfaces::provider::TransactionDataStoreError;
-use reth_nippy_jar::compression::{Compression, Lz4};
 use reth_primitives::{
     transaction::StoredTransactionData, Bytes, StoredTransaction, Transaction, TransactionSigned,
     TransactionSignedNoHash, TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy,
+    TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR,
 };
 use std::{
     fs,
@@ -17,14 +17,13 @@ use crate::traits::TransactionDataStore;
 #[derive(Debug)]
 pub struct DiskFileTransactionDataStore {
     path: PathBuf,
-    compressor: Lz4,
 }
 
 impl DiskFileTransactionDataStore {
     /// Create new transaction data store from path.
     pub fn new(path: PathBuf) -> Result<Self, TransactionDataStoreError> {
         fs::create_dir_all(&path)?;
-        Ok(Self { path, compressor: Lz4::default() })
+        Ok(Self { path })
     }
 
     /// Returns path to directory where transaction data is stored.
@@ -33,7 +32,7 @@ impl DiskFileTransactionDataStore {
     }
 
     fn filepath(&self, hash: TxHash) -> PathBuf {
-        self.path.join(format!("{hash}.data"))
+        self.path.join(format!("{hash}.data.zst"))
     }
 }
 
@@ -41,7 +40,8 @@ impl TransactionDataStore for DiskFileTransactionDataStore {
     /// Saves transactions data to a separate file.
     fn save(&self, hash: TxHash, data: Bytes) -> Result<(), TransactionDataStoreError> {
         let filepath = self.filepath(hash);
-        let compressed = self.compressor.compress(&data[..])?;
+        let compressed =
+            TRANSACTION_COMPRESSOR.with(|compressor| compressor.borrow_mut().compress(&data))?;
         tracing::trace!(
             target: "provider::txdata",
             %hash,
@@ -61,7 +61,25 @@ impl TransactionDataStore for DiskFileTransactionDataStore {
         tracing::trace!(target: "provider::txdata", %hash, ?filepath, exists, "Loading transaction data from disk");
         Ok(if exists {
             let raw = fs::read(filepath)?;
-            Some(self.compressor.decompress(&raw)?.into())
+            let decompressed = TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                let mut decompressor = decompressor.borrow_mut();
+                let mut buf: Vec<u8> =
+                    Vec::with_capacity(StoredTransaction::TRANSACTION_DATA_DATABASE_THRESHOLD);
+
+                // `decompress_to_buffer` will return an error if the output buffer doesn't have
+                // enough capacity. However we don't actually have information on the required
+                // length. So we hope for the best, and keep trying again with a fairly bigger size
+                // if it fails.
+                while let Err(err) = decompressor.decompress_to_buffer(&raw, &mut buf) {
+                    if !err.to_string().contains("Destination buffer is too small") {
+                        return Err(err)
+                    }
+                    buf.reserve(buf.capacity() + 24_000);
+                }
+
+                Ok(buf)
+            })?;
+            Some(decompressed.into())
         } else {
             None
         })
