@@ -1,5 +1,5 @@
 use crate::{
-    identifier::TransactionId, pool::size::SizeTracker, PoolTransaction, SubPoolLimit,
+    identifier::{TransactionId, SenderId}, pool::size::SizeTracker, PoolTransaction, SubPoolLimit,
     ValidPoolTransaction,
 };
 use reth_primitives::Address;
@@ -90,41 +90,41 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// Get transactions by sender
     pub(crate) fn get_txs_by_sender(
         &self,
-        sender: &Address,
+        sender: &SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.by_id
             .values()
-            .filter(|tx| tx.transaction.sender() == *sender)
+            .filter(|tx| tx.transaction.sender_id() == *sender)
             .map(|tx| tx.transaction.clone().into())
             .collect()
     }
 
-    /// Returns addresses sorted by their last submission id. Addresses with older last submission
-    /// ids are first. Note that _last_ submission ids are the newest submission id for that
-    /// sender, so this sorts senders by the last time they submitted a transaction in descending
-    /// order. Senders that have least recently submitted a transaction are first.
+    /// Returns sender ids sorted by each sender's last submission id. Senders with older last
+    /// submission ids are first. Note that _last_ submission ids are the newest submission id for
+    /// that sender, so this sorts senders by the last time they submitted a transaction in
+    /// descending order. Senders that have least recently submitted a transaction are first.
     ///
     /// Similar to `Heartbeat` in Geth
-    pub(crate) fn get_senders_by_submission_id(&self) -> Vec<Address> {
+    pub(crate) fn get_senders_by_submission_id(&self) -> Vec<SubmissionSenderId> {
         // iterate through by_id, and get the last submission id for each sender
         let senders = self
             .by_id
             .iter()
-            .fold(Vec::new(), |mut set: Vec<Reverse<(u64, Address)>>, (_, tx)| {
+            .fold(Vec::new(), |mut set: Vec<SubmissionSenderId>, (_, tx)| {
                 if let Some(last) = set.last_mut() {
                     // sort by last
-                    if last.0 .1 == tx.transaction.sender() {
-                        if last.0 .0 < tx.submission_id {
+                    if last.sender_id == tx.transaction.sender_id() {
+                        if last.submission_id < tx.submission_id {
                             // update last submission id
-                            last.0 .0 = tx.submission_id;
+                            last.submission_id = tx.submission_id;
                         }
                     } else {
                         // new entry
-                        set.push(Reverse((tx.submission_id, tx.transaction.sender())));
+                        set.push(SubmissionSenderId::new(tx.transaction.sender_id(), tx.submission_id));
                     }
                 } else {
                     // first entry
-                    set.push(Reverse((tx.submission_id, tx.transaction.sender())));
+                    set.push(SubmissionSenderId::new(tx.transaction.sender_id(), tx.submission_id));
                 }
                 set
             })
@@ -133,7 +133,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
             .collect::<BinaryHeap<_>>();
 
         // sort s.t. senders with older submission ids are first
-        senders.into_sorted_vec().into_iter().map(|Reverse((_, addr))| addr).collect()
+        senders.into_sorted_vec()
     }
 
     /// Truncates the pool by dropping transactions, first dropping transactions from senders that
@@ -148,14 +148,14 @@ impl<T: ParkedOrd> ParkedPool<T> {
         }
 
         let mut removed = Vec::new();
-        let mut addresses = self.get_senders_by_submission_id();
+        let mut sender_ids = self.get_senders_by_submission_id();
         let queued = self.len();
         let mut drop = queued - limit.max_txs;
 
-        while drop > 0 && !addresses.is_empty() {
+        while drop > 0 && !sender_ids.is_empty() {
             // SAFETY: This will not panic due to `!addresses.is_empty()`
-            let addr = addresses.pop().unwrap();
-            let mut list = self.get_txs_by_sender(&addr);
+            let sender_id = sender_ids.pop().unwrap().sender_id;
+            let mut list = self.get_txs_by_sender(&sender_id);
 
             // Drop all transactions if they are less than the overflow
             if list.len() <= drop {
@@ -322,20 +322,31 @@ impl<T: ParkedOrd> Ord for ParkedPoolTransaction<T> {
     }
 }
 
-/// Includes a [TransactionId] and `submission_id`, used for eviction.
+/// Includes a [SenderId] and `submission_id`. This is used to sort senders by their last
+/// submission id.
 #[derive(Debug, PartialEq, Eq, Clone)]
-struct EvictionEntry {
-    id: TransactionId,
-    submission_id: u64,
+pub(crate) struct SubmissionSenderId {
+    /// The sender id
+    pub(crate) sender_id: SenderId,
+    /// The submission id
+    pub(crate) submission_id: u64,
 }
 
-impl Ord for EvictionEntry {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.submission_id.cmp(&other.submission_id)
+impl SubmissionSenderId {
+    /// Creates a new [SubmissionSenderId] based on the [SenderId] and `submission_id`.
+    fn new(sender_id: SenderId, submission_id: u64) -> Self {
+        Self { sender_id, submission_id }
     }
 }
 
-impl PartialOrd for EvictionEntry {
+impl Ord for SubmissionSenderId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse ordering for `submission_id`
+        other.submission_id.cmp(&self.submission_id)
+    }
+}
+
+impl PartialOrd for SubmissionSenderId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -633,9 +644,10 @@ mod tests {
         }
 
         // get senders by submission id - a4, b3, c3, d1, reversed
-        let senders = pool.get_senders_by_submission_id();
+        let senders = pool.get_senders_by_submission_id().into_iter().map(|s| s.sender_id).collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
-        assert_eq!(senders, vec![d, c, b, a]);
+        let expected_senders = vec![d, c, b, a].into_iter().map(|s| f.ids.sender_id(&s).unwrap()).collect::<Vec<_>>();
+        assert_eq!(senders, expected_senders);
 
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
         let all_txs = vec![a1, b1, c1, d1, a2, b2, c2, a3, b3, c3, a4];
@@ -645,8 +657,9 @@ mod tests {
             pool.add_transaction(f.validated_arc(tx));
         }
 
-        let senders = pool.get_senders_by_submission_id();
+        let senders = pool.get_senders_by_submission_id().into_iter().map(|s| s.sender_id).collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
-        assert_eq!(senders, vec![a, c, b, d]);
+        let expected_senders = vec![a, c, b, d].into_iter().map(|s| f.ids.sender_id(&s).unwrap()).collect::<Vec<_>>();
+        assert_eq!(senders, expected_senders);
     }
 }
