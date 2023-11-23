@@ -17,13 +17,12 @@ use boa_engine::{
     Context, JsArgs, JsError, JsNativeError, JsObject, JsResult, JsValue,
 };
 use boa_gc::{empty_trace, Finalize, Trace};
-use reth_primitives::Account;
 use revm::{
     interpreter::{
         opcode::{PUSH0, PUSH32},
         OpCode, SharedMemory, Stack,
     },
-    primitives::{State, KECCAK_EMPTY},
+    primitives::{AccountInfo, State, KECCAK_EMPTY},
 };
 use std::{cell::RefCell, rc::Rc, sync::mpsc::channel};
 use tokio::sync::mpsc;
@@ -298,14 +297,8 @@ impl StateRef {
         (StateRef(inner), guard)
     }
 
-    fn get_account(&self, address: &Address) -> Option<Account> {
-        self.0.with_inner(|state| {
-            state.get(address).map(|acc| Account {
-                nonce: acc.info.nonce,
-                balance: acc.info.balance,
-                bytecode_hash: Some(acc.info.code_hash),
-            })
-        })?
+    fn get_account(&self, address: &Address) -> Option<AccountInfo> {
+        self.0.with_inner(|state| state.get(address).map(|acc| acc.info.clone()))?
     }
 }
 
@@ -708,7 +701,7 @@ impl EvmDbRef {
         (this, guard)
     }
 
-    fn read_basic(&self, address: JsValue, ctx: &mut Context<'_>) -> JsResult<Option<Account>> {
+    fn read_basic(&self, address: JsValue, ctx: &mut Context<'_>) -> JsResult<Option<AccountInfo>> {
         let buf = from_buf(address, ctx)?;
         let address = bytes_to_address(buf);
         if let acc @ Some(_) = self.state.get_account(&address) {
@@ -733,7 +726,7 @@ impl EvmDbRef {
 
     fn read_code(&self, address: JsValue, ctx: &mut Context<'_>) -> JsResult<JsArrayBuffer> {
         let acc = self.read_basic(address, ctx)?;
-        let code_hash = acc.and_then(|acc| acc.bytecode_hash).unwrap_or(KECCAK_EMPTY);
+        let code_hash = acc.map(|acc| acc.code_hash).unwrap_or(KECCAK_EMPTY);
         if code_hash == KECCAK_EMPTY {
             return JsArrayBuffer::new(0, ctx)
         }
