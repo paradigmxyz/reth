@@ -70,11 +70,12 @@ criterion_group! {
 }
 criterion_main!(benches);
 
-/// https://github.com/paradigmxyz/reth/blob/cda5d4e7c53ccc898b7725eb5d3b46c35e4da7f8/crates/primitives/src/integer_list.rs
+/// Implementation from https://github.com/paradigmxyz/reth/blob/cda5d4e7c53ccc898b7725eb5d3b46c35e4da7f8/crates/primitives/src/integer_list.rs
+/// adapted to work with `sucds = "0.8.1"`
 #[allow(unused)]
 mod elias_fano {
     use std::{fmt, ops::Deref};
-    use sucds::{EliasFano, Searial};
+    use sucds::{mii_sequences::EliasFano, Serializable};
 
     #[derive(Clone, PartialEq, Eq, Default)]
     pub struct IntegerList(pub EliasFano);
@@ -102,7 +103,12 @@ mod elias_fano {
         ///
         /// Returns an error if the list is empty or not pre-sorted.
         pub fn new<T: AsRef<[usize]>>(list: T) -> Result<Self, EliasFanoError> {
-            Ok(Self(EliasFano::from_ints(list.as_ref()).map_err(|_| EliasFanoError::InvalidInput)?))
+            let mut builder = EliasFanoBuilder::new(
+                list.as_ref().iter().max().map_or(0, |max| max + 1),
+                list.as_ref().len(),
+            )?;
+            builder.extend(list.as_ref().iter().copied());
+            Ok(Self(builder.build()))
         }
 
         // Creates an IntegerList from a pre-sorted list of integers. `usize` is safe to use since
@@ -112,10 +118,7 @@ mod elias_fano {
         ///
         /// Panics if the list is empty or not pre-sorted.
         pub fn new_pre_sorted<T: AsRef<[usize]>>(list: T) -> Self {
-            Self(
-                EliasFano::from_ints(list.as_ref())
-                    .expect("IntegerList must be pre-sorted and non-empty."),
-            )
+            Self::new(list).expect("IntegerList must be pre-sorted and non-empty.")
         }
 
         /// Serializes a [`IntegerList`] into a sequence of bytes.
@@ -147,7 +150,7 @@ mod elias_fano {
                 impl From<Vec<$w>> for IntegerList {
                     fn from(v: Vec<$w>) -> Self {
                         let v: Vec<usize> = v.iter().map(|v| *v as usize).collect();
-                        Self(EliasFano::from_ints(v.as_slice()).expect("could not create list."))
+                        Self::new(v.as_slice()).expect("could not create list.")
                     }
                 }
             )+
@@ -208,13 +211,14 @@ mod elias_fano {
         ser::SerializeSeq,
         Deserialize, Deserializer, Serialize, Serializer,
     };
+    use sucds::mii_sequences::EliasFanoBuilder;
 
     #[cfg(any(test, feature = "arbitrary"))]
     impl<'a> Arbitrary<'a> for IntegerList {
         fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self, arbitrary::Error> {
             let mut nums: Vec<usize> = Vec::arbitrary(u)?;
             nums.sort();
-            Ok(Self(EliasFano::from_ints(&nums).map_err(|_| arbitrary::Error::IncorrectFormat)?))
+            Ok(Self::new(&nums).map_err(|_| arbitrary::Error::IncorrectFormat)?)
         }
     }
 
@@ -222,8 +226,8 @@ mod elias_fano {
     #[derive(Debug, thiserror::Error)]
     pub enum EliasFanoError {
         /// The provided input is invalid.
-        #[error("the provided input is invalid")]
-        InvalidInput,
+        #[error(transparent)]
+        InvalidInput(#[from] anyhow::Error),
         /// Failed to deserialize data into type.
         #[error("failed to deserialize data into type")]
         FailedDeserialize,

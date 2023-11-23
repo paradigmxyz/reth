@@ -77,7 +77,8 @@ triehash = "0.8"
 plain_hasher = "0.2"
 hash-db = "~0.15"
 
-sucds = "~0.6"
+sucds = "0.8.1"
+anyhow = "1.0.75"
 
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
