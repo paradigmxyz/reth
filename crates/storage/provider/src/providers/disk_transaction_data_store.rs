@@ -1,4 +1,5 @@
 use reth_interfaces::provider::TransactionDataStoreError;
+use reth_nippy_jar::compression::{Compression, Lz4};
 use reth_primitives::{
     transaction::StoredTransactionData, Bytes, StoredTransaction, Transaction, TransactionSigned,
     TransactionSignedNoHash, TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy,
@@ -16,13 +17,14 @@ use crate::traits::TransactionDataStore;
 #[derive(Debug)]
 pub struct DiskFileTransactionDataStore {
     path: PathBuf,
+    compressor: Lz4,
 }
 
 impl DiskFileTransactionDataStore {
     /// Create new transaction data store from path.
     pub fn new(path: PathBuf) -> Result<Self, TransactionDataStoreError> {
         fs::create_dir_all(&path)?;
-        Ok(Self { path })
+        Ok(Self { path, compressor: Lz4::default() })
     }
 
     /// Returns path to directory where transaction data is stored.
@@ -39,8 +41,16 @@ impl TransactionDataStore for DiskFileTransactionDataStore {
     /// Saves transactions data to a separate file.
     fn save(&self, hash: TxHash, data: Bytes) -> Result<(), TransactionDataStoreError> {
         let filepath = self.filepath(hash);
-        tracing::trace!(target: "provider::txdata", %hash, ?filepath, "Saving transaction data to disk");
-        fs::write(filepath, data.0)?;
+        let compressed = self.compressor.compress(&data[..])?;
+        tracing::trace!(
+            target: "provider::txdata",
+            %hash,
+            ?filepath,
+            size = data.len(),
+            compressed_size = compressed.len(),
+            "Saving transaction data to disk"
+        );
+        fs::write(filepath, compressed)?;
         Ok(())
     }
 
@@ -49,7 +59,12 @@ impl TransactionDataStore for DiskFileTransactionDataStore {
         let filepath = self.filepath(hash);
         let exists = filepath.try_exists()?;
         tracing::trace!(target: "provider::txdata", %hash, ?filepath, exists, "Loading transaction data from disk");
-        Ok(if exists { Some(fs::read(filepath)?.into()) } else { None })
+        Ok(if exists {
+            let raw = fs::read(filepath)?;
+            Some(self.compressor.decompress(&raw)?.into())
+        } else {
+            None
+        })
     }
 
     /// Removes transactions data by specified hash.

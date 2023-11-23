@@ -157,6 +157,9 @@ pub enum TransactionDataStoreError {
     /// Standard IO error.
     #[error(transparent)]
     IO(#[from] std::io::Error),
+    /// Compression error.
+    #[error(transparent)]
+    Compression(#[from] reth_nippy_jar::NippyJarError),
     /// Missing transaction data.
     #[error("missing transaction data: {0}")]
     MissingTransactionData(TxHash),
