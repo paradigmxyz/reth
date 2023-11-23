@@ -412,7 +412,7 @@ impl BaseFeeParams {
     pub const fn optimism_goerli_canyon() -> BaseFeeParams {
         BaseFeeParams {
             max_change_denominator:
-                crate::constants::OP_GOERLI_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
+                crate::constants::OP_GOERLI_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
             elasticity_multiplier:
                 crate::constants::OP_GOERLI_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         }
@@ -434,7 +434,7 @@ impl BaseFeeParams {
     pub const fn optimism_canyon() -> BaseFeeParams {
         BaseFeeParams {
             max_change_denominator:
-                crate::constants::OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
+                crate::constants::OP_MAINNET_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
             elasticity_multiplier:
                 crate::constants::OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         }

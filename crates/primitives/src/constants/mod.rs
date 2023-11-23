@@ -70,7 +70,7 @@ pub const OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 50;
 /// Base fee max change denominator for Optimism Mainnet as defined in the Optimism Canyon
 /// hardfork.
 #[cfg(feature = "optimism")]
-pub const OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u64 = 250;
+pub const OP_MAINNET_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u64 = 250;
 
 /// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
@@ -85,7 +85,7 @@ pub const OP_GOERLI_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 50;
 /// Base fee max change denominator for Optimism Goerli as defined in the Optimism Canyon
 /// hardfork.
 #[cfg(feature = "optimism")]
-pub const OP_GOERLI_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u64 = 250;
+pub const OP_GOERLI_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u64 = 250;
 
 /// Base fee max change denominator for Optimism Goerli as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.

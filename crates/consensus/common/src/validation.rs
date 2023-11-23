@@ -337,7 +337,7 @@ pub fn validate_header_regarding_parent(
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have them.
                 parent
-                    .next_block_base_fee(chain_spec.base_fee_params(parent.timestamp + 12))
+                    .next_block_base_fee(chain_spec.base_fee_params(child.timestamp))
                     .ok_or(ConsensusError::BaseFeeMissing)?
             };
         if expected_base_fee != base_fee {
