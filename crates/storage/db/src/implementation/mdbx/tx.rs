@@ -196,7 +196,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
                 target: "storage::db::mdbx",
                 ?open_duration,
                 ?backtrace,
-                "The database transaction was open for too long"
+                "The database transaction has been open for too long"
             );
         }
     }
