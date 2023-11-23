@@ -8,10 +8,10 @@ use alloy_rlp::{
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
-use std::mem;
+use std::{mem, sync::mpsc, thread};
 
 pub use access_list::{AccessList, AccessListItem};
 pub use eip1559::TxEip1559;
