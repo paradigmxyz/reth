@@ -264,7 +264,7 @@ mod tests {
         .unwrap();
 
         // run
-        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD)).await;
+        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD));
 
         // verify
         let table = cast(db.table::<tables::AccountHistory>().unwrap());
@@ -299,7 +299,7 @@ mod tests {
         .unwrap();
 
         // run
-        run(&db, LAST_BLOCK_IN_FULL_SHARD, Some(LAST_BLOCK_IN_FULL_SHARD - 2)).await;
+        run(&db, LAST_BLOCK_IN_FULL_SHARD, Some(LAST_BLOCK_IN_FULL_SHARD - 2));
 
         // verify
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD - 1);
@@ -334,7 +334,7 @@ mod tests {
         .unwrap();
 
         // run
-        run(&db, LAST_BLOCK_IN_FULL_SHARD + 1, Some(LAST_BLOCK_IN_FULL_SHARD - 1)).await;
+        run(&db, LAST_BLOCK_IN_FULL_SHARD + 1, Some(LAST_BLOCK_IN_FULL_SHARD - 1));
 
         // verify
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
@@ -376,7 +376,7 @@ mod tests {
         })
         .unwrap();
 
-        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD + 1)).await;
+        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD + 1));
 
         // verify
         let table = cast(db.table::<tables::AccountHistory>().unwrap());
