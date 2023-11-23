@@ -1,4 +1,4 @@
-use reth_primitives::U256;
+use alloy_primitives::U256;
 use revm::{
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
     primitives::{db::Database, Address, Bytes, B256},

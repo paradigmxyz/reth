@@ -15,6 +15,7 @@ reth-rpc-types.workspace = true
 
 # eth
 alloy-sol-types.workspace = true
+alloy-primitives.workspace = true
 
 revm.workspace = true
 

@@ -10,19 +10,20 @@ use crate::tracing::{
     },
     types::CallKind,
 };
+use alloy_primitives::{Address, Bytes, B256, U256};
 use boa_engine::{
     native_function::NativeFunction,
     object::{builtins::JsArrayBuffer, FunctionObjectBuilder},
     Context, JsArgs, JsError, JsNativeError, JsObject, JsResult, JsValue,
 };
 use boa_gc::{empty_trace, Finalize, Trace};
-use reth_primitives::{Account, Address, Bytes, B256, KECCAK_EMPTY, U256};
+use reth_primitives::Account;
 use revm::{
     interpreter::{
         opcode::{PUSH0, PUSH32},
         OpCode, SharedMemory, Stack,
     },
-    primitives::State,
+    primitives::{State, KECCAK_EMPTY},
 };
 use std::{cell::RefCell, rc::Rc, sync::mpsc::channel};
 use tokio::sync::mpsc;

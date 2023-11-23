@@ -1,4 +1,4 @@
-use reth_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use revm::{
     inspectors::CustomPrintTracer,
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
@@ -23,7 +23,7 @@ pub enum Hook {
     /// Hook on a specific block.
     Block(u64),
     /// Hook on a specific transaction hash.
-    Transaction(TxHash),
+    Transaction(B256),
     /// Hooks on every transaction in a block.
     All,
 }
@@ -62,7 +62,7 @@ impl InspectorStack {
     }
 
     /// Check if the inspector should be used.
-    pub fn should_inspect(&self, env: &Env, tx_hash: TxHash) -> bool {
+    pub fn should_inspect(&self, env: &Env, tx_hash: B256) -> bool {
         match self.hook {
             Hook::None => false,
             Hook::Block(block) => env.block.number.to::<u64>() == block,

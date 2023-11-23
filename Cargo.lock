@@ -6277,6 +6277,7 @@ dependencies = [
 name = "reth-revm-inspectors"
 version = "0.1.0-alpha.11"
 dependencies = [
+ "alloy-primitives",
  "alloy-sol-types",
  "boa_engine",
  "boa_gc",
