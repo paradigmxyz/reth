@@ -228,9 +228,10 @@ where
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#message-id-based-multiplexing>
 ///
-/// This stream emits Bytes that start with the normalized message id, so that the first byte of
-/// each message starts from 0. If this stream only supports a single capability, for example `eth`
-/// then the first byte of each message will match [EthMessageID](crate::types::EthMessageID).
+/// This stream emits _non-empty_ Bytes that start with the normalized message id, so that the first
+/// byte of each message starts from 0. If this stream only supports a single capability, for
+/// example `eth` then the first byte of each message will match
+/// [EthMessageID](crate::types::EthMessageID).
 #[pin_project]
 #[derive(Debug)]
 pub struct P2PStream<S> {
@@ -405,6 +406,11 @@ where
                 None => return Poll::Ready(None),
             };
 
+            if bytes.is_empty() {
+                // empty messages are not allowed
+                return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage)))
+            }
+
             // first check that the compressed message length does not exceed the max
             // payload size
             let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
@@ -430,7 +436,7 @@ where
                 err
             })?;
 
-            let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
+            let id = bytes[0];
             match id {
                 _ if id == P2PMessageID::Ping as u8 => {
                     trace!("Received Ping, Sending Pong");
