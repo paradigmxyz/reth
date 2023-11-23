@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use rand::Rng;
+use rand::prelude::*;
 
 pub fn new_pre_sorted(c: &mut Criterion) {
     let mut group = c.benchmark_group("new_pre_sorted");
@@ -32,24 +32,42 @@ pub fn rank_select(c: &mut Criterion) {
         assert_eq!(integers_u64.len(), 2000);
 
         group.bench_function(BenchmarkId::new("Elias-Fano", delta), |b| {
-            let list = elias_fano::IntegerList::new_pre_sorted(black_box(&integers_usize)).0;
             b.iter_batched(
-                || list.clone(),
-                |list| {
+                || {
+                    let (index, element) =
+                        integers_usize.iter().enumerate().choose(&mut thread_rng()).unwrap();
+                    (
+                        elias_fano::IntegerList::new_pre_sorted(black_box(&integers_usize)).0,
+                        index,
+                        *element,
+                    )
+                },
+                |(list, index, element)| {
                     let list = list.enable_rank();
-                    list.rank(black_box(10));
-                    list.select(black_box(10));
+                    list.rank(element);
+                    list.select(index);
                 },
                 BatchSize::PerIteration,
             );
         });
 
         group.bench_function(BenchmarkId::new("Roaring Bitmaps", delta), |b| {
-            let list = reth_primitives::IntegerList::new_pre_sorted(black_box(&integers_u64));
-            b.iter(|| {
-                list.rank(black_box(10));
-                list.select(black_box(10));
-            });
+            b.iter_batched(
+                || {
+                    let (index, element) =
+                        integers_u64.iter().enumerate().choose(&mut thread_rng()).unwrap();
+                    (
+                        reth_primitives::IntegerList::new_pre_sorted(black_box(&integers_u64)),
+                        index as u64,
+                        *element,
+                    )
+                },
+                |(list, index, element)| {
+                    list.rank(element);
+                    list.select(index);
+                },
+                BatchSize::PerIteration,
+            );
         });
     }
 }
@@ -57,7 +75,7 @@ pub fn rank_select(c: &mut Criterion) {
 fn generate_integers(n: usize, delta: usize) -> Vec<usize> {
     (0..n).fold(Vec::new(), |mut vec, _| {
         vec.push(vec.last().map_or(0, |last| {
-            last + rand::thread_rng().gen_range(delta - delta / 2..=delta + delta / 2)
+            last + thread_rng().gen_range(delta - delta / 2..=delta + delta / 2)
         }));
         vec
     })
