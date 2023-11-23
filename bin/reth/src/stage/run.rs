@@ -128,7 +128,7 @@ impl Command {
 
         let provider_factory = ProviderFactory::new(
             Arc::clone(&db),
-            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())?),
             self.chain.clone(),
         );
         let mut provider_rw = provider_factory.provider_rw()?;

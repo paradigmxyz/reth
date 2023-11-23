@@ -20,8 +20,9 @@ pub struct DiskFileTransactionDataStore {
 
 impl DiskFileTransactionDataStore {
     /// Create new transaction data store from path.
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
+    pub fn new(path: PathBuf) -> Result<Self, TransactionDataStoreError> {
+        fs::create_dir_all(&path)?;
+        Ok(Self { path })
     }
 
     /// Returns path to directory where transaction data is stored.

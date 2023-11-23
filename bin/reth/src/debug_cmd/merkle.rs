@@ -124,7 +124,7 @@ impl Command {
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         let provider_factory = ProviderFactory::new(
             db,
-            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())?),
             self.chain.clone(),
         );
         let provider_rw = provider_factory.provider_rw()?;

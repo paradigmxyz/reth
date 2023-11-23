@@ -40,7 +40,7 @@ async fn main() -> eyre::Result<()> {
     let db = Arc::new(open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), None)?);
     let transaction_data_store = Arc::new(DiskFileTransactionDataStore::new(
         Path::new(&std::env::var("RETH_TRANSACTION_DATA_STORE_PATH")?).to_path_buf(),
-    ));
+    )?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
     let factory = ProviderFactory::new(db.clone(), transaction_data_store, spec.clone());
 

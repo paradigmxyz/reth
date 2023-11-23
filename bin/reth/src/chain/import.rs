@@ -90,7 +90,7 @@ impl ImportCommand {
         info!(target: "reth::cli", "Database opened");
         let provider_factory = ProviderFactory::new(
             db.clone(),
-            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())?),
             self.chain.clone(),
         );
 

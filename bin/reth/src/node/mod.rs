@@ -255,10 +255,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         info!(target: "reth::cli", "Database opened");
 
         let transaction_data_store_path = data_dir.transaction_data_store_path();
-        info!(target: "reth::cli", path = ?transaction_data_store_path, "Initializing transaction store"); // TODO: ensure dir exists
+        info!(target: "reth::cli", path = ?transaction_data_store_path, "Initializing transaction store");
         let mut provider_factory = ProviderFactory::new(
             Arc::clone(&db),
-            Arc::new(DiskFileTransactionDataStore::new(transaction_data_store_path)),
+            Arc::new(DiskFileTransactionDataStore::new(transaction_data_store_path)?),
             Arc::clone(&self.chain),
         );
 

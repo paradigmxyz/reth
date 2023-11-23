@@ -58,7 +58,7 @@ impl Command {
 
         let tool = DbTool::new(
             &db,
-            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())?),
             self.chain.clone(),
         )?;
 

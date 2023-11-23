@@ -99,7 +99,7 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         let tx_data_store =
-            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path()));
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())?);
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.

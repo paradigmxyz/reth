@@ -109,7 +109,7 @@ impl Command {
 
         let src_db = DbTool::new(
             &db,
-            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())?),
             self.chain.clone(),
         )?;
 
@@ -171,7 +171,7 @@ pub(crate) fn setup<DB: Database>(
     Ok((
         ProviderFactory::new(
             Arc::new(output_db),
-            Arc::new(DiskFileTransactionDataStore::new(output_transaction_store.clone())),
+            Arc::new(DiskFileTransactionDataStore::new(output_transaction_store.clone())?),
             db_tool.chain.clone(),
         ),
         tip_block_number,

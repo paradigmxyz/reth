@@ -14,7 +14,7 @@ pub struct TempTransactionDataStore {
 impl Default for TempTransactionDataStore {
     fn default() -> Self {
         let path = tempfile::TempDir::new().expect("error creating temp dir").into_path();
-        Self { store: DiskFileTransactionDataStore::new(path) }
+        Self { store: DiskFileTransactionDataStore::new(path).unwrap() }
     }
 }
 
