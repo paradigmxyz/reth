@@ -451,6 +451,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         let to_remove = self.transactions_to_remove(&limit, false);
         for txid in to_remove {
+            // TODO: add method to remove multiple transactions from the same sender at once
+            // pending must be gapless so it would only remove the last n transactions from a
+            // sender
             if let Some(tx) = self.remove_transaction(&txid) {
                 removed.push(tx);
             }
