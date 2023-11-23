@@ -26,7 +26,7 @@ use std::{
 };
 
 /// Duration after which we emit the log about long-lived database transactions.
-const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(1);
+const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
