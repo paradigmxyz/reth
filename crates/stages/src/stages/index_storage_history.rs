@@ -34,7 +34,6 @@ impl Default for IndexStorageHistoryStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -42,9 +41,9 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     }
 
     /// Execute the stage.
-    async fn execute(
+    fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
@@ -84,9 +83,9 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
@@ -103,7 +102,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestStageDB, UnwindStageTestRunner,
     };
     use itertools::Itertools;
     use reth_db::{
@@ -122,9 +121,8 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{
-        address, b256, Address, BlockNumber, PruneMode, StorageEntry, B256, MAINNET, U256,
+        address, b256, Address, BlockNumber, PruneMode, StorageEntry, B256, U256,
     };
-    use reth_provider::ProviderFactory;
     use std::collections::BTreeMap;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
@@ -167,9 +165,9 @@ mod tests {
             .collect()
     }
 
-    fn partial_setup(tx: &TestTransaction) {
+    fn partial_setup(db: &TestStageDB) {
         // setup
-        tx.commit(|tx| {
+        db.commit(|tx| {
             for block in 0..=MAX_BLOCK {
                 tx.put::<tables::BlockBodyIndices>(
                     block,
@@ -186,30 +184,28 @@ mod tests {
         .unwrap()
     }
 
-    async fn run(tx: &TestTransaction, run_to: u64, input_checkpoint: Option<BlockNumber>) {
+    fn run(db: &TestStageDB, run_to: u64, input_checkpoint: Option<BlockNumber>) {
         let input = ExecInput {
             target: Some(run_to),
             checkpoint: input_checkpoint
                 .map(|block_number| StageCheckpoint { block_number, stage_checkpoint: None }),
         };
         let mut stage = IndexStorageHistoryStage::default();
-        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
-        let provider = factory.provider_rw().unwrap();
-        let out = stage.execute(&provider, input).await.unwrap();
+        let provider = db.factory.provider_rw().unwrap();
+        let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
         provider.commit().unwrap();
     }
 
-    async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
+    fn unwind(db: &TestStageDB, unwind_from: u64, unwind_to: u64) {
         let input = UnwindInput {
             checkpoint: StageCheckpoint::new(unwind_from),
             unwind_to,
             ..Default::default()
         };
         let mut stage = IndexStorageHistoryStage::default();
-        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
-        let provider = factory.provider_rw().unwrap();
-        let out = stage.unwind(&provider, input).await.unwrap();
+        let provider = db.factory.provider_rw().unwrap();
+        let out = stage.unwind(&provider, input).unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
         provider.commit().unwrap();
     }
@@ -217,74 +213,74 @@ mod tests {
     #[tokio::test]
     async fn insert_index_to_empty() {
         // init
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
 
         // setup
-        partial_setup(&tx);
+        partial_setup(&db);
 
         // run
-        run(&tx, 3, None).await;
+        run(&db, 3, None);
 
         // verify
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
 
         // unwind
-        unwind(&tx, 5, 0).await;
+        unwind(&db, 5, 0);
 
         // verify initial state
-        let table = tx.table::<tables::StorageHistory>().unwrap();
+        let table = db.table::<tables::StorageHistory>().unwrap();
         assert!(table.is_empty());
     }
 
     #[tokio::test]
     async fn insert_index_to_not_empty_shard() {
         // init
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
 
         // setup
-        partial_setup(&tx);
-        tx.commit(|tx| {
+        partial_setup(&db);
+        db.commit(|tx| {
             tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&[1, 2, 3])).unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&tx, 5, Some(3)).await;
+        run(&db, 5, Some(3));
 
         // verify
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5])]));
 
         // unwind
-        unwind(&tx, 5, 3).await;
+        unwind(&db, 5, 3);
 
         // verify initial state
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
     }
 
     #[tokio::test]
     async fn insert_index_to_full_shard() {
         // init
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         // change does not matter only that account is present in changeset.
         let full_list = (1..=LAST_BLOCK_IN_FULL_SHARD).collect::<Vec<_>>();
 
         // setup
-        partial_setup(&tx);
-        tx.commit(|tx| {
+        partial_setup(&db);
+        db.commit(|tx| {
             tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&full_list)).unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&tx, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD)).await;
+        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD)).await;
 
         // verify
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -294,43 +290,43 @@ mod tests {
         );
 
         // unwind
-        unwind(&tx, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD).await;
+        unwind(&db, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD);
 
         // verify initial state
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), full_list)]));
     }
 
     #[tokio::test]
     async fn insert_index_to_fill_shard() {
         // init
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let mut almost_full_list = (1..=LAST_BLOCK_IN_FULL_SHARD - 2).collect::<Vec<_>>();
 
         // setup
-        partial_setup(&tx);
-        tx.commit(|tx| {
+        partial_setup(&db);
+        db.commit(|tx| {
             tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&almost_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&tx, LAST_BLOCK_IN_FULL_SHARD, Some(LAST_BLOCK_IN_FULL_SHARD - 2)).await;
+        run(&db, LAST_BLOCK_IN_FULL_SHARD, Some(LAST_BLOCK_IN_FULL_SHARD - 2)).await;
 
         // verify
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD - 1);
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list.clone())]));
 
         // unwind
-        unwind(&tx, LAST_BLOCK_IN_FULL_SHARD, LAST_BLOCK_IN_FULL_SHARD - 2).await;
+        unwind(&db, LAST_BLOCK_IN_FULL_SHARD, LAST_BLOCK_IN_FULL_SHARD - 2);
 
         // verify initial state
         almost_full_list.pop();
         almost_full_list.pop();
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list)]));
 
         // verify initial state
@@ -339,23 +335,23 @@ mod tests {
     #[tokio::test]
     async fn insert_index_second_half_shard() {
         // init
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let mut close_full_list = (1..=LAST_BLOCK_IN_FULL_SHARD - 1).collect::<Vec<_>>();
 
         // setup
-        partial_setup(&tx);
-        tx.commit(|tx| {
+        partial_setup(&db);
+        db.commit(|tx| {
             tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&tx, LAST_BLOCK_IN_FULL_SHARD + 1, Some(LAST_BLOCK_IN_FULL_SHARD - 1)).await;
+        run(&db, LAST_BLOCK_IN_FULL_SHARD + 1, Some(LAST_BLOCK_IN_FULL_SHARD - 1)).await;
 
         // verify
         close_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -365,23 +361,23 @@ mod tests {
         );
 
         // unwind
-        unwind(&tx, LAST_BLOCK_IN_FULL_SHARD, LAST_BLOCK_IN_FULL_SHARD - 1).await;
+        unwind(&db, LAST_BLOCK_IN_FULL_SHARD, LAST_BLOCK_IN_FULL_SHARD - 1);
 
         // verify initial state
         close_full_list.pop();
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list)]));
     }
 
     #[tokio::test]
     async fn insert_index_to_third_shard() {
         // init
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let full_list = (1..=LAST_BLOCK_IN_FULL_SHARD).collect::<Vec<_>>();
 
         // setup
-        partial_setup(&tx);
-        tx.commit(|tx| {
+        partial_setup(&db);
+        db.commit(|tx| {
             tx.put::<tables::StorageHistory>(shard(1), list(&full_list)).unwrap();
             tx.put::<tables::StorageHistory>(shard(2), list(&full_list)).unwrap();
             tx.put::<tables::StorageHistory>(
@@ -393,10 +389,10 @@ mod tests {
         })
         .unwrap();
 
-        run(&tx, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD + 1)).await;
+        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD + 1)).await;
 
         // verify
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -407,10 +403,10 @@ mod tests {
         );
 
         // unwind
-        unwind(&tx, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD + 1).await;
+        unwind(&db, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD + 1);
 
         // verify initial state
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -424,10 +420,10 @@ mod tests {
     #[tokio::test]
     async fn insert_index_with_prune_mode() {
         // init
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
 
         // setup
-        tx.commit(|tx| {
+        db.commit(|tx| {
             // we just need first and last
             tx.put::<tables::BlockBodyIndices>(
                 0,
@@ -458,43 +454,42 @@ mod tests {
             prune_mode: Some(PruneMode::Before(36)),
             ..Default::default()
         };
-        let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
-        let provider = factory.provider_rw().unwrap();
-        let out = stage.execute(&provider, input).await.unwrap();
+        let provider = db.factory.provider_rw().unwrap();
+        let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
         provider.commit().unwrap();
 
         // verify
-        let table = cast(tx.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StorageHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100])]));
 
         // unwind
-        unwind(&tx, 20000, 0).await;
+        unwind(&db, 20000, 0);
 
         // verify initial state
-        let table = tx.table::<tables::StorageHistory>().unwrap();
+        let table = db.table::<tables::StorageHistory>().unwrap();
         assert!(table.is_empty());
     }
 
     stage_test_suite_ext!(IndexStorageHistoryTestRunner, index_storage_history);
 
     struct IndexStorageHistoryTestRunner {
-        pub(crate) tx: TestTransaction,
+        pub(crate) db: TestStageDB,
         commit_threshold: u64,
         prune_mode: Option<PruneMode>,
     }
 
     impl Default for IndexStorageHistoryTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), commit_threshold: 1000, prune_mode: None }
+            Self { db: TestStageDB::default(), commit_threshold: 1000, prune_mode: None }
         }
     }
 
     impl StageTestRunner for IndexStorageHistoryTestRunner {
         type S = IndexStorageHistoryStage;
 
-        fn tx(&self) -> &TestTransaction {
-            &self.tx
+        fn db(&self) -> &TestStageDB {
+            &self.db
         }
 
         fn stage(&self) -> Self::S {
@@ -527,7 +522,7 @@ mod tests {
             );
 
             // add block changeset from block 1.
-            self.tx.insert_changesets(changesets, Some(start))?;
+            self.db.insert_changesets(changesets, Some(start))?;
 
             Ok(())
         }
@@ -549,7 +544,7 @@ mod tests {
                     ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true }
                 );
 
-                let provider = self.tx.inner();
+                let provider = self.db.factory.provider()?;
                 let mut changeset_cursor =
                     provider.tx_ref().cursor_read::<tables::StorageChangeSet>()?;
 
@@ -600,7 +595,7 @@ mod tests {
                     };
                 }
 
-                let table = cast(self.tx.table::<tables::StorageHistory>().unwrap());
+                let table = cast(self.db.table::<tables::StorageHistory>().unwrap());
                 assert_eq!(table, result);
             }
             Ok(())
@@ -609,7 +604,7 @@ mod tests {
 
     impl UnwindStageTestRunner for IndexStorageHistoryTestRunner {
         fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
-            let table = self.tx.table::<tables::StorageHistory>().unwrap();
+            let table = self.db.table::<tables::StorageHistory>().unwrap();
             assert!(table.is_empty());
             Ok(())
         }

@@ -14,6 +14,7 @@ use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
 };
+use reth_trie::updates::TrieUpdates;
 use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
@@ -206,7 +207,14 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn state_root(&self, _post_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+    fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
+    }
+
+    fn state_root_with_updates(
+        &self,
+        _bundle_state: &BundleStateWithReceipts,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }
@@ -225,10 +233,10 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
                     .cursor_dup_read::<tables::StorageChangeSet>()?
                     .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
                     .filter(|entry| entry.key == storage_key)
-                    .ok_or(ProviderError::StorageChangesetNotFound {
+                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
                         block_number: changeset_block_number,
                         address,
-                        storage_key,
+                        storage_key: Box::new(storage_key),
                     })?
                     .value,
             )),

@@ -74,6 +74,10 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
         None
     }
 
+    fn block_with_senders_by_hash(&self, _hash: BlockHash) -> Option<SealedBlockWithSenders> {
+        None
+    }
+
     fn buffered_block_by_hash(&self, _block_hash: BlockHash) -> Option<SealedBlock> {
         None
     }

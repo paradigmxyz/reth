@@ -14,7 +14,7 @@ use reth_provider::DatabaseProviderRW;
 ///
 /// Returns total number of processed (walked) and deleted entities.
 pub(crate) fn prune_history_indices<DB, T, SK>(
-    provider: &DatabaseProviderRW<'_, DB>,
+    provider: &DatabaseProviderRW<DB>,
     to_block: BlockNumber,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
     last_key: impl Fn(&T::Key) -> T::Key,

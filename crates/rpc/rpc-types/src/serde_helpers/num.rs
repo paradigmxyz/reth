@@ -69,6 +69,68 @@ impl<'de> Deserialize<'de> for U64HexOrNumber {
     }
 }
 
+/// serde functions for handling `u64` as [U64]
+pub mod u64_hex {
+    use alloy_primitives::U64;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Deserializes an `u64` from [U64] accepting a hex quantity string with optional 0x prefix
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        U64::deserialize(deserializer).map(|val| val.to())
+    }
+
+    /// Serializes u64 as hex string
+    pub fn serialize<S: Serializer>(value: &u64, s: S) -> Result<S::Ok, S::Error> {
+        U64::from(*value).serialize(s)
+    }
+}
+
+/// serde functions for handling `Option<u64>` as [U64]
+pub mod u64_hex_opt {
+    use alloy_primitives::U64;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Serializes u64 as hex string
+    pub fn serialize<S: Serializer>(value: &Option<u64>, s: S) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(val) => U64::from(*val).serialize(s),
+            None => s.serialize_none(),
+        }
+    }
+
+    /// Deserializes an `Option` from [U64] accepting a hex quantity string with optional 0x prefix
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(U64::deserialize(deserializer)
+            .map_or(None, |v| Some(u64::from_be_bytes(v.to_be_bytes()))))
+    }
+}
+
+/// serde functions for handling primitive `u64` as [U64]
+pub mod u64_hex_or_decimal {
+    use crate::serde_helpers::num::U64HexOrNumber;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Deserializes an `u64` accepting a hex quantity string with optional 0x prefix or
+    /// a number
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        U64HexOrNumber::deserialize(deserializer).map(Into::into)
+    }
+
+    /// Serializes u64 as hex string
+    pub fn serialize<S: Serializer>(value: &u64, s: S) -> Result<S::Ok, S::Error> {
+        U64HexOrNumber::from(*value).serialize(s)
+    }
+}
+
 /// serde functions for handling primitive optional `u64` as [U64]
 pub mod u64_hex_or_decimal_opt {
     use crate::serde_helpers::num::U64HexOrNumber;
@@ -136,4 +198,26 @@ where
     D: Deserializer<'de>,
 {
     NumberOrHexU256::deserialize(deserializer)?.try_into_u256()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    #[test]
+    fn test_hex_u64() {
+        #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+        struct Value {
+            #[serde(with = "u64_hex")]
+            inner: u64,
+        }
+
+        let val = Value { inner: 1000 };
+        let s = serde_json::to_string(&val).unwrap();
+        assert_eq!(s, "{\"inner\":\"0x3e8\"}");
+
+        let deserialized: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(val, deserialized);
+    }
 }

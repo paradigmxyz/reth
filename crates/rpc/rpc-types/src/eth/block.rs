@@ -938,4 +938,11 @@ mod tests {
         let block2 = serde_json::from_str::<RichBlock>(&serialized).unwrap();
         assert_eq!(block, block2);
     }
+
+    #[test]
+    fn compact_block_number_serde() {
+        let num: BlockNumberOrTag = 1u64.into();
+        let serialized = serde_json::to_string(&num).unwrap();
+        assert_eq!(serialized, "\"0x1\"");
+    }
 }

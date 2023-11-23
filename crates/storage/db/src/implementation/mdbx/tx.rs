@@ -7,7 +7,7 @@ use crate::{
     },
     table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::{utils::decode_one, Tables, NUM_TABLES},
-    transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use parking_lot::RwLock;
@@ -75,7 +75,7 @@ impl<K: TransactionKind> Tx<K> {
     }
 
     /// Create db Cursor
-    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'_, K, T>, DatabaseError> {
+    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
         let inner = self
             .inner
             .cursor_with_dbi(self.get_dbi::<T>()?)
@@ -167,19 +167,12 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
     }
 }
 
-impl<'a, K: TransactionKind> DbTxGAT<'a> for Tx<K> {
-    type Cursor<T: Table> = Cursor<'a, K, T>;
-    type DupCursor<T: DupSort> = Cursor<'a, K, T>;
-}
-
-impl<'a, K: TransactionKind> DbTxMutGAT<'a> for Tx<K> {
-    type CursorMut<T: Table> = Cursor<'a, RW, T>;
-    type DupCursorMut<T: DupSort> = Cursor<'a, RW, T>;
-}
-
 impl TableImporter for Tx<RW> {}
 
 impl<K: TransactionKind> DbTx for Tx<K> {
+    type Cursor<T: Table> = Cursor<K, T>;
+    type DupCursor<T: DupSort> = Cursor<K, T>;
+
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
             tx.get(self.get_dbi::<T>()?, key.encode().as_ref())
@@ -202,14 +195,12 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     // Iterate over read only values in database.
-    fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, DatabaseError> {
+    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError> {
         self.new_cursor()
     }
 
     /// Iterate over read only values in database.
-    fn cursor_dup_read<T: DupSort>(
-        &self,
-    ) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, DatabaseError> {
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError> {
         self.new_cursor()
     }
 
@@ -224,6 +215,9 @@ impl<K: TransactionKind> DbTx for Tx<K> {
 }
 
 impl DbTxMut for Tx<RW> {
+    type CursorMut<T: Table> = Cursor<RW, T>;
+    type DupCursorMut<T: DupSort> = Cursor<RW, T>;
+
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = value.compress();
@@ -268,15 +262,11 @@ impl DbTxMut for Tx<RW> {
         Ok(())
     }
 
-    fn cursor_write<T: Table>(
-        &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, DatabaseError> {
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
         self.new_cursor()
     }
 
-    fn cursor_dup_write<T: DupSort>(
-        &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, DatabaseError> {
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
         self.new_cursor()
     }
 }

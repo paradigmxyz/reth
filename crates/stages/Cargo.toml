@@ -50,6 +50,7 @@ aquamarine.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 num-traits = "0.2.15"
+auto_impl = "1"
 
 [dev-dependencies]
 # reth

@@ -12,6 +12,7 @@ use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey,
     StorageValue, B256,
 };
+use reth_trie::updates::TrieUpdates;
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -61,6 +62,15 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
 impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
     fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
         bundle_state.state_root_slow(self.db).map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_with_updates(
+        &self,
+        bundle_state: &BundleStateWithReceipts,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        bundle_state
+            .state_root_slow_with_updates(self.db)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 

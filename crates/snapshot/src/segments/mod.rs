@@ -31,7 +31,7 @@ pub trait Segment: Default {
     /// file's save location.
     fn snapshot<DB: Database>(
         &self,
-        provider: &DatabaseProviderRO<'_, DB>,
+        provider: &DatabaseProviderRO<DB>,
         directory: impl AsRef<Path>,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()>;
@@ -42,7 +42,7 @@ pub trait Segment: Default {
     /// Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
     fn dataset_for_compression<DB: Database, T: Table<Key = u64>>(
         &self,
-        provider: &DatabaseProviderRO<'_, DB>,
+        provider: &DatabaseProviderRO<DB>,
         range: &RangeInclusive<u64>,
         range_len: usize,
     ) -> ProviderResult<Vec<Vec<u8>>> {
@@ -58,7 +58,7 @@ pub trait Segment: Default {
 /// Returns a [`NippyJar`] according to the desired configuration. The `directory` parameter
 /// determines the snapshot file's save location.
 pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
-    provider: &DatabaseProviderRO<'_, DB>,
+    provider: &DatabaseProviderRO<DB>,
     directory: impl AsRef<Path>,
     segment: SnapshotSegment,
     segment_config: SegmentConfig,

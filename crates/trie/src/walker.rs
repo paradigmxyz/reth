@@ -252,11 +252,9 @@ mod tests {
         prefix_set::PrefixSetMut,
         trie_cursor::{AccountTrieCursor, StorageTrieCursor},
     };
-    use reth_db::{
-        cursor::DbCursorRW, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
-    };
-    use reth_primitives::{trie::StorageTrieEntry, MAINNET};
-    use reth_provider::ProviderFactory;
+    use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
+    use reth_primitives::trie::StorageTrieEntry;
+    use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
     fn walk_nodes_with_common_prefix() {
@@ -281,9 +279,7 @@ mod tests {
             vec![0x5, 0x8, 0x2],
         ];
 
-        let db = create_test_rw_db();
-
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap();
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
@@ -327,8 +323,7 @@ mod tests {
 
     #[test]
     fn cursor_rootnode_with_changesets() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap();
         let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 

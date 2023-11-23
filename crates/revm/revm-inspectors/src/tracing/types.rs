@@ -1,8 +1,8 @@
 //! Types for representing call trace items.
 
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
+use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use alloy_sol_types::decode_revert_reason;
-use reth_primitives::{Address, Bytes, B256, U256, U64};
 use reth_rpc_types::trace::{
     geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
@@ -10,9 +10,7 @@ use reth_rpc_types::trace::{
         SelfdestructAction, TraceOutput, TransactionTrace,
     },
 };
-use revm::interpreter::{
-    opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode, Stack,
-};
+use revm::interpreter::{opcode, CallContext, CallScheme, CreateScheme, InstructionResult, OpCode};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
@@ -429,8 +427,6 @@ impl CallTraceNode {
     }
 
     /// Converts this call trace into an _empty_ geth [CallFrame]
-    ///
-    /// Caution: this does not include any of the child calls
     pub(crate) fn geth_empty_call_frame(&self, include_logs: bool) -> CallFrame {
         let mut call_frame = CallFrame {
             typ: self.trace.kind.to_string(),
@@ -485,9 +481,6 @@ pub(crate) struct CallTraceStepStackItem<'a> {
 }
 
 /// Ordering enum for calls and logs
-///
-/// i.e. if Call 0 occurs before Log 0, it will be pushed into the `CallTraceNode`'s ordering before
-/// the log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LogCallOrder {
     Log(usize),
@@ -516,7 +509,7 @@ pub(crate) struct CallTraceStep {
     /// Current contract address
     pub(crate) contract: Address,
     /// Stack before step execution
-    pub(crate) stack: Stack,
+    pub(crate) stack: Option<Vec<U256>>,
     /// The new stack items placed by this step if any
     pub(crate) push_stack: Option<Vec<U256>>,
     /// All allocated memory in a step
@@ -568,7 +561,7 @@ impl CallTraceStep {
         };
 
         if opts.is_stack_enabled() {
-            log.stack = Some(self.stack.data().clone());
+            log.stack = self.stack.clone();
         }
 
         if opts.is_memory_enabled() {

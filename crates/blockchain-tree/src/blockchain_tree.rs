@@ -24,7 +24,7 @@ use reth_provider::{
     chain::{ChainSplit, ChainSplitTarget},
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
-    DatabaseProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider,
+    ChainSpecProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider,
 };
 use reth_stages::{MetricEvent, MetricEventsSender};
 use std::{collections::BTreeMap, sync::Arc};
@@ -104,8 +104,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
 
         // TODO(rakita) save last finalized block inside database but for now just take
-        // tip-max_reorg_depth
-        // task: https://github.com/paradigmxyz/reth/issues/1712
+        // `tip - max_reorg_depth`
+        // https://github.com/paradigmxyz/reth/issues/1712
         let last_finalized_block_number = if last_canonical_hashes.len() > max_reorg_depth {
             // we pick `Highest - max_reorg_depth` block as last finalized block.
             last_canonical_hashes.keys().nth_back(max_reorg_depth)
@@ -161,7 +161,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             }
 
             // check if block is inside database
-            if self.externals.database().provider()?.block_number(block.hash)?.is_some() {
+            if self.externals.provider_factory.provider()?.block_number(block.hash)?.is_some() {
                 return Ok(Some(BlockStatus::Valid))
             }
 
@@ -209,8 +209,20 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// Returns the block with matching hash from any side-chain.
     ///
     /// Caution: This will not return blocks from the canonical chain.
+    #[inline]
     pub fn block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
         self.state.block_by_hash(block_hash)
+    }
+
+    /// Returns the block with matching hash from any side-chain.
+    ///
+    /// Caution: This will not return blocks from the canonical chain.
+    #[inline]
+    pub fn block_with_senders_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> Option<&SealedBlockWithSenders> {
+        self.state.block_with_senders_by_hash(block_hash)
     }
 
     /// Returns the block's receipts with matching hash from any side-chain.
@@ -368,8 +380,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         // https://github.com/paradigmxyz/reth/issues/1713
 
         let (block_status, chain) = {
-            let factory = self.externals.database();
-            let provider = factory
+            let provider = self
+                .externals
+                .provider_factory
                 .provider()
                 .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?;
 
@@ -385,7 +398,12 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 })?;
 
             // Pass the parent total difficulty to short-circuit unnecessary calculations.
-            if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO)
+            if !self
+                .externals
+                .provider_factory
+                .chain_spec()
+                .fork(Hardfork::Paris)
+                .active_at_ttd(parent_td, U256::ZERO)
             {
                 return Err(InsertBlockError::execution_error(
                     BlockValidationError::BlockPreMerge { hash: block.hash }.into(),
@@ -546,8 +564,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             let Some(chain) = self.state.chains.get(&chain_id) else { return hashes };
             hashes.extend(chain.blocks().values().map(|b| (b.number, b.hash())));
 
-            let fork_block = chain.fork_block_hash();
-            if let Some(next_chain_id) = self.block_indices().get_blocks_chain_id(&fork_block) {
+            let fork_block = chain.fork_block();
+            if let Some(next_chain_id) = self.block_indices().get_blocks_chain_id(&fork_block.hash)
+            {
                 chain_id = next_chain_id;
             } else {
                 // if there is no fork block that point to other chains, break the loop.
@@ -794,7 +813,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         // check unconnected block buffer for childs of the chains
         let mut all_chain_blocks = Vec::new();
         for (_, chain) in self.state.chains.iter() {
-            for (&number, blocks) in chain.blocks.iter() {
+            for (&number, blocks) in chain.blocks().iter() {
                 all_chain_blocks.push(BlockNumHash { number, hash: blocks.hash })
             }
         }
@@ -868,8 +887,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         // canonical, but in the db. If it is in a sidechain, it is not canonical. If it is not in
         // the db, then it is not canonical.
 
-        let factory = self.externals.database();
-        let provider = factory.provider()?;
+        let provider = self.externals.provider_factory.provider()?;
 
         let mut header = None;
         if let Some(num) = self.block_indices().get_canonical_block_number(hash) {
@@ -917,12 +935,18 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         if let Some(header) = canonical_header {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
             // TODO: this could be fetched from the chainspec first
-            let td = self.externals.database().provider()?.header_td(block_hash)?.ok_or(
+            let td = self.externals.provider_factory.provider()?.header_td(block_hash)?.ok_or(
                 CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
                     hash: *block_hash,
                 }),
             )?;
-            if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
+            if !self
+                .externals
+                .provider_factory
+                .chain_spec()
+                .fork(Hardfork::Paris)
+                .active_at_ttd(td, U256::ZERO)
+            {
                 return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
                     hash: *block_hash,
                 })
@@ -946,18 +970,16 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         let canonical = self.split_chain(chain_id, chain, ChainSplitTarget::Hash(*block_hash));
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
-        let mut block_fork = canonical.fork_block();
-        let mut block_fork_number = canonical.fork_block_number();
+        let mut fork_block = canonical.fork_block();
         let mut chains_to_promote = vec![canonical];
 
         // loop while fork blocks are found in Tree.
-        while let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block_fork.hash) {
-            let chain = self.state.chains.remove(&chain_id).expect("To fork to be present");
-            block_fork = chain.fork_block();
+        while let Some(chain_id) = self.block_indices().get_blocks_chain_id(&fork_block.hash) {
+            let chain = self.state.chains.remove(&chain_id).expect("fork is present");
             // canonical chain is lower part of the chain.
             let canonical =
-                self.split_chain(chain_id, chain, ChainSplitTarget::Number(block_fork_number));
-            block_fork_number = canonical.fork_block_number();
+                self.split_chain(chain_id, chain, ChainSplitTarget::Number(fork_block.number));
+            fork_block = canonical.fork_block();
             chains_to_promote.push(canonical);
         }
         durations_recorder.record_relative(MakeCanonicalAction::SplitChainForks);
@@ -989,7 +1011,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         );
 
         // if joins to the tip;
-        if new_canon_chain.fork_block_hash() == old_tip.hash {
+        if new_canon_chain.fork_block().hash == old_tip.hash {
             chain_notification =
                 CanonStateNotification::Commit { new: Arc::new(new_canon_chain.clone()) };
             // append to database
@@ -1082,14 +1104,11 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
     /// Write the given chain to the database as canonical.
     fn commit_canonical_to_database(&self, chain: Chain) -> RethResult<()> {
-        let provider = DatabaseProvider::new_rw(
-            self.externals.db.tx_mut()?,
-            self.externals.chain_spec.clone(),
-        );
+        let provider_rw = self.externals.provider_factory.provider_rw()?;
 
         let (blocks, state) = chain.into_inner();
 
-        provider
+        provider_rw
             .append_blocks_with_bundle_state(
                 blocks.into_blocks().collect(),
                 state,
@@ -1097,7 +1116,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             )
             .map_err(|e| BlockExecutionError::CanonicalCommit { inner: e.to_string() })?;
 
-        provider.commit()?;
+        provider_rw.commit()?;
 
         Ok(())
     }
@@ -1130,21 +1149,20 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         revert_until: BlockNumber,
     ) -> RethResult<Option<Chain>> {
         // read data that is needed for new sidechain
+        let provider_rw = self.externals.provider_factory.provider_rw()?;
 
-        let provider = DatabaseProvider::new_rw(
-            self.externals.db.tx_mut()?,
-            self.externals.chain_spec.clone(),
-        );
-
-        let tip = provider.last_block_number()?;
+        let tip = provider_rw.last_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
         info!(target: "blockchain_tree", "Unwinding canonical chain blocks: {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
-        let blocks_and_execution = provider
-            .take_block_and_execution_range(self.externals.chain_spec.as_ref(), revert_range)
+        let blocks_and_execution = provider_rw
+            .take_block_and_execution_range(
+                self.externals.provider_factory.chain_spec().as_ref(),
+                revert_range,
+            )
             .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
 
-        provider.commit()?;
+        provider_rw.commit()?;
 
         if blocks_and_execution.is_empty() {
             Ok(None)
@@ -1186,18 +1204,16 @@ mod tests {
     use crate::block_buffer::BufferedBlocks;
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
-    use reth_db::{
-        tables,
-        test_utils::{create_test_rw_db, TempDatabase},
-        transaction::DbTxMut,
-        DatabaseEnv,
-    };
+    use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{
         constants::EMPTY_ROOT_HASH, stage::StageCheckpoint, ChainSpecBuilder, B256, MAINNET,
     };
     use reth_provider::{
-        test_utils::{blocks::BlockChainTestData, TestExecutorFactory},
+        test_utils::{
+            blocks::BlockChainTestData, create_test_provider_factory_with_chain_spec,
+            TestExecutorFactory,
+        },
         BlockWriter, BundleStateWithReceipts, ProviderFactory,
     };
     use std::{
@@ -1208,8 +1224,6 @@ mod tests {
     fn setup_externals(
         exec_res: Vec<BundleStateWithReceipts>,
     ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, TestExecutorFactory> {
-        let db = create_test_rw_db();
-        let consensus = Arc::new(TestConsensus::default());
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1217,18 +1231,19 @@ mod tests {
                 .shanghai_activated()
                 .build(),
         );
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let consensus = Arc::new(TestConsensus::default());
         let executor_factory = TestExecutorFactory::new(chain_spec.clone());
         executor_factory.extend(exec_res);
 
-        TreeExternals::new(db, consensus, executor_factory, chain_spec)
+        TreeExternals::new(provider_factory, consensus, executor_factory)
     }
 
-    fn setup_genesis<DB: Database>(db: DB, mut genesis: SealedBlock) {
+    fn setup_genesis<DB: Database>(factory: &ProviderFactory<DB>, mut genesis: SealedBlock) {
         // insert genesis to db.
 
         genesis.header.header.number = 10;
         genesis.header.header.state_root = EMPTY_ROOT_HASH;
-        let factory = ProviderFactory::new(&db, MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
         provider.insert_block(genesis, None, None).unwrap();
@@ -1328,7 +1343,7 @@ mod tests {
         let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
 
         // last finalized block would be number 9.
-        setup_genesis(externals.db.clone(), genesis);
+        setup_genesis(&externals.provider_factory, genesis);
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);

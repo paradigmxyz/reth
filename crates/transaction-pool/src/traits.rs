@@ -306,6 +306,27 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Local]
+    fn get_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Local)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Private]
+    fn get_private_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Private)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::External]
+    fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::External)
+    }
+
     /// Returns a set of all senders of transactions in the pool
     fn unique_senders(&self) -> HashSet<Address>;
 

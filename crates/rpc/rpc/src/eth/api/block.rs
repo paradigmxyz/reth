@@ -146,13 +146,23 @@ where
         &self,
         block_id: impl Into<BlockId>,
     ) -> EthResult<Option<reth_primitives::SealedBlock>> {
+        self.block_with_senders(block_id)
+            .await
+            .map(|maybe_block| maybe_block.map(|block| block.block))
+    }
+
+    /// Returns the block object for the given block id.
+    pub(crate) async fn block_with_senders(
+        &self,
+        block_id: impl Into<BlockId>,
+    ) -> EthResult<Option<reth_primitives::SealedBlockWithSenders>> {
         let block_id = block_id.into();
 
         if block_id.is_pending() {
             // Pending block can be fetched directly without need for caching
-            let maybe_pending = self.provider().pending_block()?;
+            let maybe_pending = self.provider().pending_block_with_senders()?;
             return if maybe_pending.is_some() {
-                return Ok(maybe_pending)
+                Ok(maybe_pending)
             } else {
                 self.local_pending_block().await
             }
@@ -163,7 +173,7 @@ where
             None => return Ok(None),
         };
 
-        Ok(self.cache().get_sealed_block(block_hash).await?)
+        Ok(self.cache().get_sealed_block_with_senders(block_hash).await?)
     }
 
     /// Returns the populated rpc block object for the given block id.
@@ -175,7 +185,7 @@ where
         block_id: impl Into<BlockId>,
         full: bool,
     ) -> EthResult<Option<RichBlock>> {
-        let block = match self.block(block_id).await? {
+        let block = match self.block_with_senders(block_id).await? {
             Some(block) => block,
             None => return Ok(None),
         };
@@ -184,7 +194,7 @@ where
             .provider()
             .header_td_by_number(block.number)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
-        let block = from_block(block.into(), total_difficulty, full.into(), Some(block_hash))?;
+        let block = from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))?;
         Ok(Some(block.into()))
     }
 }

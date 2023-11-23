@@ -473,6 +473,13 @@ where
         self.pool.get_transactions_by_sender(sender)
     }
 
+    fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_transactions_by_origin(origin)
+    }
+
     fn unique_senders(&self) -> HashSet<Address> {
         self.pool.unique_senders()
     }

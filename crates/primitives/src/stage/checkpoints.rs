@@ -4,10 +4,7 @@ use crate::{
 };
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
-use std::{
-    fmt::{Display, Formatter},
-    ops::RangeInclusive,
-};
+use std::ops::RangeInclusive;
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -57,10 +54,7 @@ impl Compact for MerkleCheckpoint {
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let target_block = buf.get_u64();
 
         let last_account_key = B256::from_slice(&buf[..32]);
@@ -145,9 +139,16 @@ pub struct EntitiesCheckpoint {
     pub total: u64,
 }
 
-impl Display for EntitiesCheckpoint {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.2}%", 100.0 * self.processed as f64 / self.total as f64)
+impl EntitiesCheckpoint {
+    /// Formats entities checkpoint as percentage, i.e. `processed / total`.
+    ///
+    /// Return [None] if `total == 0`.
+    pub fn fmt_percentage(&self) -> Option<String> {
+        if self.total == 0 {
+            return None
+        }
+
+        Some(format!("{:.2}%", 100.0 * self.processed as f64 / self.total as f64))
     }
 }
 

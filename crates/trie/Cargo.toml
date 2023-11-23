@@ -34,7 +34,7 @@ triehash = { version = "0.8", optional = true }
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
-reth-provider.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 
 # trie
 triehash = "0.8"

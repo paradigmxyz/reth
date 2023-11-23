@@ -107,11 +107,6 @@ where
         self.inner.txn_execute(f)
     }
 
-    /// Returns a copy of the pointer to the underlying MDBX transaction.
-    pub(crate) fn txn_ptr(&self) -> TransactionPtr {
-        self.inner.txn.clone()
-    }
-
     /// Returns a copy of the raw pointer to the underlying MDBX transaction.
     #[doc(hidden)]
     pub fn txn(&self) -> *mut ffi::MDBX_txn {
@@ -151,9 +146,9 @@ where
     /// returned. Retrieval of other items requires the use of
     /// [Cursor]. If the item is not in the database, then
     /// [None] will be returned.
-    pub fn get<'txn, Key>(&'txn self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
+    pub fn get<Key>(&self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
     where
-        Key: TableObject<'txn>,
+        Key: TableObject,
     {
         let key_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
@@ -161,7 +156,7 @@ where
 
         self.txn_execute(|txn| unsafe {
             match ffi::mdbx_get(txn, dbi, &key_val, &mut data_val) {
-                ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, &data_val).map(Some),
+                ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, data_val).map(Some),
                 ffi::MDBX_NOTFOUND => Ok(None),
                 err_code => Err(Error::from_err_code(err_code)),
             }
@@ -257,13 +252,31 @@ where
     }
 
     /// Open a new cursor on the given database.
-    pub fn cursor(&self, db: &Database) -> Result<Cursor<'_, K>> {
-        Cursor::new(self, db.dbi())
+    pub fn cursor(&self, db: &Database) -> Result<Cursor<K>> {
+        Cursor::new(self.clone(), db.dbi())
     }
 
     /// Open a new cursor on the given dbi.
-    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<'_, K>> {
-        Cursor::new(self, dbi)
+    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
+        Cursor::new(self.clone(), dbi)
+    }
+}
+
+impl<K> Clone for Transaction<K>
+where
+    K: TransactionKind,
+{
+    fn clone(&self) -> Self {
+        Self { inner: Arc::clone(&self.inner) }
+    }
+}
+
+impl<K> fmt::Debug for Transaction<K>
+where
+    K: TransactionKind,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RoTransaction").finish_non_exhaustive()
     }
 }
 
@@ -496,15 +509,6 @@ impl Transaction<RW> {
 
             rx.recv().unwrap().map(|ptr| Transaction::new_from_ptr(self.env().clone(), ptr.0))
         })
-    }
-}
-
-impl<K> fmt::Debug for Transaction<K>
-where
-    K: TransactionKind,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RoTransaction").finish_non_exhaustive()
     }
 }
 

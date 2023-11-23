@@ -36,7 +36,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let range = match input.get_next_block_range() {
@@ -94,16 +94,16 @@ mod tests {
     };
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
     use reth_provider::PruneCheckpointReader;
-    use reth_stages::test_utils::TestTransaction;
+    use reth_stages::test_utils::TestStageDB;
     use std::{collections::BTreeMap, ops::AddAssign};
 
     #[test]
     fn prune() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=5000, B256::ZERO, 0..1);
-        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
 
@@ -114,10 +114,10 @@ mod tests {
             1..2,
             1..2,
         );
-        tx.insert_changesets(changesets.clone(), None).expect("insert changesets");
-        tx.insert_history(changesets.clone(), None).expect("insert history");
+        db.insert_changesets(changesets.clone(), None).expect("insert changesets");
+        db.insert_history(changesets.clone(), None).expect("insert history");
 
-        let storage_occurrences = tx.table::<tables::StorageHistory>().unwrap().into_iter().fold(
+        let storage_occurrences = db.table::<tables::StorageHistory>().unwrap().into_iter().fold(
             BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
                 map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
@@ -127,17 +127,19 @@ mod tests {
         assert!(storage_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
 
         assert_eq!(
-            tx.table::<tables::StorageChangeSet>().unwrap().len(),
+            db.table::<tables::StorageChangeSet>().unwrap().len(),
             changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
         );
 
-        let original_shards = tx.table::<tables::StorageHistory>().unwrap();
+        let original_shards = db.table::<tables::StorageHistory>().unwrap();
 
         let test_prune = |to_block: BlockNumber, run: usize, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let input = PruneInput {
-                previous_checkpoint: tx
-                    .inner()
+                previous_checkpoint: db
+                    .factory
+                    .provider()
+                    .unwrap()
                     .get_prune_checkpoint(PruneSegment::StorageHistory)
                     .unwrap(),
                 to_block,
@@ -145,7 +147,7 @@ mod tests {
             };
             let segment = StorageHistory::new(prune_mode);
 
-            let provider = tx.inner_rw();
+            let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             assert_matches!(
                 result,
@@ -205,11 +207,11 @@ mod tests {
             );
 
             assert_eq!(
-                tx.table::<tables::StorageChangeSet>().unwrap().len(),
+                db.table::<tables::StorageChangeSet>().unwrap().len(),
                 pruned_changesets.values().flatten().count()
             );
 
-            let actual_shards = tx.table::<tables::StorageHistory>().unwrap();
+            let actual_shards = db.table::<tables::StorageHistory>().unwrap();
 
             let expected_shards = original_shards
                 .iter()
@@ -226,7 +228,11 @@ mod tests {
             assert_eq!(actual_shards, expected_shards);
 
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PruneSegment::StorageHistory).unwrap(),
+                db.factory
+                    .provider()
+                    .unwrap()
+                    .get_prune_checkpoint(PruneSegment::StorageHistory)
+                    .unwrap(),
                 Some(PruneCheckpoint {
                     block_number: Some(last_pruned_block_number),
                     tx_number: None,

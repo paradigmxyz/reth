@@ -24,7 +24,7 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, ExecOutput, Stage, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -128,7 +128,7 @@ impl Command {
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
-        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let factory = ProviderFactory::new(Arc::clone(&db), self.chain.clone());
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
@@ -166,6 +166,9 @@ impl Command {
 
                     let default_peers_path = data_dir.known_peers_path();
 
+                    let provider_factory =
+                        Arc::new(ProviderFactory::new(db.clone(), self.chain.clone()));
+
                     let network = self
                         .network
                         .network_config(
@@ -174,13 +177,13 @@ impl Command {
                             p2p_secret_key,
                             default_peers_path,
                         )
-                        .build(Arc::new(ProviderFactory::new(db.clone(), self.chain.clone())))
+                        .build(provider_factory.clone())
                         .start_network()
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
-                    let stage = BodyStage {
-                        downloader: BodiesDownloaderBuilder::default()
+                    let stage = BodyStage::new(
+                        BodiesDownloaderBuilder::default()
                             .with_stream_batch_size(batch_size as usize)
                             .with_request_limit(config.stages.bodies.downloader_request_limit)
                             .with_max_buffered_blocks_size_bytes(
@@ -190,15 +193,13 @@ impl Command {
                                 config.stages.bodies.downloader_min_concurrent_requests..=
                                     config.stages.bodies.downloader_max_concurrent_requests,
                             )
-                            .build(fetch_client, consensus.clone(), db.clone()),
-                        consensus: consensus.clone(),
-                    };
-
+                            .build(fetch_client, consensus.clone(), provider_factory),
+                    );
                     (Box::new(stage), None)
                 }
                 StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),
                 StageEnum::Execution => {
-                    let factory = reth_revm::Factory::new(self.chain.clone());
+                    let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
                     (
                         Box::new(ExecutionStage::new(
                             factory,
@@ -246,7 +247,7 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind).await?;
+                let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind)?;
                 unwind.checkpoint = checkpoint;
 
                 if self.checkpoints {
@@ -266,7 +267,9 @@ impl Command {
         };
 
         loop {
-            let ExecOutput { checkpoint, done } = exec_stage.execute(&provider_rw, input).await?;
+            exec_stage.execute_ready(input).await?;
+            let ExecOutput { checkpoint, done } = exec_stage.execute(&provider_rw, input)?;
+
             input.checkpoint = Some(checkpoint);
 
             if self.checkpoints {

@@ -85,6 +85,12 @@ pub trait BlockReader:
     /// and the caller does not know the hash.
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>>;
 
+    /// Returns the pending block if available
+    ///
+    /// Note: This returns a [SealedBlockWithSenders] because it's expected that this is sealed by
+    /// the provider and the caller does not know the hash.
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>>;
+
     /// Returns the pending block and receipts if available.
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>>;
 

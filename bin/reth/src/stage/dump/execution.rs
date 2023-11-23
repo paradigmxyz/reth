@@ -7,7 +7,7 @@ use reth_db::{
 };
 use reth_primitives::{stage::StageCheckpoint, ChainSpec};
 use reth_provider::ProviderFactory;
-use reth_revm::Factory;
+use reth_revm::EvmProcessorFactory;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
@@ -98,18 +98,17 @@ async fn unwind_and_copy<DB: Database>(
     let factory = ProviderFactory::new(db_tool.db, db_tool.chain.clone());
     let provider = factory.provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(db_tool.chain.clone()));
+    let mut exec_stage =
+        ExecutionStage::new_with_factory(EvmProcessorFactory::new(db_tool.chain.clone()));
 
-    exec_stage
-        .unwind(
-            &provider,
-            UnwindInput {
-                unwind_to: from,
-                checkpoint: StageCheckpoint::new(tip_block_number),
-                bad_block: None,
-            },
-        )
-        .await?;
+    exec_stage.unwind(
+        &provider,
+        UnwindInput {
+            unwind_to: from,
+            checkpoint: StageCheckpoint::new(tip_block_number),
+            bad_block: None,
+        },
+    )?;
 
     let unwind_inner_tx = provider.into_tx();
 
@@ -131,20 +130,13 @@ async fn dry_run<DB: Database>(
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
     let factory = ProviderFactory::new(&output_db, chain.clone());
-    let provider = factory.provider_rw()?;
-    let mut exec_stage = ExecutionStage::new_with_factory(Factory::new(chain.clone()));
+    let mut exec_stage = ExecutionStage::new_with_factory(EvmProcessorFactory::new(chain.clone()));
 
-    exec_stage
-        .execute(
-            &provider,
-            reth_stages::ExecInput {
-                target: Some(to),
-                checkpoint: Some(StageCheckpoint::new(from)),
-            },
-        )
-        .await?;
+    let input =
+        reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
+    exec_stage.execute(&factory.provider_rw()?, input)?;
 
-    info!(target: "reth::cli", "Success.");
+    info!(target: "reth::cli", "Success");
 
     Ok(())
 }

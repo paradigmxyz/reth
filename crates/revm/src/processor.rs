@@ -568,6 +568,7 @@ mod tests {
     use reth_provider::{
         AccountReader, BlockHashReader, BundleStateWithReceipts, StateRootProvider,
     };
+    use reth_trie::updates::TrieUpdates;
     use revm::{Database, TransitionState};
     use std::collections::HashMap;
 
@@ -625,6 +626,13 @@ mod tests {
 
     impl StateRootProvider for StateProviderTest {
         fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+            unimplemented!("state root computation is not supported")
+        }
+
+        fn state_root_with_updates(
+            &self,
+            _bundle_state: &BundleStateWithReceipts,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
             unimplemented!("state root computation is not supported")
         }
     }
