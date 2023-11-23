@@ -3,11 +3,10 @@ use crate::{
     pool::size::SizeTracker,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
-use reth_primitives::Address;
 use std::{
-    cmp::{Ordering, Reverse},
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet, BinaryHeap},
-    ops::Deref,
+    ops::{Bound::Unbounded, Deref},
     sync::Arc,
 };
 
@@ -91,12 +90,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// Get transactions by sender
     pub(crate) fn get_txs_by_sender(
         &self,
-        sender: &SenderId,
+        sender: SenderId,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.by_id
-            .values()
-            .filter(|tx| tx.transaction.sender_id() == *sender)
-            .map(|tx| tx.transaction.clone().into())
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(_, tx)| tx.transaction.clone().into())
             .collect()
     }
 
@@ -159,7 +158,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         while drop > 0 && !sender_ids.is_empty() {
             // SAFETY: This will not panic due to `!addresses.is_empty()`
             let sender_id = sender_ids.pop().unwrap().sender_id;
-            let mut list = self.get_txs_by_sender(&sender_id);
+            let mut list = self.get_txs_by_sender(sender_id);
 
             // Drop all transactions if they are less than the overflow
             if list.len() <= drop {
