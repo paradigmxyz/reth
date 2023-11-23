@@ -36,11 +36,7 @@ pub fn rank_select(c: &mut Criterion) {
                 || {
                     let (index, element) =
                         integers_usize.iter().enumerate().choose(&mut thread_rng()).unwrap();
-                    (
-                        elias_fano::IntegerList::new_pre_sorted(black_box(&integers_usize)).0,
-                        index,
-                        *element,
-                    )
+                    (elias_fano::IntegerList::new_pre_sorted(&integers_usize).0, index, *element)
                 },
                 |(list, index, element)| {
                     let list = list.enable_rank();
@@ -57,7 +53,7 @@ pub fn rank_select(c: &mut Criterion) {
                     let (index, element) =
                         integers_u64.iter().enumerate().choose(&mut thread_rng()).unwrap();
                     (
-                        reth_primitives::IntegerList::new_pre_sorted(black_box(&integers_u64)),
+                        reth_primitives::IntegerList::new_pre_sorted(&integers_u64),
                         index as u64,
                         *element,
                     )
