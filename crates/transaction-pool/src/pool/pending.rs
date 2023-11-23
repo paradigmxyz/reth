@@ -360,15 +360,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        // return early if nothing needs to happen
-        if self.size() <= limit.max_size && self.len() <= limit.max_txs {
-            return Vec::new()
-        }
-
         let mut removed = Vec::new();
 
         // penalize non-local txs if limit is still exceeded
-        while self.size() > limit.max_size || self.len() > limit.max_txs {
+        loop {
+            // return early if the pool is under limits
+            if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+                break
+            }
+
             // flag to break out of the loop if all are local
             let mut any_non_local = true;
 
@@ -394,7 +394,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
 
         // finally penalize txs whether or not they are local
-        while self.size() > limit.max_size || self.len() > limit.max_txs {
+        loop {
+            if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+                break
+            }
+
             // use descendants, so we pop a single tx per sender, starting with the worst txs
             for tx in self.highest_nonces.clone().iter() {
                 if let Some(tx) = self.remove_transaction(tx.transaction.id()) {
