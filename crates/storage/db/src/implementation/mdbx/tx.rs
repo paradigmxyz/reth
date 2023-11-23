@@ -13,7 +13,7 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, Transaction, TransactionKind, WriteFlags, RW};
-use reth_tracing::tracing::warn;
+use reth_tracing::tracing::debug;
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
@@ -22,8 +22,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Duration after which we emit the warning log about long-lived database transactions.
-const TRANSACTION_WARNING_DURATION: Duration = Duration::from_secs(60);
+/// Duration after which we emit the log about long-lived database transactions.
+const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
@@ -178,8 +178,8 @@ impl<K: TransactionKind> MetricsHandler<K> {
 impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
         if let Some(open_duration) = self.open_duration {
-            if open_duration > TRANSACTION_WARNING_DURATION {
-                warn!(
+            if open_duration > LONG_TRANSACTION_DURATION {
+                debug!(
                     target: "storage::db::mdbx",
                     ?open_duration,
                     backtrace = ?self.open_backtrace,
