@@ -31,27 +31,8 @@ pub struct PoolConfig {
     /// Price bump (in %) for the transaction pool underpriced check.
     pub price_bumps: PriceBumpConfig,
     /// Flag to disable local transaction exemptions.
-    pub tx_pool_policy: TxPoolPolicy,
-}
-/// `TxPoolPolicy` holds configuration settings that dictate the behavior of the transaction pool.
-
-#[derive(Debug, Clone, Default)]
-pub struct TxPoolPolicy {
-    /// If set to `true`, local transactions (transactions originating from the local node) will
-    /// not be exempt from certain checks and limitations that are applied to non-local
-    /// transactions.
     pub no_locals: bool,
 }
-
-impl TxPoolPolicy {
-    /// Creates a new `TxPoolPolicy` with default settings.
-    pub fn new() -> Self {
-        TxPoolPolicy {
-                no_locals: false, // Set the default value for no_locals here
-            }
-    }
-}
-
 
 impl Default for PoolConfig {
     fn default() -> Self {
@@ -61,7 +42,7 @@ impl Default for PoolConfig {
             queued_limit: Default::default(),
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
-            tx_pool_policy: TxPoolPolicy::default(),
+            no_locals: false,
         }
     }
 }
