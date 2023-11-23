@@ -218,17 +218,15 @@ impl proptest::arbitrary::Arbitrary for Receipt {
                         success in any::<bool>(),
                         cumulative_gas_used in any::<u64>(),
                         logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
-                        mut _deposit_nonce in any::<Option<u64>>(),
+                        _deposit_nonce in any::<Option<u64>>(),
                         _deposit_receipt_version in any::<Option<u64>>()) -> Receipt
             {
                 // Only receipts for deposit transactions may contain a deposit nonce
                 #[cfg(feature = "optimism")]
                 let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
                     // The deposit receipt version is only present if the deposit nonce is present
-                    if _deposit_receipt_version.is_some() && _deposit_nonce.is_none() {
-                        _deposit_nonce = _deposit_receipt_version;
-                    }
-                    (_deposit_nonce, _deposit_receipt_version)
+                    let deposit_receipt_version = _deposit_nonce.is_some().then_some(_deposit_receipt_version).flatten();
+                    (_deposit_nonce, deposit_receipt_version)
                 } else {
                     (None, None)
                 };
@@ -243,7 +241,6 @@ impl proptest::arbitrary::Arbitrary for Receipt {
                     // Only receipts for deposit transactions may contain a deposit nonce
                     #[cfg(feature = "optimism")]
                     deposit_receipt_version
-
                 }
             }
         };
@@ -264,7 +261,10 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
         // Only receipts for deposit transactions may contain a deposit nonce
         #[cfg(feature = "optimism")]
         let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
-            (Option::<u64>::arbitrary(u)?, Option::<u64>::arbitrary(u)?)
+            let deposit_nonce = Option::<u64>::arbitrary(u)?;
+            let deposit_nonce_version =
+                deposit_nonce.is_some().then(|| Option::<u64>::arbitrary(u)).transpose()?.flatten();
+            (deposit_nonce, deposit_nonce_version)
         } else {
             (None, None)
         };
@@ -305,19 +305,11 @@ impl ReceiptWithBloom {
         let receipt = match tx_type {
             #[cfg(feature = "optimism")]
             TxType::DEPOSIT => {
-                let has_deposit_nonce = rlp_head.payload_length - (started_len - b.len()) > 0;
-                let (deposit_nonce, deposit_receipt_version) = if has_deposit_nonce {
-                    let deposit_nonce = Some(alloy_rlp::Decodable::decode(b)?);
-                    let has_deposit_receipt_version =
-                        rlp_head.payload_length - (started_len - b.len()) > 0;
-                    if has_deposit_receipt_version {
-                        (deposit_nonce, Some(alloy_rlp::Decodable::decode(b)?))
-                    } else {
-                        (deposit_nonce, None)
-                    }
-                } else {
-                    (None, None)
-                };
+                let remaining = |b: &[u8]| rlp_head.payload_length - (started_len - b.len()) > 0;
+                let deposit_nonce =
+                    remaining(b).then(|| alloy_rlp::Decodable::decode(b)).transpose()?;
+                let deposit_receipt_version =
+                    remaining(b).then(|| alloy_rlp::Decodable::decode(b)).transpose()?;
 
                 Receipt {
                     tx_type,
