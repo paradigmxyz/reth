@@ -1,5 +1,5 @@
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, SnapshotSegment,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, SnapshotSegment, TxHash,
     TxHashOrNumber, TxNumber, B256,
 };
 use std::path::PathBuf;
@@ -17,6 +17,12 @@ pub enum ProviderError {
     /// Nippy jar error.
     #[error("nippy jar error: {0}")]
     NippyJar(String),
+    /// Encountered missing transaction data in the snapshot.
+    #[error("missing snapshot transaction data")]
+    MissingSnapshotTransactionData,
+    /// Transaction data store error.
+    #[error("transaction data store: {0}")]
+    TransactionDataStore(String),
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
     SenderRecoveryError,
@@ -127,6 +133,12 @@ impl From<reth_nippy_jar::NippyJarError> for ProviderError {
     }
 }
 
+impl From<TransactionDataStoreError> for ProviderError {
+    fn from(err: TransactionDataStoreError) -> Self {
+        ProviderError::TransactionDataStore(err.to_string())
+    }
+}
+
 /// A root mismatch error at a given block height.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[error("root mismatch at #{block_number} ({block_hash}): {root}")]
@@ -137,4 +149,15 @@ pub struct RootMismatch {
     pub block_number: BlockNumber,
     /// The target block hash.
     pub block_hash: BlockHash,
+}
+
+/// Transaction data store error.
+#[derive(Error, Debug)]
+pub enum TransactionDataStoreError {
+    /// Standard IO error.
+    #[error(transparent)]
+    IO(#[from] std::io::Error),
+    /// Missing transaction data.
+    #[error("missing transaction data: {0}")]
+    MissingTransactionData(TxHash),
 }

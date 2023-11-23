@@ -11,7 +11,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, ProviderError, ProviderFactory, ReceiptProvider,
-    TransactionsProvider, TransactionsProviderExt,
+    TransactionDataStore, TransactionsProvider, TransactionsProviderExt,
 };
 
 use std::{
@@ -23,14 +23,19 @@ impl Command {
     pub(crate) fn bench_receipts_snapshot(
         &self,
         db_path: &Path,
+        transaction_data_store: Arc<dyn TransactionDataStore>,
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let factory = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone());
-        let provider = factory.provider()?;
+        let provider_factory = ProviderFactory::new(
+            Arc::new(open_db_read_only(db_path, log_level)?),
+            transaction_data_store.clone(),
+            chain.clone(),
+        );
+        let provider = provider_factory.provider()?;
         let tip = provider.last_block_number()?;
         let block_range =
             self.block_ranges(tip).first().expect("has been generated before").clone();
@@ -43,9 +48,7 @@ impl Command {
 
         let mut rng = rand::thread_rng();
 
-        let tx_range = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
-            .provider()?
-            .transaction_range_by_block_range(block_range.clone())?;
+        let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
@@ -64,7 +67,7 @@ impl Command {
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {
             bench(
                 bench_kind,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                provider_factory.clone(),
                 SnapshotSegment::Receipts,
                 filters,
                 compression,
@@ -95,7 +98,7 @@ impl Command {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())];
             bench(
                 BenchKind::RandomOne,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                provider_factory.clone(),
                 SnapshotSegment::Receipts,
                 filters,
                 compression,
@@ -115,15 +118,18 @@ impl Command {
         // BENCHMARK QUERYING A RANDOM RECEIPT BY HASH
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
-            let tx_hash =
-                ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
-                    .transaction_by_id(num)?
-                    .ok_or(ProviderError::ReceiptNotFound(num.into()))?
-                    .hash();
+            let tx_hash = ProviderFactory::new(
+                open_db_read_only(db_path, log_level)?,
+                transaction_data_store,
+                chain.clone(),
+            )
+            .transaction_by_id(num)?
+            .ok_or(ProviderError::ReceiptNotFound(num.into()))?
+            .hash();
 
             bench(
                 BenchKind::RandomHash,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                provider_factory.clone(),
                 SnapshotSegment::Receipts,
                 filters,
                 compression,

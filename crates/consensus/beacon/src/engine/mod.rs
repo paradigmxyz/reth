@@ -1953,7 +1953,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{self, Rng};
-    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, B256, MAINNET};
+    use reth_primitives::{stage::StageCheckpoint, ChainSpecBuilder, B256, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::try_block_to_payload_v1;
@@ -2126,11 +2126,9 @@ mod tests {
     }
 
     fn insert_blocks<'a, DB: Database>(
-        db: DB,
-        chain: Arc<ChainSpec>,
+        factory: &ProviderFactory<DB>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
-        let factory = ProviderFactory::new(db, chain);
         let provider = factory.provider_rw().unwrap();
         blocks
             .try_for_each(|b| provider.insert_block(b.clone(), None, None).map(|_| ()))
@@ -2194,8 +2192,9 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
-            env.db
+            insert_blocks(&env.provider_factory, [&genesis, &block1].into_iter());
+            env.provider_factory
+                .as_db()
                 .update(|tx| {
                     tx.put::<tables::SyncStage>(
                         StageId::Finish.to_string(),
@@ -2244,7 +2243,7 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
+            insert_blocks(&env.provider_factory, [&genesis, &block1].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
@@ -2260,7 +2259,7 @@ mod tests {
             let invalid_rx = env.send_forkchoice_updated(next_forkchoice_state).await;
 
             // Insert next head immediately after sending forkchoice update
-            insert_blocks(env.db.as_ref(), chain_spec.clone(), [&next_head].into_iter());
+            insert_blocks(&env.provider_factory, [&next_head].into_iter());
 
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(invalid_rx, Ok(result) => assert_eq!(result, expected_result));
@@ -2294,7 +2293,7 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
-            insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
+            insert_blocks(&env.provider_factory, [&genesis, &block1].into_iter());
 
             let engine = spawn_consensus_engine(consensus_engine);
 
@@ -2341,11 +2340,7 @@ mod tests {
             let mut block3 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             block3.header.difficulty = U256::from(1);
 
-            insert_blocks(
-                env.db.as_ref(),
-                chain_spec.clone(),
-                [&genesis, &block1, &block2, &block3].into_iter(),
-            );
+            insert_blocks(&env.provider_factory, [&genesis, &block1, &block2, &block3].into_iter());
 
             let _engine = spawn_consensus_engine(consensus_engine);
 
@@ -2385,7 +2380,7 @@ mod tests {
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
 
-            insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
+            insert_blocks(&env.provider_factory, [&genesis, &block1].into_iter());
 
             let _engine = spawn_consensus_engine(consensus_engine);
 
@@ -2480,11 +2475,7 @@ mod tests {
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash), None, Some(0));
             let block2 = random_block(&mut rng, 2, Some(block1.hash), None, Some(0));
-            insert_blocks(
-                env.db.as_ref(),
-                chain_spec.clone(),
-                [&genesis, &block1, &block2].into_iter(),
-            );
+            insert_blocks(&env.provider_factory, [&genesis, &block1, &block2].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
@@ -2547,7 +2538,7 @@ mod tests {
             // TODO: add transactions that transfer from the alloc accounts, generating the new
             // block tx and state root
 
-            insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis, &block1].into_iter());
+            insert_blocks(&env.provider_factory, [&genesis, &block1].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
@@ -2585,7 +2576,7 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
 
-            insert_blocks(env.db.as_ref(), chain_spec.clone(), [&genesis].into_iter());
+            insert_blocks(&env.provider_factory, [&genesis].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
@@ -2641,11 +2632,7 @@ mod tests {
                 .with_executor_results(Vec::from([exec_result2]))
                 .build();
 
-            insert_blocks(
-                env.db.as_ref(),
-                chain_spec.clone(),
-                [&data.genesis, &block1].into_iter(),
-            );
+            insert_blocks(&env.provider_factory, [&data.genesis, &block1].into_iter());
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 

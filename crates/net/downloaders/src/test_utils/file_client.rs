@@ -268,7 +268,7 @@ mod tests {
         test_utils::TestConsensus,
     };
     use reth_primitives::{SealedHeader, MAINNET};
-    use reth_provider::ProviderFactory;
+    use reth_provider::{test_utils::TempTransactionDataStore, ProviderFactory};
     use std::{
         io::{Read, Seek, SeekFrom, Write},
         sync::Arc,
@@ -292,7 +292,11 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(
+                db,
+                Arc::new(TempTransactionDataStore::default()),
+                MAINNET.clone(),
+            ),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
@@ -374,7 +378,11 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(
+                db,
+                Arc::new(TempTransactionDataStore::default()),
+                MAINNET.clone(),
+            ),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 

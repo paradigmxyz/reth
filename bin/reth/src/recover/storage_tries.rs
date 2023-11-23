@@ -11,7 +11,10 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_primitives::ChainSpec;
-use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
+use reth_provider::{
+    providers::DiskFileTransactionDataStore, BlockNumReader, HeaderProvider, ProviderError,
+    ProviderFactory,
+};
 use reth_trie::StateRoot;
 use std::{fs, sync::Arc};
 use tracing::*;
@@ -49,12 +52,16 @@ impl Command {
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, None)?);
+        let provider_factory = ProviderFactory::new(
+            &db,
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            self.chain.clone(),
+        );
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(db.clone(), self.chain.clone())?;
+        init_genesis(provider_factory.clone())?;
 
-        let factory = ProviderFactory::new(&db, self.chain);
-        let mut provider = factory.provider_rw()?;
+        let mut provider = provider_factory.provider_rw()?;
         let best_block = provider.best_block_number()?;
         let best_header = provider
             .sealed_header(best_block)?

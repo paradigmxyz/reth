@@ -20,7 +20,9 @@ use reth_downloaders::{
 };
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::{stage::StageId, ChainSpec, B256};
-use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
+use reth_provider::{
+    providers::DiskFileTransactionDataStore, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
+};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
@@ -86,11 +88,15 @@ impl ImportCommand {
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
-        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            self.chain.clone(),
+        );
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
-        init_genesis(db.clone(), self.chain.clone())?;
+        init_genesis(provider_factory.clone())?;
 
         let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");

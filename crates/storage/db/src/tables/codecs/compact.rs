@@ -46,7 +46,7 @@ impl_compression_for_compact!(
     StoredBlockWithdrawals,
     Bytecode,
     AccountBeforeTx,
-    TransactionSignedNoHash,
+    StoredTransaction,
     CompactU256,
     StageCheckpoint,
     PruneCheckpoint

@@ -7,8 +7,8 @@ use crate::{
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+    PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionDataStore,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -40,8 +40,8 @@ use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
     PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    StoredTransaction, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
@@ -98,6 +98,8 @@ pub struct DatabaseProvider<TX> {
     tx: TX,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
+    /// Transaction data store.
+    transaction_data_store: Arc<dyn TransactionDataStore>,
     /// Snapshot provider
     #[allow(unused)]
     snapshot_provider: Option<Arc<SnapshotProvider>>,
@@ -105,8 +107,12 @@ pub struct DatabaseProvider<TX> {
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
-    pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { tx, chain_spec, snapshot_provider: None }
+    pub fn new_rw(
+        tx: TX,
+        chain_spec: Arc<ChainSpec>,
+        transaction_data_store: Arc<dyn TransactionDataStore>,
+    ) -> Self {
+        Self { tx, chain_spec, transaction_data_store, snapshot_provider: None }
     }
 }
 
@@ -160,8 +166,12 @@ where
 
 impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
-    pub fn new(tx: TX, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { tx, chain_spec, snapshot_provider: None }
+    pub fn new(
+        tx: TX,
+        chain_spec: Arc<ChainSpec>,
+        transaction_data_store: Arc<dyn TransactionDataStore>,
+    ) -> Self {
+        Self { tx, chain_spec, transaction_data_store, snapshot_provider: None }
     }
 
     /// Creates a new [`Self`] with access to a [`SnapshotProvider`].
@@ -183,6 +193,11 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     /// Pass `DbTx` or `DbTxMut` immutable reference.
     pub fn tx_ref(&self) -> &TX {
         &self.tx
+    }
+
+    /// Returns reference to transaction data store.
+    pub fn transaction_data_store(&self) -> Arc<dyn TransactionDataStore> {
+        self.transaction_data_store.clone()
     }
 
     /// Return full table as Vec
@@ -425,11 +440,17 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         }
 
         // Get transactions and senders
-        let transactions = self
-            .get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?
-            .into_iter()
-            .map(|(id, tx)| (id, tx.into()))
-            .collect::<Vec<(u64, TransactionSigned)>>();
+        let stored_transactions =
+            self.get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?;
+
+        let mut transactions = Vec::with_capacity(stored_transactions.len());
+        for (id, stored) in stored_transactions {
+            let transaction = self.transaction_data_store.stored_tx_into_signed(stored)?;
+            if TAKE {
+                self.transaction_data_store.remove(transaction.hash)?;
+            }
+            transactions.push((id, transaction));
+        }
 
         let mut senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
@@ -1182,8 +1203,14 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     } else {
                         tx_cursor
                             .walk_range(tx_range)?
-                            .map(|result| result.map(|(_, tx)| tx.into()))
-                            .collect::<Result<Vec<_>, _>>()?
+                            .map(|result| {
+                                let (_, tx) = result?;
+                                Ok(self
+                                    .transaction_data_store
+                                    .stored_tx_into_signed_no_hash(tx)?
+                                    .into())
+                            })
+                            .collect::<ProviderResult<Vec<TransactionSigned>>>()?
                     };
 
                     // If we are past shanghai, then all blocks should have a withdrawal list,
@@ -1230,12 +1257,11 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
 
         #[inline]
         fn calculate_hash(
-            entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
+            entry: Result<(TxNumber, StoredTransaction), DatabaseError>,
             rlp_buf: &mut Vec<u8>,
         ) -> Result<(B256, TxNumber), Box<ProviderError>> {
             let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
-            tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-            Ok((keccak256(rlp_buf), tx_id))
+            Ok((tx.hash_with_buf(rlp_buf), tx_id))
         }
 
         for chunk in &tx_walker.chunks(chunk_size) {
@@ -1278,14 +1304,22 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into))
+        if let Some(tx) = self.tx.get::<tables::Transactions>(id)? {
+            Ok(Some(self.transaction_data_store.stored_tx_into_signed(tx)?))
+        } else {
+            Ok(None)
+        }
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        Ok(self.tx.get::<tables::Transactions>(id)?)
+        if let Some(tx) = self.tx.get::<tables::Transactions>(id)? {
+            Ok(Some(self.transaction_data_store.stored_tx_into_signed_no_hash(tx)?))
+        } else {
+            Ok(None)
+        }
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -1362,8 +1396,11 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                 } else {
                     let transactions = tx_cursor
                         .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .map(|result| {
+                            let (_, tx) = result?;
+                            Ok(self.transaction_data_store.stored_tx_into_signed(tx)?)
+                        })
+                        .collect::<ProviderResult<Vec<_>>>()?;
                     Ok(Some(transactions))
                 }
             }
@@ -1387,8 +1424,11 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                 results.push(
                     tx_cursor
                         .walk_range(tx_num_range)?
-                        .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<Result<Vec<_>, _>>()?,
+                        .map(|result| {
+                            let (_, tx) = result?;
+                            Ok(self.transaction_data_store.stored_tx_into_signed(tx)?)
+                        })
+                        .collect::<ProviderResult<Vec<_>>>()?,
                 );
             }
         }
@@ -1403,8 +1443,11 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
             .tx
             .cursor_read::<tables::Transactions>()?
             .walk_range(range)?
-            .map(|entry| entry.map(|tx| tx.1))
-            .collect::<Result<Vec<_>, _>>()?)
+            .map(|entry| {
+                let (_, tx) = entry?;
+                Ok(self.transaction_data_store.stored_tx_into_signed_no_hash(tx)?)
+            })
+            .collect::<ProviderResult<Vec<_>>>()?)
     }
 
     fn senders_by_tx_range(
@@ -2227,7 +2270,11 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
             }
 
             let start = Instant::now();
-            self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
+            let (stored, data) = StoredTransaction::from_signed(transaction);
+            if let Some(data) = data {
+                self.transaction_data_store.save(hash, data)?;
+            }
+            self.tx.put::<tables::Transactions>(next_tx_num, stored)?;
             let elapsed = start.elapsed();
             if elapsed > Duration::from_secs(1) {
                 warn!(

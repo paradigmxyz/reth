@@ -6,8 +6,8 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
     HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TransactionDataStore,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
@@ -40,18 +40,80 @@ pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 pub struct ProviderFactory<DB> {
     /// Database
     db: DB,
+    /// Transaction data store
+    transaction_data_store: Arc<dyn TransactionDataStore>,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
     snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
+impl<DB: Clone> Clone for ProviderFactory<DB> {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            transaction_data_store: Arc::clone(&self.transaction_data_store),
+            chain_spec: Arc::clone(&self.chain_spec),
+            snapshot_provider: self.snapshot_provider.clone(),
+        }
+    }
+}
+
+impl<DB> ProviderFactory<DB> {
+    /// Create new database provider
+    pub fn new(
+        db: DB,
+        transaction_data_store: Arc<dyn TransactionDataStore>,
+        chain_spec: Arc<ChainSpec>,
+    ) -> Self {
+        Self { db, chain_spec, transaction_data_store, snapshot_provider: None }
+    }
+
+    /// Initialize a shared snapshot provider on provider factory.
+    pub fn with_snapshots(
+        mut self,
+        snapshots_path: PathBuf,
+        highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
+    ) -> Self {
+        self.snapshot_provider = Some(Arc::new(
+            SnapshotProvider::new(snapshots_path)
+                .with_highest_tracker(Some(highest_snapshot_tracker)),
+        ));
+        self
+    }
+
+    /// Return reference to the underlying database.
+    pub fn as_db(&self) -> &DB {
+        &self.db
+    }
+}
+
 impl<DB: Database> ProviderFactory<DB> {
+    /// Create new database provider by passing a path.
+    /// [`ProviderFactory`] will own the database instance.
+    pub fn new_with_database_path<P: AsRef<std::path::Path>>(
+        path: P,
+        transaction_data_store: Arc<dyn TransactionDataStore>,
+        chain_spec: Arc<ChainSpec>,
+        log_level: Option<LogLevel>,
+    ) -> RethResult<ProviderFactory<DatabaseEnv>> {
+        Ok(ProviderFactory::<DatabaseEnv> {
+            db: init_db(path, log_level).map_err(|e| RethError::Custom(e.to_string()))?,
+            chain_spec,
+            transaction_data_store,
+            snapshot_provider: None,
+        })
+    }
+
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
-        let mut provider = DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone());
+        let mut provider = DatabaseProvider::new(
+            self.db.tx()?,
+            self.chain_spec.clone(),
+            self.transaction_data_store.clone(),
+        );
 
         if let Some(snapshot_provider) = &self.snapshot_provider {
             provider = provider.with_snapshot_provider(snapshot_provider.clone());
@@ -65,7 +127,11 @@ impl<DB: Database> ProviderFactory<DB> {
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
-        let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
+        let mut provider = DatabaseProvider::new_rw(
+            self.db.tx_mut()?,
+            self.chain_spec.clone(),
+            self.transaction_data_store.clone(),
+        );
 
         if let Some(snapshot_provider) = &self.snapshot_provider {
             provider = provider.with_snapshot_provider(snapshot_provider.clone());
@@ -73,55 +139,7 @@ impl<DB: Database> ProviderFactory<DB> {
 
         Ok(DatabaseProviderRW(provider))
     }
-}
 
-impl<DB> ProviderFactory<DB> {
-    /// create new database provider
-    pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { db, chain_spec, snapshot_provider: None }
-    }
-
-    /// database provider comes with a shared snapshot provider
-    pub fn with_snapshots(
-        mut self,
-        snapshots_path: PathBuf,
-        highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
-    ) -> Self {
-        self.snapshot_provider = Some(Arc::new(
-            SnapshotProvider::new(snapshots_path)
-                .with_highest_tracker(Some(highest_snapshot_tracker)),
-        ));
-        self
-    }
-}
-
-impl<DB: Database> ProviderFactory<DB> {
-    /// create new database provider by passing a path. [`ProviderFactory`] will own the database
-    /// instance.
-    pub fn new_with_database_path<P: AsRef<std::path::Path>>(
-        path: P,
-        chain_spec: Arc<ChainSpec>,
-        log_level: Option<LogLevel>,
-    ) -> RethResult<ProviderFactory<DatabaseEnv>> {
-        Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path, log_level).map_err(|e| RethError::Custom(e.to_string()))?,
-            chain_spec,
-            snapshot_provider: None,
-        })
-    }
-}
-
-impl<DB: Clone> Clone for ProviderFactory<DB> {
-    fn clone(&self) -> Self {
-        Self {
-            db: self.db.clone(),
-            chain_spec: Arc::clone(&self.chain_spec),
-            snapshot_provider: self.snapshot_provider.clone(),
-        }
-    }
-}
-
-impl<DB: Database> ProviderFactory<DB> {
     /// Storage provider for latest block
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
@@ -490,8 +508,9 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{
-        test_utils::create_test_provider_factory, BlockHashReader, BlockNumReader, BlockWriter,
-        HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+        test_utils::{create_test_provider_factory, TempTransactionDataStore},
+        BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode,
+        TransactionsProvider,
     };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
@@ -542,6 +561,7 @@ mod tests {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+            Arc::new(TempTransactionDataStore::default()),
             Arc::new(chain_spec),
             None,
         )

@@ -239,7 +239,8 @@ mod tests {
         generators::{random_block_range, random_contract_account_range},
     };
     use reth_primitives::{
-        stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, B256, U256,
+        stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, StoredTransaction, B256,
+        U256,
     };
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
@@ -501,60 +502,61 @@ mod tests {
             for progress in iter {
                 // Insert last progress data
                 let block_number = progress.number;
-                self.db.commit(|tx| {
-                    progress.body.iter().try_for_each(
-                        |transaction| -> Result<(), reth_db::DatabaseError> {
-                            tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
-                            tx.put::<tables::Transactions>(
-                                next_tx_num,
-                                transaction.clone().into(),
-                            )?;
+                let provider_rw = self.db.factory.provider_rw()?;
+                let transaction_data_store = provider_rw.transaction_data_store();
+                let tx = provider_rw.tx_ref();
 
-                            let (addr, _) =
-                                accounts.get_mut(rng.gen::<usize>() % n_accounts as usize).unwrap();
+                for transaction in &progress.body {
+                    let hash = transaction.hash();
+                    let (stored, data) = StoredTransaction::from_signed(transaction.clone());
+                    if let Some(data) = data {
+                        transaction_data_store
+                            .save(hash, data)
+                            .map_err(|err| TestRunnerError::Provider(err.into()))?;
+                    }
+                    tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+                    tx.put::<tables::Transactions>(next_tx_num, stored)?;
 
-                            for _ in 0..2 {
-                                let new_entry = StorageEntry {
-                                    key: keccak256([rng.gen::<u8>()]),
-                                    value: U256::from(rng.gen::<u8>() % 30 + 1),
-                                };
-                                self.insert_storage_entry(
-                                    tx,
-                                    (block_number, *addr).into(),
-                                    new_entry,
-                                    progress.header.number == stage_progress,
-                                )?;
-                            }
+                    let (addr, _) =
+                        accounts.get_mut(rng.gen::<usize>() % n_accounts as usize).unwrap();
 
-                            next_tx_num += 1;
-                            Ok(())
-                        },
-                    )?;
-
-                    // Randomize rewards
-                    let has_reward: bool = rng.gen();
-                    if has_reward {
+                    for _ in 0..2 {
+                        let new_entry = StorageEntry {
+                            key: keccak256([rng.gen::<u8>()]),
+                            value: U256::from(rng.gen::<u8>() % 30 + 1),
+                        };
                         self.insert_storage_entry(
                             tx,
-                            (block_number, Address::random()).into(),
-                            StorageEntry {
-                                key: keccak256("mining"),
-                                value: U256::from(rng.gen::<u32>()),
-                            },
+                            (block_number, *addr).into(),
+                            new_entry,
                             progress.header.number == stage_progress,
                         )?;
                     }
 
-                    let body = StoredBlockBodyIndices {
-                        first_tx_num,
-                        tx_count: progress.body.len() as u64,
-                    };
+                    next_tx_num += 1;
+                }
+                // Randomize rewards
+                let has_reward: bool = rng.gen();
+                if has_reward {
+                    self.insert_storage_entry(
+                        tx,
+                        (block_number, Address::random()).into(),
+                        StorageEntry {
+                            key: keccak256("mining"),
+                            value: U256::from(rng.gen::<u32>()),
+                        },
+                        progress.header.number == stage_progress,
+                    )?;
+                }
 
-                    first_tx_num = next_tx_num;
+                let body =
+                    StoredBlockBodyIndices { first_tx_num, tx_count: progress.body.len() as u64 };
 
-                    tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
-                    Ok(())
-                })?;
+                first_tx_num = next_tx_num;
+
+                tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
+
+                provider_rw.commit()?;
             }
 
             Ok(blocks)

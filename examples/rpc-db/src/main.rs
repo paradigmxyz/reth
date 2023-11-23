@@ -13,7 +13,10 @@
 //! ```
 use reth::{
     primitives::ChainSpecBuilder,
-    providers::{providers::BlockchainProvider, ProviderFactory},
+    providers::{
+        providers::{BlockchainProvider, DiskFileTransactionDataStore},
+        ProviderFactory,
+    },
     utils::db::open_db_read_only,
 };
 // Bringing up the RPC
@@ -35,8 +38,11 @@ pub mod myrpc_ext;
 async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
     let db = Arc::new(open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), None)?);
+    let transaction_data_store = Arc::new(DiskFileTransactionDataStore::new(
+        Path::new(&std::env::var("RETH_TRANSACTION_DATA_STORE_PATH")?).to_path_buf(),
+    ));
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-    let factory = ProviderFactory::new(db.clone(), spec.clone());
+    let factory = ProviderFactory::new(db.clone(), transaction_data_store, spec.clone());
 
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the

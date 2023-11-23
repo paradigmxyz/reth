@@ -11,12 +11,16 @@ use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PruneSegment, TransactionSignedNoHash, TxNumber,
+    Address, PruneSegment, StoredTransaction, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
+    TransactionDataStore,
 };
-use std::{fmt::Debug, sync::mpsc};
+use std::{
+    fmt::Debug,
+    sync::{mpsc, Arc},
+};
 use thiserror::Error;
 use tracing::*;
 
@@ -115,11 +119,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
             // Spawn the sender recovery task onto the global rayon pool
             // This task will send the results through the channel after it recovered the senders.
+            let transaction_data_store = provider.transaction_data_store();
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
                 for entry in chunk {
                     rlp_buf.clear();
-                    let recovery_result = recover_sender(entry, &mut rlp_buf);
+                    let recovery_result =
+                        recover_sender(&transaction_data_store, entry, &mut rlp_buf);
                     let _ = recovered_senders_tx.send(recovery_result);
                 }
             });
@@ -188,7 +194,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 }
 
 fn recover_sender(
-    entry: Result<(RawKey<TxNumber>, RawValue<TransactionSignedNoHash>), DatabaseError>,
+    transaction_data_store: &Arc<dyn TransactionDataStore>,
+    entry: Result<(RawKey<TxNumber>, RawValue<StoredTransaction>), DatabaseError>,
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
     let (tx_id, transaction) =
@@ -196,6 +203,9 @@ fn recover_sender(
     let tx_id = tx_id.key().expect("key to be formated");
 
     let tx = transaction.value().expect("value to be formated");
+    let tx = transaction_data_store.stored_tx_into_signed(tx).map_err(|e| {
+        Box::new(SenderRecoveryStageError::StageError(StageError::DatabaseIntegrity(e.into())))
+    })?;
     tx.transaction.encode_without_signature(rlp_buf);
 
     let sender = tx

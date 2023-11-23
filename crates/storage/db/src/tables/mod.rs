@@ -38,7 +38,7 @@ use reth_primitives::{
     stage::StageCheckpoint,
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
-    PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
+    PruneSegment, Receipt, StorageEntry, StoredTransaction, TxHash, TxNumber, B256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -270,7 +270,7 @@ table!(
 
 table!(
     /// (Canonical only) Stores the transaction body for canonical transactions.
-    ( Transactions ) TxNumber | TransactionSignedNoHash
+    ( Transactions ) TxNumber | StoredTransaction
 );
 
 table!(

@@ -804,7 +804,6 @@ impl Decodable for TransactionKind {
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
-#[derive_arbitrary(compact)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
@@ -854,7 +853,108 @@ impl TransactionSignedNoHash {
     }
 }
 
-impl Compact for TransactionSignedNoHash {
+impl From<TransactionSignedNoHash> for TransactionSigned {
+    fn from(tx: TransactionSignedNoHash) -> Self {
+        TransactionSigned::from_transaction_and_signature(tx.transaction, tx.signature)
+    }
+}
+
+impl From<TransactionSigned> for TransactionSignedNoHash {
+    fn from(tx: TransactionSigned) -> Self {
+        TransactionSignedNoHash { signature: tx.signature, transaction: tx.transaction }
+    }
+}
+/// Enum indicating whether the transaction data was stored
+/// in the database or elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StoredTransactionData {
+    /// Transaction data is included.
+    Included,
+    /// Transaction data is excluded. Contains transaction hash for lookup.
+    Excluded(TxHash),
+}
+
+impl StoredTransactionData {
+    /// Returns `true` if the data is excluded.
+    pub fn is_excluded(&self) -> bool {
+        matches!(self, Self::Excluded(_))
+    }
+}
+
+/// Transaction as it is stored in the database.
+// TODO: #[derive_arbitrary(compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StoredTransaction {
+    transaction: TransactionSignedNoHash,
+    stored_transaction_data: StoredTransactionData,
+}
+
+impl StoredTransaction {
+    /// The threshold for storing transaction data in the database.
+    /// The transaction data exceeding the threshold must be stored elsewhere.
+    pub const TRANSACTION_DATA_DATABASE_THRESHOLD: usize = 100 * 1024; // 100KB
+
+    /// Create new stored transaction from signed.
+    /// If transaction data exceeds the threshold, it is returned to be stored elsewhere.
+    pub fn from_signed(mut transaction: TransactionSigned) -> (Self, Option<Bytes>) {
+        let mut transaction_data = None;
+        let mut stored_transaction_data = StoredTransactionData::Included;
+        if transaction.input().len() > Self::TRANSACTION_DATA_DATABASE_THRESHOLD {
+            match &mut transaction.transaction {
+                Transaction::Legacy(TxLegacy { input, .. }) |
+                Transaction::Eip2930(TxEip2930 { input, .. }) |
+                Transaction::Eip1559(TxEip1559 { input, .. }) |
+                Transaction::Eip4844(TxEip4844 { input, .. }) => {
+                    stored_transaction_data = StoredTransactionData::Excluded(transaction.hash);
+                    transaction_data = Some(std::mem::take(input));
+                }
+            };
+        }
+        (
+            Self {
+                transaction: TransactionSignedNoHash::from(transaction),
+                stored_transaction_data,
+            },
+            transaction_data,
+        )
+    }
+
+    /// Returns the hash of this transaction.
+    /// Either it is stored or re-calculated.
+    pub fn hash(&self) -> TxHash {
+        self.hash_with_buf(&mut Vec::with_capacity(128 + self.transaction.input().len()))
+    }
+
+    /// Returns the hash of this transaction.
+    /// Either it is stored or re-calculated using the provided buffer.
+    pub fn hash_with_buf(&self, buf: &mut Vec<u8>) -> TxHash {
+        match self.stored_transaction_data {
+            StoredTransactionData::Included => {
+                self.transaction.encode_with_signature(&self.transaction.signature, buf, false);
+                keccak256(buf)
+            }
+            StoredTransactionData::Excluded(hash) => hash,
+        }
+    }
+
+    /// Returns [TransactionSignedNoHash] if the data has not been excluded.
+    /// Otherwise, returns [None].
+    pub fn as_no_hash(self) -> Option<TransactionSignedNoHash> {
+        if self.stored_transaction_data.is_excluded() {
+            None
+        } else {
+            Some(self.transaction)
+        }
+    }
+
+    /// Returns inner components of stored transactions.
+    /// NOTE: The transaction must not be used without checking the presence of transaction data.
+    pub fn into_inner(self) -> (TransactionSignedNoHash, StoredTransactionData) {
+        (self.transaction, self.stored_transaction_data)
+    }
+}
+
+impl Compact for StoredTransaction {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -862,39 +962,56 @@ impl Compact for TransactionSignedNoHash {
         let start = buf.as_mut().len();
 
         // Placeholder for bitflags.
-        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+        // The first byte uses 5 bits as flags:
+        // IsCompressed[1bit], TxType[2bits], Signature[1bit], IsDataExcluded[1bit]
         buf.put_u8(0);
 
-        let sig_bit = self.signature.to_compact(buf) as u8;
+        let mut data_excluded_bit = 0;
+        if let StoredTransactionData::Excluded(hash) = self.stored_transaction_data {
+            data_excluded_bit = 1;
+            hash.to_compact(buf);
+        }
+
+        let sig_bit = self.transaction.signature.to_compact(buf) as u8;
         let zstd_bit = self.transaction.input().len() >= 32;
 
         let tx_bits = if zstd_bit {
             TRANSACTION_COMPRESSOR.with(|compressor| {
                 let mut compressor = compressor.borrow_mut();
                 let mut tmp = bytes::BytesMut::with_capacity(200);
-                let tx_bits = self.transaction.to_compact(&mut tmp);
+                let tx_bits = self.transaction.transaction.to_compact(&mut tmp);
 
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
                 tx_bits as u8
             })
         } else {
-            self.transaction.to_compact(buf) as u8
+            self.transaction.transaction.to_compact(buf) as u8
         };
 
         // Replace bitflags with the actual values
-        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+        buf.as_mut()[start] =
+            sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3) | (data_excluded_bit << 4);
 
         buf.as_mut().len() - start
     }
 
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
+        // The first byte uses 5 bits as flags:
+        // IsCompressed[1], TxType[2], Signature[1], IsDataExcluded[1bit]
         let bitflags = buf.get_u8() as usize;
+
+        let data_excluded_bit = (bitflags >> 4) & 1;
+        let mut stored_transaction_data = StoredTransactionData::Included;
+        if data_excluded_bit != 0 {
+            let (hash, remaining) = B256::from_compact(buf, 32);
+            buf = remaining;
+            stored_transaction_data = StoredTransactionData::Excluded(hash);
+        }
 
         let sig_bit = bitflags & 1;
         let (signature, buf) = Signature::from_compact(buf, sig_bit);
 
-        let zstd_bit = bitflags >> 3;
+        let zstd_bit = (bitflags >> 3) & 1;
         let (transaction, buf) = if zstd_bit != 0 {
             TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                 let mut decompressor = decompressor.borrow_mut();
@@ -924,20 +1041,46 @@ impl Compact for TransactionSignedNoHash {
             Transaction::from_compact(buf, transaction_type)
         };
 
-        (TransactionSignedNoHash { signature, transaction }, buf)
+        (
+            Self {
+                transaction: TransactionSignedNoHash { signature, transaction },
+                stored_transaction_data,
+            },
+            buf,
+        )
     }
 }
 
-impl From<TransactionSignedNoHash> for TransactionSigned {
-    fn from(tx: TransactionSignedNoHash) -> Self {
-        TransactionSigned::from_transaction_and_signature(tx.transaction, tx.signature)
-    }
-}
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for StoredTransaction {
+    type Parameters = ();
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::{any, Strategy};
 
-impl From<TransactionSigned> for TransactionSignedNoHash {
-    fn from(tx: TransactionSigned) -> Self {
-        TransactionSignedNoHash { signature: tx.signature, transaction: tx.transaction }
+        any::<(Transaction, Signature)>()
+            .prop_map(move |(mut transaction, sig)| {
+                if let Some(chain_id) = transaction.chain_id() {
+                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+                    transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+                }
+
+                // NOTE: for now make all transactions include the data
+
+                #[cfg(feature = "optimism")]
+                let sig = transaction
+                    .is_deposit()
+                    .then(Signature::optimism_deposit_tx_signature)
+                    .unwrap_or(sig);
+
+                StoredTransaction {
+                    transaction: TransactionSignedNoHash { transaction, signature: sig },
+                    stored_transaction_data: StoredTransactionData::Included,
+                }
+            })
+            .boxed()
     }
+
+    type Strategy = proptest::strategy::BoxedStrategy<StoredTransaction>;
 }
 
 /// Signed transaction.

@@ -11,6 +11,7 @@ use crate::{
 use clap::Parser;
 use reth_db::{database::Database, open_db, tables, transaction::DbTxMut, DatabaseEnv};
 use reth_primitives::{fs, stage::StageId, ChainSpec};
+use reth_provider::providers::DiskFileTransactionDataStore;
 use std::sync::Arc;
 use tracing::info;
 
@@ -55,7 +56,11 @@ impl Command {
 
         let db = open_db(db_path.as_ref(), self.db.log_level)?;
 
-        let tool = DbTool::new(&db, self.chain.clone())?;
+        let tool = DbTool::new(
+            &db,
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            self.chain.clone(),
+        )?;
 
         tool.db.update(|tx| {
             match &self.stage {

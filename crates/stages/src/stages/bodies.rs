@@ -9,7 +9,10 @@ use reth_db::{
     DatabaseError,
 };
 use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
-use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
+use reth_primitives::{
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
+    StoredTransaction,
+};
 use reth_provider::DatabaseProviderRW;
 use std::task::{ready, Context, Poll};
 use tracing::*;
@@ -122,6 +125,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let buffer = self.buffer.take().ok_or(StageError::MissingDownloadBuffer)?;
         trace!(target: "sync::stages::bodies", bodies_len = buffer.len(), "Writing blocks");
         let mut highest_block = from_block;
+        let transaction_data_store = provider.transaction_data_store();
         for response in buffer {
             // Write block
             let block_number = response.block_number();
@@ -143,7 +147,14 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     // Write transactions
                     for transaction in block.body {
                         // Append the transaction
-                        tx_cursor.append(next_tx_num, transaction.into())?;
+                        let hash = transaction.hash;
+                        let (stored, data) = StoredTransaction::from_signed(transaction);
+                        if let Some(data) = data {
+                            transaction_data_store
+                                .save(hash, data)
+                                .map_err(|err| StageError::DatabaseIntegrity(err.into()))?;
+                        }
+                        tx_cursor.append(next_tx_num, stored)?;
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
                     }
@@ -501,7 +512,9 @@ mod tests {
                 generators::{random_block_range, random_signed_tx},
             },
         };
-        use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, B256};
+        use reth_primitives::{
+            BlockBody, BlockNumber, SealedBlock, SealedHeader, StoredTransaction, TxNumber, B256,
+        };
         use reth_provider::ProviderFactory;
         use std::{
             collections::{HashMap, VecDeque},
@@ -577,33 +590,39 @@ mod tests {
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
-                    self.db.commit(|tx| {
-                        let body = StoredBlockBodyIndices {
-                            first_tx_num: 0,
-                            tx_count: progress.body.len() as u64,
-                        };
-                        body.tx_num_range().try_for_each(|tx_num| {
-                            let transaction = random_signed_tx(&mut rng);
-                            tx.put::<tables::Transactions>(tx_num, transaction.into())
-                        })?;
+                    let provider_rw = self.db.factory.provider_rw()?;
+                    let transaction_data_store = provider_rw.transaction_data_store();
+                    let tx = provider_rw.tx_ref();
 
-                        if body.tx_count != 0 {
-                            tx.put::<tables::TransactionBlock>(
-                                body.first_tx_num(),
-                                progress.number,
-                            )?;
+                    let body = StoredBlockBodyIndices {
+                        first_tx_num: 0,
+                        tx_count: progress.body.len() as u64,
+                    };
+                    for tx_num in body.tx_num_range() {
+                        let transaction = random_signed_tx(&mut rng);
+                        let hash = transaction.hash;
+                        let (stored, data) = StoredTransaction::from_signed(transaction);
+                        if let Some(data) = data {
+                            transaction_data_store
+                                .save(hash, data)
+                                .map_err(|err| TestRunnerError::Provider(err.into()))?;
                         }
+                        tx.put::<tables::Transactions>(tx_num, stored)?;
+                    }
 
-                        tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
+                    if body.tx_count != 0 {
+                        tx.put::<tables::TransactionBlock>(body.first_tx_num(), progress.number)?;
+                    }
 
-                        if !progress.ommers_hash_is_empty() {
-                            tx.put::<tables::BlockOmmers>(
-                                progress.number,
-                                StoredBlockOmmers { ommers: progress.ommers.clone() },
-                            )?;
-                        }
-                        Ok(())
-                    })?;
+                    tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
+
+                    if !progress.ommers_hash_is_empty() {
+                        tx.put::<tables::BlockOmmers>(
+                            progress.number,
+                            StoredBlockOmmers { ommers: progress.ommers.clone() },
+                        )?;
+                    }
+                    provider_rw.commit()?;
                 }
                 self.set_responses(blocks.iter().map(body_by_hash).collect());
                 Ok(blocks)

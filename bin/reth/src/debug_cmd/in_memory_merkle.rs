@@ -17,9 +17,9 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
-    AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StorageReader,
+    providers::DiskFileTransactionDataStore, AccountExtReader, BlockWriter, ExecutorFactory,
+    HashingWriter, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
+    StageCheckpointReader, StorageReader,
 };
 use reth_tasks::TaskExecutor;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, updates::TrieKey, StateRoot};
@@ -78,7 +78,7 @@ impl Command {
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<DatabaseEnv>,
+        factory: ProviderFactory<Arc<DatabaseEnv>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -92,7 +92,7 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             )))
-            .build(ProviderFactory::new(db, self.chain.clone()))
+            .build(factory)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -111,8 +111,12 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
-        let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider = factory.provider()?;
+        let provider_factory = ProviderFactory::new(
+            db,
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            self.chain.clone(),
+        );
+        let provider = provider_factory.provider()?;
 
         // Look up merkle checkpoint
         let merkle_checkpoint = provider
@@ -128,7 +132,7 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                db.clone(),
+                provider_factory.clone(),
                 network_secret_path,
                 data_dir.known_peers_path(),
             )
@@ -188,7 +192,7 @@ impl Command {
             return Ok(())
         }
 
-        let provider_rw = factory.provider_rw()?;
+        let provider_rw = provider_factory.provider_rw()?;
 
         // Insert block, state and hashes
         provider_rw.insert_block(block.clone(), None, None)?;

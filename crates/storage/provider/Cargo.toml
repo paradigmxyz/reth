@@ -38,6 +38,7 @@ dashmap = { version = "5.5", features = ["inline"] }
 
 # test-utils
 alloy-rlp = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -55,7 +56,7 @@ assert_matches.workspace = true
 rand.workspace = true
 
 [features]
-test-utils = ["alloy-rlp", "reth-db/test-utils"]
+test-utils = ["reth-db/test-utils", "alloy-rlp", "tempfile"]
 optimism = [
   "reth-primitives/optimism",
   "reth-interfaces/optimism"

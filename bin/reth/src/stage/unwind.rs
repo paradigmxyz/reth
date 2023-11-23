@@ -10,7 +10,9 @@ use crate::{
 use clap::{Parser, Subcommand};
 use reth_db::{cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx};
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::{BlockExecutionWriter, ProviderFactory};
+use reth_provider::{
+    providers::DiskFileTransactionDataStore, BlockExecutionWriter, ProviderFactory,
+};
 use std::{ops::RangeInclusive, sync::Arc};
 
 /// `reth stage unwind` command
@@ -64,7 +66,11 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let factory = ProviderFactory::new(
+            &db,
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            self.chain.clone(),
+        );
         let provider = factory.provider_rw()?;
 
         let blocks_and_execution = provider

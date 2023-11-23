@@ -15,7 +15,7 @@ use reth_db::open_db;
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
-use reth_provider::ProviderFactory;
+use reth_provider::{test_utils::TempTransactionDataStore, ProviderFactory};
 use std::{path::PathBuf, sync::Arc};
 
 /// `reth p2p` command
@@ -100,6 +100,11 @@ impl Command {
     pub async fn execute(&self) -> eyre::Result<()> {
         let tempdir = tempfile::TempDir::new()?;
         let noop_db = Arc::new(open_db(&tempdir.into_path(), self.db.log_level)?);
+        let noop_provider_factory = ProviderFactory::new(
+            noop_db,
+            Arc::new(TempTransactionDataStore::default()),
+            self.chain.clone(),
+        );
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -126,10 +131,7 @@ impl Command {
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
-        let network = network_config_builder
-            .build(Arc::new(ProviderFactory::new(noop_db, self.chain.clone())))
-            .start_network()
-            .await?;
+        let network = network_config_builder.build(noop_provider_factory).start_network().await?;
 
         let fetch_client = network.fetch_client().await?;
         let retries = self.retries.max(1);

@@ -10,7 +10,7 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::HighestSnapshots, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo,
-    Header, SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned,
+    Header, SealedHeader, SnapshotSegment, StoredTransaction, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
 use revm::primitives::HashMap;
@@ -328,15 +328,17 @@ impl TransactionsProvider for SnapshotProvider {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
             let mut cursor = jar_provider.cursor()?;
-            if cursor
-                .get_one::<TransactionMask<TransactionSignedNoHash>>((&tx_hash).into())?
-                .and_then(|tx| (tx.hash() == tx_hash).then_some(tx))
-                .is_some()
+            if let Some(stored) =
+                cursor.get_one::<TransactionMask<StoredTransaction>>((&tx_hash).into())?
             {
-                Ok(Some(cursor.number()))
-            } else {
-                Ok(None)
+                let transaction =
+                    stored.as_no_hash().ok_or(ProviderError::MissingSnapshotTransactionData)?;
+                if transaction.hash() == tx_hash {
+                    return Ok(Some(cursor.number()))
+                }
             }
+
+            Ok(None)
         })
     }
 
@@ -355,11 +357,20 @@ impl TransactionsProvider for SnapshotProvider {
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
-            Ok(jar_provider
+            if let Some(stored) = jar_provider
                 .cursor()?
-                .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
-                .map(|tx| tx.with_hash())
-                .and_then(|tx| (tx.hash_ref() == &hash).then_some(tx)))
+                .get_one::<TransactionMask<StoredTransaction>>((&hash).into())?
+            {
+                let transaction = stored
+                    .as_no_hash()
+                    .ok_or(ProviderError::MissingSnapshotTransactionData)?
+                    .with_hash();
+                if transaction.hash == hash {
+                    return Ok(Some(transaction))
+                }
+            }
+
+            Ok(None)
         })
     }
 

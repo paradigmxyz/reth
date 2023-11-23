@@ -58,8 +58,9 @@ use reth_primitives::{
     BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
-    HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
+    providers::{BlockchainProvider, DiskFileTransactionDataStore},
+    BlockHashReader, BlockReader, CanonStateSubscriptions, HeaderProvider, HeaderSyncMode,
+    ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::{segments::SegmentSet, Pruner};
 use reth_revm::EvmProcessorFactory;
@@ -253,7 +254,13 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics());
         info!(target: "reth::cli", "Database opened");
 
-        let mut provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
+        let transaction_data_store_path = data_dir.transaction_data_store_path();
+        info!(target: "reth::cli", path = ?transaction_data_store_path, "Initializing transaction store"); // TODO: ensure dir exists
+        let mut provider_factory = ProviderFactory::new(
+            Arc::clone(&db),
+            Arc::new(DiskFileTransactionDataStore::new(transaction_data_store_path)),
+            Arc::clone(&self.chain),
+        );
 
         // configure snapshotter
         let snapshotter = reth_snapshot::Snapshotter::new(
@@ -269,7 +276,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
-        let genesis_hash = init_genesis(Arc::clone(&db), self.chain.clone())?;
+        let genesis_hash = init_genesis(provider_factory.clone())?;
 
         info!(target: "reth::cli", "{}", DisplayHardforks::new(self.chain.hardforks()));
 
@@ -300,7 +307,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         debug!(target: "reth::cli", "configured blockchain tree");
 
         // fetch the head block from the database
-        let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
+        let head =
+            self.lookup_head(provider_factory.clone()).wrap_err("the head block is missing")?;
 
         // setup the blockchain provider
         let blockchain_db =
@@ -342,7 +350,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let default_peers_path = data_dir.known_peers_path();
         let network_config = self.load_network_config(
             &config,
-            Arc::clone(&db),
+            provider_factory.clone(),
             ctx.task_executor.clone(),
             head,
             secret_key,
@@ -385,7 +393,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(&db, &network_client, tip).await?)
+            Some(self.lookup_or_fetch_tip(provider_factory.clone(), &network_client, tip).await?)
         } else {
             None
         };
@@ -421,7 +429,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     &config,
                     client.clone(),
                     Arc::clone(&consensus),
-                    provider_factory,
+                    provider_factory.clone(),
                     &ctx.task_executor,
                     sync_metrics_tx,
                     prune_config.clone(),
@@ -441,7 +449,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     &config,
                     network_client.clone(),
                     Arc::clone(&consensus),
-                    provider_factory,
+                    provider_factory.clone(),
                     &ctx.task_executor,
                     sync_metrics_tx,
                     prune_config.clone(),
@@ -472,7 +480,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let pruner_events = if let Some(prune_config) = prune_config {
             let mut pruner = self.build_pruner(
                 &prune_config,
-                db.clone(),
+                provider_factory.clone(),
                 snapshotter.highest_snapshot_receiver(),
             );
 
@@ -739,8 +747,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> RethResult<Head> {
-        let factory = ProviderFactory::new(db, self.chain.clone());
+    fn lookup_head<DB: Database>(&self, factory: ProviderFactory<DB>) -> RethResult<Head> {
         let provider = factory.provider()?;
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
@@ -772,7 +779,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn lookup_or_fetch_tip<DB, Client>(
         &self,
-        db: DB,
+        factory: ProviderFactory<DB>,
         client: Client,
         tip: B256,
     ) -> RethResult<u64>
@@ -780,7 +787,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         DB: Database,
         Client: HeadersClient,
     {
-        Ok(self.fetch_tip(db, client, BlockHashOrNumber::Hash(tip)).await?.number)
+        Ok(self.fetch_tip(factory, client, BlockHashOrNumber::Hash(tip)).await?.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -788,7 +795,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// NOTE: The download is attempted with infinite retries.
     async fn fetch_tip<DB, Client>(
         &self,
-        db: DB,
+        factory: ProviderFactory<DB>,
         client: Client,
         tip: BlockHashOrNumber,
     ) -> RethResult<SealedHeader>
@@ -796,7 +803,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         DB: Database,
         Client: HeadersClient,
     {
-        let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
         let header = provider.header_by_hash_or_number(tip)?;
@@ -821,15 +827,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
-    fn load_network_config(
+    fn load_network_config<DB: Database>(
         &self,
         config: &Config,
-        db: Arc<DatabaseEnv>,
+        factory: ProviderFactory<DB>,
         executor: TaskExecutor,
         head: Head,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
-    ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
+    ) -> NetworkConfig<ProviderFactory<DB>> {
         let cfg_builder = self
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
@@ -854,7 +860,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .sequencer_endpoint(self.rollup.sequencer_http.clone())
             .disable_tx_gossip(self.rollup.disable_txpool_gossip);
 
-        cfg_builder.build(ProviderFactory::new(db, self.chain.clone()))
+        cfg_builder.build(factory)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -974,7 +980,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     fn build_pruner<DB: Database>(
         &self,
         config: &PruneConfig,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         highest_snapshots_rx: HighestSnapshotsTracker,
     ) -> Pruner<DB> {
         let segments = SegmentSet::default()
@@ -1007,8 +1013,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             );
 
         Pruner::new(
-            db,
-            self.chain.clone(),
+            provider_factory,
             segments.into_vec(),
             config.block_interval,
             self.chain.prune_delete_limit,

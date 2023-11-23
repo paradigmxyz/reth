@@ -9,7 +9,8 @@ use reth_db::{
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    StoredTransaction, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
+    TxNumber, B256, U256,
 };
 use std::ops::{Deref, Range, RangeBounds};
 
@@ -174,30 +175,60 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     fn transaction_id(&self, hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let mut cursor = self.cursor()?;
 
-        Ok(cursor
-            .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
-            .and_then(|res| (res.hash() == hash).then(|| cursor.number())))
+        if let Some(stored) =
+            cursor.get_one::<TransactionMask<StoredTransaction>>((&hash).into())?
+        {
+            let transaction =
+                stored.as_no_hash().ok_or(ProviderError::MissingSnapshotTransactionData)?;
+            if transaction.hash() == hash {
+                return Ok(Some(cursor.number()))
+            }
+        }
+
+        Ok(None)
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        Ok(self
-            .cursor()?
-            .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
-            .map(|tx| tx.with_hash()))
+        if let Some(stored) =
+            self.cursor()?.get_one::<TransactionMask<StoredTransaction>>(num.into())?
+        {
+            Ok(Some(
+                stored
+                    .as_no_hash()
+                    .ok_or(ProviderError::MissingSnapshotTransactionData)?
+                    .with_hash(),
+            ))
+        } else {
+            Ok(None)
+        }
     }
 
     fn transaction_by_id_no_hash(
         &self,
         num: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.cursor()?.get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())
+        if let Some(stored) =
+            self.cursor()?.get_one::<TransactionMask<StoredTransaction>>(num.into())?
+        {
+            Ok(Some(stored.as_no_hash().ok_or(ProviderError::MissingSnapshotTransactionData)?))
+        } else {
+            Ok(None)
+        }
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
-        Ok(self
-            .cursor()?
-            .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
-            .map(|tx| tx.with_hash()))
+        if let Some(stored) =
+            self.cursor()?.get_one::<TransactionMask<StoredTransaction>>((&hash).into())?
+        {
+            Ok(Some(
+                stored
+                    .as_no_hash()
+                    .ok_or(ProviderError::MissingSnapshotTransactionData)?
+                    .with_hash(),
+            ))
+        } else {
+            Ok(None)
+        }
     }
 
     fn transaction_by_hash_with_meta(
@@ -249,20 +280,28 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
         let mut txes = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range {
-            if let Some(tx) =
-                cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
+            if let Some(stored) =
+                cursor.get_one::<TransactionMask<StoredTransaction>>(num.into())?
             {
-                txes.push(tx)
+                txes.push(
+                    stored.as_no_hash().ok_or(ProviderError::MissingSnapshotTransactionData)?,
+                );
             }
         }
         Ok(txes)
     }
 
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {
-        Ok(self
-            .cursor()?
-            .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
-            .and_then(|tx| tx.recover_signer()))
+        if let Some(stored) =
+            self.cursor()?.get_one::<TransactionMask<StoredTransaction>>(num.into())?
+        {
+            Ok(stored
+                .as_no_hash()
+                .ok_or(ProviderError::MissingSnapshotTransactionData)?
+                .recover_signer())
+        } else {
+            Ok(None)
+        }
     }
 }
 

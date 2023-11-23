@@ -22,7 +22,9 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockHashOrNumber, ChainSpec, PruneModes,
 };
-use reth_provider::{BlockWriter, ProviderFactory, StageCheckpointReader};
+use reth_provider::{
+    providers::DiskFileTransactionDataStore, BlockWriter, ProviderFactory, StageCheckpointReader,
+};
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
@@ -87,7 +89,7 @@ impl Command {
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<DatabaseEnv>,
+        factory: ProviderFactory<Arc<DatabaseEnv>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -101,7 +103,7 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             )))
-            .build(ProviderFactory::new(db, self.chain.clone()))
+            .build(factory)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -120,8 +122,12 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
-        let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider_rw = factory.provider_rw()?;
+        let provider_factory = ProviderFactory::new(
+            db,
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            self.chain.clone(),
+        );
+        let provider_rw = provider_factory.provider_rw()?;
 
         // Configure and build network
         let network_secret_path =
@@ -130,7 +136,7 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                db.clone(),
+                provider_factory.clone(),
                 network_secret_path,
                 data_dir.known_peers_path(),
             )

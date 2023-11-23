@@ -8,7 +8,9 @@ use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
     BlockNumber, ChainSpec, SnapshotSegment,
 };
-use reth_provider::{BlockNumReader, ProviderFactory, TransactionsProviderExt};
+use reth_provider::{
+    BlockNumReader, ProviderFactory, TransactionDataStore, TransactionsProviderExt,
+};
 use reth_snapshot::{segments as snap_segments, segments::Segment};
 use std::{
     ops::RangeInclusive,
@@ -75,6 +77,7 @@ impl Command {
     pub fn execute(
         self,
         db_path: &Path,
+        transaction_data_store: Arc<dyn TransactionDataStore>,
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
     ) -> eyre::Result<()> {
@@ -86,7 +89,8 @@ impl Command {
 
         {
             let db = open_db_read_only(db_path, None)?;
-            let factory = Arc::new(ProviderFactory::new(db, chain.clone()));
+            let factory =
+                Arc::new(ProviderFactory::new(db, transaction_data_store.clone(), chain.clone()));
 
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
@@ -119,6 +123,7 @@ impl Command {
                 match mode {
                     SnapshotSegment::Headers => self.bench_headers_snapshot(
                         db_path,
+                        transaction_data_store.clone(),
                         log_level,
                         chain.clone(),
                         *compression,
@@ -127,6 +132,7 @@ impl Command {
                     )?,
                     SnapshotSegment::Transactions => self.bench_transactions_snapshot(
                         db_path,
+                        transaction_data_store.clone(),
                         log_level,
                         chain.clone(),
                         *compression,
@@ -135,6 +141,7 @@ impl Command {
                     )?,
                     SnapshotSegment::Receipts => self.bench_receipts_snapshot(
                         db_path,
+                        transaction_data_store.clone(),
                         log_level,
                         chain.clone(),
                         *compression,

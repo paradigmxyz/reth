@@ -18,6 +18,7 @@ use reth_db::{
     Tables,
 };
 use reth_primitives::ChainSpec;
+use reth_provider::providers::DiskFileTransactionDataStore;
 use std::{
     io::{self, Write},
     sync::Arc,
@@ -97,12 +98,14 @@ impl Command {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
+        let tx_data_store =
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path()));
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats { .. } => {
                 let db = open_db_read_only(&db_path, self.db.log_level)?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let tool = DbTool::new(&db, tx_data_store, self.chain.clone())?;
                 let mut stats_table = ComfyTable::new();
                 stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
                 stats_table.set_header([
@@ -186,17 +189,17 @@ impl Command {
             }
             Subcommands::List(command) => {
                 let db = open_db_read_only(&db_path, self.db.log_level)?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let tool = DbTool::new(&db, tx_data_store, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Diff(command) => {
                 let db = open_db_read_only(&db_path, self.db.log_level)?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let tool = DbTool::new(&db, tx_data_store, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Get(command) => {
                 let db = open_db_read_only(&db_path, self.db.log_level)?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
+                let tool = DbTool::new(&db, tx_data_store, self.chain.clone())?;
                 command.execute(&tool)?;
             }
             Subcommands::Drop { force } => {
@@ -216,7 +219,7 @@ impl Command {
                 }
 
                 let db = open_db(&db_path, self.db.log_level)?;
-                let mut tool = DbTool::new(&db, self.chain.clone())?;
+                let mut tool = DbTool::new(&db, tx_data_store, self.chain.clone())?;
                 tool.drop(db_path)?;
             }
             Subcommands::Clear(command) => {
@@ -224,7 +227,7 @@ impl Command {
                 command.execute(&db)?;
             }
             Subcommands::Snapshot(command) => {
-                command.execute(&db_path, self.db.log_level, self.chain.clone())?;
+                command.execute(&db_path, tx_data_store, self.db.log_level, self.chain.clone())?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {

@@ -11,8 +11,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
-    BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
-    ProviderError, ProviderFactory,
+    BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter, HistoryWriter,
+    OriginalValuesKnown, ProviderError, ProviderFactory,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -47,15 +47,17 @@ impl From<DatabaseError> for InitDatabaseError {
 /// Write the genesis block if it has not already been written
 #[allow(clippy::field_reassign_with_default)]
 pub fn init_genesis<DB: Database>(
-    db: Arc<DB>,
-    chain: Arc<ChainSpec>,
+    provider_factory: ProviderFactory<DB>,
 ) -> Result<B256, InitDatabaseError> {
+    let chain = provider_factory.chain_spec();
     let genesis = chain.genesis();
 
     let hash = chain.genesis_hash();
 
-    let tx = db.tx()?;
-    if let Some((_, db_hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
+    let provider = provider_factory.provider()?;
+    if let Some((_, db_hash)) =
+        provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?.first()?
+    {
         if db_hash == hash {
             debug!("Genesis already written, skipping.");
             return Ok(hash)
@@ -66,29 +68,26 @@ pub fn init_genesis<DB: Database>(
             database_hash: db_hash,
         })
     }
+    drop(provider);
 
-    drop(tx);
     debug!("Writing genesis block.");
 
     // use transaction to insert genesis header
-    let factory = ProviderFactory::new(&db, chain.clone());
-    let provider_rw = factory.provider_rw()?;
+    let provider_rw = provider_factory.provider_rw()?;
     insert_genesis_hashes(&provider_rw, genesis)?;
     insert_genesis_history(&provider_rw, genesis)?;
-    provider_rw.commit()?;
 
     // Insert header
-    let tx = db.tx_mut()?;
-    insert_genesis_header::<DB>(&tx, chain.clone())?;
-
-    insert_genesis_state::<DB>(&tx, genesis)?;
+    insert_genesis_header::<DB>(provider_rw.tx_ref(), chain.clone())?;
+    insert_genesis_state::<DB>(provider_rw.tx_ref(), genesis)?;
 
     // insert sync stage
     for stage in StageId::ALL.iter() {
-        tx.put::<tables::SyncStage>(stage.to_string(), Default::default())?;
+        provider_rw.tx_ref().put::<tables::SyncStage>(stage.to_string(), Default::default())?;
     }
 
-    tx.commit()?;
+    provider_rw.commit()?;
+
     Ok(hash)
 }
 
@@ -160,7 +159,7 @@ pub fn insert_genesis_state<DB: Database>(
 
 /// Inserts hashes for the genesis state.
 pub fn insert_genesis_hashes<DB: Database>(
-    provider: &DatabaseProviderRW<&DB>,
+    provider: &DatabaseProviderRW<DB>,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
@@ -184,7 +183,7 @@ pub fn insert_genesis_hashes<DB: Database>(
 
 /// Inserts history indices for genesis accounts and storage.
 pub fn insert_genesis_history<DB: Database>(
-    provider: &DatabaseProviderRW<&DB>,
+    provider: &DatabaseProviderRW<DB>,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
     let account_transitions =
@@ -221,17 +220,16 @@ pub fn insert_genesis_header<DB: Database>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use reth_db::{
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::{Table, TableRow},
-        test_utils::create_test_rw_db,
         DatabaseEnv,
     };
     use reth_primitives::{
         Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
         GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
+    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use std::collections::HashMap;
 
     #[allow(clippy::type_complexity)]
@@ -247,8 +245,9 @@ mod tests {
 
     #[test]
     fn success_init_genesis_mainnet() {
-        let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, MAINNET.clone()).unwrap();
+        let chain_spec = MAINNET.clone();
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let genesis_hash = init_genesis(provider_factory).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
@@ -256,8 +255,9 @@ mod tests {
 
     #[test]
     fn success_init_genesis_goerli() {
-        let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, GOERLI.clone()).unwrap();
+        let chain_spec = GOERLI.clone();
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let genesis_hash = init_genesis(provider_factory).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
@@ -265,8 +265,9 @@ mod tests {
 
     #[test]
     fn success_init_genesis_sepolia() {
-        let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, SEPOLIA.clone()).unwrap();
+        let chain_spec = SEPOLIA.clone();
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let genesis_hash = init_genesis(provider_factory).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
@@ -274,11 +275,15 @@ mod tests {
 
     #[test]
     fn fail_init_inconsistent_db() {
-        let db = create_test_rw_db();
-        init_genesis(db.clone(), SEPOLIA.clone()).unwrap();
+        let chain_spec = SEPOLIA.clone();
+        let sepolia_provider_factory =
+            create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(sepolia_provider_factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(db, MAINNET.clone());
+        let mainnet_provider_factory =
+            create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        let genesis_hash = init_genesis(mainnet_provider_factory);
 
         assert_eq!(
             genesis_hash.unwrap_err(),
@@ -320,13 +325,12 @@ mod tests {
             ..Default::default()
         });
 
-        let db = create_test_rw_db();
-        init_genesis(db.clone(), chain_spec).unwrap();
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(provider_factory.clone()).unwrap();
 
-        let tx = db.tx().expect("failed to init tx");
-
+        let provider = provider_factory.provider().unwrap();
         assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountHistory>(&tx)
+            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountHistory>(provider.tx_ref())
                 .expect("failed to collect"),
             vec![
                 (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
@@ -335,7 +339,7 @@ mod tests {
         );
 
         assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::StorageHistory>(&tx)
+            collect_table_entries::<Arc<DatabaseEnv>, tables::StorageHistory>(provider.tx_ref())
                 .expect("failed to collect"),
             vec![(
                 StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),

@@ -17,7 +17,9 @@ use reth_config::Config;
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
-use reth_provider::{ProviderFactory, StageCheckpointReader};
+use reth_provider::{
+    providers::DiskFileTransactionDataStore, ProviderFactory, StageCheckpointReader,
+};
 use reth_stages::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
@@ -124,8 +126,12 @@ impl Command {
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
-        let factory = ProviderFactory::new(Arc::clone(&db), self.chain.clone());
-        let mut provider_rw = factory.provider_rw()?;
+        let provider_factory = ProviderFactory::new(
+            Arc::clone(&db),
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            self.chain.clone(),
+        );
+        let mut provider_rw = provider_factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -162,9 +168,6 @@ impl Command {
 
                     let default_peers_path = data_dir.known_peers_path();
 
-                    let provider_factory =
-                        Arc::new(ProviderFactory::new(db.clone(), self.chain.clone()));
-
                     let network = self
                         .network
                         .network_config(
@@ -189,7 +192,7 @@ impl Command {
                                 config.stages.bodies.downloader_min_concurrent_requests..=
                                     config.stages.bodies.downloader_max_concurrent_requests,
                             )
-                            .build(fetch_client, consensus.clone(), provider_factory),
+                            .build(fetch_client, consensus.clone(), provider_factory.clone()),
                     );
                     (Box::new(stage), None)
                 }
@@ -248,7 +251,7 @@ impl Command {
 
                 if self.commit {
                     provider_rw.commit()?;
-                    provider_rw = factory.provider_rw()?;
+                    provider_rw = provider_factory.provider_rw()?;
                 }
             }
         }
@@ -266,7 +269,7 @@ impl Command {
 
             if self.commit {
                 provider_rw.commit()?;
-                provider_rw = factory.provider_rw()?;
+                provider_rw = provider_factory.provider_rw()?;
             }
 
             if output.done {

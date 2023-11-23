@@ -266,6 +266,11 @@ impl<D> ChainPath<D> {
         self.0.join("db").into()
     }
 
+    /// Returns the path to the transaction data store directory for this chain.
+    pub fn transaction_data_store_path(&self) -> PathBuf {
+        self.0.join("transaction-store").into()
+    }
+
     /// Returns the path to the snapshots directory for this chain.
     pub fn snapshots_path(&self) -> PathBuf {
         self.0.join("snapshots").into()

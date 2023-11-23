@@ -17,7 +17,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{database::Database, init_db};
 use reth_interfaces::{consensus::Consensus, RethResult};
 use reth_payload_builder::{database::CachedReads, PayloadBuilderAttributes};
 use reth_primitives::{
@@ -29,8 +29,9 @@ use reth_primitives::{
     SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
-    ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    providers::{BlockchainProvider, DiskFileTransactionDataStore},
+    BlockHashReader, BlockReader, BlockWriter, ExecutorFactory, ProviderFactory,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
@@ -103,8 +104,10 @@ impl Command {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_best_block(&self, db: Arc<DatabaseEnv>) -> RethResult<Arc<SealedBlock>> {
-        let factory = ProviderFactory::new(db, self.chain.clone());
+    fn lookup_best_block<DB: Database>(
+        &self,
+        factory: ProviderFactory<DB>,
+    ) -> RethResult<Arc<SealedBlock>> {
         let provider = factory.provider()?;
 
         let best_number =
@@ -142,7 +145,11 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
-        let provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
+        let provider_factory = ProviderFactory::new(
+            Arc::clone(&db),
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            Arc::clone(&self.chain),
+        );
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
@@ -156,8 +163,9 @@ impl Command {
         let blockchain_tree = ShareableBlockchainTree::new(tree);
 
         // fetch the best block from the database
-        let best_block =
-            self.lookup_best_block(Arc::clone(&db)).wrap_err("the head block is missing")?;
+        let best_block = self
+            .lookup_best_block(provider_factory.clone())
+            .wrap_err("the head block is missing")?;
 
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;

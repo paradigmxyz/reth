@@ -5,9 +5,10 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::Decodable;
-use reth_db::test_utils::create_test_rw_db;
 use reth_primitives::{BlockBody, SealedBlock};
-use reth_provider::{BlockWriter, HashingWriter, ProviderFactory};
+use reth_provider::{
+    test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, HashingWriter,
+};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
@@ -73,8 +74,8 @@ impl Case for BlockchainTestCase {
             }
 
             // Create the database
-            let db = create_test_rw_db();
-            let factory = ProviderFactory::new(db.as_ref(), Arc::new(case.network.clone().into()));
+            let factory =
+                create_test_provider_factory_with_chain_spec(Arc::new(case.network.clone().into()));
             let provider = factory.provider_rw().unwrap();
 
             // Insert test state

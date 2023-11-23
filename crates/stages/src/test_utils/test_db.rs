@@ -12,9 +12,12 @@ use reth_db::{
 use reth_interfaces::{provider::ProviderResult, test_utils::generators::ChangeSet, RethResult};
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
-    TxHash, TxNumber, B256, MAINNET, U256,
+    StoredTransaction, TxHash, TxNumber, B256, MAINNET, U256,
 };
-use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, HistoryWriter, ProviderFactory};
+use reth_provider::{
+    test_utils::TempTransactionDataStore, DatabaseProviderRO, DatabaseProviderRW, HistoryWriter,
+    ProviderFactory,
+};
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
@@ -32,13 +35,25 @@ pub struct TestStageDB {
 impl Default for TestStageDB {
     /// Create a new instance of [TestStageDB]
     fn default() -> Self {
-        Self { factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone()) }
+        Self {
+            factory: ProviderFactory::new(
+                create_test_rw_db(),
+                Arc::new(TempTransactionDataStore::default()),
+                MAINNET.clone(),
+            ),
+        }
     }
 }
 
 impl TestStageDB {
     pub fn new(path: &Path) -> Self {
-        Self { factory: ProviderFactory::new(create_test_rw_db_with_path(path), MAINNET.clone()) }
+        Self {
+            factory: ProviderFactory::new(
+                create_test_rw_db_with_path(path),
+                Arc::new(TempTransactionDataStore::default()),
+                MAINNET.clone(),
+            ),
+        }
     }
 
     /// Invoke a callback with transaction committing it afterwards
@@ -161,32 +176,34 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
-        self.commit(|tx| {
-            let mut next_tx_num = tx_offset.unwrap_or_default();
+        let mut next_tx_num = tx_offset.unwrap_or_default();
+        let provider_rw = self.factory.provider_rw()?;
+        let transaction_data_store = provider_rw.transaction_data_store();
+        let tx = provider_rw.tx_ref();
+        for block in blocks {
+            Self::insert_header(tx, &block.header)?;
+            let block_body_indices = StoredBlockBodyIndices {
+                first_tx_num: next_tx_num,
+                tx_count: block.body.len() as u64,
+            };
 
-            blocks.into_iter().try_for_each(|block| {
-                Self::insert_header(tx, &block.header)?;
-                // Insert into body tables.
-                let block_body_indices = StoredBlockBodyIndices {
-                    first_tx_num: next_tx_num,
-                    tx_count: block.body.len() as u64,
-                };
+            if !block.body.is_empty() {
+                tx.put::<tables::TransactionBlock>(block_body_indices.last_tx_num(), block.number)?;
+            }
+            tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
 
-                if !block.body.is_empty() {
-                    tx.put::<tables::TransactionBlock>(
-                        block_body_indices.last_tx_num(),
-                        block.number,
-                    )?;
+            for transaction in &block.body {
+                let hash = transaction.hash;
+                let (stored, data) = StoredTransaction::from_signed(transaction.clone());
+                if let Some(data) = data {
+                    transaction_data_store.save(hash, data)?;
                 }
-                tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
-
-                block.body.iter().try_for_each(|body_tx| {
-                    tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
-                    next_tx_num += 1;
-                    Ok(())
-                })
-            })
-        })
+                tx.put::<tables::Transactions>(next_tx_num, stored)?;
+                next_tx_num += 1;
+            }
+        }
+        provider_rw.commit()?;
+        Ok(())
     }
 
     pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> ProviderResult<()>

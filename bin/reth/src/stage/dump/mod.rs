@@ -9,6 +9,7 @@ use reth_db::{
     transaction::DbTx, DatabaseEnv,
 };
 use reth_primitives::ChainSpec;
+use reth_provider::{providers::DiskFileTransactionDataStore, ProviderFactory};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -80,6 +81,10 @@ pub struct StageCommand {
     #[arg(long, value_name = "OUTPUT_PATH", verbatim_doc_comment)]
     output_db: PathBuf,
 
+    /// The path to the new transaction store folder.
+    #[arg(long, value_name = "OUTPUT_PATH", verbatim_doc_comment)]
+    output_transaction_store: PathBuf,
+
     /// From which block.
     #[arg(long, short)]
     from: u64,
@@ -102,20 +107,34 @@ impl Command {
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
 
-        let tool = DbTool::new(&db, self.chain.clone())?;
+        let src_db = DbTool::new(
+            &db,
+            Arc::new(DiskFileTransactionDataStore::new(data_dir.transaction_data_store_path())),
+            self.chain.clone(),
+        )?;
+
+        let cmd = match &self.command {
+            Stages::Execution(cmd) |
+            Stages::StorageHashing(cmd) |
+            Stages::AccountHashing(cmd) |
+            Stages::Merkle(cmd) => cmd,
+        };
+
+        let StageCommand { output_db, output_transaction_store, from, to, dry_run, .. } = cmd;
+        let (dest_db, tip) = setup(*from, *to, output_db, output_transaction_store, &src_db)?;
 
         match &self.command {
-            Stages::Execution(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_execution_stage(&tool, *from, *to, output_db, *dry_run).await?
+            Stages::Execution(_) => {
+                dump_execution_stage(&src_db, &dest_db, *from..=*to, tip, *dry_run).await?
             }
-            Stages::StorageHashing(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_hashing_storage_stage(&tool, *from, *to, output_db, *dry_run).await?
+            Stages::StorageHashing(_) => {
+                dump_hashing_storage_stage(&src_db, &dest_db, *from..=*to, tip, *dry_run).await?
             }
-            Stages::AccountHashing(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_hashing_account_stage(&tool, *from, *to, output_db, *dry_run).await?
+            Stages::AccountHashing(_) => {
+                dump_hashing_account_stage(&src_db, &dest_db, *from..=*to, tip, *dry_run).await?
             }
-            Stages::Merkle(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_merkle_stage(&tool, *from, *to, output_db, *dry_run).await?
+            Stages::Merkle(_) => {
+                dump_merkle_stage(&src_db, &dest_db, *from..=*to, tip, *dry_run).await?
             }
         }
 
@@ -129,8 +148,9 @@ pub(crate) fn setup<DB: Database>(
     from: u64,
     to: u64,
     output_db: &PathBuf,
+    output_transaction_store: &PathBuf,
     db_tool: &DbTool<'_, DB>,
-) -> eyre::Result<(DatabaseEnv, u64)> {
+) -> eyre::Result<(ProviderFactory<Arc<DatabaseEnv>>, u64)> {
     assert!(from < to, "FROM block should be bigger than TO block.");
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
@@ -148,5 +168,12 @@ pub(crate) fn setup<DB: Database>(
     let (tip_block_number, _) =
         db_tool.db.view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??.expect("some");
 
-    Ok((output_db, tip_block_number))
+    Ok((
+        ProviderFactory::new(
+            Arc::new(output_db),
+            Arc::new(DiskFileTransactionDataStore::new(output_transaction_store.clone())),
+            db_tool.chain.clone(),
+        ),
+        tip_block_number,
+    ))
 }

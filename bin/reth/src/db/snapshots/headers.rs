@@ -11,7 +11,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,
-    TransactionsProviderExt,
+    TransactionDataStore, TransactionsProviderExt,
 };
 use std::{
     path::{Path, PathBuf},
@@ -22,14 +22,19 @@ impl Command {
     pub(crate) fn bench_headers_snapshot(
         &self,
         db_path: &Path,
+        transaction_data_store: Arc<dyn TransactionDataStore>,
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
         phf: PerfectHashingFunction,
     ) -> eyre::Result<()> {
-        let factory = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone());
-        let provider = factory.provider()?;
+        let provider_factory = ProviderFactory::new(
+            Arc::new(open_db_read_only(db_path, log_level)?),
+            transaction_data_store,
+            chain.clone(),
+        );
+        let provider = provider_factory.provider()?;
         let tip = provider.last_block_number()?;
         let block_range =
             self.block_ranges(tip).first().expect("has been generated before").clone();
@@ -43,9 +48,7 @@ impl Command {
         let mut row_indexes = block_range.clone().collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
 
-        let tx_range = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
-            .provider()?
-            .transaction_range_by_block_range(block_range.clone())?;
+        let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
 
         let path: PathBuf = SnapshotSegment::Headers
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
@@ -61,7 +64,7 @@ impl Command {
         for bench_kind in [BenchKind::Walk, BenchKind::RandomAll] {
             bench(
                 bench_kind,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                provider_factory.clone(),
                 SnapshotSegment::Headers,
                 filters,
                 compression,
@@ -92,7 +95,7 @@ impl Command {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())];
             bench(
                 BenchKind::RandomOne,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                provider_factory.clone(),
                 SnapshotSegment::Headers,
                 filters,
                 compression,
@@ -112,15 +115,14 @@ impl Command {
         // BENCHMARK QUERYING A RANDOM HEADER BY HASH
         {
             let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
-            let header_hash =
-                ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone())
-                    .header_by_number(num)?
-                    .ok_or(ProviderError::HeaderNotFound(num.into()))?
-                    .hash_slow();
+            let header_hash = provider_factory
+                .header_by_number(num)?
+                .ok_or(ProviderError::HeaderNotFound(num.into()))?
+                .hash_slow();
 
             bench(
                 BenchKind::RandomHash,
-                (open_db_read_only(db_path, log_level)?, chain.clone()),
+                provider_factory.clone(),
                 SnapshotSegment::Headers,
                 filters,
                 compression,

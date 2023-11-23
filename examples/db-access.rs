@@ -1,13 +1,12 @@
 use reth_db::open_db_read_only;
 use reth_primitives::{Address, ChainSpecBuilder, B256, U256};
 use reth_provider::{
-    AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
-    StateProvider, TransactionsProvider,
+    providers::DiskFileTransactionDataStore, AccountReader, BlockReader, BlockSource,
+    HeaderProvider, ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
 use reth_rpc_types_compat::log::from_primitive_log;
-
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
 // exposing a familiar API to query the chain's information without requiring knowledge
@@ -20,11 +19,14 @@ fn main() -> eyre::Result<()> {
     // TODO: Should be able to do `ProviderFactory::new_with_db_path_ro(...)` instead of
     // doing in 2 steps.
     let db = open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), None)?;
+    let transaction_data_store = Arc::new(DiskFileTransactionDataStore::new(
+        Path::new(&std::env::var("RETH_TRANSACTION_DATA_STORE_PATH")?).to_path_buf(),
+    ));
 
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = ProviderFactory::new(db, spec.into());
+    let factory = ProviderFactory::new(db, transaction_data_store, spec.into());
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.

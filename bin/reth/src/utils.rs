@@ -18,6 +18,7 @@ use reth_interfaces::p2p::{
 use reth_primitives::{
     fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader,
 };
+use reth_provider::{ProviderFactory, TransactionDataStore};
 use reth_rpc::{JwtError, JwtSecret};
 use std::{
     env::VarError,
@@ -101,13 +102,23 @@ where
 /// Wrapper over DB that implements many useful DB queries.
 pub struct DbTool<'a, DB: Database> {
     pub(crate) db: &'a DB,
+    pub(crate) transaction_data_store: Arc<dyn TransactionDataStore>,
     pub(crate) chain: Arc<ChainSpec>,
 }
 
 impl<'a, DB: Database> DbTool<'a, DB> {
     /// Takes a DB where the tables have already been created.
-    pub(crate) fn new(db: &'a DB, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
-        Ok(Self { db, chain })
+    pub(crate) fn new(
+        db: &'a DB,
+        transaction_data_store: Arc<dyn TransactionDataStore>,
+        chain: Arc<ChainSpec>,
+    ) -> eyre::Result<Self> {
+        Ok(Self { db, chain, transaction_data_store })
+    }
+
+    /// Returns [ProviderFactory]
+    pub(crate) fn provider_factory(&self) -> ProviderFactory<&'a DB> {
+        ProviderFactory::new(self.db, self.transaction_data_store.clone(), self.chain.clone())
     }
 
     /// Grabs the contents of the table within a certain index range and places the

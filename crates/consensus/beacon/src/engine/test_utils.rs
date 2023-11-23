@@ -6,11 +6,7 @@ use crate::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_db::{
-    test_utils::{create_test_rw_db, TempDatabase},
-    DatabaseEnv as DE,
-};
-type DatabaseEnv = TempDatabase<DE>;
+use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -25,8 +21,9 @@ use reth_interfaces::{
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, PruneModes, Receipt, B256, U256};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
-    BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, ProviderFactory,
+    providers::BlockchainProvider,
+    test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
+    BlockExecutor, BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, ProviderFactory,
     PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
@@ -38,6 +35,8 @@ use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipel
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
+
+type DatabaseEnv = TempDatabase<DE>;
 
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<DatabaseEnv>,
@@ -53,7 +52,7 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
 
 #[derive(Debug)]
 pub struct TestEnv<DB> {
-    pub db: DB,
+    pub provider_factory: ProviderFactory<DB>,
     // Keep the tip receiver around, so it's not dropped.
     #[allow(dead_code)]
     tip_rx: watch::Receiver<B256>,
@@ -62,11 +61,11 @@ pub struct TestEnv<DB> {
 
 impl<DB> TestEnv<DB> {
     fn new(
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         tip_rx: watch::Receiver<B256>,
         engine_handle: BeaconConsensusEngineHandle,
     ) -> Self {
-        Self { db, tip_rx, engine_handle }
+        Self { provider_factory, tip_rx, engine_handle }
     }
 
     pub async fn send_new_payload<T: Into<ExecutionPayload>>(
@@ -454,9 +453,8 @@ where
     /// Builds the test consensus engine into a `TestConsensusEngine` and `TestEnv`.
     pub fn build(self) -> (TestBeaconConsensusEngine<Client>, TestEnv<Arc<DatabaseEnv>>) {
         reth_tracing::init_test_tracing();
-        let db = create_test_rw_db();
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());
+            create_test_provider_factory_with_chain_spec(self.base_config.chain_spec.clone());
 
         let consensus: Arc<dyn Consensus> = match self.base_config.consensus {
             TestConsensusConfig::Real => {
@@ -502,7 +500,7 @@ where
                     .into_task();
 
                 Pipeline::builder().add_stages(DefaultStages::new(
-                    ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone()),
+                    provider_factory.clone(),
                     HeaderSyncMode::Tip(tip_rx.clone()),
                     Arc::clone(&consensus),
                     header_downloader,
@@ -525,11 +523,11 @@ where
             BlockchainTree::new(externals, config, None).expect("failed to create tree"),
         );
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
-        let blockchain_provider = BlockchainProvider::with_latest(provider_factory, tree, latest);
+        let blockchain_provider =
+            BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
 
         let pruner = Pruner::new(
-            db.clone(),
-            self.base_config.chain_spec.clone(),
+            provider_factory.clone(),
             vec![],
             5,
             self.base_config.chain_spec.prune_delete_limit,
@@ -558,7 +556,7 @@ where
             engine.sync.set_max_block(max_block)
         }
 
-        (engine, TestEnv::new(db, tip_rx, handle))
+        (engine, TestEnv::new(provider_factory, tip_rx, handle))
     }
 }
 

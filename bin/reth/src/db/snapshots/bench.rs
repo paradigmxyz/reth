@@ -1,7 +1,7 @@
 use reth_db::DatabaseEnv;
 use reth_primitives::{
     snapshot::{Compression, Filters},
-    ChainSpec, SnapshotSegment,
+    SnapshotSegment,
 };
 use reth_provider::{DatabaseProviderRO, ProviderFactory};
 use std::{fmt::Debug, sync::Arc, time::Instant};
@@ -16,7 +16,7 @@ pub(crate) enum BenchKind {
 
 pub(crate) fn bench<F1, F2, R>(
     bench_kind: BenchKind,
-    db: (DatabaseEnv, Arc<ChainSpec>),
+    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
     segment: SnapshotSegment,
     filters: Filters,
     compression: Compression,
@@ -28,8 +28,6 @@ where
     F2: Fn(DatabaseProviderRO<DatabaseEnv>) -> eyre::Result<R>,
     R: Debug + PartialEq,
 {
-    let (db, chain) = db;
-
     println!();
     println!("############");
     println!("## [{segment:?}] [{compression:?}] [{filters:?}] [{bench_kind:?}]");
@@ -42,8 +40,7 @@ where
     };
 
     let db_result = {
-        let factory = ProviderFactory::new(db, chain);
-        let provider = factory.provider()?;
+        let provider = provider_factory.provider()?;
         let start = Instant::now();
         let result = database_method(provider)?;
         let end = start.elapsed().as_micros();

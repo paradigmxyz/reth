@@ -172,7 +172,10 @@ mod tests {
     use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
     use reth_primitives::MAINNET;
-    use reth_provider::ProviderFactory;
+    use reth_provider::{
+        test_utils::{create_test_provider_factory, TempTransactionDataStore},
+        ProviderFactory,
+    };
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -190,7 +193,11 @@ mod tests {
         let downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(
+                db,
+                Arc::new(TempTransactionDataStore::default()),
+                MAINNET.clone(),
+            ),
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
@@ -208,11 +215,10 @@ mod tests {
     async fn set_download_range_error_returned() {
         reth_tracing::init_test_tracing();
 
-        let db = create_test_rw_db();
         let downloader = BodiesDownloaderBuilder::default().build(
             Arc::new(TestBodiesClient::default()),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            create_test_provider_factory(),
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
