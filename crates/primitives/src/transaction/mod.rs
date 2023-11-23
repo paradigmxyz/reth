@@ -1012,6 +1012,7 @@ impl Compact for StoredTransaction {
         let (signature, buf) = Signature::from_compact(buf, sig_bit);
 
         let zstd_bit = (bitflags >> 3) & 1;
+        let transaction_type = (bitflags & 0b110) >> 1;
         let (transaction, buf) = if zstd_bit != 0 {
             TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                 let mut decompressor = decompressor.borrow_mut();
@@ -1031,13 +1032,10 @@ impl Compact for StoredTransaction {
 
                 // TODO: enforce that zstd is only present at a "top" level type
 
-                let transaction_type = (bitflags & 0b110) >> 1;
                 let (transaction, _) = Transaction::from_compact(tmp.as_slice(), transaction_type);
-
                 (transaction, buf)
             })
         } else {
-            let transaction_type = bitflags >> 1;
             Transaction::from_compact(buf, transaction_type)
         };
 
