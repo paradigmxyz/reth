@@ -11,6 +11,7 @@ use reth_db::{
 use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
+    transaction::StoredTransactionData,
     StoredTransaction,
 };
 use reth_provider::DatabaseProviderRW;
@@ -202,6 +203,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         self.buffer.take();
 
         let tx = provider.tx_ref();
+        let transaction_data_store = provider.transaction_data_store();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
@@ -236,7 +238,12 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // Delete all transactions that belong to this block
             for tx_id in block_meta.tx_num_range() {
                 // First delete the transaction
-                if transaction_cursor.seek_exact(tx_id)?.is_some() {
+                if let Some((_, tx)) = transaction_cursor.seek_exact(tx_id)? {
+                    if let StoredTransactionData::Excluded(hash) = tx.into_inner().1 {
+                        transaction_data_store
+                            .remove(hash)
+                            .map_err(|err| StageError::DatabaseIntegrity(err.into()))?;
+                    }
                     transaction_cursor.delete_current()?;
                 }
             }
