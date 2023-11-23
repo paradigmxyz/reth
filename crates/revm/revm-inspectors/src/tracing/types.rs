@@ -1,7 +1,8 @@
 //! Types for representing call trace items.
 
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
-use alloy_primitives::{Address, Bytes, B256, U256, U64};
+pub use alloy_primitives::Log;
+use alloy_primitives::{Address, Bytes, U256, U64};
 use alloy_sol_types::decode_revert_reason;
 use reth_rpc_types::trace::{
     geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
@@ -14,162 +15,58 @@ use revm::interpreter::{opcode, CallContext, CallScheme, CreateScheme, Instructi
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
-/// A unified representation of a call
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-#[allow(missing_docs)]
-pub enum CallKind {
-    #[default]
-    Call,
-    StaticCall,
-    CallCode,
-    DelegateCall,
-    Create,
-    Create2,
-}
-
-impl CallKind {
-    /// Returns true if the call is a create
-    #[inline]
-    pub fn is_any_create(&self) -> bool {
-        matches!(self, CallKind::Create | CallKind::Create2)
-    }
-
-    /// Returns true if the call is a delegate of some sorts
-    #[inline]
-    pub fn is_delegate(&self) -> bool {
-        matches!(self, CallKind::DelegateCall | CallKind::CallCode)
-    }
-
-    /// Returns true if the call is [CallKind::StaticCall].
-    #[inline]
-    pub fn is_static_call(&self) -> bool {
-        matches!(self, CallKind::StaticCall)
-    }
-}
-
-impl std::fmt::Display for CallKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CallKind::Call => {
-                write!(f, "CALL")
-            }
-            CallKind::StaticCall => {
-                write!(f, "STATICCALL")
-            }
-            CallKind::CallCode => {
-                write!(f, "CALLCODE")
-            }
-            CallKind::DelegateCall => {
-                write!(f, "DELEGATECALL")
-            }
-            CallKind::Create => {
-                write!(f, "CREATE")
-            }
-            CallKind::Create2 => {
-                write!(f, "CREATE2")
-            }
-        }
-    }
-}
-
-impl From<CallScheme> for CallKind {
-    fn from(scheme: CallScheme) -> Self {
-        match scheme {
-            CallScheme::Call => CallKind::Call,
-            CallScheme::StaticCall => CallKind::StaticCall,
-            CallScheme::CallCode => CallKind::CallCode,
-            CallScheme::DelegateCall => CallKind::DelegateCall,
-        }
-    }
-}
-
-impl From<CreateScheme> for CallKind {
-    fn from(create: CreateScheme) -> Self {
-        match create {
-            CreateScheme::Create => CallKind::Create,
-            CreateScheme::Create2 { .. } => CallKind::Create2,
-        }
-    }
-}
-
-impl From<CallKind> for ActionType {
-    fn from(kind: CallKind) -> Self {
-        match kind {
-            CallKind::Call | CallKind::StaticCall | CallKind::DelegateCall | CallKind::CallCode => {
-                ActionType::Call
-            }
-            CallKind::Create => ActionType::Create,
-            CallKind::Create2 => ActionType::Create,
-        }
-    }
-}
-
-impl From<CallKind> for CallType {
-    fn from(ty: CallKind) -> Self {
-        match ty {
-            CallKind::Call => CallType::Call,
-            CallKind::StaticCall => CallType::StaticCall,
-            CallKind::CallCode => CallType::CallCode,
-            CallKind::DelegateCall => CallType::DelegateCall,
-            CallKind::Create => CallType::None,
-            CallKind::Create2 => CallType::None,
-        }
-    }
-}
-
 /// A trace of a call.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CallTrace {
+pub struct CallTrace {
     /// The depth of the call
-    pub(crate) depth: usize,
+    pub depth: usize,
     /// Whether the call was successful
-    pub(crate) success: bool,
+    pub success: bool,
     /// caller of this call
-    pub(crate) caller: Address,
+    pub caller: Address,
     /// The destination address of the call or the address from the created contract.
     ///
     /// In other words, this is the callee if the [CallKind::Call] or the address of the created
     /// contract if [CallKind::Create].
-    pub(crate) address: Address,
+    pub address: Address,
     /// Whether this is a call to a precompile
     ///
     /// Note: This is an Option because not all tracers make use of this
-    pub(crate) maybe_precompile: Option<bool>,
+    pub maybe_precompile: Option<bool>,
     /// Holds the target for the selfdestruct refund target if `status` is
     /// [InstructionResult::SelfDestruct]
-    pub(crate) selfdestruct_refund_target: Option<Address>,
+    pub selfdestruct_refund_target: Option<Address>,
     /// The kind of call this is
-    pub(crate) kind: CallKind,
+    pub kind: CallKind,
     /// The value transferred in the call
-    pub(crate) value: U256,
+    pub value: U256,
     /// The calldata for the call, or the init code for contract creations
-    pub(crate) data: Bytes,
+    pub data: Bytes,
     /// The return data of the call if this was not a contract creation, otherwise it is the
     /// runtime bytecode of the created contract
-    pub(crate) output: Bytes,
+    pub output: Bytes,
     /// The gas cost of the call
-    pub(crate) gas_used: u64,
+    pub gas_used: u64,
     /// The gas limit of the call
-    pub(crate) gas_limit: u64,
+    pub gas_limit: u64,
     /// The status of the trace's call
-    pub(crate) status: InstructionResult,
+    pub status: InstructionResult,
     /// call context of the runtime
-    pub(crate) call_context: Option<Box<CallContext>>,
+    pub call_context: Option<Box<CallContext>>,
     /// Opcode-level execution steps
-    pub(crate) steps: Vec<CallTraceStep>,
+    pub steps: Vec<CallTraceStep>,
 }
 
 impl CallTrace {
-    // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
+    /// Returns true if the status code is an error or revert, See [InstructionResult::Revert]
     #[inline]
-    pub(crate) fn is_error(&self) -> bool {
+    pub fn is_error(&self) -> bool {
         self.status.is_error()
     }
 
-    // Returns true if the status code is a revert
+    /// Returns true if the status code is a revert
     #[inline]
-    pub(crate) fn is_revert(&self) -> bool {
+    pub fn is_revert(&self) -> bool {
         self.status == InstructionResult::Revert
     }
 
@@ -223,26 +120,26 @@ impl Default for CallTrace {
 
 /// A node in the arena
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CallTraceNode {
+pub struct CallTraceNode {
     /// Parent node index in the arena
-    pub(crate) parent: Option<usize>,
+    pub parent: Option<usize>,
     /// Children node indexes in the arena
-    pub(crate) children: Vec<usize>,
+    pub children: Vec<usize>,
     /// This node's index in the arena
-    pub(crate) idx: usize,
+    pub idx: usize,
     /// The call trace
-    pub(crate) trace: CallTrace,
-    /// Logs
-    pub(crate) logs: Vec<RawLog>,
+    pub trace: CallTrace,
+    /// Recorded logs, if enabled
+    pub logs: Vec<Log>,
     /// Ordering of child calls and logs
-    pub(crate) ordering: Vec<LogCallOrder>,
+    pub ordering: Vec<LogCallOrder>,
 }
 
 impl CallTraceNode {
     /// Returns the call context's execution address
     ///
     /// See `Inspector::call` impl of [TracingInspector](crate::tracing::TracingInspector)
-    pub(crate) fn execution_address(&self) -> Address {
+    pub fn execution_address(&self) -> Address {
         if self.trace.kind.is_delegate() {
             self.trace.caller
         } else {
@@ -256,7 +153,7 @@ impl CallTraceNode {
     ///
     /// If the slot is accessed more than once, the result only includes the first time it was
     /// accessed, in other words in only returns the original value of the slot.
-    pub(crate) fn touched_slots(&self) -> BTreeMap<U256, U256> {
+    pub fn touched_slots(&self) -> BTreeMap<U256, U256> {
         let mut touched_slots = BTreeMap::new();
         for change in self.trace.steps.iter().filter_map(|s| s.storage_change.as_ref()) {
             match touched_slots.entry(change.key) {
@@ -461,13 +358,117 @@ impl CallTraceNode {
                 .iter()
                 .map(|log| CallLogFrame {
                     address: Some(self.execution_address()),
-                    topics: Some(log.topics.clone()),
+                    topics: Some(log.topics().to_vec()),
                     data: Some(log.data.clone()),
                 })
                 .collect();
         }
 
         call_frame
+    }
+}
+
+/// A unified representation of a call
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+#[allow(missing_docs)]
+pub enum CallKind {
+    #[default]
+    Call,
+    StaticCall,
+    CallCode,
+    DelegateCall,
+    Create,
+    Create2,
+}
+
+impl CallKind {
+    /// Returns true if the call is a create
+    #[inline]
+    pub fn is_any_create(&self) -> bool {
+        matches!(self, CallKind::Create | CallKind::Create2)
+    }
+
+    /// Returns true if the call is a delegate of some sorts
+    #[inline]
+    pub fn is_delegate(&self) -> bool {
+        matches!(self, CallKind::DelegateCall | CallKind::CallCode)
+    }
+
+    /// Returns true if the call is [CallKind::StaticCall].
+    #[inline]
+    pub fn is_static_call(&self) -> bool {
+        matches!(self, CallKind::StaticCall)
+    }
+}
+
+impl std::fmt::Display for CallKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CallKind::Call => {
+                write!(f, "CALL")
+            }
+            CallKind::StaticCall => {
+                write!(f, "STATICCALL")
+            }
+            CallKind::CallCode => {
+                write!(f, "CALLCODE")
+            }
+            CallKind::DelegateCall => {
+                write!(f, "DELEGATECALL")
+            }
+            CallKind::Create => {
+                write!(f, "CREATE")
+            }
+            CallKind::Create2 => {
+                write!(f, "CREATE2")
+            }
+        }
+    }
+}
+
+impl From<CallScheme> for CallKind {
+    fn from(scheme: CallScheme) -> Self {
+        match scheme {
+            CallScheme::Call => CallKind::Call,
+            CallScheme::StaticCall => CallKind::StaticCall,
+            CallScheme::CallCode => CallKind::CallCode,
+            CallScheme::DelegateCall => CallKind::DelegateCall,
+        }
+    }
+}
+
+impl From<CreateScheme> for CallKind {
+    fn from(create: CreateScheme) -> Self {
+        match create {
+            CreateScheme::Create => CallKind::Create,
+            CreateScheme::Create2 { .. } => CallKind::Create2,
+        }
+    }
+}
+
+impl From<CallKind> for ActionType {
+    fn from(kind: CallKind) -> Self {
+        match kind {
+            CallKind::Call | CallKind::StaticCall | CallKind::DelegateCall | CallKind::CallCode => {
+                ActionType::Call
+            }
+            CallKind::Create => ActionType::Create,
+            CallKind::Create2 => ActionType::Create,
+        }
+    }
+}
+
+impl From<CallKind> for CallType {
+    fn from(ty: CallKind) -> Self {
+        match ty {
+            CallKind::Call => CallType::Call,
+            CallKind::StaticCall => CallType::StaticCall,
+            CallKind::CallCode => CallType::CallCode,
+            CallKind::DelegateCall => CallType::DelegateCall,
+            CallKind::Create => CallType::None,
+            CallKind::Create2 => CallType::None,
+        }
     }
 }
 
@@ -482,55 +483,48 @@ pub(crate) struct CallTraceStepStackItem<'a> {
 
 /// Ordering enum for calls and logs
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LogCallOrder {
+pub enum LogCallOrder {
+    /// Contains the index of the corresponding log
     Log(usize),
+    /// Contains the index of the corresponding trace node
     Call(usize),
-}
-
-/// Ethereum log.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RawLog {
-    /// Indexed event params are represented as log topics.
-    pub(crate) topics: Vec<B256>,
-    /// Others are just plain data.
-    pub(crate) data: Bytes,
 }
 
 /// Represents a tracked call step during execution
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CallTraceStep {
+pub struct CallTraceStep {
     // Fields filled in `step`
     /// Call depth
-    pub(crate) depth: u64,
+    pub depth: u64,
     /// Program counter before step execution
-    pub(crate) pc: usize,
+    pub pc: usize,
     /// Opcode to be executed
-    pub(crate) op: OpCode,
+    pub op: OpCode,
     /// Current contract address
-    pub(crate) contract: Address,
+    pub contract: Address,
     /// Stack before step execution
-    pub(crate) stack: Option<Vec<U256>>,
+    pub stack: Option<Vec<U256>>,
     /// The new stack items placed by this step if any
-    pub(crate) push_stack: Option<Vec<U256>>,
+    pub push_stack: Option<Vec<U256>>,
     /// All allocated memory in a step
     ///
     /// This will be empty if memory capture is disabled
-    pub(crate) memory: RecordedMemory,
+    pub memory: RecordedMemory,
     /// Size of memory at the beginning of the step
-    pub(crate) memory_size: usize,
+    pub memory_size: usize,
     /// Remaining gas before step execution
-    pub(crate) gas_remaining: u64,
+    pub gas_remaining: u64,
     /// Gas refund counter before step execution
-    pub(crate) gas_refund_counter: u64,
+    pub gas_refund_counter: u64,
     // Fields filled in `step_end`
     /// Gas cost of step execution
-    pub(crate) gas_cost: u64,
+    pub gas_cost: u64,
     /// Change of the contract state after step execution (effect of the SLOAD/SSTORE instructions)
-    pub(crate) storage_change: Option<StorageChange>,
+    pub storage_change: Option<StorageChange>,
     /// Final status of the step
     ///
     /// This is set after the step was executed.
-    pub(crate) status: InstructionResult,
+    pub status: InstructionResult,
 }
 
 // === impl CallTraceStep ===
@@ -609,25 +603,37 @@ impl CallTraceStep {
 /// from an SSTORE or SLOAD instruction.
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StorageChangeReason {
+pub enum StorageChangeReason {
+    /// SLOAD opcode
     SLOAD,
+    /// SSTORE opcode
     SSTORE,
 }
 
-/// Represents a storage change during execution
+/// Represents a storage change during execution.
+///
+/// This maps to evm internals:
+/// [JournalEntry::StorageChange](revm::JournalEntry::StorageChange)
+///
+/// It is used to track both storage change and warm load of a storage slot. For warm load in regard
+/// to EIP-2929 AccessList had_value will be None.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct StorageChange {
-    pub(crate) key: U256,
-    pub(crate) value: U256,
-    pub(crate) had_value: Option<U256>,
-    pub(crate) reason: StorageChangeReason,
+pub struct StorageChange {
+    /// key of the storage slot
+    pub key: U256,
+    /// Current value of the storage slot
+    pub value: U256,
+    /// The previous value of the storage slot, if any
+    pub had_value: Option<U256>,
+    /// How this storage was accessed
+    pub reason: StorageChangeReason,
 }
 
 /// Represents the memory captured during execution
 ///
 /// This is a wrapper around the [SharedMemory](revm::interpreter::SharedMemory) context memory.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct RecordedMemory(pub(crate) Vec<u8>);
+pub struct RecordedMemory(pub(crate) Vec<u8>);
 
 impl RecordedMemory {
     #[inline]
@@ -635,8 +641,9 @@ impl RecordedMemory {
         Self(mem)
     }
 
+    /// Returns the memory as a byte slice
     #[inline]
-    pub(crate) fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
@@ -645,19 +652,27 @@ impl RecordedMemory {
         self.0.resize(size, 0);
     }
 
+    /// Returns the size of the memory
     #[inline]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Returns whether the memory is empty
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
     /// Converts the memory into 32byte hex chunks
     #[inline]
-    pub(crate) fn memory_chunks(&self) -> Vec<String> {
+    pub fn memory_chunks(&self) -> Vec<String> {
         convert_memory(self.as_bytes())
+    }
+}
+
+impl AsRef<[u8]> for RecordedMemory {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
     }
 }
