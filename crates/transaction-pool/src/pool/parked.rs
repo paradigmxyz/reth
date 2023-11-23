@@ -1,6 +1,7 @@
 use crate::{
-    identifier::{TransactionId, SenderId}, pool::size::SizeTracker, PoolTransaction, SubPoolLimit,
-    ValidPoolTransaction,
+    identifier::{SenderId, TransactionId},
+    pool::size::SizeTracker,
+    PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
 use reth_primitives::Address;
 use std::{
@@ -120,7 +121,10 @@ impl<T: ParkedOrd> ParkedPool<T> {
                         }
                     } else {
                         // new entry
-                        set.push(SubmissionSenderId::new(tx.transaction.sender_id(), tx.submission_id));
+                        set.push(SubmissionSenderId::new(
+                            tx.transaction.sender_id(),
+                            tx.submission_id,
+                        ));
                     }
                 } else {
                     // first entry
@@ -456,12 +460,10 @@ impl<T: PoolTransaction> Ord for QueuedOrd<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use reth_primitives::address;
-
     use super::*;
     use crate::test_utils::{MockTransaction, MockTransactionFactory};
+    use reth_primitives::address;
+    use std::collections::HashSet;
 
     #[test]
     fn test_enforce_parked_basefee() {
@@ -644,9 +646,14 @@ mod tests {
         }
 
         // get senders by submission id - a4, b3, c3, d1, reversed
-        let senders = pool.get_senders_by_submission_id().into_iter().map(|s| s.sender_id).collect::<Vec<_>>();
+        let senders = pool
+            .get_senders_by_submission_id()
+            .into_iter()
+            .map(|s| s.sender_id)
+            .collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
-        let expected_senders = vec![d, c, b, a].into_iter().map(|s| f.ids.sender_id(&s).unwrap()).collect::<Vec<_>>();
+        let expected_senders =
+            vec![d, c, b, a].into_iter().map(|s| f.ids.sender_id(&s).unwrap()).collect::<Vec<_>>();
         assert_eq!(senders, expected_senders);
 
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
@@ -657,9 +664,14 @@ mod tests {
             pool.add_transaction(f.validated_arc(tx));
         }
 
-        let senders = pool.get_senders_by_submission_id().into_iter().map(|s| s.sender_id).collect::<Vec<_>>();
+        let senders = pool
+            .get_senders_by_submission_id()
+            .into_iter()
+            .map(|s| s.sender_id)
+            .collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
-        let expected_senders = vec![a, c, b, d].into_iter().map(|s| f.ids.sender_id(&s).unwrap()).collect::<Vec<_>>();
+        let expected_senders =
+            vec![a, c, b, d].into_iter().map(|s| f.ids.sender_id(&s).unwrap()).collect::<Vec<_>>();
         assert_eq!(senders, expected_senders);
     }
 }
