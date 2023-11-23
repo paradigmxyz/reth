@@ -1,7 +1,8 @@
 //! Types for representing call trace items.
 
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
-use alloy_primitives::{Address, Bytes, B256, U256, U64};
+pub use alloy_primitives::Log;
+use alloy_primitives::{Address, Bytes, U256, U64};
 use alloy_sol_types::decode_revert_reason;
 use reth_rpc_types::trace::{
     geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
@@ -128,8 +129,8 @@ pub struct CallTraceNode {
     pub idx: usize,
     /// The call trace
     pub trace: CallTrace,
-    /// Logs
-    pub logs: Vec<RawLog>,
+    /// Recorded logs, if enabled
+    pub logs: Vec<Log>,
     /// Ordering of child calls and logs
     pub ordering: Vec<LogCallOrder>,
 }
@@ -357,7 +358,7 @@ impl CallTraceNode {
                 .iter()
                 .map(|log| CallLogFrame {
                     address: Some(self.execution_address()),
-                    topics: Some(log.topics.clone()),
+                    topics: Some(log.topics().to_vec()),
                     data: Some(log.data.clone()),
                 })
                 .collect();
@@ -487,15 +488,6 @@ pub enum LogCallOrder {
     Log(usize),
     /// Contains the index of the corresponding trace node
     Call(usize),
-}
-
-/// Ethereum log.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawLog {
-    /// Indexed event params are represented as log topics.
-    pub topics: Vec<B256>,
-    /// Others are just plain data.
-    pub data: Bytes,
 }
 
 /// Represents a tracked call step during execution
