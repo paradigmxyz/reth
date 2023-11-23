@@ -88,14 +88,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 
     /// Get transactions by sender
-    pub(crate) fn get_txs_by_sender(
-        &self,
-        sender: SenderId,
-    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+    pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
-            .map(|(_, tx)| tx.transaction.clone().into())
+            .map(|(_, tx)| *tx.transaction.id())
             .collect()
     }
 
@@ -162,8 +159,8 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
             // Drop all transactions if they are less than the overflow
             if list.len() <= drop {
-                for tx in &list {
-                    if let Some(tx) = self.remove_transaction(tx.id()) {
+                for txid in &list {
+                    if let Some(tx) = self.remove_transaction(txid) {
                         removed.push(tx);
                     }
                 }
@@ -173,8 +170,8 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
             // Otherwise drop only last few transactions
             // SAFETY: This will not panic because `list.len() > drop`
-            for tx in list.split_off(drop) {
-                if let Some(tx) = self.remove_transaction(tx.id()) {
+            for txid in list.split_off(drop) {
+                if let Some(tx) = self.remove_transaction(&txid) {
                     removed.push(tx);
                 }
                 drop -= 1;
