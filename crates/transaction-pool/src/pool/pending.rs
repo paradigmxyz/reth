@@ -385,7 +385,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             if original_size - total_size <= limit.max_size &&
                 original_length - removed.len() <= limit.max_txs
             {
-                break
+                return removed
             }
 
             if !local && tx.transaction.is_local() {
