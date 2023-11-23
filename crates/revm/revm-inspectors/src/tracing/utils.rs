@@ -1,9 +1,10 @@
 //! Util functions for revm related ops
 
-use reth_primitives::{hex, revm_primitives::db::DatabaseRef, Address, Bytes, B256, KECCAK_EMPTY};
+use alloy_primitives::{hex, Address, Bytes, B256};
 use revm::{
     interpreter::CreateInputs,
-    primitives::{CreateScheme, SpecId},
+    primitives::{CreateScheme, SpecId, KECCAK_EMPTY},
+    DatabaseRef,
 };
 
 /// creates the memory data in 32byte chunks

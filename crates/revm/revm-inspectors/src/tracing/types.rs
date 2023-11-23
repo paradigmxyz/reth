@@ -1,8 +1,8 @@
 //! Types for representing call trace items.
 
 use crate::tracing::{config::TraceStyle, utils::convert_memory};
+use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use alloy_sol_types::decode_revert_reason;
-use reth_primitives::{Address, Bytes, B256, U256, U64};
 use reth_rpc_types::trace::{
     geth::{CallFrame, CallLogFrame, GethDefaultTracingOptions, StructLog},
     parity::{
