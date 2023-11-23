@@ -123,7 +123,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             let block_number = chunk.select(rank);
 
             // If our block is before the first entry in the index chunk and this first entry
-            // doesn't equal to our block it might be before the first write ever. To check, we
+            // doesn't equal to our block, it might be before the first write ever. To check, we
             // look at the previous entry and check if the key is the same.
             // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
             // short-circuit) and when it passes we save a full seek into the changeset/plain state
