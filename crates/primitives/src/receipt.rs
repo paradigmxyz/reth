@@ -225,7 +225,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
                 #[cfg(feature = "optimism")]
                 let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
                     // The deposit receipt version is only present if the deposit nonce is present
-                    let deposit_receipt_version = _deposit_nonce.is_some().then_some(_deposit_receipt_version).flatten();
+                    let deposit_receipt_version = _deposit_nonce.and(_deposit_receipt_version);
                     (_deposit_nonce, deposit_receipt_version)
                 } else {
                     (None, None)
@@ -263,7 +263,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
         let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
             let deposit_nonce = Option::<u64>::arbitrary(u)?;
             let deposit_nonce_version =
-                deposit_nonce.is_some().then(|| Option::<u64>::arbitrary(u)).transpose()?.flatten();
+                deposit_nonce.map(|_| Option::<u64>::arbitrary(u)).transpose()?.flatten();
             (deposit_nonce, deposit_nonce_version)
         } else {
             (None, None)
