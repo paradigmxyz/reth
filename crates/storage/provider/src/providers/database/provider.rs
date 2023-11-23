@@ -5,16 +5,16 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown,
-    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader,
-    StorageReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    WithdrawalsProvider,
+    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, StageCheckpointReader, StorageReader, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::{Database, DatabaseGAT},
+    database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
@@ -24,7 +24,11 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
-use reth_interfaces::provider::{ProviderResult, RootMismatch};
+use reth_interfaces::{
+    p2p::headers::downloader::SyncTarget,
+    provider::{ProviderResult, RootMismatch},
+    RethError, RethResult,
+};
 use reth_primitives::{
     keccak256,
     revm::{
@@ -51,39 +55,37 @@ use std::{
 use tracing::{debug, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
-pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<<DB as DatabaseGAT<'this>>::TX>;
+pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
 
 /// A [`DatabaseProvider`] that holds a read-write database transaction.
 ///
 /// Ideally this would be an alias type. However, there's some weird compiler error (<https://github.com/rust-lang/rust/issues/102211>), that forces us to wrap this in a struct instead.
 /// Once that issue is solved, we can probably revert back to being an alias type.
 #[derive(Debug)]
-pub struct DatabaseProviderRW<'this, DB: Database>(
-    pub DatabaseProvider<<DB as DatabaseGAT<'this>>::TXMut>,
-);
+pub struct DatabaseProviderRW<DB: Database>(pub DatabaseProvider<<DB as Database>::TXMut>);
 
-impl<'this, DB: Database> Deref for DatabaseProviderRW<'this, DB> {
-    type Target = DatabaseProvider<<DB as DatabaseGAT<'this>>::TXMut>;
+impl<DB: Database> Deref for DatabaseProviderRW<DB> {
+    type Target = DatabaseProvider<<DB as Database>::TXMut>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<DB: Database> DerefMut for DatabaseProviderRW<'_, DB> {
+impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<'this, DB: Database> DatabaseProviderRW<'this, DB> {
+impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction
     pub fn commit(self) -> ProviderResult<bool> {
         self.0.commit()
     }
 
     /// Consume `DbTx` or `DbTxMut`.
-    pub fn into_tx(self) -> <DB as DatabaseGAT<'this>>::TXMut {
+    pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
     }
 }
@@ -868,6 +870,57 @@ impl<TX: DbTx> ChangeSetReader for DatabaseProvider<TX> {
     }
 }
 
+impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
+    fn sync_gap(
+        &self,
+        mode: HeaderSyncMode,
+        highest_uninterrupted_block: BlockNumber,
+    ) -> RethResult<HeaderSyncGap> {
+        // Create a cursor over canonical header hashes
+        let mut cursor = self.tx.cursor_read::<tables::CanonicalHeaders>()?;
+        let mut header_cursor = self.tx.cursor_read::<tables::Headers>()?;
+
+        // Get head hash and reposition the cursor
+        let (head_num, head_hash) = cursor
+            .seek_exact(highest_uninterrupted_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(highest_uninterrupted_block.into()))?;
+
+        // Construct head
+        let (_, head) = header_cursor
+            .seek_exact(head_num)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(head_num.into()))?;
+        let local_head = head.seal(head_hash);
+
+        // Look up the next header
+        let next_header = cursor
+            .next()?
+            .map(|(next_num, next_hash)| -> Result<SealedHeader, RethError> {
+                let (_, next) = header_cursor
+                    .seek_exact(next_num)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(next_num.into()))?;
+                Ok(next.seal(next_hash))
+            })
+            .transpose()?;
+
+        // Decide the tip or error out on invalid input.
+        // If the next element found in the cursor is not the "expected" next block per our current
+        // checkpoint, then there is a gap in the database and we should start downloading in
+        // reverse from there. Else, it should use whatever the forkchoice state reports.
+        let target = match next_header {
+            Some(header) if highest_uninterrupted_block + 1 != header.number => {
+                SyncTarget::Gap(header)
+            }
+            None => match mode {
+                HeaderSyncMode::Tip(rx) => SyncTarget::Tip(*rx.borrow()),
+                HeaderSyncMode::Continuous => SyncTarget::TipNum(head_num + 1),
+            },
+            _ => return Err(ProviderError::InconsistentHeaderGap.into()),
+        };
+
+        Ok(HeaderSyncGap { local_head, target })
+    }
+}
+
 impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         if let Some(num) = self.block_number(*block_hash)? {
@@ -1017,6 +1070,10 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+        Ok(None)
+    }
+
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
         Ok(None)
     }
 

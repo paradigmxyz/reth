@@ -49,9 +49,7 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_network::{
-    error::NetworkError, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager,
-};
+use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -61,19 +59,19 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
-    HeaderProvider, ProviderFactory, StageCheckpointReader,
+    HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::{segments::SegmentSet, Pruner};
-use reth_revm::Factory;
+use reth_revm::EvmProcessorFactory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
 use reth_snapshot::HighestSnapshotsTracker;
 use reth_stages::{
     prelude::*,
     stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, HeaderSyncMode,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TotalDifficultyStage, TransactionLookupStage,
     },
 };
 use reth_tasks::TaskExecutor;
@@ -188,6 +186,7 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
 
     /// Additional cli arguments
     #[clap(flatten)]
+    #[clap(next_help_heading = "Extension")]
     pub ext: Ext::Node,
 }
 
@@ -258,6 +257,18 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics());
         info!(target: "reth::cli", "Database opened");
 
+        let mut provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
+
+        // configure snapshotter
+        let snapshotter = reth_snapshot::Snapshotter::new(
+            provider_factory.clone(),
+            data_dir.snapshots_path(),
+            self.chain.snapshot_block_interval,
+        )?;
+
+        provider_factory = provider_factory
+            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
+
         self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
@@ -280,10 +291,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            Arc::clone(&db),
+            provider_factory.clone(),
             Arc::clone(&consensus),
-            Factory::new(self.chain.clone()),
-            Arc::clone(&self.chain),
+            EvmProcessorFactory::new(self.chain.clone()),
         );
         let tree = BlockchainTree::new(
             tree_externals,
@@ -298,18 +308,9 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // fetch the head block from the database
         let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
 
-        // configure snapshotter
-        let snapshotter = reth_snapshot::Snapshotter::new(
-            db.clone(),
-            data_dir.snapshots_path(),
-            self.chain.clone(),
-            self.chain.snapshot_block_interval,
-        )?;
-
         // setup the blockchain provider
-        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain))
-            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
-        let blockchain_db = BlockchainProvider::new(factory, blockchain_tree.clone())?;
+        let blockchain_db =
+            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(head.timestamp)
@@ -353,25 +354,34 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             secret_key,
             default_peers_path.clone(),
         );
-        let network = self
-            .start_network(
-                network_config,
-                &ctx.task_executor,
-                transaction_pool.clone(),
-                default_peers_path,
-            )
-            .await?;
-        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
-        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
-        let network_client = network.fetch_client().await?;
+
+        let network_client = network_config.client.clone();
+        let mut network_builder = NetworkManager::builder(network_config).await?;
 
         let components = RethNodeComponentsImpl {
             provider: blockchain_db.clone(),
             pool: transaction_pool.clone(),
-            network: network.clone(),
+            network: network_builder.handle(),
             task_executor: ctx.task_executor.clone(),
             events: blockchain_db.clone(),
         };
+
+        // allow network modifications
+        self.ext.configure_network(network_builder.network_mut(), &components)?;
+
+        // launch network
+        let network = self.start_network(
+            network_builder,
+            &ctx.task_executor,
+            transaction_pool.clone(),
+            network_client,
+            default_peers_path,
+        );
+
+        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
+        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
+        let network_client = network.fetch_client().await?;
+
         self.ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
@@ -417,7 +427,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     &config,
                     client.clone(),
                     Arc::clone(&consensus),
-                    db.clone(),
+                    provider_factory,
                     &ctx.task_executor,
                     sync_metrics_tx,
                     prune_config.clone(),
@@ -437,7 +447,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     &config,
                     network_client.clone(),
                     Arc::clone(&consensus),
-                    db.clone(),
+                    provider_factory,
                     &ctx.task_executor,
                     sync_metrics_tx,
                     prune_config.clone(),
@@ -515,7 +525,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         );
         ctx.task_executor.spawn_critical(
             "events task",
-            events::handle_events(Some(network.clone()), Some(head.number), events),
+            events::handle_events(Some(network.clone()), Some(head.number), events, db.clone()),
         );
 
         let engine_api = EngineApi::new(
@@ -601,7 +611,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         config: &Config,
         client: Client,
         consensus: Arc<dyn Consensus>,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
@@ -617,12 +627,12 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), db.clone())
+            .build(client, Arc::clone(&consensus), provider_factory.clone())
             .into_task_with(task_executor);
 
         let pipeline = self
             .build_pipeline(
-                db,
+                provider_factory,
                 config,
                 header_downloader,
                 body_downloader,
@@ -691,33 +701,30 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
     /// to that network.
-    async fn start_network<C, Pool>(
+    fn start_network<C, Pool>(
         &self,
-        config: NetworkConfig<C>,
+        builder: NetworkBuilder<C, (), ()>,
         task_executor: &TaskExecutor,
         pool: Pool,
+        client: C,
         default_peers_path: PathBuf,
-    ) -> Result<NetworkHandle, NetworkError>
+    ) -> NetworkHandle
     where
         C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Unpin + 'static,
     {
-        let client = config.client.clone();
-        let (handle, network, txpool, eth) = NetworkManager::builder(config)
-            .await?
-            .transactions(pool)
-            .request_handler(client)
-            .split_with_handle();
+        let (handle, network, txpool, eth) =
+            builder.transactions(pool).request_handler(client).split_with_handle();
 
         task_executor.spawn_critical("p2p txpool", txpool);
         task_executor.spawn_critical("p2p eth request handler", eth);
 
         let known_peers_file = self.network.persistent_peers_file(default_peers_path);
-        task_executor.spawn_critical_with_signal("p2p network task", |shutdown| {
+        task_executor.spawn_critical_with_shutdown_signal("p2p network task", |shutdown| {
             run_network_until_shutdown(shutdown, network, known_peers_file)
         });
 
-        Ok(handle)
+        handle
     }
 
     /// Fetches the head block from the database.
@@ -844,7 +851,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     #[allow(clippy::too_many_arguments)]
     async fn build_pipeline<DB, H, B>(
         &self,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         config: &Config,
         header_downloader: H,
         body_downloader: B,
@@ -870,7 +877,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         use reth_revm_inspectors::stack::InspectorStackConfig;
-        let factory = reth_revm::Factory::new(self.chain.clone());
+        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {
             use_printer_tracer: self.debug.print_inspector,
@@ -896,6 +903,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             .with_metrics_tx(metrics_tx.clone())
             .add_stages(
                 DefaultStages::new(
+                    provider_factory.clone(),
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,
@@ -948,7 +956,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     prune_modes.storage_history,
                 )),
             )
-            .build(db, self.chain.clone());
+            .build(provider_factory);
 
         Ok(pipeline)
     }

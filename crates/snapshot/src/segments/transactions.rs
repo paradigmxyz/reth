@@ -34,7 +34,7 @@ impl Segment for Transactions {
 
     fn snapshot<DB: Database>(
         &self,
-        provider: &DatabaseProviderRO<'_, DB>,
+        provider: &DatabaseProviderRO<DB>,
         directory: impl AsRef<Path>,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {

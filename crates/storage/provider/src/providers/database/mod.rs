@@ -5,8 +5,9 @@ use crate::{
     },
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
@@ -14,9 +15,9 @@ use reth_primitives::{
     snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
-    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedHeader,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
-    B256, U256,
+    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
@@ -49,7 +50,7 @@ impl<DB: Database> ProviderFactory<DB> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
-    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<'_, DB>> {
+    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         let mut provider = DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone());
 
         if let Some(snapshot_provider) = &self.snapshot_provider {
@@ -63,7 +64,7 @@ impl<DB: Database> ProviderFactory<DB> {
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
-    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<'_, DB>> {
+    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
         let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
 
         if let Some(snapshot_provider) = &self.snapshot_provider {
@@ -122,7 +123,7 @@ impl<DB: Clone> Clone for ProviderFactory<DB> {
 
 impl<DB: Database> ProviderFactory<DB> {
     /// Storage provider for latest block
-    pub fn latest(&self) -> ProviderResult<StateProviderBox<'_>> {
+    pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
         Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
     }
@@ -131,7 +132,7 @@ impl<DB: Database> ProviderFactory<DB> {
     fn state_provider_by_block_number(
         &self,
         mut block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox<'_>> {
+    ) -> ProviderResult<StateProviderBox> {
         let provider = self.provider()?;
 
         if block_number == provider.best_block_number().unwrap_or_default() &&
@@ -174,17 +175,14 @@ impl<DB: Database> ProviderFactory<DB> {
     pub fn history_by_block_number(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox<'_>> {
+    ) -> ProviderResult<StateProviderBox> {
         let state_provider = self.state_provider_by_block_number(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(state_provider)
     }
 
     /// Storage provider for state at that given block hash
-    pub fn history_by_block_hash(
-        &self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<StateProviderBox<'_>> {
+    pub fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         let block_number = self
             .provider()?
             .block_number(block_hash)?
@@ -193,6 +191,16 @@ impl<DB: Database> ProviderFactory<DB> {
         let state_provider = self.state_provider_by_block_number(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block hash");
         Ok(state_provider)
+    }
+}
+
+impl<DB: Database> HeaderSyncGapProvider for ProviderFactory<DB> {
+    fn sync_gap(
+        &self,
+        mode: HeaderSyncMode,
+        highest_uninterrupted_block: BlockNumber,
+    ) -> RethResult<HeaderSyncGap> {
+        self.provider()?.sync_gap(mode, highest_uninterrupted_block)
     }
 }
 
@@ -280,6 +288,10 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
         self.provider()?.pending_block()
+    }
+
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        self.provider()?.pending_block_with_senders()
     }
 
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
@@ -477,33 +489,37 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 #[cfg(test)]
 mod tests {
     use super::ProviderFactory;
-    use crate::{BlockHashReader, BlockNumReader, BlockWriter, TransactionsProvider};
+    use crate::{
+        test_utils::create_test_provider_factory, BlockHashReader, BlockNumReader, BlockWriter,
+        HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+    };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use reth_db::{
-        tables,
-        test_utils::{create_test_rw_db, ERROR_TEMPDIR},
-        DatabaseEnv,
+    use rand::Rng;
+    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut, DatabaseEnv};
+    use reth_interfaces::{
+        provider::ProviderError,
+        test_utils::{
+            generators,
+            generators::{random_block, random_header},
+        },
+        RethError,
     };
-    use reth_interfaces::test_utils::{generators, generators::random_block};
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
     };
     use std::{ops::RangeInclusive, sync::Arc};
+    use tokio::sync::watch;
 
     #[test]
     fn common_history_provider() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let provider = ProviderFactory::new(db, Arc::new(chain_spec));
-        let _ = provider.latest();
+        let factory = create_test_provider_factory();
+        let _ = factory.latest();
     }
 
     #[test]
     fn default_chain_info() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let factory = create_test_provider_factory();
         let provider = factory.provider().unwrap();
 
         let chain_info = provider.chain_info().expect("should be ok");
@@ -513,9 +529,7 @@ mod tests {
 
     #[test]
     fn provider_flow() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let factory = create_test_provider_factory();
         let provider = factory.provider().unwrap();
         provider.block_hash(0).unwrap();
         let provider_rw = factory.provider_rw().unwrap();
@@ -542,9 +556,7 @@ mod tests {
 
     #[test]
     fn insert_block_with_prune_modes() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let factory = create_test_provider_factory();
 
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
@@ -580,9 +592,7 @@ mod tests {
 
     #[test]
     fn get_take_block_transaction_range_recover_senders() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let factory = create_test_provider_factory();
 
         let mut rng = generators::rng();
         let block = random_block(&mut rng, 0, None, Some(3), None);
@@ -617,5 +627,72 @@ mod tests {
                 )])
             )
         }
+    }
+
+    #[test]
+    fn header_sync_gap_lookup() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+
+        let mut rng = generators::rng();
+        let consensus_tip = rng.gen();
+        let (_tip_tx, tip_rx) = watch::channel(consensus_tip);
+        let mode = HeaderSyncMode::Tip(tip_rx);
+
+        // Genesis
+        let checkpoint = 0;
+        let head = random_header(&mut rng, 0, None);
+        let gap_fill = random_header(&mut rng, 1, Some(head.hash()));
+        let gap_tip = random_header(&mut rng, 2, Some(gap_fill.hash()));
+
+        // Empty database
+        assert_matches!(
+            provider.sync_gap(mode.clone(), checkpoint),
+            Err(RethError::Provider(ProviderError::HeaderNotFound(block_number)))
+                if block_number.as_number().unwrap() == checkpoint
+        );
+
+        // Checkpoint and no gap
+        provider
+            .tx_ref()
+            .put::<tables::CanonicalHeaders>(head.number, head.hash())
+            .expect("failed to write canonical");
+        provider
+            .tx_ref()
+            .put::<tables::Headers>(head.number, head.clone().unseal())
+            .expect("failed to write header");
+
+        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
+        assert_eq!(gap.local_head, head);
+        assert_eq!(gap.target.tip(), consensus_tip.into());
+
+        // Checkpoint and gap
+        provider
+            .tx_ref()
+            .put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
+            .expect("failed to write canonical");
+        provider
+            .tx_ref()
+            .put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
+            .expect("failed to write header");
+
+        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
+        assert_eq!(gap.local_head, head);
+        assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
+
+        // Checkpoint and gap closed
+        provider
+            .tx_ref()
+            .put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
+            .expect("failed to write canonical");
+        provider
+            .tx_ref()
+            .put::<tables::Headers>(gap_fill.number, gap_fill.clone().unseal())
+            .expect("failed to write header");
+
+        assert_matches!(
+            provider.sync_gap(mode, checkpoint),
+            Err(RethError::Provider(ProviderError::InconsistentHeaderGap))
+        );
     }
 }

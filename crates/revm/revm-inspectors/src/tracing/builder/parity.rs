@@ -4,7 +4,7 @@ use crate::tracing::{
     utils::load_account_code,
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, U64};
+use alloy_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
@@ -453,9 +453,11 @@ impl ParityTraceBuilder {
                 }
             };
             let mut push_stack = step.push_stack.clone().unwrap_or_default();
-            for idx in (0..show_stack).rev() {
-                if step.stack.len() > idx {
-                    push_stack.push(step.stack.peek(idx).unwrap_or_default())
+            if let Some(stack) = step.stack.as_ref() {
+                for idx in (0..show_stack).rev() {
+                    if stack.len() > idx {
+                        push_stack.push(stack[stack.len() - idx - 1])
+                    }
                 }
             }
             push_stack
@@ -487,10 +489,6 @@ impl ParityTraceBuilder {
 }
 
 /// An iterator for [TransactionTrace]s
-///
-/// This iterator handles additional selfdestruct actions based on the last emitted
-/// [TransactionTrace], since selfdestructs are not recorded as individual call traces but are
-/// derived from recorded call
 struct TransactionTraceIter<Iter> {
     iter: Iter,
     next_selfdestruct: Option<TransactionTrace>,

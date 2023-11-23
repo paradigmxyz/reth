@@ -1,7 +1,7 @@
 //! Module that interacts with MDBX.
 
 use crate::{
-    database::{Database, DatabaseGAT},
+    database::Database,
     tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
@@ -40,20 +40,18 @@ pub struct DatabaseEnv {
     with_metrics: bool,
 }
 
-impl<'a> DatabaseGAT<'a> for DatabaseEnv {
+impl Database for DatabaseEnv {
     type TX = tx::Tx<RO>;
     type TXMut = tx::Tx<RW>;
-}
 
-impl Database for DatabaseEnv {
-    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, DatabaseError> {
+    fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.with_metrics,
         ))
     }
 
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, DatabaseError> {
+    fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.with_metrics,

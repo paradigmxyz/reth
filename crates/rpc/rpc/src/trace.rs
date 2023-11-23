@@ -68,7 +68,7 @@ where
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
         let at = trace_request.block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let config = tracing_config(&trace_request.trace_types);
+        let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
         let mut inspector = TracingInspector::new(config);
@@ -103,7 +103,7 @@ where
         let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
         let env = Env { cfg, block, tx };
 
-        let config = tracing_config(&trace_types);
+        let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
         self.inner
             .eth_api
@@ -148,7 +148,7 @@ where
                         &mut db,
                         Default::default(),
                     )?;
-                    let config = tracing_config(&trace_types);
+                    let config = TracingInspectorConfig::from_parity_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = inspect(&mut db, env, &mut inspector)?;
 
@@ -180,7 +180,7 @@ where
         hash: B256,
         trace_types: HashSet<TraceType>,
     ) -> EthResult<TraceResults> {
-        let config = tracing_config(&trace_types);
+        let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.inner
             .eth_api
             .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
@@ -403,7 +403,7 @@ where
             .eth_api
             .trace_block_with(
                 block_id,
-                tracing_config(&trace_types),
+                TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, inspector, res, state, db| {
                     let mut full_trace =
                         inspector.into_parity_builder().into_trace_results(&res, &trace_types);
@@ -549,18 +549,6 @@ struct TraceApiInner<Provider, Eth> {
     blocking_task_guard: BlockingTaskGuard,
 }
 
-/// Returns the [TracingInspectorConfig] depending on the enabled [TraceType]s
-///
-/// Note: the parity statediffs can be populated entirely via the execution result, so we don't need
-/// statediff recording
-#[inline]
-fn tracing_config(trace_types: &HashSet<TraceType>) -> TracingInspectorConfig {
-    let needs_vm_trace = trace_types.contains(&TraceType::VmTrace);
-    TracingInspectorConfig::default_parity()
-        .set_steps(needs_vm_trace)
-        .set_memory_snapshots(needs_vm_trace)
-}
-
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
 /// beneficiary.
 fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransactionTrace {
@@ -576,34 +564,5 @@ fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransac
             error: None,
             result: None,
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parity_config() {
-        let mut s = HashSet::new();
-        s.insert(TraceType::StateDiff);
-        let config = tracing_config(&s);
-        // not required
-        assert!(!config.record_steps);
-        assert!(!config.record_state_diff);
-
-        let mut s = HashSet::new();
-        s.insert(TraceType::VmTrace);
-        let config = tracing_config(&s);
-        assert!(config.record_steps);
-        assert!(!config.record_state_diff);
-
-        let mut s = HashSet::new();
-        s.insert(TraceType::VmTrace);
-        s.insert(TraceType::StateDiff);
-        let config = tracing_config(&s);
-        assert!(config.record_steps);
-        // not required for StateDiff
-        assert!(!config.record_state_diff);
     }
 }

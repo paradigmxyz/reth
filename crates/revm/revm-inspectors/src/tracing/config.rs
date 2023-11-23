@@ -1,4 +1,5 @@
-use reth_rpc_types::trace::geth::GethDefaultTracingOptions;
+use reth_rpc_types::trace::{geth::GethDefaultTracingOptions, parity::TraceType};
+use std::collections::HashSet;
 
 /// What kind of tracing style this is.
 ///
@@ -85,7 +86,21 @@ impl TracingInspectorConfig {
         }
     }
 
+    /// Returns the [TracingInspectorConfig] depending on the enabled [TraceType]s
+    ///
+    /// Note: the parity statediffs can be populated entirely via the execution result, so we don't
+    /// need statediff recording
+    #[inline]
+    pub fn from_parity_config(trace_types: &HashSet<TraceType>) -> Self {
+        let needs_vm_trace = trace_types.contains(&TraceType::VmTrace);
+        TracingInspectorConfig::default_parity()
+            .set_steps(needs_vm_trace)
+            .set_stack_snapshots(needs_vm_trace)
+            .set_memory_snapshots(needs_vm_trace)
+    }
+
     /// Returns a config for geth style traces based on the given [GethDefaultTracingOptions].
+    #[inline]
     pub fn from_geth_config(config: &GethDefaultTracingOptions) -> Self {
         Self {
             record_memory_snapshots: config.enable_memory.unwrap_or_default(),
@@ -146,5 +161,34 @@ impl TracingInspectorConfig {
     pub fn set_record_logs(mut self, record_logs: bool) -> Self {
         self.record_logs = record_logs;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parity_config() {
+        let mut s = HashSet::new();
+        s.insert(TraceType::StateDiff);
+        let config = TracingInspectorConfig::from_parity_config(&s);
+        // not required
+        assert!(!config.record_steps);
+        assert!(!config.record_state_diff);
+
+        let mut s = HashSet::new();
+        s.insert(TraceType::VmTrace);
+        let config = TracingInspectorConfig::from_parity_config(&s);
+        assert!(config.record_steps);
+        assert!(!config.record_state_diff);
+
+        let mut s = HashSet::new();
+        s.insert(TraceType::VmTrace);
+        s.insert(TraceType::StateDiff);
+        let config = TracingInspectorConfig::from_parity_config(&s);
+        assert!(config.record_steps);
+        // not required for StateDiff
+        assert!(!config.record_state_diff);
     }
 }

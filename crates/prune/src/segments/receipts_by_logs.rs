@@ -32,7 +32,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
@@ -216,12 +216,12 @@ mod tests {
     };
     use reth_primitives::{PruneMode, PruneSegment, ReceiptsLogPruneConfig, B256};
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
-    use reth_stages::test_utils::TestTransaction;
+    use reth_stages::test_utils::TestStageDB;
     use std::collections::BTreeMap;
 
     #[test]
     fn prune_receipts_by_logs() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let mut rng = generators::rng();
 
         let tip = 20000;
@@ -231,7 +231,7 @@ mod tests {
             random_block_range(&mut rng, (tip - 100 + 1)..=tip, B256::ZERO, 1..5),
         ]
         .concat();
-        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut receipts = Vec::new();
 
@@ -247,19 +247,19 @@ mod tests {
                 receipts.push((receipts.len() as u64, receipt));
             }
         }
-        tx.insert_receipts(receipts).expect("insert receipts");
+        db.insert_receipts(receipts).expect("insert receipts");
 
         assert_eq!(
-            tx.table::<tables::Transactions>().unwrap().len(),
+            db.table::<tables::Transactions>().unwrap().len(),
             blocks.iter().map(|block| block.body.len()).sum::<usize>()
         );
         assert_eq!(
-            tx.table::<tables::Transactions>().unwrap().len(),
-            tx.table::<tables::Receipts>().unwrap().len()
+            db.table::<tables::Transactions>().unwrap().len(),
+            db.table::<tables::Receipts>().unwrap().len()
         );
 
         let run_prune = || {
-            let provider = tx.inner_rw();
+            let provider = db.factory.provider_rw().unwrap();
 
             let prune_before_block: usize = 20;
             let prune_mode = PruneMode::Before(prune_before_block as u64);
@@ -269,8 +269,10 @@ mod tests {
             let result = ReceiptsByLogs::new(receipts_log_filter).prune(
                 &provider,
                 PruneInput {
-                    previous_checkpoint: tx
-                        .inner()
+                    previous_checkpoint: db
+                        .factory
+                        .provider()
+                        .unwrap()
                         .get_prune_checkpoint(PruneSegment::ContractLogs)
                         .unwrap(),
                     to_block: tip,
@@ -282,8 +284,10 @@ mod tests {
             assert_matches!(result, Ok(_));
             let output = result.unwrap();
 
-            let (pruned_block, pruned_tx) = tx
-                .inner()
+            let (pruned_block, pruned_tx) = db
+                .factory
+                .provider()
+                .unwrap()
                 .get_prune_checkpoint(PruneSegment::ContractLogs)
                 .unwrap()
                 .map(|checkpoint| (checkpoint.block_number.unwrap(), checkpoint.tx_number.unwrap()))
@@ -293,7 +297,7 @@ mod tests {
             let unprunable = pruned_block.saturating_sub(prune_before_block as u64 - 1);
 
             assert_eq!(
-                tx.table::<tables::Receipts>().unwrap().len(),
+                db.table::<tables::Receipts>().unwrap().len(),
                 blocks.iter().map(|block| block.body.len()).sum::<usize>() -
                     ((pruned_tx + 1) - unprunable) as usize
             );
@@ -303,7 +307,7 @@ mod tests {
 
         while !run_prune() {}
 
-        let provider = tx.inner();
+        let provider = db.factory.provider().unwrap();
         let mut cursor = provider.tx_ref().cursor_read::<tables::Receipts>().unwrap();
         let walker = cursor.walk(None).unwrap();
         for receipt in walker {

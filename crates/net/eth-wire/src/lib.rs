@@ -20,12 +20,16 @@ mod disconnect;
 pub mod errors;
 mod ethstream;
 mod hello;
+pub mod multiplex;
 mod p2pstream;
 mod pinger;
 pub mod protocol;
 pub use builder::*;
 pub mod types;
 pub use types::*;
+
+#[cfg(test)]
+pub mod test_utils;
 
 #[cfg(test)]
 pub use tokio_util::codec::{

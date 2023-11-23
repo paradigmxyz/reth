@@ -16,7 +16,7 @@ use reth_primitives::{Account, Address, SealedBlock, B256, MAINNET};
 use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
-    test_utils::TestTransaction,
+    test_utils::TestStageDB,
     ExecInput, Stage, UnwindInput,
 };
 use reth_trie::StateRoot;
@@ -34,24 +34,23 @@ pub(crate) type StageRange = (ExecInput, UnwindInput);
 
 pub(crate) fn stage_unwind<S: Clone + Stage<DatabaseEnv>>(
     stage: S,
-    tx: &TestTransaction,
+    db: &TestStageDB,
     range: StageRange,
 ) {
     let (_, unwind) = range;
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut stage = stage.clone();
-        let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
+        let factory = ProviderFactory::new(db.factory.db(), MAINNET.clone());
         let provider = factory.provider_rw().unwrap();
 
         // Clear previous run
         stage
             .unwind(&provider, unwind)
-            .await
             .map_err(|e| {
                 format!(
                     "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
-                    tx.path.as_ref().unwrap().display()
+                    db.path.as_ref().unwrap().display()
                 )
             })
             .unwrap();
@@ -62,27 +61,25 @@ pub(crate) fn stage_unwind<S: Clone + Stage<DatabaseEnv>>(
 
 pub(crate) fn unwind_hashes<S: Clone + Stage<DatabaseEnv>>(
     stage: S,
-    tx: &TestTransaction,
+    db: &TestStageDB,
     range: StageRange,
 ) {
     let (input, unwind) = range;
 
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let mut stage = stage.clone();
-        let factory = ProviderFactory::new(tx.tx.db(), MAINNET.clone());
-        let provider = factory.provider_rw().unwrap();
+    let mut stage = stage.clone();
+    let factory = ProviderFactory::new(db.factory.db(), MAINNET.clone());
+    let provider = factory.provider_rw().unwrap();
 
-        StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
-        AccountHashingStage::default().unwind(&provider, unwind).await.unwrap();
+    StorageHashingStage::default().unwind(&provider, unwind).unwrap();
+    AccountHashingStage::default().unwind(&provider, unwind).unwrap();
 
-        // Clear previous run
-        stage.unwind(&provider, unwind).await.unwrap();
+    // Clear previous run
+    stage.unwind(&provider, unwind).unwrap();
 
-        AccountHashingStage::default().execute(&provider, input).await.unwrap();
-        StorageHashingStage::default().execute(&provider, input).await.unwrap();
+    AccountHashingStage::default().execute(&provider, input).unwrap();
+    StorageHashingStage::default().execute(&provider, input).unwrap();
 
-        provider.commit().unwrap();
-    });
+    provider.commit().unwrap();
 }
 
 // Helper for generating testdata for the benchmarks.
@@ -108,7 +105,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         // create the dirs
         std::fs::create_dir_all(&path).unwrap();
         println!("Transactions testdata not found, generating to {:?}", path.display());
-        let tx = TestTransaction::new(&path);
+        let tx = TestStageDB::new(&path);
 
         let accounts: BTreeMap<Address, Account> = concat([
             random_eoa_account_range(&mut rng, 0..n_eoa),
@@ -130,7 +127,8 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         tx.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let (root, updates) = StateRoot::new(tx.inner_rw().tx_ref()).root_with_updates().unwrap();
+        let (root, updates) =
+            StateRoot::new(tx.provider_rw().tx_ref()).root_with_updates().unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
@@ -156,7 +154,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         // make last block have valid state root
         let root = {
-            let tx_mut = tx.inner_rw();
+            let tx_mut = tx.provider_rw();
             let root = StateRoot::new(tx_mut.tx_ref()).root().unwrap();
             tx_mut.commit().unwrap();
             root
