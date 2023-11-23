@@ -10,8 +10,9 @@ use crate::tracing::{
     types::CallKind,
     utils::get_create_address,
 };
+use alloy_primitives::{Address, Bytes, B256, U256};
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::{Account, Address, Bytes, B256, U256};
+use reth_primitives::Account;
 use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,

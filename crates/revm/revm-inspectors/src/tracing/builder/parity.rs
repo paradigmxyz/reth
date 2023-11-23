@@ -4,7 +4,7 @@ use crate::tracing::{
     utils::load_account_code,
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, U64};
+use alloy_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,

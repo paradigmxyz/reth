@@ -2,8 +2,8 @@ use crate::tracing::{
     types::{CallKind, LogCallOrder, RawLog},
     utils::get_create_address,
 };
+use alloy_primitives::{Address, Bytes, B256, U256};
 pub use arena::CallTraceArena;
-use reth_primitives::{Address, Bytes, B256, U256};
 use revm::{
     inspectors::GasInspector,
     interpreter::{
