@@ -8,8 +8,8 @@ use proptest::{
 };
 use reth_primitives::{hex_literal::hex, Address};
 use reth_transaction_pool::{
-    pool::{BasefeeOrd, ParkedPool},
-    test_utils::{MockTransaction, MockTransactionFactory},
+    pool::{BasefeeOrd, ParkedPool, PendingPool},
+    test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
     SubPoolLimit,
 };
 
@@ -100,9 +100,13 @@ fn txpool_truncate(c: &mut Criterion) {
             println!("Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}...");
             let txs = generate_many_transactions(senders, max_depth);
 
-            truncate_parked(&mut group, "ParkedPool", txs, senders, max_depth);
+            // benchmark parked pool
+            truncate_parked(&mut group, "ParkedPool", txs.clone(), senders, max_depth);
 
-            // TODO: pending, blob truncate methods
+            // benchmark pending pool
+            truncate_pending(&mut group, "PendingPool", txs, senders, max_depth);
+
+            // TODO: benchmark blob truncate
         }
     }
 
@@ -113,7 +117,47 @@ fn txpool_truncate(c: &mut Criterion) {
     // we hit the TXPOOL_SUBPOOL_MAX_TXS_DEFAULT limit, which is currently 10k
     println!("Generating transactions for large benchmark with {large_senders} unique senders and a max depth of {max_depth}...");
     let txs = generate_many_transactions(large_senders, max_depth);
-    truncate_parked(&mut group, "ParkedPool", txs, large_senders, max_depth);
+
+    // benchmark parked
+    truncate_parked(&mut group, "ParkedPool", txs.clone(), large_senders, max_depth);
+
+    // benchmark pending
+    truncate_pending(&mut group, "PendingPool", txs, large_senders, max_depth);
+}
+
+fn truncate_pending(
+    group: &mut BenchmarkGroup<WallTime>,
+    description: &str,
+    seed: Vec<MockTransaction>,
+    senders: usize,
+    max_depth: usize,
+) {
+    let setup = || {
+        let mut txpool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        for tx in seed.iter() {
+            // add transactions with a basefee of zero, so they are not immediately removed
+            txpool.add_transaction(f.validated_arc(tx.clone()), 0);
+        }
+        txpool
+    };
+
+    let group_id = format!(
+        "txpool | total txs: {} | total senders: {} | max depth: {} | {}",
+        seed.len(),
+        senders,
+        max_depth,
+        description,
+    );
+
+    // for now we just use the default SubPoolLimit
+    group.bench_function(group_id, |b| {
+        b.iter_with_setup(setup, |mut txpool| {
+            txpool.truncate_pool(SubPoolLimit::default());
+            std::hint::black_box(());
+        });
+    });
 }
 
 fn truncate_parked(

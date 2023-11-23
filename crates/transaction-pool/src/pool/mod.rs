@@ -108,6 +108,7 @@ use crate::{
 use alloy_rlp::Encodable;
 pub use listener::{AllTransactionsEvents, TransactionEvents};
 pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool};
+pub use pending::PendingPool;
 
 mod best;
 mod blob;

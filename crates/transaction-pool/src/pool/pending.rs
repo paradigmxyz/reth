@@ -22,8 +22,9 @@ use tokio::sync::broadcast;
 ///
 /// Once an `independent` transaction was executed it *unlocks* the next nonce, if this transaction
 /// is also pending, then this will be moved to the `independent` queue.
+#[allow(missing_debug_implementations)]
 #[derive(Clone)]
-pub(crate) struct PendingPool<T: TransactionOrdering> {
+pub struct PendingPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: T,
     /// Keeps track of transactions inserted in the pool.
@@ -57,7 +58,7 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> PendingPool<T> {
     /// Create a new pool instance.
-    pub(crate) fn new(ordering: T) -> Self {
+    pub fn new(ordering: T) -> Self {
         let (new_transaction_notifier, _) = broadcast::channel(200);
         Self {
             ordering,
@@ -280,7 +281,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Panics
     ///
     /// if the transaction is already included
-    pub(crate) fn add_transaction(
+    pub fn add_transaction(
         &mut self,
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
         base_fee: u64,
@@ -442,7 +443,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Removes transactions from the pending pool
     /// The algorithm tries to reduce transaction counts by an approximately
     /// equal number for all for accounts with many pending transactions.
-    pub(crate) fn truncate_pool(
+    pub fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
