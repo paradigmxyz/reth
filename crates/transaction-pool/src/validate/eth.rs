@@ -486,6 +486,8 @@ pub struct EthTransactionValidatorBuilder {
 
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: Arc<KzgSettings>,
+    /// Flag to enforce no local transaction exemptions
+    no_locals: bool,
 }
 
 impl EthTransactionValidatorBuilder {
@@ -513,12 +515,18 @@ impl EthTransactionValidatorBuilder {
 
             // TODO: can hard enable by default once mainnet transitioned
             cancun,
+            no_locals: false,
         }
     }
 
     /// Disables the Cancun fork.
     pub fn no_cancun(self) -> Self {
         self.set_cancun(false)
+    }
+    /// Set tge no locals transactions.
+    pub fn set_no_locals(mut self, no_locals: bool) -> Self {
+        self.no_locals = no_locals;
+        self
     }
 
     /// Set the Cancun fork.
