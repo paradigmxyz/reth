@@ -103,7 +103,7 @@ impl<K: TransactionKind> Tx<K> {
     ) -> R {
         if let Some(mut metrics_handler) = self.metrics_handler.take() {
             metrics_handler.close_recorded = true;
-            metrics_handler.check_open_duration();
+            metrics_handler.log_backtrace_on_long_transaction();
 
             let start = Instant::now();
             let result = f(self);
@@ -134,7 +134,7 @@ impl<K: TransactionKind> Tx<K> {
         f: impl FnOnce(&Transaction<K>) -> R,
     ) -> R {
         if let Some(metrics_handler) = &self.metrics_handler {
-            metrics_handler.check_open_duration();
+            metrics_handler.log_backtrace_on_long_transaction();
             OperationMetrics::record(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
@@ -152,7 +152,7 @@ struct MetricsHandler<K: TransactionKind> {
     /// to do anything on [Drop::drop].
     close_recorded: bool,
     /// If `true`, the backtrace of transaction has already been recorded and logged.
-    /// See [MetricsHandler::check_open_duration].
+    /// See [MetricsHandler::log_backtrace_on_long_transaction].
     backtrace_recorded: AtomicBool,
     _marker: PhantomData<K>,
 }
@@ -182,7 +182,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
     ///
     /// NOTE: Backtrace is recorded using [Backtrace::force_capture], so `RUST_BACKTRACE` env var is
     /// not needed.
-    fn check_open_duration(&self) {
+    fn log_backtrace_on_long_transaction(&self) {
         if self.backtrace_recorded.load(Ordering::Relaxed) {
             return
         }
@@ -205,7 +205,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
 impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
         if !self.close_recorded {
-            self.check_open_duration();
+            self.log_backtrace_on_long_transaction();
 
             TransactionMetrics::record_close(
                 self.transaction_mode(),
