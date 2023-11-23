@@ -1048,6 +1048,7 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn canyon_activated(mut self) -> Self {
         self = self.regolith_activated();
+        // Canyon also activates changes from L1's Shanghai hardfork
         self.hardforks.insert(Hardfork::Shanghai, ForkCondition::Timestamp(0));
         self.hardforks.insert(Hardfork::Canyon, ForkCondition::Timestamp(0));
         self
@@ -1987,7 +1988,6 @@ Post-merge hard forks (timestamp based):
 
     #[cfg(feature = "optimism")]
     #[test]
-    #[ignore]
     fn optimism_goerli_forkids() {
         test_fork_ids(
             &OP_GOERLI,
@@ -1998,19 +1998,19 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 4061224, timestamp: 1679079599, ..Default::default() },
-                    ForkId { hash: ForkHash([0x03, 0x47, 0x85, 0x69]), next: 1679079600 },
+                    ForkId { hash: ForkHash([0x03, 0x47, 0x85, 0x69]), next: 1699981200 },
                 ),
                 (
                     Head { number: 4061225, timestamp: 1679079600, ..Default::default() },
-                    ForkId { hash: ForkHash([0x6d, 0x43, 0x1d, 0x6c]), next: 1699981200 },
+                    ForkId { hash: ForkHash([0x03, 0x47, 0x85, 0x69]), next: 1699981200 },
                 ),
                 (
                     Head { number: 4061226, timestamp: 1699981199, ..Default::default() },
-                    ForkId { hash: ForkHash([0x6d, 0x43, 0x1d, 0x6c]), next: 1699981200 },
+                    ForkId { hash: ForkHash([0x03, 0x47, 0x85, 0x69]), next: 1699981200 },
                 ),
                 (
                     Head { number: 4061227, timestamp: 1699981200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x7f, 0x4a, 0x72, 0x1f]), next: 0 },
+                    ForkId { hash: ForkHash([0xb9, 0xe8, 0xc3, 0x20]), next: 0 },
                 ),
             ],
         );
@@ -2018,30 +2018,29 @@ Post-merge hard forks (timestamp based):
 
     #[cfg(feature = "optimism")]
     #[test]
-    #[ignore]
     fn base_goerli_forkids() {
         test_fork_ids(
             &BASE_GOERLI,
             &[
                 (
                     Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0xd4, 0x0c, 0x23, 0x50]), next: 1683219600 },
+                    ForkId { hash: ForkHash([0xd4, 0x0c, 0x23, 0x50]), next: 1699981200 },
                 ),
                 (
                     Head { number: 1, timestamp: 1683219599, ..Default::default() },
-                    ForkId { hash: ForkHash([0xd4, 0x0c, 0x23, 0x50]), next: 1683219600 },
+                    ForkId { hash: ForkHash([0xd4, 0x0c, 0x23, 0x50]), next: 1699981200 },
                 ),
                 (
                     Head { number: 2, timestamp: 1683219600, ..Default::default() },
-                    ForkId { hash: ForkHash([0xd5, 0x45, 0x43, 0x5d]), next: 1699981200 },
+                    ForkId { hash: ForkHash([0xd4, 0x0c, 0x23, 0x50]), next: 1699981200 },
                 ),
                 (
                     Head { number: 3, timestamp: 1699981199, ..Default::default() },
-                    ForkId { hash: ForkHash([0xd5, 0x45, 0x43, 0x5d]), next: 1699981200 },
+                    ForkId { hash: ForkHash([0xd4, 0x0c, 0x23, 0x50]), next: 1699981200 },
                 ),
                 (
                     Head { number: 4, timestamp: 1699981200, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb3, 0x29, 0x13, 0xde]), next: 0 },
+                    ForkId { hash: ForkHash([0xff, 0x48, 0x53, 0x14]), next: 0 },
                 ),
             ],
         );
