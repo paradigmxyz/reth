@@ -12,13 +12,12 @@ use crate::tracing::{
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::Account;
 use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
     },
     precompile::Precompiles,
-    primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo},
+    primitives::{AccountInfo, Env, ExecutionResult, Output, ResultAndState, TransactTo},
     Database, EVMData, Inspector,
 };
 use tokio::sync::mpsc;
@@ -484,7 +483,7 @@ pub enum JsDbRequest {
         /// The address of the account to be loaded
         address: Address,
         /// The response channel
-        resp: std::sync::mpsc::Sender<Result<Option<Account>, String>>,
+        resp: std::sync::mpsc::Sender<Result<Option<AccountInfo>, String>>,
     },
     /// Bindings for [Database::code_by_hash]
     Code {
