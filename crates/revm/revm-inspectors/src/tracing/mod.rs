@@ -20,7 +20,7 @@ mod builder;
 mod config;
 mod fourbyte;
 mod opcount;
-mod types;
+pub mod types;
 mod utils;
 use crate::tracing::{
     arena::PushTraceKind,
