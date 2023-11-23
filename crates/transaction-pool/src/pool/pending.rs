@@ -659,7 +659,7 @@ mod tests {
 
     #[test]
     fn correct_independent_descendants() {
-        // this test ensures that we set the right independent descendants
+        // this test ensures that we set the right highest nonces set for each sender
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
 
@@ -694,16 +694,16 @@ mod tests {
 
         pool.assert_invariants();
 
-        // the independent set is the roots of each of these tx chains, independent descendants
-        // should be the highest nonce
-        let expected_independent_descendants =
+        // the independent set is the roots of each of these tx chains, these are the highest
+        // nonces for each sender
+        let expected_highest_nonces =
             vec![d1, c3, b3, a4].iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
-        let actual_independent_descendants = pool
+        let actual_highest_nonces = pool
             .highest_nonces
             .iter()
             .map(|tx| (tx.transaction.sender(), tx.transaction.nonce()))
             .collect::<HashSet<_>>();
-        assert_eq!(expected_independent_descendants, actual_independent_descendants);
+        assert_eq!(expected_highest_nonces, actual_highest_nonces);
         pool.assert_invariants();
     }
 
@@ -753,7 +753,7 @@ mod tests {
         .into_iter()
         .map(|tx| (tx.sender(), tx.nonce()))
         .collect::<HashSet<_>>();
-        let all_txs = vec![a1, a2, a3, a4, b1, b2, b3, c1, c2, c3, d1];
+        let all_txs = vec![a1, a2, a3, a4.clone(), b1, b2, b3, c1, c2, c3, d1];
 
         // add all the transactions to the pool
         for tx in all_txs {
@@ -776,6 +776,14 @@ mod tests {
 
         // make sure to_remove is the same thing as expected
         let to_remove = pool.transactions_to_remove(&pool_limit, false);
+
+        // ensure the result is sorted by decreasing nonce for each sender
+        let mut starting_nonce = a4.nonce();
+        for tx in to_remove.iter().filter(|id| id.sender == f.ids.sender_id(&a).unwrap()) {
+            assert_eq!(tx.nonce, starting_nonce);
+            starting_nonce -= 1;
+        }
+
         let to_remove_mapped =
             to_remove.into_iter().map(|id| (id.sender, id.nonce)).collect::<HashSet<_>>();
         let expected_removed_mapped = expected_removed
