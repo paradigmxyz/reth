@@ -351,6 +351,92 @@ impl<T: TransactionOrdering> PendingPool<T> {
         id
     }
 
+    /// Traverses the pool, starting at the highest nonce set, returning the transactions which
+    /// would put the pool under the specified limits.
+    ///
+    /// If the `local` flag is unset, then only non-local transactions will be removed.
+    pub(crate) fn transactions_to_remove(
+        &self,
+        limit: SubPoolLimit,
+        local: bool,
+    ) -> Vec<&PendingTransaction<T>> {
+        // this serves as a termination condition for the loop - it represents the number of
+        // _valid_ unique senders that might have descendants in the pool.
+        //
+        // If `local` is false, a value of zero means that there are no non-local txs in the pool
+        // that can be removed.
+        //
+        // If `local` is true, a value of zero means that there are no txs in the pool that can be
+        // removed.
+        let mut unique_senders = self.highest_nonces.len();
+
+        // transactions to remove
+        let original_length = self.len();
+        let mut removed = Vec::new();
+
+        // track total `size` of transactions to remove
+        let original_size = self.size();
+        let mut total_size = 0;
+
+        // starting loop to populate `removed`
+        for tx in self.highest_nonces.iter() {
+            // return early if the pool is under limits
+            if original_size - total_size <= limit.max_size &&
+                original_length - removed.len() <= limit.max_txs
+            {
+                break
+            }
+
+            if !local && tx.transaction.is_local() {
+                unique_senders -= 1;
+                continue
+            }
+
+            total_size += tx.transaction.size();
+            removed.push(tx);
+        }
+
+        // index of first tx to check
+        let mut removed_idx = 0;
+        'outer: loop {
+            // loop `removed_idx` to `removed_idx + unique_senders` then re-set those values
+            let start = removed_idx;
+            let end = removed_idx + unique_senders;
+
+            // this loop should look back at the last `unique_senders` txs, which should be the
+            // exact transactions that were just added to `removed` in the last iteration of the
+            // outer loop
+            for i in start..end {
+                // return early if the pool is under limits or if there are no more txs to check
+                if original_size - total_size <= limit.max_size &&
+                    original_length - removed.len() <= limit.max_txs ||
+                    unique_senders == 0
+                {
+                    break 'outer
+                }
+
+                let ancestor = self.ancestor(removed[i].transaction.id());
+                match ancestor {
+                    Some(tx) => {
+                        if !local && tx.transaction.is_local() {
+                            unique_senders -= 1;
+                            continue
+                        }
+
+                        total_size += tx.transaction.size();
+                        removed.push(tx);
+                        removed_idx += 1;
+                    }
+                    None => {
+                        unique_senders -= 1;
+                    }
+                }
+            }
+        }
+
+        removed
+    }
+
     /// Truncates the pool to the given limit.
     ///
     /// Removes transactions from the pending pool
@@ -716,6 +802,14 @@ mod tests {
         // * b1
         // * c1
         let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
+
+        // make sure to_remove is the same thing as expected
+        let to_remove = pool.transactions_to_remove(pool_limit.clone(), false);
+        let to_remove_mapped = to_remove
+            .into_iter()
+            .map(|tx| (tx.transaction.sender(), tx.transaction.nonce()))
+            .collect::<HashSet<_>>();
+        assert_eq!(to_remove_mapped, expected_removed);
 
         // truncate the pool
         let removed = pool.truncate_pool(pool_limit);
