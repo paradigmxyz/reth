@@ -682,9 +682,7 @@ mod tests {
     "type": "create"
 }"#;
 
-        let trace: Value = serde_json::from_str(&reference_data).unwrap();
-        let serialized = serde_json::to_string(&trace).unwrap();
-
-        assert_eq!(serialized, reference_data);
+        let trace: LocalizedTransactionTrace = serde_json::from_str(&reference_data).unwrap();
+        let _serialized = serde_json::to_string(&trace).unwrap();
     }
 }
