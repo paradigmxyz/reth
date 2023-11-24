@@ -355,20 +355,20 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Traverses the pool, starting at the highest nonce set, returning the transactions which
     /// would put the pool under the specified limits.
     ///
-    /// If the `local` flag is unset, then only non-local transactions will be removed.
+    /// If the `remove_locals` flag is unset, then only non-local transactions will be removed.
     pub(crate) fn transactions_to_remove(
         &self,
         limit: &SubPoolLimit,
-        local: bool,
+        remove_locals: bool,
     ) -> Vec<TransactionId> {
         // this serves as a termination condition for the loop - it represents the number of
         // _valid_ unique senders that might have descendants in the pool.
         //
-        // If `local` is false, a value of zero means that there are no non-local txs in the pool
-        // that can be removed.
+        // If `remove_locals` is false, a value of zero means that there are no non-local txs in the
+        // pool that can be removed.
         //
-        // If `local` is true, a value of zero means that there are no txs in the pool that can be
-        // removed.
+        // If `remove_locals` is true, a value of zero means that there are no txs in the pool that
+        // can be removed.
         let mut unique_senders = self.highest_nonces.len();
 
         // transactions to remove
@@ -388,7 +388,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 return removed
             }
 
-            if !local && tx.transaction.is_local() {
+            if !remove_locals && tx.transaction.is_local() {
                 unique_senders -= 1;
                 continue
             }
@@ -419,7 +419,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 let ancestor = self.ancestor(&removed[i]);
                 match ancestor {
                     Some(tx) => {
-                        if !local && tx.transaction.is_local() {
+                        if !remove_locals && tx.transaction.is_local() {
                             unique_senders -= 1;
                             continue
                         }
@@ -447,9 +447,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut removed = Vec::new();
-
         let to_remove = self.transactions_to_remove(&limit, false);
+        let mut removed = Vec::with_capacity(to_remove.len());
         for txid in to_remove {
             // TODO: add method to remove multiple transactions from the same sender at once
             // pending must be gapless so it would only remove the last n transactions from a
@@ -471,6 +470,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             }
         }
 
+        removed.shrink_to_fit();
         removed
     }
 
