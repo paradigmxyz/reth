@@ -55,3 +55,106 @@ pub async fn connect_passthrough(
 
     p2p_stream
 }
+
+/// A Rplx subprotocol for testing
+pub mod proto {
+    use super::*;
+    use crate::{capability::Capability, protocol::Protocol};
+    use bytes::{Buf, BufMut, BytesMut};
+
+    /// Returns a new testing `HelloMessage` with eth and the test protocol
+    pub fn test_hello() -> (HelloMessageWithProtocols, SecretKey) {
+        let mut handshake = eth_hello();
+        handshake.0.protocols.push(TestProtoMessage::protocol());
+        handshake
+    }
+
+    #[repr(u8)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum TestProtoMessageId {
+        Ping = 0x00,
+        Pong = 0x01,
+        Message = 0x02,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum TesProtoMessage {
+        Message(String),
+        Ping,
+        Pong,
+    }
+
+    /// An `test` protocol message, containing a message ID and payload.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct TestProtoMessage {
+        pub message_type: TestProtoMessageId,
+        pub message: TesProtoMessage,
+    }
+
+    impl TestProtoMessage {
+        /// Returns the capability for the `test` protocol.
+        pub fn capability() -> Capability {
+            Capability::new_static("test", 1)
+        }
+
+        /// Returns the protocol for the `test` protocol.
+        pub fn protocol() -> Protocol {
+            Protocol::new(Self::capability(), 3)
+        }
+
+        /// Creates a ping message
+        pub fn ping() -> Self {
+            Self { message_type: TestProtoMessageId::Ping, message: TesProtoMessage::Ping }
+        }
+
+        /// Creates a pong message
+        pub fn pong() -> Self {
+            Self { message_type: TestProtoMessageId::Pong, message: TesProtoMessage::Pong }
+        }
+
+        /// Creates a message
+        pub fn message(msg: impl Into<String>) -> Self {
+            Self {
+                message_type: TestProtoMessageId::Message,
+                message: TesProtoMessage::Message(msg.into()),
+            }
+        }
+
+        /// Creates a new `TestProtoMessage` with the given message ID and payload.
+        pub fn encoded(&self) -> BytesMut {
+            let mut buf = BytesMut::new();
+            buf.put_u8(self.message_type as u8);
+            match &self.message {
+                TesProtoMessage::Ping => {}
+                TesProtoMessage::Pong => {}
+                TesProtoMessage::Message(msg) => {
+                    buf.put(msg.as_bytes());
+                }
+            }
+            buf
+        }
+
+        /// Decodes a `TestProtoMessage` from the given message buffer.
+        pub fn decode_message(buf: &mut &[u8]) -> Option<Self> {
+            if buf.is_empty() {
+                return None;
+            }
+            let id = buf[0];
+            buf.advance(1);
+            let message_type = match id {
+                0x00 => TestProtoMessageId::Ping,
+                0x01 => TestProtoMessageId::Pong,
+                0x02 => TestProtoMessageId::Message,
+                _ => return None,
+            };
+            let message = match message_type {
+                TestProtoMessageId::Ping => TesProtoMessage::Ping,
+                TestProtoMessageId::Pong => TesProtoMessage::Pong,
+                TestProtoMessageId::Message => {
+                    TesProtoMessage::Message(String::from_utf8_lossy(&buf[..]).into_owned())
+                }
+            };
+            Some(Self { message_type, message })
+        }
+    }
+}
