@@ -1,6 +1,6 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, FetchClient,
+    peers::PeersHandle, protocol::RlpxSubProtocol, FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -155,6 +155,8 @@ impl NetworkHandle {
     }
 }
 
+// === API Implementations ===
+
 impl NetworkEvents for NetworkHandle {
     fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -169,7 +171,11 @@ impl NetworkEvents for NetworkHandle {
     }
 }
 
-// === API Implementations ===
+impl NetworkProtocols for NetworkHandle {
+    fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol) {
+        self.send_message(NetworkHandleMessage::AddRlpxSubProtocol(protocol))
+    }
+}
 
 impl PeersInfo for NetworkHandle {
     fn num_connected_peers(&self) -> usize {
@@ -353,6 +359,12 @@ pub trait NetworkEvents: Send + Sync {
     fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent>;
 }
 
+/// Provides access to modify the network's additional protocol handlers.
+pub trait NetworkProtocols: Send + Sync {
+    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol);
+}
+
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[allow(missing_docs)]
 #[derive(Debug)]
@@ -400,4 +412,6 @@ pub(crate) enum NetworkHandleMessage {
     Shutdown(oneshot::Sender<()>),
     /// Add a new listener for `DiscoveryEvent`.
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
+    /// Add an additional [RlpxSubProtocol].
+    AddRlpxSubProtocol(RlpxSubProtocol),
 }

@@ -41,10 +41,7 @@ impl Compact for AccountBeforeTx {
         acc_len + 20
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         let address = Address::from_slice(&buf[..20]);
         buf.advance(20);
 

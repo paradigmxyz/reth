@@ -40,10 +40,7 @@ impl Compact for StorageEntry {
         self.value.to_compact(buf) + 32
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let key = B256::from_slice(&buf[..32]);
         let (value, out) = U256::from_compact(&buf[32..], len - 32);
         (Self { key, value }, out)

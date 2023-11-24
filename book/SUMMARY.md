@@ -9,6 +9,7 @@
    1. [Update Priorities](./installation/priorities.md)
 1. [Run a Node](./run/run-a-node.md)
    1. [Mainnet or official testnets](./run/mainnet.md)
+   1. [OP Stack](./run/optimism.md)
    1. [Private testnet](./run/private-testnet.md)
    1. [Metrics](./run/observability.md)
    1. [Configuring Reth](./run/config.md)

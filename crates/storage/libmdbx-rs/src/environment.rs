@@ -15,10 +15,243 @@ use std::{
     ops::{Bound, RangeBounds},
     path::Path,
     ptr,
-    sync::mpsc::{sync_channel, SyncSender},
+    sync::{
+        mpsc::{sync_channel, SyncSender},
+        Arc,
+    },
     thread::sleep,
     time::Duration,
 };
+
+/// An environment supports multiple databases, all residing in the same shared-memory map.
+///
+/// Accessing the environment is thread-safe.
+/// The environment will be closed when the last instance of this type is dropped.
+#[derive(Clone)]
+pub struct Environment {
+    inner: Arc<EnvironmentInner>,
+}
+
+impl Environment {
+    /// Creates a new builder for specifying options for opening an MDBX environment.
+    pub fn builder() -> EnvironmentBuilder {
+        EnvironmentBuilder {
+            flags: EnvironmentFlags::default(),
+            max_readers: None,
+            max_dbs: None,
+            rp_augment_limit: None,
+            loose_limit: None,
+            dp_reserve_limit: None,
+            txn_dp_limit: None,
+            spill_max_denominator: None,
+            spill_min_denominator: None,
+            geometry: None,
+            log_level: None,
+            kind: Default::default(),
+        }
+    }
+
+    /// Returns true if the environment was opened as WRITEMAP.
+    #[inline]
+    pub fn is_write_map(&self) -> bool {
+        self.inner.env_kind.is_write_map()
+    }
+
+    /// Returns the kind of the environment.
+    #[inline]
+    pub fn env_kind(&self) -> EnvironmentKind {
+        self.inner.env_kind
+    }
+
+    /// Returns true if the environment was opened in [Mode::ReadWrite] mode.
+    #[inline]
+    pub fn is_read_write(&self) -> bool {
+        self.inner.txn_manager.is_some()
+    }
+
+    /// Returns true if the environment was opened in [Mode::ReadOnly] mode.
+    #[inline]
+    pub fn is_read_only(&self) -> bool {
+        self.inner.txn_manager.is_none()
+    }
+
+    /// Returns the manager that handles transaction messages.
+    ///
+    /// Requires [Mode::ReadWrite] and returns None otherwise.
+    #[inline]
+    pub(crate) fn txn_manager(&self) -> Option<&SyncSender<TxnManagerMessage>> {
+        self.inner.txn_manager.as_ref()
+    }
+
+    /// Returns the manager that handles transaction messages.
+    ///
+    /// Requires [Mode::ReadWrite] and returns None otherwise.
+    #[inline]
+    pub(crate) fn ensure_txn_manager(&self) -> Result<&SyncSender<TxnManagerMessage>> {
+        self.txn_manager().ok_or(Error::WriteTransactionUnsupportedInReadOnlyMode)
+    }
+
+    /// Create a read-only transaction for use with the environment.
+    #[inline]
+    pub fn begin_ro_txn(&self) -> Result<Transaction<RO>> {
+        Transaction::new(self.clone())
+    }
+
+    /// Create a read-write transaction for use with the environment. This method will block while
+    /// there are any other read-write transactions open on the environment.
+    pub fn begin_rw_txn(&self) -> Result<Transaction<RW>> {
+        let sender = self.ensure_txn_manager()?;
+        let txn = loop {
+            let (tx, rx) = sync_channel(0);
+            sender
+                .send(TxnManagerMessage::Begin {
+                    parent: TxnPtr(ptr::null_mut()),
+                    flags: RW::OPEN_FLAGS,
+                    sender: tx,
+                })
+                .unwrap();
+            let res = rx.recv().unwrap();
+            if let Err(Error::Busy) = &res {
+                sleep(Duration::from_millis(250));
+                continue
+            }
+
+            break res
+        }?;
+        Ok(Transaction::new_from_ptr(self.clone(), txn.0))
+    }
+
+    /// Returns a raw pointer to the underlying MDBX environment.
+    ///
+    /// The caller **must** ensure that the pointer is never dereferenced after the environment has
+    /// been dropped.
+    #[inline]
+    pub(crate) fn env_ptr(&self) -> *mut ffi::MDBX_env {
+        self.inner.env
+    }
+
+    /// Executes the given closure once
+    ///
+    /// This is only intended to be used when accessing mdbx ffi functions directly is required.
+    ///
+    /// The caller **must** ensure that the pointer is only used within the closure.
+    #[inline]
+    #[doc(hidden)]
+    pub fn with_raw_env_ptr<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_env) -> T,
+    {
+        (f)(self.env_ptr())
+    }
+
+    /// Flush the environment data buffers to disk.
+    pub fn sync(&self, force: bool) -> Result<bool> {
+        mdbx_result(unsafe { ffi::mdbx_env_sync_ex(self.env_ptr(), force, false) })
+    }
+
+    /// Retrieves statistics about this environment.
+    pub fn stat(&self) -> Result<Stat> {
+        unsafe {
+            let mut stat = Stat::new();
+            mdbx_result(ffi::mdbx_env_stat_ex(
+                self.env_ptr(),
+                ptr::null(),
+                stat.mdb_stat(),
+                size_of::<Stat>(),
+            ))?;
+            Ok(stat)
+        }
+    }
+
+    /// Retrieves info about this environment.
+    pub fn info(&self) -> Result<Info> {
+        unsafe {
+            let mut info = Info(mem::zeroed());
+            mdbx_result(ffi::mdbx_env_info_ex(
+                self.env_ptr(),
+                ptr::null(),
+                &mut info.0,
+                size_of::<Info>(),
+            ))?;
+            Ok(info)
+        }
+    }
+
+    /// Retrieves the total number of pages on the freelist.
+    ///
+    /// Along with [Environment::info()], this can be used to calculate the exact number
+    /// of used pages as well as free pages in this environment.
+    ///
+    /// ```
+    /// # use reth_libmdbx::Environment;
+    /// let dir = tempfile::tempdir().unwrap();
+    /// let env = Environment::builder().open(dir.path()).unwrap();
+    /// let info = env.info().unwrap();
+    /// let stat = env.stat().unwrap();
+    /// let freelist = env.freelist().unwrap();
+    /// let last_pgno = info.last_pgno() + 1; // pgno is 0 based.
+    /// let total_pgs = info.map_size() / stat.page_size() as usize;
+    /// let pgs_in_use = last_pgno - freelist;
+    /// let pgs_free = total_pgs - pgs_in_use;
+    /// ```
+    ///
+    /// Note:
+    ///
+    /// * MDBX stores all the freelists in the designated database 0 in each environment, and the
+    ///   freelist count is stored at the beginning of the value as `libc::uint32_t` in the native
+    ///   byte order.
+    ///
+    /// * It will create a read transaction to traverse the freelist database.
+    pub fn freelist(&self) -> Result<usize> {
+        let mut freelist: usize = 0;
+        let txn = self.begin_ro_txn()?;
+        let db = Database::freelist_db();
+        let cursor = txn.cursor(&db)?;
+
+        for result in cursor.iter_slices() {
+            let (_key, value) = result?;
+            if value.len() < size_of::<usize>() {
+                return Err(Error::Corrupted)
+            }
+
+            let s = &value[..size_of::<usize>()];
+            freelist += NativeEndian::read_u32(s) as usize;
+        }
+
+        Ok(freelist)
+    }
+}
+
+/// Container type for Environment internals.
+///
+/// This holds the raw pointer to the MDBX environment and the transaction manager.
+/// The env is opened via [mdbx_env_create](ffi::mdbx_env_create) and closed when this type drops.
+struct EnvironmentInner {
+    /// The raw pointer to the MDBX environment.
+    ///
+    /// Accessing the environment is thread-safe as long as long as this type exists.
+    env: *mut ffi::MDBX_env,
+    /// Whether the environment was opened as WRITEMAP.
+    env_kind: EnvironmentKind,
+    /// the sender half of the transaction manager channel
+    ///
+    /// Only set if the environment was opened in [Mode::ReadWrite] mode.
+    txn_manager: Option<SyncSender<TxnManagerMessage>>,
+}
+
+impl Drop for EnvironmentInner {
+    fn drop(&mut self) {
+        // Close open mdbx environment on drop
+        unsafe {
+            ffi::mdbx_env_close_ex(self.env, false);
+        }
+    }
+}
+
+// SAFETY: internal type, only used inside [Environment]. Accessing the environment pointer is
+// thread-safe
+unsafe impl Send for EnvironmentInner {}
+unsafe impl Sync for EnvironmentInner {}
 
 /// Determines how data is mapped into memory
 ///
@@ -71,184 +304,6 @@ pub(crate) enum TxnManagerMessage {
     Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
     Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
     Commit { tx: TxnPtr, sender: SyncSender<Result<bool>> },
-}
-
-/// An environment supports multiple databases, all residing in the same shared-memory map.
-pub struct Environment {
-    inner: EnvironmentInner,
-}
-
-impl Environment {
-    /// Creates a new builder for specifying options for opening an MDBX environment.
-    pub fn builder() -> EnvironmentBuilder {
-        EnvironmentBuilder {
-            flags: EnvironmentFlags::default(),
-            max_readers: None,
-            max_dbs: None,
-            rp_augment_limit: None,
-            loose_limit: None,
-            dp_reserve_limit: None,
-            txn_dp_limit: None,
-            spill_max_denominator: None,
-            spill_min_denominator: None,
-            geometry: None,
-            log_level: None,
-            kind: Default::default(),
-        }
-    }
-
-    /// Returns true if the environment was opened as WRITEMAP.
-    pub fn is_write_map(&self) -> bool {
-        self.inner.env_kind.is_write_map()
-    }
-
-    /// Returns the kind of the environment.
-    pub fn env_kind(&self) -> EnvironmentKind {
-        self.inner.env_kind
-    }
-
-    /// Returns the manager that handles transaction messages.
-    ///
-    /// Requires [Mode::ReadWrite] and returns None otherwise.
-    #[inline]
-    pub(crate) fn txn_manager(&self) -> Option<&SyncSender<TxnManagerMessage>> {
-        self.inner.txn_manager.as_ref()
-    }
-
-    /// Returns a raw pointer to the underlying MDBX environment.
-    ///
-    /// The caller **must** ensure that the pointer is not dereferenced after the lifetime of the
-    /// environment.
-    #[inline]
-    pub fn env(&self) -> *mut ffi::MDBX_env {
-        self.inner.env
-    }
-
-    /// Create a read-only transaction for use with the environment.
-    #[inline]
-    pub fn begin_ro_txn(&self) -> Result<Transaction<'_, RO>> {
-        Transaction::new(self)
-    }
-
-    /// Create a read-write transaction for use with the environment. This method will block while
-    /// there are any other read-write transactions open on the environment.
-    pub fn begin_rw_txn(&self) -> Result<Transaction<'_, RW>> {
-        let sender = self.txn_manager().ok_or(Error::Access)?;
-        let txn = loop {
-            let (tx, rx) = sync_channel(0);
-            sender
-                .send(TxnManagerMessage::Begin {
-                    parent: TxnPtr(ptr::null_mut()),
-                    flags: RW::OPEN_FLAGS,
-                    sender: tx,
-                })
-                .unwrap();
-            let res = rx.recv().unwrap();
-            if let Err(Error::Busy) = &res {
-                sleep(Duration::from_millis(250));
-                continue
-            }
-
-            break res
-        }?;
-        Ok(Transaction::new_from_ptr(self, txn.0))
-    }
-
-    /// Flush the environment data buffers to disk.
-    pub fn sync(&self, force: bool) -> Result<bool> {
-        mdbx_result(unsafe { ffi::mdbx_env_sync_ex(self.env(), force, false) })
-    }
-
-    /// Retrieves statistics about this environment.
-    pub fn stat(&self) -> Result<Stat> {
-        unsafe {
-            let mut stat = Stat::new();
-            mdbx_result(ffi::mdbx_env_stat_ex(
-                self.env(),
-                ptr::null(),
-                stat.mdb_stat(),
-                size_of::<Stat>(),
-            ))?;
-            Ok(stat)
-        }
-    }
-
-    /// Retrieves info about this environment.
-    pub fn info(&self) -> Result<Info> {
-        unsafe {
-            let mut info = Info(mem::zeroed());
-            mdbx_result(ffi::mdbx_env_info_ex(
-                self.env(),
-                ptr::null(),
-                &mut info.0,
-                size_of::<Info>(),
-            ))?;
-            Ok(info)
-        }
-    }
-
-    /// Retrieves the total number of pages on the freelist.
-    ///
-    /// Along with [Environment::info()], this can be used to calculate the exact number
-    /// of used pages as well as free pages in this environment.
-    ///
-    /// ```
-    /// # use reth_libmdbx::Environment;
-    /// let dir = tempfile::tempdir().unwrap();
-    /// let env = Environment::builder().open(dir.path()).unwrap();
-    /// let info = env.info().unwrap();
-    /// let stat = env.stat().unwrap();
-    /// let freelist = env.freelist().unwrap();
-    /// let last_pgno = info.last_pgno() + 1; // pgno is 0 based.
-    /// let total_pgs = info.map_size() / stat.page_size() as usize;
-    /// let pgs_in_use = last_pgno - freelist;
-    /// let pgs_free = total_pgs - pgs_in_use;
-    /// ```
-    ///
-    /// Note:
-    ///
-    /// * MDBX stores all the freelists in the designated database 0 in each environment, and the
-    ///   freelist count is stored at the beginning of the value as `libc::uint32_t` in the native
-    ///   byte order.
-    ///
-    /// * It will create a read transaction to traverse the freelist database.
-    pub fn freelist(&self) -> Result<usize> {
-        let mut freelist: usize = 0;
-        let txn = self.begin_ro_txn()?;
-        let db = Database::freelist_db();
-        let cursor = txn.cursor(&db)?;
-
-        for result in cursor {
-            let (_key, value) = result?;
-            if value.len() < size_of::<usize>() {
-                return Err(Error::Corrupted)
-            }
-
-            let s = &value[..size_of::<usize>()];
-            freelist += NativeEndian::read_u32(s) as usize;
-        }
-
-        Ok(freelist)
-    }
-}
-
-/// Container type for Environment internals.
-///
-/// This holds the raw pointer to the MDBX environment and the transaction manager.
-/// The env is opened via [mdbx_env_create](ffi::mdbx_env_create) and closed when this type drops.
-struct EnvironmentInner {
-    env: *mut ffi::MDBX_env,
-    env_kind: EnvironmentKind,
-    txn_manager: Option<SyncSender<TxnManagerMessage>>,
-}
-
-impl Drop for EnvironmentInner {
-    fn drop(&mut self) {
-        // Close open mdbx environment on drop
-        unsafe {
-            ffi::mdbx_env_close_ex(self.env, false);
-        }
-    }
 }
 
 /// Environment statistics.
@@ -357,9 +412,6 @@ impl Info {
         self.0.mi_numreaders as usize
     }
 }
-
-unsafe impl Send for Environment {}
-unsafe impl Sync for Environment {}
 
 impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -564,7 +616,7 @@ impl EnvironmentBuilder {
             env.txn_manager = Some(tx);
         }
 
-        Ok(Environment { inner: env })
+        Ok(Environment { inner: Arc::new(env) })
     }
 
     /// Configures how this environment will be opened.

@@ -2,6 +2,7 @@ use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::{PeerMessage, PeerRequestSender},
     peers::InboundConnectionError,
+    protocol::IntoRlpxSubProtocol,
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
 };
@@ -76,10 +77,7 @@ pub(crate) struct Swarm<C> {
 
 // === impl Swarm ===
 
-impl<C> Swarm<C>
-where
-    C: BlockNumReader,
-{
+impl<C> Swarm<C> {
     /// Configures a new swarm instance.
     pub(crate) fn new(
         incoming: ConnectionListener,
@@ -88,6 +86,11 @@ where
         net_connection_state: NetworkConnectionState,
     ) -> Self {
         Self { incoming, sessions, state, net_connection_state }
+    }
+
+    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        self.sessions_mut().add_rlpx_sub_protocol(protocol);
     }
 
     /// Access to the state.
@@ -114,7 +117,12 @@ where
     pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
         &mut self.sessions
     }
+}
 
+impl<C> Swarm<C>
+where
+    C: BlockNumReader,
+{
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)

@@ -20,7 +20,7 @@ mod otterscan;
 mod peer;
 pub mod relay;
 mod rpc;
-mod serde_helpers;
+pub mod serde_helpers;
 
 pub use admin::*;
 pub use eth::*;

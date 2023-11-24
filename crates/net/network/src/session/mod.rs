@@ -48,7 +48,7 @@ pub use handle::{
     SessionCommand,
 };
 
-use crate::protocol::RlpxSubProtocols;
+use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
 pub use reth_network_api::{Direction, PeerInfo};
 
 /// Internal identifier for active sessions.
@@ -103,7 +103,6 @@ pub struct SessionManager {
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Additional RLPx sub-protocols to be used by the session manager.
-    #[allow(unused)]
     extra_protocols: RlpxSubProtocols,
     /// Used to measure inbound & outbound bandwidth across all managed streams
     bandwidth_meter: BandwidthMeter,
@@ -174,6 +173,11 @@ impl SessionManager {
     /// Returns the session hello message.
     pub fn hello_message(&self) -> HelloMessageWithProtocols {
         self.hello_message.clone()
+    }
+
+    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        self.extra_protocols.push(protocol)
     }
 
     /// Spawns the given future onto a new task that is tracked in the `spawned_tasks`

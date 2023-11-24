@@ -62,9 +62,9 @@ default-members = ["bin/reth"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.10"
+version = "0.1.0-alpha.11"
 edition = "2021"
-rust-version = "1.70" # Remember to update clippy.toml and README.md
+rust-version = "1.70"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -135,13 +135,13 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
+revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze",  features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = ["std"], default-features = false }
 
 # eth
-alloy-primitives = "0.4"
-alloy-dyn-abi = "0.4"
-alloy-sol-types = "0.4"
+alloy-primitives = "0.5"
+alloy-dyn-abi = "0.5"
+alloy-sol-types = "0.5"
 alloy-rlp = "0.3"
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
@@ -214,7 +214,8 @@ toml = "0.8"
 arbitrary = "1.1"
 assert_matches = "1.5.0"
 tempfile = "3.8"
-
+criterion = "0.5"
+pprof = "0.13"
 proptest = "1.0"
 proptest-derive = "0.4"
 serial_test = "2"

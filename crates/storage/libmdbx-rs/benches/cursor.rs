@@ -33,7 +33,7 @@ fn bench_get_seq_iter(c: &mut Criterion) {
                 count += 1;
             }
 
-            fn iterate<K: TransactionKind>(cursor: &mut Cursor<'_, K>) -> Result<()> {
+            fn iterate<K: TransactionKind>(cursor: &mut Cursor<K>) -> Result<()> {
                 let mut i = 0;
                 for result in cursor.iter::<ObjectLength, ObjectLength>() {
                     let (key_len, data_len) = result?;

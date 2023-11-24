@@ -61,14 +61,14 @@ async fn unwind_and_copy<DB: Database>(
 
     // Unwind hashes all the way to FROM
 
-    StorageHashingStage::default().unwind(&provider, unwind).await.unwrap();
-    AccountHashingStage::default().unwind(&provider, unwind).await.unwrap();
+    StorageHashingStage::default().unwind(&provider, unwind).unwrap();
+    AccountHashingStage::default().unwind(&provider, unwind).unwrap();
 
-    MerkleStage::default_unwind().unwind(&provider, unwind).await?;
+    MerkleStage::default_unwind().unwind(&provider, unwind)?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
-        reth_revm::Factory::new(db_tool.chain.clone()),
+        reth_revm::EvmProcessorFactory::new(db_tool.chain.clone()),
         ExecutionStageThresholds {
             max_blocks: Some(u64::MAX),
             max_changes: None,
@@ -78,26 +78,21 @@ async fn unwind_and_copy<DB: Database>(
         PruneModes::all(),
     );
 
-    exec_stage
-        .unwind(
-            &provider,
-            UnwindInput {
-                unwind_to: to,
-                checkpoint: StageCheckpoint::new(tip_block_number),
-                bad_block: None,
-            },
-        )
-        .await?;
+    exec_stage.unwind(
+        &provider,
+        UnwindInput {
+            unwind_to: to,
+            checkpoint: StageCheckpoint::new(tip_block_number),
+            bad_block: None,
+        },
+    )?;
 
     // Bring hashes to TO
-
     AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
         .execute(&provider, execute_input)
-        .await
         .unwrap();
     StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
         .execute(&provider, execute_input)
-        .await
         .unwrap();
 
     let unwind_inner_tx = provider.into_tx();
@@ -123,25 +118,23 @@ async fn dry_run<DB: Database>(
     info!(target: "reth::cli", "Executing stage.");
     let factory = ProviderFactory::new(&output_db, chain);
     let provider = factory.provider_rw()?;
-    let mut exec_output = false;
-    while !exec_output {
-        exec_output = MerkleStage::Execution {
-            clean_threshold: u64::MAX, /* Forces updating the root instead of calculating
-                                        * from
-                                        * scratch */
+
+    let mut stage = MerkleStage::Execution {
+        // Forces updating the root instead of calculating from scratch
+        clean_threshold: u64::MAX,
+    };
+
+    loop {
+        let input = reth_stages::ExecInput {
+            target: Some(to),
+            checkpoint: Some(StageCheckpoint::new(from)),
+        };
+        if stage.execute(&provider, input)?.done {
+            break
         }
-        .execute(
-            &provider,
-            reth_stages::ExecInput {
-                target: Some(to),
-                checkpoint: Some(StageCheckpoint::new(from)),
-            },
-        )
-        .await?
-        .done;
     }
 
-    info!(target: "reth::cli", "Success.");
+    info!(target: "reth::cli", "Success");
 
     Ok(())
 }

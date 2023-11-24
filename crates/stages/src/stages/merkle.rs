@@ -80,7 +80,7 @@ impl MerkleStage {
     /// Gets the hashing progress
     pub fn get_execution_checkpoint<DB: Database>(
         &self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
     ) -> Result<Option<MerkleCheckpoint>, StageError> {
         let buf =
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
@@ -96,7 +96,7 @@ impl MerkleStage {
     /// Saves the hashing progress
     pub fn save_execution_checkpoint<DB: Database>(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
         checkpoint: Option<MerkleCheckpoint>,
     ) -> Result<(), StageError> {
         let mut buf = vec![];
@@ -113,7 +113,6 @@ impl MerkleStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for MerkleStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -126,9 +125,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     }
 
     /// Execute the stage.
-    async fn execute(
+    fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let threshold = match self {
@@ -260,9 +259,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -339,7 +338,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -393,8 +392,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.tx.table::<tables::HashedAccount>().unwrap().len() +
-                    runner.tx.table::<tables::HashedStorage>().unwrap().len()
+                    runner.db.table::<tables::HashedAccount>().unwrap().len() +
+                    runner.db.table::<tables::HashedStorage>().unwrap().len()
                 ) as u64
         );
 
@@ -433,8 +432,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.tx.table::<tables::HashedAccount>().unwrap().len() +
-                    runner.tx.table::<tables::HashedStorage>().unwrap().len()
+                    runner.db.table::<tables::HashedAccount>().unwrap().len() +
+                    runner.db.table::<tables::HashedStorage>().unwrap().len()
                 ) as u64
         );
 
@@ -443,21 +442,21 @@ mod tests {
     }
 
     struct MerkleTestRunner {
-        tx: TestTransaction,
+        db: TestStageDB,
         clean_threshold: u64,
     }
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), clean_threshold: 10000 }
+            Self { db: TestStageDB::default(), clean_threshold: 10000 }
         }
     }
 
     impl StageTestRunner for MerkleTestRunner {
         type S = MerkleStage;
 
-        fn tx(&self) -> &TestTransaction {
-            &self.tx
+        fn db(&self) -> &TestStageDB {
+            &self.db
         }
 
         fn stage(&self) -> Self::S {
@@ -480,7 +479,7 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            self.tx.insert_accounts_and_storages(
+            self.db.insert_accounts_and_storages(
                 accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
             )?;
 
@@ -499,7 +498,7 @@ mod tests {
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
             blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
-            self.tx.insert_blocks(blocks.iter(), None)?;
+            self.db.insert_blocks(blocks.iter(), None)?;
 
             let (transitions, final_state) = random_changeset_range(
                 &mut rng,
@@ -509,11 +508,11 @@ mod tests {
                 0..256,
             );
             // add block changeset from block 1.
-            self.tx.insert_changesets(transitions, Some(start))?;
-            self.tx.insert_accounts_and_storages(final_state)?;
+            self.db.insert_changesets(transitions, Some(start))?;
+            self.db.insert_accounts_and_storages(final_state)?;
 
             // Calculate state root
-            let root = self.tx.query(|tx| {
+            let root = self.db.query(|tx| {
                 let mut accounts = BTreeMap::default();
                 let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
                 let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
@@ -537,10 +536,11 @@ mod tests {
             })?;
 
             let last_block_number = end;
-            self.tx.commit(|tx| {
+            self.db.commit(|tx| {
                 let mut last_header = tx.get::<tables::Headers>(last_block_number)?.unwrap();
                 last_header.state_root = root;
-                tx.put::<tables::Headers>(last_block_number, last_header)
+                tx.put::<tables::Headers>(last_block_number, last_header)?;
+                Ok(())
             })?;
 
             Ok(blocks)
@@ -565,7 +565,7 @@ mod tests {
         fn before_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             let target_block = input.unwind_to + 1;
 
-            self.tx
+            self.db
                 .commit(|tx| {
                     let mut storage_changesets_cursor =
                         tx.cursor_dup_read::<tables::StorageChangeSet>().unwrap();

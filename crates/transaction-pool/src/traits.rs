@@ -306,6 +306,27 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Local]
+    fn get_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Local)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Private]
+    fn get_private_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Private)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::External]
+    fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::External)
+    }
+
     /// Returns a set of all senders of transactions in the pool
     fn unique_senders(&self) -> HashSet<Address>;
 
@@ -921,6 +942,10 @@ impl PoolTransaction for EthPooledTransaction {
         }
     }
 
+    fn access_list(&self) -> Option<&AccessList> {
+        self.transaction.access_list()
+    }
+
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
     /// This will return `None` for non-EIP1559 transactions
@@ -937,10 +962,6 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
         self.transaction.max_fee_per_blob_gas()
-    }
-
-    fn access_list(&self) -> Option<&AccessList> {
-        self.transaction.access_list()
     }
 
     /// Returns the effective tip for this transaction.
@@ -1029,7 +1050,7 @@ impl FromRecoveredTransaction for EthPooledTransaction {
 }
 
 impl FromRecoveredPooledTransaction for EthPooledTransaction {
-    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
         EthPooledTransaction::from(tx)
     }
 }
