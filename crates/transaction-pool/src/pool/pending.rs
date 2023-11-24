@@ -358,7 +358,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// The removed transactions will be added to the `end_removed` vector.
     ///
     /// If the `remove_locals` flag is unset, then only non-local transactions will be removed.
-    pub(crate) fn transactions_to_remove(
+    pub(crate) fn limit_pool(
         &mut self,
         limit: &SubPoolLimit,
         remove_locals: bool,
@@ -444,14 +444,14 @@ impl<T: TransactionOrdering> PendingPool<T> {
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        self.transactions_to_remove(&limit, false, &mut removed);
+        self.limit_pool(&limit, false, &mut removed);
 
         if self.size() <= limit.max_size && self.len() <= limit.max_txs {
             return removed
         }
 
         // now repeat for local transactions
-        self.transactions_to_remove(&limit, true, &mut removed);
+        self.limit_pool(&limit, true, &mut removed);
 
         removed.shrink_to_fit();
         removed
