@@ -172,12 +172,13 @@ impl Action {
         matches!(self, Action::Reward(_))
     }
 
-    pub fn kind(&self) -> ActionKind {
+    /// Returns what kind of action this is
+    pub fn kind(&self) -> ActionType {
         match self {
-            Action::Call(_) => ActionKind::Call,
-            Action::Create(_) => ActionKind::Create,
-            Action::Selfdestruct(_) => ActionKind::Selfdestruct,
-            Action::Reward(_) => ActionKind::Reward,
+            Action::Call(_) => ActionType::Call,
+            Action::Create(_) => ActionType::Create,
+            Action::Selfdestruct(_) => ActionType::Selfdestruct,
+            Action::Reward(_) => ActionType::Reward,
         }
     }
 }
@@ -196,15 +197,6 @@ pub enum ActionType {
     #[serde(rename = "suicide", alias = "selfdestruct")]
     Selfdestruct,
     /// A block reward.
-    Reward,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ActionKind {
-    Call,
-    Create,
-    Selfdestruct,
     Reward,
 }
 
@@ -229,11 +221,11 @@ pub enum CallType {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallAction {
-    pub call_type: CallType,
-    /// The gas available for executing the call.
     /// Address of the sending account.
     pub from: Address,
     /// The type of the call.
+    pub call_type: CallType,
+    /// The gas available for executing the call.
     pub gas: U64,
     /// The input data provided to the call.
     pub input: Bytes,
@@ -348,33 +340,35 @@ pub struct TransactionTrace {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalizedTransactionTrace {
+    /// Trace of the transaction and its result.
+    #[serde(flatten)]
     pub trace: TransactionTrace,
-    /// Hash of the block, if not pending
+    /// Hash of the block, if not pending.
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_hash: Option<B256>,
     /// Block number the transaction is included in, None if pending.
     ///
     /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_number: Option<u64>,
     /// Hash of the transaction
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_hash: Option<B256>,
     /// Transaction index within the block, None if pending.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_position: Option<u64>,
 }
 
+// Implement Serialize manually to ensure consistent ordering of fields to match other client's
+// format
 impl Serialize for LocalizedTransactionTrace {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut s = serializer.serialize_struct("LocalizedTransactionTrace", 8)?;
+        let mut s = serializer.serialize_struct("LocalizedTransactionTrace", 9)?;
 
-        match &self.trace.action {
+        let TransactionTrace { action, error, result, subtraces, trace_address } = &self.trace;
+
+        match action {
             Action::Call(call_action) => {
                 s.serialize_field("action", call_action)?;
             }
@@ -394,24 +388,32 @@ impl Serialize for LocalizedTransactionTrace {
         if let Some(block_number) = self.block_number {
             s.serialize_field("blockNumber", &block_number)?;
         }
-        if let Some(transaction_hash) = self.transaction_hash {
-            s.serialize_field("transactionHash", &transaction_hash)?;
+
+        if let Some(error) = error {
+            s.serialize_field("error", error)?;
         }
-        if let Some(transaction_position) = self.transaction_position {
-            s.serialize_field("transactionPosition", &transaction_position)?;
-        }
-        match &self.trace.result {
-            Some(TraceOutput::Call(_call)) => {
-                s.serialize_field("result", _call)?;
+
+        match result {
+            Some(TraceOutput::Call(call)) => {
+                s.serialize_field("result", call)?;
             }
-            Some(TraceOutput::Create(_create)) => {
-                s.serialize_field("result", _create)?;
+            Some(TraceOutput::Create(create)) => {
+                s.serialize_field("result", create)?;
             }
             None => {}
         }
-        s.serialize_field("subtraces", &self.trace.subtraces)?;
-        s.serialize_field("traceAddress", &self.trace.trace_address)?;
-        s.serialize_field("type", &self.trace.action.kind())?;
+
+        s.serialize_field("subtraces", &subtraces)?;
+        s.serialize_field("traceAddress", &trace_address)?;
+
+        if let Some(transaction_hash) = &self.transaction_hash {
+            s.serialize_field("transactionHash", transaction_hash)?;
+        }
+        if let Some(transaction_position) = &self.transaction_position {
+            s.serialize_field("transactionPosition", transaction_position)?;
+        }
+
+        s.serialize_field("type", &action.kind())?;
 
         s.end()
     }
@@ -657,32 +659,57 @@ mod tests {
     #[test]
     fn test_deserialize_serialize() {
         let reference_data = r#"{
-    "action": {
-        "from": "0x4f4495243837681061c4743b74b3eedf548d56a5",
-        "gas": "0x388b4f",
-        "init": "0x6080604052600160005534801561001557600080fd5b50610324806100256000396000f3fe608060405234801561001057600080fd5b50600436106100355760003560e01c8062f55d9d1461003a5780631cff79cd1461004f575b600080fd5b61004d6100483660046101da565b610079565b005b61006261005d3660046101fc565b6100bb565b60405161007092919061027f565b60405180910390f35b6002600054141561009d5760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff8116ff5b60006060600260005414156100e35760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff85163b610136576040517f6f7c43f100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b8473ffffffffffffffffffffffffffffffffffffffff16848460405161015d9291906102de565b6000604051808303816000865af19150503d806000811461019a576040519150601f19603f3d011682016040523d82523d6000602084013e61019f565b606091505b50600160005590969095509350505050565b803573ffffffffffffffffffffffffffffffffffffffff811681146101d557600080fd5b919050565b6000602082840312156101ec57600080fd5b6101f5826101b1565b9392505050565b60008060006040848603121561021157600080fd5b61021a846101b1565b9250602084013567ffffffffffffffff8082111561023757600080fd5b818601915086601f83011261024b57600080fd5b81358181111561025a57600080fd5b87602082850101111561026c57600080fd5b6020830194508093505050509250925092565b821515815260006020604081840152835180604085015260005b818110156102b557858101830151858201606001528201610299565b818111156102c7576000606083870101525b50601f01601f191692909201606001949350505050565b818382376000910190815291905056fea264697066735822122032cb5e746816b7fac95205c068b30da37bd40119a57265be331c162cae74712464736f6c63430008090033",
-        "value": "0x0"
-    },
-    "blockHash": "0xd5ac5043011d4f16dba7841fa760c4659644b78f663b901af4673b679605ed0d",
-    "blockNumber": 18557272,
-    "result": {
-        "address": "0x0292ddd2c4d72bf26602fe5d55de16f50dc535e1",
-        "code": "0x608060405234801561001057600080fd5b50600436106100355760003560e01c8062f55d9d1461003a5780631cff79cd1461004f575b600080fd5b61004d6100483660046101da565b610079565b005b61006261005d3660046101fc565b6100bb565b60405161007092919061027f565b60405180910390f35b6002600054141561009d5760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff8116ff5b60006060600260005414156100e35760405163caa30f5560e01b815260040160405180910390fd5b600260005573ffffffffffffffffffffffffffffffffffffffff85163b610136576040517f6f7c43f100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b8473ffffffffffffffffffffffffffffffffffffffff16848460405161015d9291906102de565b6000604051808303816000865af19150503d806000811461019a576040519150601f19603f3d011682016040523d82523d6000602084013e61019f565b606091505b50600160005590969095509350505050565b803573ffffffffffffffffffffffffffffffffffffffff811681146101d557600080fd5b919050565b6000602082840312156101ec57600080fd5b6101f5826101b1565b9392505050565b60008060006040848603121561021157600080fd5b61021a846101b1565b9250602084013567ffffffffffffffff8082111561023757600080fd5b818601915086601f83011261024b57600080fd5b81358181111561025a57600080fd5b87602082850101111561026c57600080fd5b6020830194508093505050509250925092565b821515815260006020604081840152835180604085015260005b818110156102b557858101830151858201606001528201610299565b818111156102c7576000606083870101525b50601f01601f191692909201606001949350505050565b818382376000910190815291905056fea264697066735822122032cb5e746816b7fac95205c068b30da37bd40119a57265be331c162cae74712464736f6c63430008090033",
-        "gasUsed": "0x2cb4a"
-    },
-    "subtraces": 0,
-    "traceAddress": [
-        0,
-        6,
-        0,
-        0
-    ],
-    "transactionHash": "0x54160ddcdbfaf98a43a43c328ebd44aa99faa765e0daa93e61145b06815a4071",
-    "transactionPosition": 102,
-    "type": "create"
+  "action": {
+    "from": "0xc77820eef59629fc8d88154977bc8de8a1b2f4ae",
+    "callType": "call",
+    "gas": "0x4a0d00",
+    "input": "0x12",
+    "to": "0x4f4495243837681061c4743b74b3eedf548d56a5",
+    "value": "0x0"
+  },
+  "blockHash": "0xd5ac5043011d4f16dba7841fa760c4659644b78f663b901af4673b679605ed0d",
+  "blockNumber": 18557272,
+  "result": {
+    "gasUsed": "0x17d337",
+    "output": "0x"
+  },
+  "subtraces": 1,
+  "traceAddress": [],
+  "transactionHash": "0x54160ddcdbfaf98a43a43c328ebd44aa99faa765e0daa93e61145b06815a4071",
+  "transactionPosition": 102,
+  "type": "call"
 }"#;
 
-        let trace: LocalizedTransactionTrace = serde_json::from_str(&reference_data).unwrap();
-        let _serialized = serde_json::to_string(&trace).unwrap();
+        let trace: LocalizedTransactionTrace = serde_json::from_str(reference_data).unwrap();
+        assert!(trace.trace.action.is_call());
+        let serialized = serde_json::to_string_pretty(&trace).unwrap();
+        similar_asserts::assert_eq!(serialized, reference_data);
+    }
+
+    #[test]
+    fn test_deserialize_serialize_selfdestruct() {
+        let reference_data = r#"{
+  "action": {
+    "address": "0xc77820eef59629fc8d88154977bc8de8a1b2f4ae",
+    "balance": "0x0",
+    "refundAddress": "0x4f4495243837681061c4743b74b3eedf548d56a5"
+  },
+  "blockHash": "0xd5ac5043011d4f16dba7841fa760c4659644b78f663b901af4673b679605ed0d",
+  "blockNumber": 18557272,
+  "result": {
+    "gasUsed": "0x17d337",
+    "output": "0x"
+  },
+  "subtraces": 1,
+  "traceAddress": [],
+  "transactionHash": "0x54160ddcdbfaf98a43a43c328ebd44aa99faa765e0daa93e61145b06815a4071",
+  "transactionPosition": 102,
+  "type": "suicide"
+}"#;
+
+        let trace: LocalizedTransactionTrace = serde_json::from_str(reference_data).unwrap();
+        assert!(trace.trace.action.is_selfdestruct());
+        let serialized = serde_json::to_string_pretty(&trace).unwrap();
+        similar_asserts::assert_eq!(serialized, reference_data);
     }
 }
