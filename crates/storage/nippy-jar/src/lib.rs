@@ -13,14 +13,12 @@
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::{
-    clone::Clone,
     error::Error as StdError,
     fs::File,
     io::{Seek, Write},
     marker::Sync,
-    ops::Deref,
+    ops::Range,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use sucds::{int_vectors::PrefixSummedEliasFano, Serializable};
 use tracing::*;
@@ -263,7 +261,7 @@ where
 
     /// Loads the offset list into memory
     pub fn load_offsets(mut self) -> Result<Self, NippyJarError> {
-        let handle = MmapHandle::new(self.data_path())?;
+        let handle = DataReader::new(self.data_path())?;
         self.offsets = (0..self.rows * self.columns).map(|i| handle.offset(i)).collect();
         Ok(self)
     }
@@ -290,8 +288,8 @@ where
     }
 
     /// Returns a [`MmapHandle`] of the data file
-    pub fn open_data(&self) -> Result<MmapHandle, NippyJarError> {
-        MmapHandle::new(self.data_path())
+    pub fn open_data(&self) -> Result<DataReader, NippyJarError> {
+        DataReader::new(self.data_path())
     }
 
     /// If required, prepares any compression algorithm to an early pass of the data.
@@ -551,40 +549,47 @@ where
     }
 }
 
-/// Holds an `Arc` over a file and its associated mmap handle.
-#[derive(Debug, Clone)]
-pub struct MmapHandle {
-    /// File descriptor. Needs to be kept alive as long as the mmap handle.
+/// Manages the reading of snapshot data using memory-mapped files.
+///
+/// Holds file and mmap descriptors of the data and offsets files of a snapshot.
+#[derive(Debug)]
+pub struct DataReader {
+    /// Data file descriptor. Needs to be kept alive as long as the respective mmap handle.
     #[allow(unused)]
-    data_file: Arc<File>,
-    /// Mmap handle.
-    data_mmap: Arc<Mmap>,
-    /// File descriptor. Needs to be kept alive as long as the mmap handle.
+    data_file: File,
+    /// Mmap handle for data.
+    data_mmap: Mmap,
+    /// Offset file descriptor. Needs to be kept alive as long as the respective mmap handle.
     #[allow(unused)]
-    offset_file: Arc<File>,
-    /// Mmap handle.
-    offset_mmap: Arc<Mmap>,
-    /// Number of bytes that represents one offset
+    offset_file: File,
+    /// Mmap handle for offsets.
+    offset_mmap: Mmap,
+    /// Number of bytes that represents one offset.
     offset_len: usize,
 }
 
-impl MmapHandle {
+impl DataReader {
+    /// Reads the respective data and offsets file and returns [`DataReader`].
     pub fn new(path: impl AsRef<Path>) -> Result<Self, NippyJarError> {
-        let data_file = Arc::new(File::open(path.as_ref())?);
+        let data_file = File::open(path.as_ref())?;
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let data_mmap = Arc::new(unsafe { Mmap::map(&data_file)? });
-        let offset_file =
-            Arc::new(File::open(PathBuf::from(format!("{}.off", path.as_ref().display())))?);
+        let data_mmap = unsafe { Mmap::map(&data_file)? };
+
+        let offset_file = File::open(PathBuf::from(format!("{}.off", path.as_ref().display())))?;
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let offset_mmap = Arc::new(unsafe { Mmap::map(&offset_file)? });
-        let offset_len = offset_mmap[0] as usize;
-        Ok(Self { data_file, data_mmap, offset_file, offset_mmap, offset_len })
+        let offset_mmap = unsafe { Mmap::map(&offset_file)? };
+
+        Ok(Self {
+            data_file,
+            data_mmap,
+            offset_file,
+            // First byte indicates how many bytes represent each offset
+            offset_len: offset_mmap[0] as usize,
+            offset_mmap,
+        })
     }
 
-    pub fn offsets(&self) -> &Mmap {
-        &self.offset_mmap
-    }
-
+    /// Returns the offset for the requested data index
     pub fn offset(&self, index: usize) -> u64 {
         let mut buffer: [u8; 8] = [0; 8];
 
@@ -596,15 +601,14 @@ impl MmapHandle {
         u64::from_le_bytes(buffer)
     }
 
-    pub fn data(&self) -> &Mmap {
-        &self.data_mmap
+    /// Provides the underlying data as a slice on the provided offset range.
+    pub fn data(&self, range: Range<usize>) -> &[u8] {
+        &self.data_mmap[range]
     }
-}
 
-impl Deref for MmapHandle {
-    type Target = Mmap;
-    fn deref(&self) -> &Self::Target {
-        &self.data_mmap
+    /// Returns total size of data
+    pub fn size(&self) -> usize {
+        self.data_mmap.len()
     }
 }
 
