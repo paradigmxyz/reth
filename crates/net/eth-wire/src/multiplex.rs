@@ -134,14 +134,33 @@ impl<St> RlpxProtocolMultiplexer<St> {
 }
 
 /// A Stream and Sink type that acts as a wrapper around a primary RLPx subprotocol (e.g. "eth")
+///
+/// Only emits and sends _non-empty_ messages
 #[derive(Debug)]
 pub struct ProtocolProxy {
     cap: SharedCapability,
+    /// Receives _non-empty_ messages from the wire
     from_wire: UnboundedReceiverStream<BytesMut>,
+    /// Sends _non-empty_ messages from the wire
     to_wire: UnboundedSender<Bytes>,
 }
 
 impl ProtocolProxy {
+    /// Sends a _non-empty_ message on the wire.
+    fn try_send(&self, msg: Bytes) -> Result<(), io::Error> {
+        if msg.is_empty() {
+            // message must not be empty
+            return Err(io::ErrorKind::InvalidInput.into())
+        }
+        self.to_wire.send(self.mask_msg_id(msg)).map_err(|_| io::ErrorKind::BrokenPipe.into())
+    }
+
+    /// Masks the message ID of a message to be sent on the wire.
+    ///
+    /// # Panics
+    ///
+    /// If the message is empty.
+    #[inline]
     fn mask_msg_id(&self, msg: Bytes) -> Bytes {
         let mut masked_bytes = BytesMut::zeroed(msg.len());
         masked_bytes[0] = msg[0] + self.cap.relative_message_id_offset();
@@ -149,6 +168,12 @@ impl ProtocolProxy {
         masked_bytes.freeze()
     }
 
+    /// Unmasks the message ID of a message received from the wire.
+    ///
+    /// # Panics
+    ///
+    /// If the message is empty.
+    #[inline]
     fn unmask_id(&self, mut msg: BytesMut) -> BytesMut {
         msg[0] -= self.cap.relative_message_id_offset();
         msg
@@ -172,12 +197,7 @@ impl Sink<Bytes> for ProtocolProxy {
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        if item.is_empty() {
-            // message must not be empty
-            return Err(io::ErrorKind::InvalidInput.into())
-        }
-        let msg = self.mask_msg_id(item);
-        self.to_wire.send(msg).map_err(|_| io::ErrorKind::BrokenPipe.into())
+        self.get_mut().try_send(item)
     }
 
     fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -200,7 +220,7 @@ impl CanDisconnect<Bytes> for ProtocolProxy {
     }
 }
 
-/// A connection channel to receive messages for the negotiated protocol.
+/// A connection channel to receive _non_empty_ messages for the negotiated protocol.
 ///
 /// This is a [Stream] that returns raw bytes of the received messages for this protocol.
 #[derive(Debug)]
@@ -386,17 +406,29 @@ struct ProtocolStream {
 }
 
 impl ProtocolStream {
+    /// Masks the message ID of a message to be sent on the wire.
+    ///
+    /// # Panics
+    ///
+    /// If the message is empty.
     #[inline]
     fn mask_msg_id(&self, mut msg: BytesMut) -> Bytes {
         msg[0] += self.cap.relative_message_id_offset();
         msg.freeze()
     }
 
+    /// Unmasks the message ID of a message received from the wire.
+    ///
+    /// # Panics
+    ///
+    /// If the message is empty.
+    #[inline]
     fn unmask_id(&self, mut msg: BytesMut) -> BytesMut {
         msg[0] -= self.cap.relative_message_id_offset();
         msg
     }
 
+    /// Sends the message to the satellite stream.
     fn send_raw(&self, msg: BytesMut) {
         let _ = self.to_satellite.send(self.unmask_id(msg));
     }
@@ -408,7 +440,7 @@ impl Stream for ProtocolStream {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         let msg = ready!(this.satellite_st.as_mut().poll_next(cx));
-        Poll::Ready(msg.map(|msg| this.mask_msg_id(msg)))
+        Poll::Ready(msg.filter(|msg| !msg.is_empty()).map(|msg| this.mask_msg_id(msg)))
     }
 }
 
