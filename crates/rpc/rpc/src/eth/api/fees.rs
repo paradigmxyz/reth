@@ -130,7 +130,7 @@ where
                     rewards.push(block_rewards);
                 }
             }
-            let last_entry = fee_entries.last().unwrap();
+            let last_entry = fee_entries.last().expect("is present");
             base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
                 last_entry.gas_used,
                 last_entry.gas_limit,
@@ -179,7 +179,7 @@ where
             // newest block"
             //
             // The unwrap is safe since we checked earlier that we got at least 1 header.
-            let last_header = headers.last().unwrap();
+            let last_header = headers.last().expect("is present");
             base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
                 last_header.gas_used,
                 last_header.gas_limit,

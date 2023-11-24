@@ -6,7 +6,7 @@ use futures::{Stream, StreamExt};
 use metrics::atomics::AtomicU64;
 use reth_interfaces::RethResult;
 use reth_primitives::{Receipt, SealedBlock, TransactionSigned, B256, U256};
-use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider};
+use reth_provider::{BlockReaderIdExt, CanonStateNotification, Chain, ChainSpecProvider};
 use reth_rpc_types::TxGasAndReward;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -73,11 +73,15 @@ impl FeeHistoryCache {
     }
 
     /// Processing of the arriving blocks
-    pub async fn on_new_blocks<'a, I>(&self, blocks: I)
+    async fn on_new_chain<'a, I>(&self, chain: Arc<Chain>)
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
         let mut entries = self.entries.write().await;
+
+        // we're only interested in new committed blocks
+        let (blocks, state) = chain.inner();
+        // TODO: need iterator
 
         for block in blocks {
             let mut fee_history_entry = FeeHistoryEntry::new(block);
@@ -101,6 +105,7 @@ impl FeeHistoryCache {
             }
         }
 
+        // enforce bounds
         while entries.len() > self.config.max_blocks as usize {
             entries.pop_first();
         }
@@ -180,20 +185,15 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
             0
         };
 
-        let blocks = provider.block_range(start_block..=last_block_number).unwrap_or_default();
-        let sealed = blocks.into_iter().map(|block| block.seal_slow()).collect::<Vec<_>>();
-
-        fee_history_cache.on_new_blocks(sealed.iter()).await;
+        // let blocks = provider.block_range(start_block..=last_block_number).unwrap_or_default();
+        // let sealed = blocks.into_iter().map(|block| block.seal_slow()).collect::<Vec<_>>();
+        //
+        // fee_history_cache.on_new_chain(sealed.iter()).await;
     }
 
     while let Some(event) = events.next().await {
         if let Some(committed) = event.committed() {
-            // we're only interested in new committed blocks
-            let (blocks, _) = committed.inner();
-
-            let blocks = blocks.iter().map(|(_, v)| v.block.clone()).collect::<Vec<_>>();
-
-            fee_history_cache.on_new_blocks(blocks.iter()).await;
+            fee_history_cache.on_new_chain(committed).await;
         }
     }
 }
