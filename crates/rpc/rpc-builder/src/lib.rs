@@ -1230,6 +1230,8 @@ pub struct RpcServerConfig {
     ipc_endpoint: Option<Endpoint>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
+    /// HTTP RPC path prefix.
+    http_rpcprefix: Option<String>,
 }
 
 impl fmt::Debug for RpcServerConfig {
@@ -1250,6 +1252,11 @@ impl fmt::Debug for RpcServerConfig {
 /// === impl RpcServerConfig ===
 
 impl RpcServerConfig {
+    /// Configures the HTTP RPC path prefix
+    pub fn with_http_rpc_prefix(mut self, prefix: String) -> Self {
+        self.http_rpcprefix = Some(prefix);
+        self
+    }
     /// Creates a new config with only http set
     pub fn http(config: ServerBuilder) -> Self {
         Self::default().with_http(config)
