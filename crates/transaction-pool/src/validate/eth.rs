@@ -126,7 +126,7 @@ where
     kzg_settings: Arc<KzgSettings>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
-    ///
+    /// Flag to enforce no local transaction exemptions.
     no_locals: bool,
 }
 
