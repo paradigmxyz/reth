@@ -6378,6 +6378,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-types",
  "serde_json",
+ "similar-asserts",
  "tokio",
 ]
 
