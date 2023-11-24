@@ -127,7 +127,7 @@ where
             base_fee_per_gas.push(U256::try_from(entry.base_fee_per_gas).unwrap());
             gas_used_ratio.push(entry.gas_used_ratio);
 
-            if fee_cache_flag == true {
+            if fee_cache_flag {
                 if let Some(percentiles) = &reward_percentiles {
                     let mut block_rewards = Vec::new();
 
@@ -166,7 +166,7 @@ where
     /// Approximates reward at a given percentile for a specific block
     /// Based on the configured resolution
     fn approximate_percentile(&self, entry: &FeeHistoryEntry, requested_percentile: f64) -> U256 {
-        let resolution = self.fee_history_cache().config.resolution;
+        let resolution = self.fee_history_cache().resolution();
         let rounded_percentile =
             (requested_percentile * resolution as f64).round() / resolution as f64;
         let clamped_percentile = rounded_percentile.clamp(0.0, 100.0);

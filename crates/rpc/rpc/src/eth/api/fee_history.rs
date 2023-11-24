@@ -2,22 +2,20 @@
 
 use crate::eth::{cache::EthStateCache, error::EthApiError};
 
+use futures::{Stream, StreamExt};
 use metrics::atomics::AtomicU64;
 use reth_interfaces::RethResult;
 use reth_primitives::{Receipt, SealedBlock, TransactionSigned, B256, U256};
-use serde::{Deserialize, Serialize};
-
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider};
 use reth_rpc_types::TxGasAndReward;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fmt::Debug,
     sync::{atomic::Ordering::SeqCst, Arc},
 };
 
-use futures::{Stream, StreamExt};
-
-/// Settings for the [FeeHistoryCache](crate::eth::FeeHistoryCache).
+/// Settings for the [FeeHistoryCache].
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeeHistoryCacheConfig {
@@ -40,12 +38,12 @@ impl Default for FeeHistoryCacheConfig {
 /// Wrapper struct for BTreeMap
 #[derive(Debug, Clone)]
 pub struct FeeHistoryCache {
+    /// Stores the lower bound of the cache
     lower_bound: Arc<AtomicU64>,
     upper_bound: Arc<AtomicU64>,
-
     /// Config for FeeHistoryCache, consists of resolution for percentile approximation
     /// and max number of blocks
-    pub config: FeeHistoryCacheConfig,
+    config: FeeHistoryCacheConfig,
     entries: Arc<tokio::sync::RwLock<BTreeMap<u64, FeeHistoryEntry>>>,
     eth_cache: EthStateCache,
 }
@@ -63,6 +61,17 @@ impl FeeHistoryCache {
         FeeHistoryCache { config, entries, upper_bound, lower_bound, eth_cache }
     }
 
+    /// How the cache is configured.
+    pub fn config(&self) -> &FeeHistoryCacheConfig {
+        &self.config
+    }
+
+    /// Returns the configured resolution for percentile approximation.
+    #[inline]
+    pub fn resolution(&self) -> u64 {
+        self.config.resolution
+    }
+
     /// Processing of the arriving blocks
     pub async fn on_new_blocks<'a, I>(&self, blocks: I)
     where
@@ -71,7 +80,7 @@ impl FeeHistoryCache {
         let mut entries = self.entries.write().await;
 
         for block in blocks {
-            let mut fee_history_entry = FeeHistoryEntry::new(&block);
+            let mut fee_history_entry = FeeHistoryEntry::new(block);
             let percentiles = self.predefined_percentiles();
 
             if let Ok(Some((transactions, receipts))) =
@@ -140,10 +149,11 @@ impl FeeHistoryCache {
     }
 
     /// Generates predefined set of percentiles
+    ///
+    /// This returns 100 * resolution points
     pub fn predefined_percentiles(&self) -> Vec<f64> {
-        (0..=100 * self.config.resolution)
-            .map(|p| p as f64 / self.config.resolution as f64)
-            .collect()
+        let res = self.resolution() as f64;
+        (0..=100 * self.resolution()).map(|p| p as f64 / res).collect()
     }
 }
 
