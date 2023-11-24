@@ -30,7 +30,7 @@ use reth_provider::{
     PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
-use reth_revm::Factory;
+use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
@@ -45,7 +45,7 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
         Arc<DatabaseEnv>,
         ShareableBlockchainTree<
             Arc<DatabaseEnv>,
-            EitherExecutorFactory<TestExecutorFactory, Factory>,
+            EitherExecutorFactory<TestExecutorFactory, EvmProcessorFactory>,
         >,
     >,
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
@@ -481,9 +481,9 @@ where
                 executor_factory.extend(results);
                 EitherExecutorFactory::Left(executor_factory)
             }
-            TestExecutorConfig::Real => {
-                EitherExecutorFactory::Right(Factory::new(self.base_config.chain_spec.clone()))
-            }
+            TestExecutorConfig::Real => EitherExecutorFactory::Right(EvmProcessorFactory::new(
+                self.base_config.chain_spec.clone(),
+            )),
         };
 
         // Setup pipeline
@@ -516,15 +516,10 @@ where
             pipeline = pipeline.with_max_block(max_block);
         }
 
-        let pipeline = pipeline.build(db.clone(), self.base_config.chain_spec.clone());
+        let pipeline = pipeline.build(provider_factory.clone());
 
         // Setup blockchain tree
-        let externals = TreeExternals::new(
-            db.clone(),
-            consensus,
-            executor_factory,
-            self.base_config.chain_spec.clone(),
-        );
+        let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let tree = ShareableBlockchainTree::new(
             BlockchainTree::new(externals, config, None).expect("failed to create tree"),

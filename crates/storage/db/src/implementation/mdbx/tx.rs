@@ -13,7 +13,20 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, Transaction, TransactionKind, WriteFlags, RW};
-use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Instant};
+use reth_tracing::tracing::debug;
+use std::{
+    backtrace::Backtrace,
+    marker::PhantomData,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
+/// Duration after which we emit the log about long-lived database transactions.
+const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
@@ -38,12 +51,7 @@ impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     pub fn new_with_metrics(inner: Transaction<K>, with_metrics: bool) -> Self {
         let metrics_handler = with_metrics.then(|| {
-            let handler = MetricsHandler::<K> {
-                txn_id: inner.id(),
-                start: Instant::now(),
-                close_recorded: false,
-                _marker: PhantomData,
-            };
+            let handler = MetricsHandler::<K>::new(inner.id());
             TransactionMetrics::record_open(handler.transaction_mode());
             handler
         });
@@ -95,11 +103,12 @@ impl<K: TransactionKind> Tx<K> {
     ) -> R {
         if let Some(mut metrics_handler) = self.metrics_handler.take() {
             metrics_handler.close_recorded = true;
+            metrics_handler.log_backtrace_on_long_transaction();
 
             let start = Instant::now();
             let result = f(self);
-            let close_duration = start.elapsed();
             let open_duration = metrics_handler.start.elapsed();
+            let close_duration = start.elapsed();
 
             TransactionMetrics::record_close(
                 metrics_handler.transaction_mode(),
@@ -124,7 +133,8 @@ impl<K: TransactionKind> Tx<K> {
         value_size: Option<usize>,
         f: impl FnOnce(&Transaction<K>) -> R,
     ) -> R {
-        if self.metrics_handler.is_some() {
+        if let Some(metrics_handler) = &self.metrics_handler {
+            metrics_handler.log_backtrace_on_long_transaction();
             OperationMetrics::record(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
@@ -138,13 +148,26 @@ struct MetricsHandler<K: TransactionKind> {
     txn_id: u64,
     /// The time when transaction has started.
     start: Instant,
-    /// If true, the metric about transaction closing has already been recorded and we don't need
+    /// If `true`, the metric about transaction closing has already been recorded and we don't need
     /// to do anything on [Drop::drop].
     close_recorded: bool,
+    /// If `true`, the backtrace of transaction has already been recorded and logged.
+    /// See [MetricsHandler::log_backtrace_on_long_transaction].
+    backtrace_recorded: AtomicBool,
     _marker: PhantomData<K>,
 }
 
 impl<K: TransactionKind> MetricsHandler<K> {
+    fn new(txn_id: u64) -> Self {
+        Self {
+            txn_id,
+            start: Instant::now(),
+            close_recorded: false,
+            backtrace_recorded: AtomicBool::new(false),
+            _marker: PhantomData,
+        }
+    }
+
     const fn transaction_mode(&self) -> TransactionMode {
         if K::IS_READ_ONLY {
             TransactionMode::ReadOnly
@@ -152,11 +175,38 @@ impl<K: TransactionKind> MetricsHandler<K> {
             TransactionMode::ReadWrite
         }
     }
+
+    /// Logs the backtrace of current call if the duration that the transaction has been open is
+    /// more than [LONG_TRANSACTION_DURATION].
+    /// The backtrace is recorded and logged just once, guaranteed by `backtrace_recorded` atomic.
+    ///
+    /// NOTE: Backtrace is recorded using [Backtrace::force_capture], so `RUST_BACKTRACE` env var is
+    /// not needed.
+    fn log_backtrace_on_long_transaction(&self) {
+        if self.backtrace_recorded.load(Ordering::Relaxed) {
+            return
+        }
+
+        let open_duration = self.start.elapsed();
+        if open_duration > LONG_TRANSACTION_DURATION {
+            self.backtrace_recorded.store(true, Ordering::Relaxed);
+
+            let backtrace = Backtrace::force_capture();
+            debug!(
+                target: "storage::db::mdbx",
+                ?open_duration,
+                ?backtrace,
+                "The database transaction has been open for too long"
+            );
+        }
+    }
 }
 
 impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
         if !self.close_recorded {
+            self.log_backtrace_on_long_transaction();
+
             TransactionMetrics::record_close(
                 self.transaction_mode(),
                 TransactionOutcome::Drop,

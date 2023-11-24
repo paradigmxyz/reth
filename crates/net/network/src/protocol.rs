@@ -2,19 +2,14 @@
 //!
 //! See also <https://github.com/ethereum/devp2p/blob/master/README.md>
 
-use futures::{Stream, StreamExt};
-use reth_eth_wire::{capability::SharedCapabilities, protocol::Protocol};
+use futures::Stream;
+use reth_eth_wire::{
+    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
+};
 use reth_network_api::Direction;
 use reth_primitives::BytesMut;
 use reth_rpc_types::PeerId;
-use std::{
-    fmt,
-    net::SocketAddr,
-    pin::Pin,
-    task::{Context, Poll},
-};
-
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use std::{fmt, net::SocketAddr, pin::Pin};
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
@@ -81,22 +76,6 @@ pub enum OnNotSupported {
     Disconnect,
 }
 
-/// A connection channel to receive messages for the negotiated protocol.
-///
-/// This is a [Stream] that returns raw bytes of the received messages for this protocol.
-#[derive(Debug)]
-pub struct ProtocolConnection {
-    from_wire: UnboundedReceiverStream<BytesMut>,
-}
-
-impl Stream for ProtocolConnection {
-    type Item = BytesMut;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.from_wire.poll_next_unpin(cx)
-    }
-}
-
 /// A wrapper type for a RLPx sub-protocol.
 #[derive(Debug)]
 pub struct RlpxSubProtocol(Box<dyn DynProtocolHandler>);
@@ -113,6 +92,12 @@ where
 {
     fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol {
         RlpxSubProtocol(Box::new(self))
+    }
+}
+
+impl IntoRlpxSubProtocol for RlpxSubProtocol {
+    fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol {
+        self
     }
 }
 

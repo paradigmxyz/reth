@@ -41,19 +41,17 @@ impl Deref for LoadedJar {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{HeaderProvider, ProviderFactory};
+    use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::{self, seq::SliceRandom};
     use reth_db::{
         cursor::DbCursorRO,
-        database::Database,
         snapshot::create_snapshot_T1_T2_T3,
-        test_utils::create_test_rw_db,
         transaction::{DbTx, DbTxMut},
-        CanonicalHeaders, DatabaseError, HeaderNumbers, HeaderTD, Headers, RawTable,
+        CanonicalHeaders, HeaderNumbers, HeaderTD, Headers, RawTable,
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
     use reth_nippy_jar::NippyJar;
-    use reth_primitives::{BlockNumber, B256, MAINNET, U256};
+    use reth_primitives::{BlockNumber, B256, U256};
 
     #[test]
     fn test_snap() {
@@ -64,8 +62,7 @@ mod test {
             SegmentHeader::new(range.clone(), range.clone(), SnapshotSegment::Headers);
 
         // Data sources
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(&db, MAINNET.clone());
+        let factory = create_test_provider_factory();
         let snap_path = tempfile::tempdir().unwrap();
         let snap_file = snap_path.path().join(SnapshotSegment::Headers.filename(&range, &range));
 
@@ -76,21 +73,19 @@ mod test {
             B256::random(),
         );
 
-        db.update(|tx| -> Result<(), DatabaseError> {
-            let mut td = U256::ZERO;
-            for header in headers.clone() {
-                td += header.header.difficulty;
-                let hash = header.hash();
+        let mut provider_rw = factory.provider_rw().unwrap();
+        let tx = provider_rw.tx_mut();
+        let mut td = U256::ZERO;
+        for header in headers.clone() {
+            td += header.header.difficulty;
+            let hash = header.hash();
 
-                tx.put::<CanonicalHeaders>(header.number, hash)?;
-                tx.put::<Headers>(header.number, header.clone().unseal())?;
-                tx.put::<HeaderTD>(header.number, td.into())?;
-                tx.put::<HeaderNumbers>(hash, header.number)?;
-            }
-            Ok(())
-        })
-        .unwrap()
-        .unwrap();
+            tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
+            tx.put::<Headers>(header.number, header.clone().unseal()).unwrap();
+            tx.put::<HeaderTD>(header.number, td.into()).unwrap();
+            tx.put::<HeaderNumbers>(hash, header.number).unwrap();
+        }
+        provider_rw.commit().unwrap();
 
         // Create Snapshot
         {
@@ -107,7 +102,8 @@ mod test {
                 nippy_jar = nippy_jar.with_cuckoo_filter(row_count as usize + 10).with_fmph();
             }
 
-            let tx = db.tx().unwrap();
+            let provider = factory.provider().unwrap();
+            let tx = provider.tx_ref();
 
             // Hacky type inference. TODO fix
             let mut none_vec = Some(vec![vec![vec![0u8]].into_iter()]);
@@ -127,7 +123,7 @@ mod test {
                 BlockNumber,
                 SegmentHeader,
             >(
-                &tx, range, None, none_vec, Some(hashes), row_count as usize, &mut nippy_jar
+                tx, range, None, none_vec, Some(hashes), row_count as usize, &mut nippy_jar
             )
             .unwrap();
         }

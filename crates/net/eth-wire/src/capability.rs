@@ -374,6 +374,45 @@ impl SharedCapabilities {
         self.0.iter().find(|c| c.version() == cap.version as u8 && c.name() == cap.name)
     }
 
+    /// Returns the matching shared capability for the given capability offset.
+    ///
+    /// `offset` is the multiplexed message id offset of the capability relative to the reserved
+    /// message id space. In other words, counting starts at [`MAX_RESERVED_MESSAGE_ID`] + 1, which
+    /// corresponds to the first non-reserved message id.
+    ///
+    /// For example: `offset == 0` corresponds to the first shared message across the shared
+    /// capabilities and will return the first shared capability that supports messages.
+    #[inline]
+    pub fn find_by_relative_offset(&self, offset: u8) -> Option<&SharedCapability> {
+        self.find_by_offset(offset.saturating_add(MAX_RESERVED_MESSAGE_ID + 1))
+    }
+
+    /// Returns the matching shared capability for the given capability offset.
+    ///
+    /// `offset` is the multiplexed message id offset of the capability that includes the reserved
+    /// message id space.
+    ///
+    /// This will always return None if `offset` is less than or equal to
+    /// [`MAX_RESERVED_MESSAGE_ID`] because the reserved message id space is not shared.
+    #[inline]
+    pub fn find_by_offset(&self, offset: u8) -> Option<&SharedCapability> {
+        let mut iter = self.0.iter();
+        let mut cap = iter.next()?;
+        if offset < cap.message_id_offset() {
+            // reserved message id space
+            return None
+        }
+
+        for next in iter {
+            if offset < next.message_id_offset() {
+                return Some(cap)
+            }
+            cap = next
+        }
+
+        Some(cap)
+    }
+
     /// Returns the shared capability for the given capability or an error if it's not compatible.
     #[inline]
     pub fn ensure_matching_capability(
@@ -596,5 +635,48 @@ mod tests {
             shared_capability,
             Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
         ))
+    }
+
+    #[test]
+    fn test_find_by_offset() {
+        let local_capabilities = vec![EthVersion::Eth66.into()];
+        let peer_capabilities = vec![EthVersion::Eth66.into()];
+
+        let shared = SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap();
+
+        let shared_eth = shared.find_by_relative_offset(0).unwrap();
+        assert_eq!(shared_eth.name(), "eth");
+
+        let shared_eth = shared.find_by_offset(MAX_RESERVED_MESSAGE_ID + 1).unwrap();
+        assert_eq!(shared_eth.name(), "eth");
+
+        // reserved message id space
+        assert!(shared.find_by_offset(MAX_RESERVED_MESSAGE_ID).is_none());
+    }
+
+    #[test]
+    fn test_find_by_offset_many() {
+        let cap = Capability::new_static("aaa", 1);
+        let proto = Protocol::new(cap.clone(), 5);
+        let local_capabilities = vec![proto.clone(), EthVersion::Eth66.into()];
+        let peer_capabilities = vec![cap, EthVersion::Eth66.into()];
+
+        let shared = SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap();
+
+        let shared_eth = shared.find_by_relative_offset(0).unwrap();
+        assert_eq!(shared_eth.name(), proto.cap.name);
+
+        let shared_eth = shared.find_by_offset(MAX_RESERVED_MESSAGE_ID + 1).unwrap();
+        assert_eq!(shared_eth.name(), proto.cap.name);
+
+        // the 5th shared message (0,1,2,3,4) is the last message of the aaa capability
+        let shared_eth = shared.find_by_relative_offset(4).unwrap();
+        assert_eq!(shared_eth.name(), proto.cap.name);
+        let shared_eth = shared.find_by_offset(MAX_RESERVED_MESSAGE_ID + 5).unwrap();
+        assert_eq!(shared_eth.name(), proto.cap.name);
+
+        // the 6th shared message is the first message of the eth capability
+        let shared_eth = shared.find_by_relative_offset(1 + proto.messages).unwrap();
+        assert_eq!(shared_eth.name(), "eth");
     }
 }

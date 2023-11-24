@@ -309,6 +309,7 @@ pub fn fill_tx_env<T>(
         }
         #[cfg(feature = "optimism")]
         Transaction::Deposit(tx) => {
+            tx_env.access_list.clear();
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::ZERO;
             tx_env.gas_priority_fee = None;

@@ -381,7 +381,7 @@ impl BundleStateWithReceipts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AccountReader, BundleStateWithReceipts, ProviderFactory};
+    use crate::{test_utils::create_test_provider_factory, AccountReader, BundleStateWithReceipts};
     use reth_db::{
         cursor::{DbCursorRO, DbDupCursorRO},
         database::Database,
@@ -391,7 +391,7 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256,
+        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
     use reth_trie::test_utils::state_root;
     use revm::{
@@ -413,8 +413,7 @@ mod tests {
 
     #[test]
     fn write_to_db_account_info() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
         let address_a = Address::ZERO;
@@ -552,8 +551,7 @@ mod tests {
 
     #[test]
     fn write_to_db_storage() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
         let address_a = Address::ZERO;
@@ -741,8 +739,7 @@ mod tests {
 
     #[test]
     fn write_to_db_multiple_selfdestructs() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();
@@ -1050,8 +1047,7 @@ mod tests {
 
     #[test]
     fn storage_change_after_selfdestruct_within_block() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();

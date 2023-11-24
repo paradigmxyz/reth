@@ -12,27 +12,26 @@
 //! ```no_run
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
-//! # use reth_revm::Factory;
+//! # use reth_revm::EvmProcessorFactory;
 //! # use reth_primitives::MAINNET;
-//! use reth_db::test_utils::create_test_rw_db;
+//! # use reth_provider::test_utils::create_test_provider_factory;
 //!
-//! # let factory = Factory::new(MAINNET.clone());
-//! # let db = create_test_rw_db();
+//! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone());
+//! # let provider_factory = create_test_provider_factory();
 //! // Build a pipeline with all offline stages.
-//! # let pipeline =
-//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build(db, MAINNET.clone());
+//! # let pipeline = Pipeline::builder().add_stages(OfflineStages::new(executor_factory)).build(provider_factory);
 //! ```
 //!
 //! ```ignore
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::{StageSet, sets::OfflineStages};
-//! # use reth_revm::Factory;
+//! # use reth_revm::EvmProcessorFactory;
 //! # use reth_primitives::MAINNET;
 //! // Build a pipeline with all offline stages and a custom stage at the end.
-//! # let factory = Factory::new(MAINNET.clone());
+//! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone());
 //! Pipeline::builder()
 //!     .add_stages(
-//!         OfflineStages::new(factory).builder().add_stage(MyCustomStage)
+//!         OfflineStages::new(executor_factory).builder().add_stage(MyCustomStage)
 //!     )
 //!     .build();
 //! ```

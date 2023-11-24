@@ -13,18 +13,18 @@
 //!
 //! ```
 //! # use std::sync::Arc;
-//! # use reth_db::test_utils::create_test_rw_db;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
-//! # use reth_revm::Factory;
+//! # use reth_revm::EvmProcessorFactory;
 //! # use reth_primitives::{PeerId, MAINNET, B256};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
 //! # use reth_provider::ProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
+//! # use reth_provider::test_utils::create_test_provider_factory;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
@@ -32,27 +32,27 @@
 //! #    Arc::new(TestHeadersClient::default()),
 //! #    consensus.clone()
 //! # );
-//! # let db = create_test_rw_db();
+//! # let provider_factory = create_test_provider_factory();
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::ZERO, vec![]).into()) }),
 //! #    consensus.clone(),
-//! #    ProviderFactory::new(db.clone(), MAINNET.clone())
+//! #    provider_factory.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
-//! # let factory = Factory::new(chain_spec.clone());
+//! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone());
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
 //!     .add_stages(DefaultStages::new(
-//!         ProviderFactory::new(db.clone(), chain_spec.clone()),
+//!         provider_factory.clone(),
 //!         HeaderSyncMode::Tip(tip_rx),
 //!         consensus,
 //!         headers_downloader,
 //!         bodies_downloader,
-//!         factory,
+//!         executor_factory,
 //!     ))
-//!     .build(db, chain_spec.clone());
+//!     .build(provider_factory);
 //! ```
 //!
 //! ## Feature Flags

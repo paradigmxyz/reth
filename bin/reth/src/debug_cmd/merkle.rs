@@ -197,7 +197,7 @@ impl Command {
                         checkpoint.stage_checkpoint.is_some()
                 });
 
-        let factory = reth_revm::Factory::new(self.chain.clone());
+        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
             factory,
             ExecutionStageThresholds {
