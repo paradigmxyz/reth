@@ -112,7 +112,7 @@ where
     pub fn next_row(&mut self) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.internal_buffer.clear();
 
-        if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
+        if self.row as usize >= self.jar.rows {
             // Has reached the end
             return Ok(None)
         }
@@ -186,7 +186,7 @@ where
     pub fn next_row_with_cols(&mut self, mask: usize) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.internal_buffer.clear();
 
-        if self.row as usize * self.jar.columns >= self.jar.offsets.len() {
+        if self.row as usize >= self.jar.rows {
             // Has reached the end
             return Ok(None)
         }
@@ -219,13 +219,13 @@ where
     ) -> Result<(), NippyJarError> {
         // Find out the offset of the column value
         let offset_pos = self.row as usize * self.jar.columns + column;
-        let value_offset = self.jar.offsets.select(offset_pos).expect("should exist");
+        let value_offset = self.mmap_handle.offset(offset_pos) as usize;
 
-        let column_offset_range = if self.jar.offsets.len() == (offset_pos + 1) {
+        let column_offset_range = if self.jar.rows * self.jar.columns == offset_pos + 1 {
             // It's the last column of the last row
             value_offset..self.mmap_handle.len()
         } else {
-            let next_value_offset = self.jar.offsets.select(offset_pos + 1).expect("should exist");
+            let next_value_offset = self.mmap_handle.offset(offset_pos + 1) as usize;
             value_offset..next_value_offset
         };
 
