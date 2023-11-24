@@ -116,6 +116,10 @@ pub struct RpcServerArgs {
     #[arg(long = "authrpc.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     pub auth_addr: IpAddr,
 
+    /// HTTP path prefix on which JSON-RPC is served.
+    #[arg(long = "http.rpcprefix", default_value = "/")]
+    pub http_rpcprefix: String,
+
     /// Auth server port to listen on
     #[arg(long = "authrpc.port", default_value_t = constants::DEFAULT_AUTH_PORT)]
     pub auth_port: u16,
@@ -335,6 +339,9 @@ impl RpcServerArgs {
 }
 
 impl RethRpcConfig for RpcServerArgs {
+    fn http_rpc_prefix(&self) -> &str {
+        &self.http_rpcprefix
+    }
     fn is_ipc_enabled(&self) -> bool {
         // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
