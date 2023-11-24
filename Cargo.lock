@@ -5581,6 +5581,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "rand 0.8.5",
+ "rayon",
  "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
@@ -6378,6 +6379,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-types",
  "serde_json",
+ "similar-asserts",
  "tokio",
 ]
 
