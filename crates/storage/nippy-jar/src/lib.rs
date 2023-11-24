@@ -263,19 +263,8 @@ where
 
     /// Loads the offset list into memory
     pub fn load_offsets(mut self) -> Result<Self, NippyJarError> {
-        // Read the offsets lists located at the index file.
-        let offsets_file = File::open(self.offsets_path())?;
-
-        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let mmap = unsafe { memmap2::Mmap::map(&offsets_file)? };
-        let mut offsets = Vec::with_capacity(self.rows * self.columns);
-
-        for chunk in mmap.chunks_exact(8) {
-            offsets
-                .push(u64::from_le_bytes(chunk.try_into().expect("slice with incorrect length")));
-        }
-        self.offsets = offsets;
-
+        let handle = MmapHandle::new(self.data_path())?;
+        self.offsets = (0..self.rows * self.columns).map(|i| handle.offset(i)).collect();
         Ok(self)
     }
 
@@ -483,8 +472,13 @@ where
         bincode::serialize_into(&mut file, &self.filter)?;
 
         let mut file = File::create(self.offsets_path())?;
+        let bytes_needed = (std::mem::size_of::<u64>() * 8 -
+            self.offsets.iter().max().expect("should exist.").leading_zeros() as usize +
+            7) /
+            8;
+        file.write_all(&[bytes_needed as u8])?;
         for offset in &self.offsets {
-            file.write_all(&offset.to_le_bytes())?;
+            file.write_all(&offset.to_le_bytes()[..bytes_needed])?;
         }
 
         Ok(())
@@ -570,6 +564,8 @@ pub struct MmapHandle {
     offset_file: Arc<File>,
     /// Mmap handle.
     offset_mmap: Arc<Mmap>,
+    /// Number of bytes that represents one offset
+    offset_len: usize,
 }
 
 impl MmapHandle {
@@ -581,8 +577,8 @@ impl MmapHandle {
             Arc::new(File::open(PathBuf::from(format!("{}.off", path.as_ref().display())))?);
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let offset_mmap = Arc::new(unsafe { Mmap::map(&offset_file)? });
-
-        Ok(Self { data_file, data_mmap, offset_file, offset_mmap })
+        let offset_len = offset_mmap[0] as usize;
+        Ok(Self { data_file, data_mmap, offset_file, offset_mmap, offset_len })
     }
 
     pub fn offsets(&self) -> &Mmap {
@@ -590,10 +586,14 @@ impl MmapHandle {
     }
 
     pub fn offset(&self, index: usize) -> u64 {
-        let bytes: [u8; 8] = self.offset_mmap[index * 8..index * 8 + 8]
-            .try_into()
-            .expect("slice with incorrect length");
-        u64::from_le_bytes(bytes)
+        let mut buffer: [u8; 8] = [0; 8];
+
+        // + 1 represents the offset_len u8 which is in the beginning of the file
+        let from = index * self.offset_len + 1;
+        let to = from + self.offset_len;
+
+        buffer[..self.offset_len].copy_from_slice(&self.offset_mmap[from..to]);
+        u64::from_le_bytes(buffer)
     }
 
     pub fn data(&self) -> &Mmap {
