@@ -15,6 +15,8 @@ use std::{borrow::Cow, path::PathBuf, time::Duration};
 /// This provides all basic config values for the RPC server and is implemented by the
 /// [RpcServerArgs](crate::args::RpcServerArgs) type.
 pub trait RethRpcConfig {
+    /// Returns the HTTP RPC path prefix.
+    fn http_rpc_prefix(&self) -> &str;
     /// Returns whether ipc is enabled.
     fn is_ipc_enabled(&self) -> bool;
 
