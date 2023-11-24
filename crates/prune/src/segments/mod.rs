@@ -22,7 +22,7 @@ pub use transactions::Transactions;
 
 use crate::PrunerError;
 use reth_db::database::Database;
-use reth_interfaces::RethResult;
+use reth_interfaces::{provider::ProviderResult, RethResult};
 use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber};
 use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter};
 use std::ops::RangeInclusive;
@@ -45,16 +45,16 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     /// Prune data for [Self::segment] using the provided input.
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError>;
 
     /// Save checkpoint for [Self::segment] to the database.
     fn save_checkpoint(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         checkpoint: PruneCheckpoint,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         provider.save_prune_checkpoint(self.segment(), checkpoint)
     }
 }
@@ -80,7 +80,7 @@ impl PruneInput {
     /// To get the range end: get last tx number for `to_block`.
     pub(crate) fn get_next_tx_num_range<DB: Database>(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
     ) -> RethResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = self.previous_checkpoint
             // Checkpoint exists, prune from the next transaction after the highest pruned one

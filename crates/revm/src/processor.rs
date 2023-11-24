@@ -557,7 +557,7 @@ pub fn verify_receipt<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_interfaces::RethResult;
+    use reth_interfaces::provider::ProviderResult;
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
@@ -568,6 +568,7 @@ mod tests {
     use reth_provider::{
         AccountReader, BlockHashReader, BundleStateWithReceipts, StateRootProvider,
     };
+    use reth_trie::updates::TrieUpdates;
     use revm::{Database, TransitionState};
     use std::collections::HashMap;
 
@@ -599,14 +600,13 @@ mod tests {
     }
 
     impl AccountReader for StateProviderTest {
-        fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
-            let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
-            ret
+        fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+            Ok(self.accounts.get(&address).map(|(_, acc)| *acc))
         }
     }
 
     impl BlockHashReader for StateProviderTest {
-        fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
+        fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
             Ok(self.block_hash.get(&number).cloned())
         }
 
@@ -614,7 +614,7 @@ mod tests {
             &self,
             start: BlockNumber,
             end: BlockNumber,
-        ) -> RethResult<Vec<B256>> {
+        ) -> ProviderResult<Vec<B256>> {
             let range = start..end;
             Ok(self
                 .block_hash
@@ -625,7 +625,14 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
+        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+            unimplemented!("state root computation is not supported")
+        }
+
+        fn state_root_with_updates(
+            &self,
+            _bundle_state: &BundleStateWithReceipts,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
             unimplemented!("state root computation is not supported")
         }
     }
@@ -635,18 +642,18 @@ mod tests {
             &self,
             account: Address,
             storage_key: StorageKey,
-        ) -> RethResult<Option<reth_primitives::StorageValue>> {
+        ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
             Ok(self
                 .accounts
                 .get(&account)
                 .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
-        fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
+        fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
 
-        fn proof(&self, _address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
+        fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
             unimplemented!("proof generation is not supported")
         }
     }

@@ -56,6 +56,16 @@ impl CallTraceArena {
             }
         }
     }
+
+    /// Returns the nodes in the arena
+    pub fn nodes(&self) -> &[CallTraceNode] {
+        &self.arena
+    }
+
+    /// Consumes the arena and returns the nodes
+    pub fn into_nodes(self) -> Vec<CallTraceNode> {
+        self.arena
+    }
 }
 
 /// How to push a trace into the arena

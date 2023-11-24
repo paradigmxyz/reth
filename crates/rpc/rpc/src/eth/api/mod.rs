@@ -15,7 +15,7 @@ use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnv},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlock, B256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -206,7 +206,7 @@ where
     /// Returns the state at the given [BlockId] enum.
     ///
     /// Note: if not [BlockNumberOrTag::Pending] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
-    pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
+    pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox> {
         Ok(self.provider().state_by_block_id(at)?)
     }
 
@@ -216,7 +216,7 @@ where
     pub fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> EthResult<StateProviderBox<'_>> {
+    ) -> EthResult<StateProviderBox> {
         if let Some(block_id) = block_id {
             self.state_at_block_id(block_id)
         } else {
@@ -225,13 +225,13 @@ where
     }
 
     /// Returns the state at the given block number
-    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox<'_>> {
-        self.provider().history_by_block_hash(block_hash)
+    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox> {
+        Ok(self.provider().history_by_block_hash(block_hash)?)
     }
 
     /// Returns the _latest_ state
-    pub fn latest_state(&self) -> RethResult<StateProviderBox<'_>> {
-        self.provider().latest()
+    pub fn latest_state(&self) -> RethResult<StateProviderBox> {
+        Ok(self.provider().latest()?)
     }
 }
 
@@ -246,7 +246,7 @@ where
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
-        let origin = if let Some(pending) = self.provider().pending_block()? {
+        let origin = if let Some(pending) = self.provider().pending_block_with_senders()? {
             PendingBlockEnvOrigin::ActualPending(pending)
         } else {
             // no pending block from the CL yet, so we use the latest block and modify the env
@@ -281,7 +281,7 @@ where
     }
 
     /// Returns the locally built pending block
-    pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlock>> {
+    pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlockWithSenders>> {
         let pending = self.pending_block_env_and_cfg()?;
         if pending.origin.is_actual_pending() {
             return Ok(pending.origin.into_actual_pending())
@@ -364,7 +364,7 @@ where
 
     /// Returns the current info for the chain
     fn chain_info(&self) -> RethResult<ChainInfo> {
-        self.provider().chain_info()
+        Ok(self.provider().chain_info()?)
     }
 
     fn accounts(&self) -> Vec<Address> {

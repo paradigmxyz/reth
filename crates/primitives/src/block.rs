@@ -98,9 +98,47 @@ impl BlockWithSenders {
         (!block.body.len() != senders.len()).then_some(Self { block, senders })
     }
 
+    /// Seal the block with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    #[inline]
+    pub fn seal(self, hash: B256) -> SealedBlockWithSenders {
+        let Self { block, senders } = self;
+        SealedBlockWithSenders { block: block.seal(hash), senders }
+    }
+
     /// Split Structure to its components
+    #[inline]
     pub fn into_components(self) -> (Block, Vec<Address>) {
         (self.block, self.senders)
+    }
+
+    /// Returns an iterator over all transactions in the block.
+    #[inline]
+    pub fn transactions(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.block.body.iter()
+    }
+
+    /// Returns an iterator over all transactions and their sender.
+    #[inline]
+    pub fn transactions_with_sender(
+        &self,
+    ) -> impl Iterator<Item = (&Address, &TransactionSigned)> + '_ {
+        self.senders.iter().zip(self.block.body.iter())
+    }
+
+    /// Consumes the block and returns the transactions of the block.
+    #[inline]
+    pub fn into_transactions(self) -> Vec<TransactionSigned> {
+        self.block.body
+    }
+
+    /// Returns an iterator over all transactions in the chain.
+    #[inline]
+    pub fn into_transactions_ecrecovered(
+        self,
+    ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
+        self.block.body.into_iter().zip(self.senders).map(|(tx, sender)| tx.with_signer(sender))
     }
 }
 
@@ -258,6 +296,13 @@ impl SealedBlockWithSenders {
     #[inline]
     pub fn into_components(self) -> (SealedBlock, Vec<Address>) {
         (self.block, self.senders)
+    }
+
+    /// Returns the unsealed [BlockWithSenders]
+    #[inline]
+    pub fn unseal(self) -> BlockWithSenders {
+        let Self { block, senders } = self;
+        BlockWithSenders { block: block.unseal(), senders }
     }
 
     /// Returns an iterator over all transactions in the block.

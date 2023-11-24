@@ -173,7 +173,7 @@ impl PayloadBuilderAttributes {
                 .as_deref()
                 .unwrap_or(&[])
                 .iter()
-                .map(|tx| TransactionSigned::decode_enveloped(tx.clone()))
+                .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
                 .collect::<Result<_, _>>()?;
             (payload_id(&parent, &attributes, &transactions), transactions)
         };

@@ -1,5 +1,8 @@
 use crate::stage::{ExecOutput, UnwindInput, UnwindOutput};
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    BlockNumber,
+};
 use std::fmt::{Display, Formatter};
 
 /// An event emitted by a [Pipeline][crate::Pipeline].
@@ -12,13 +15,15 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PipelineEvent {
     /// Emitted when a stage is about to be run.
-    Running {
+    Run {
         /// Pipeline stages progress.
         pipeline_stages_progress: PipelineStagesProgress,
         /// The stage that is about to be run.
         stage_id: StageId,
         /// The previous checkpoint of the stage.
         checkpoint: Option<StageCheckpoint>,
+        /// The block number up to which the stage is running, if known.
+        target: Option<BlockNumber>,
     },
     /// Emitted when a stage has run a single time.
     Ran {
@@ -30,7 +35,7 @@ pub enum PipelineEvent {
         result: ExecOutput,
     },
     /// Emitted when a stage is about to be unwound.
-    Unwinding {
+    Unwind {
         /// The stage that is about to be unwound.
         stage_id: StageId,
         /// The unwind parameters.

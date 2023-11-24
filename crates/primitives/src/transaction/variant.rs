@@ -1,8 +1,10 @@
 //!  Helper enum functions  for `Transaction`, `TransactionSigned` and
 //! `TransactionSignedEcRecovered`
 use crate::{
-    Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
+    Address, Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
+    B256,
 };
+use std::ops::Deref;
 
 /// Represents various different transaction formats used in reth.
 ///
@@ -26,6 +28,26 @@ impl TransactionSignedVariant {
             TransactionSignedVariant::SignedNoHash(tx) => &tx.transaction,
             TransactionSignedVariant::Signed(tx) => &tx.transaction,
             TransactionSignedVariant::SignedEcRecovered(tx) => &tx.signed_transaction.transaction,
+        }
+    }
+
+    /// Returns the hash of the transaction
+    pub fn hash(&self) -> B256 {
+        match self {
+            TransactionSignedVariant::SignedNoHash(tx) => tx.hash(),
+            TransactionSignedVariant::Signed(tx) => tx.hash,
+            TransactionSignedVariant::SignedEcRecovered(tx) => tx.hash,
+        }
+    }
+
+    /// Returns the signer of the transaction.
+    ///
+    /// If the transaction is of not of [TransactionSignedEcRecovered] it will be recovered.
+    pub fn signer(&self) -> Option<Address> {
+        match self {
+            TransactionSignedVariant::SignedNoHash(tx) => tx.recover_signer(),
+            TransactionSignedVariant::Signed(tx) => tx.recover_signer(),
+            TransactionSignedVariant::SignedEcRecovered(tx) => Some(tx.signer),
         }
     }
 
@@ -127,6 +149,14 @@ impl From<TransactionSignedEcRecovered> for TransactionSignedVariant {
 
 impl AsRef<Transaction> for TransactionSignedVariant {
     fn as_ref(&self) -> &Transaction {
+        self.as_raw()
+    }
+}
+
+impl Deref for TransactionSignedVariant {
+    type Target = Transaction;
+
+    fn deref(&self) -> &Self::Target {
         self.as_raw()
     }
 }

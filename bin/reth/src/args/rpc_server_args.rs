@@ -10,6 +10,7 @@ use crate::{
         config::RethRpcConfig,
         ext::RethNodeCommandConfig,
     },
+    utils::get_or_create_jwt_secret_from_path,
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -61,7 +62,7 @@ pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Clone, Args)]
-#[command(next_help_heading = "RPC")]
+#[clap(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
     #[arg(long, default_value_if("dev", "true", "true"))]
@@ -449,15 +450,7 @@ impl RethRpcConfig for RpcServerArgs {
                 debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
                 JwtSecret::from_file(fpath)
             }
-            None => {
-                if default_jwt_path.exists() {
-                    debug!(target: "reth::cli", ?default_jwt_path, "Reading JWT auth secret file");
-                    JwtSecret::from_file(&default_jwt_path)
-                } else {
-                    info!(target: "reth::cli", ?default_jwt_path, "Creating JWT auth secret file");
-                    JwtSecret::try_create(&default_jwt_path)
-                }
-            }
+            None => get_or_create_jwt_secret_from_path(&default_jwt_path),
         }
     }
 
@@ -535,6 +528,23 @@ mod tests {
 
         let apis = args.http_api.unwrap();
         let expected = RpcModuleSelection::try_from_selection(["eth", "admin", "debug"]).unwrap();
+
+        assert_eq!(apis, expected);
+    }
+
+    #[test]
+    fn test_rpc_server_eth_call_bundle_args() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            "eth,admin,debug,eth-call-bundle",
+        ])
+        .args;
+
+        let apis = args.http_api.unwrap();
+        let expected =
+            RpcModuleSelection::try_from_selection(["eth", "admin", "debug", "eth-call-bundle"])
+                .unwrap();
 
         assert_eq!(apis, expected);
     }

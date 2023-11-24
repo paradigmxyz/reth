@@ -25,7 +25,7 @@ pub(crate) fn bench<F1, F2, R>(
 ) -> eyre::Result<()>
 where
     F1: FnMut() -> eyre::Result<R>,
-    F2: Fn(DatabaseProviderRO<'_, DatabaseEnv>) -> eyre::Result<R>,
+    F2: Fn(DatabaseProviderRO<DatabaseEnv>) -> eyre::Result<R>,
     R: Debug + PartialEq,
 {
     let (db, chain) = db;

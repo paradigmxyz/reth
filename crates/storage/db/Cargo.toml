@@ -62,8 +62,8 @@ reth-interfaces.workspace = true
 tempfile.workspace = true
 test-fuzz = "4"
 
-pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
-criterion = "0.5"
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+criterion.workspace = true
 iai = "0.1.1"
 tokio = { workspace = true, features = ["full"] }
 

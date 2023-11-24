@@ -33,7 +33,7 @@ impl<DB: Database> Segment<DB> for Headers {
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let block_range = match input.get_next_block_range() {
@@ -91,7 +91,7 @@ impl Headers {
     /// Returns `done`, number of pruned rows and last pruned block number.
     fn prune_table<DB: Database, T: Table<Key = BlockNumber>>(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         range: RangeInclusive<BlockNumber>,
         delete_limit: usize,
     ) -> RethResult<(bool, usize, BlockNumber)> {
@@ -116,25 +116,27 @@ mod tests {
     use reth_interfaces::test_utils::{generators, generators::random_header_range};
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
     use reth_provider::PruneCheckpointReader;
-    use reth_stages::test_utils::TestTransaction;
+    use reth_stages::test_utils::TestStageDB;
 
     #[test]
     fn prune() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let mut rng = generators::rng();
 
         let headers = random_header_range(&mut rng, 0..100, B256::ZERO);
-        tx.insert_headers_with_td(headers.iter()).expect("insert headers");
+        db.insert_headers_with_td(headers.iter()).expect("insert headers");
 
-        assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap().len(), headers.len());
-        assert_eq!(tx.table::<tables::Headers>().unwrap().len(), headers.len());
-        assert_eq!(tx.table::<tables::HeaderTD>().unwrap().len(), headers.len());
+        assert_eq!(db.table::<tables::CanonicalHeaders>().unwrap().len(), headers.len());
+        assert_eq!(db.table::<tables::Headers>().unwrap().len(), headers.len());
+        assert_eq!(db.table::<tables::HeaderTD>().unwrap().len(), headers.len());
 
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let input = PruneInput {
-                previous_checkpoint: tx
-                    .inner()
+                previous_checkpoint: db
+                    .factory
+                    .provider()
+                    .unwrap()
                     .get_prune_checkpoint(PruneSegment::Headers)
                     .unwrap(),
                 to_block,
@@ -142,15 +144,17 @@ mod tests {
             };
             let segment = Headers::new(prune_mode);
 
-            let next_block_number_to_prune = tx
-                .inner()
+            let next_block_number_to_prune = db
+                .factory
+                .provider()
+                .unwrap()
                 .get_prune_checkpoint(PruneSegment::Headers)
                 .unwrap()
                 .and_then(|checkpoint| checkpoint.block_number)
                 .map(|block_number| block_number + 1)
                 .unwrap_or_default();
 
-            let provider = tx.inner_rw();
+            let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             assert_matches!(
                 result,
@@ -169,19 +173,19 @@ mod tests {
                 .min(next_block_number_to_prune + input.delete_limit as BlockNumber / 3 - 1);
 
             assert_eq!(
-                tx.table::<tables::CanonicalHeaders>().unwrap().len(),
+                db.table::<tables::CanonicalHeaders>().unwrap().len(),
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
             assert_eq!(
-                tx.table::<tables::Headers>().unwrap().len(),
+                db.table::<tables::Headers>().unwrap().len(),
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
             assert_eq!(
-                tx.table::<tables::HeaderTD>().unwrap().len(),
+                db.table::<tables::HeaderTD>().unwrap().len(),
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
             assert_eq!(
-                tx.inner().get_prune_checkpoint(PruneSegment::Headers).unwrap(),
+                db.factory.provider().unwrap().get_prune_checkpoint(PruneSegment::Headers).unwrap(),
                 Some(PruneCheckpoint {
                     block_number: Some(last_pruned_block_number),
                     tx_number: None,
@@ -196,7 +200,7 @@ mod tests {
 
     #[test]
     fn prune_cannot_be_done() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
 
         let input = PruneInput {
             previous_checkpoint: None,
@@ -206,7 +210,7 @@ mod tests {
         };
         let segment = Headers::new(PruneMode::Full);
 
-        let provider = tx.inner_rw();
+        let provider = db.factory.provider_rw().unwrap();
         let result = segment.prune(&provider, input).unwrap();
         assert_eq!(result, PruneOutput::not_done());
     }

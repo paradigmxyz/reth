@@ -1,6 +1,7 @@
 //! Config traits for various node components.
 
 use alloy_rlp::Encodable;
+use reth_network::protocol::IntoRlpxSubProtocol;
 use reth_primitives::{Bytes, BytesMut};
 use reth_rpc::{eth::gas_oracle::GasPriceOracleConfig, JwtError, JwtSecret};
 use reth_rpc_builder::{
@@ -101,4 +102,22 @@ pub trait PayloadBuilderConfig {
     /// Returns whether or not to construct the pending block.
     #[cfg(feature = "optimism")]
     fn compute_pending_block(&self) -> bool;
+}
+
+/// A trait that can be used to apply additional configuration to the network.
+pub trait RethNetworkConfig {
+    /// Adds a new additional protocol to the RLPx sub-protocol list.
+    ///
+    /// These additional protocols are negotiated during the RLPx handshake.
+    /// If both peers share the same protocol, the corresponding handler will be included alongside
+    /// the `eth` protocol.
+    ///
+    /// See also [ProtocolHandler](reth_network::protocol::ProtocolHandler)
+    fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol);
+}
+
+impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
+    fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        reth_network::NetworkManager::add_rlpx_sub_protocol(self, protocol);
+    }
 }

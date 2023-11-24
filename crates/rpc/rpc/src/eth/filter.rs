@@ -11,9 +11,8 @@ use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_interfaces::RethError;
 use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, Receipt, SealedBlock, TxHash};
-use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider};
+use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
     Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
@@ -690,8 +689,8 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
     }
 }
 
-impl From<RethError> for FilterError {
-    fn from(err: RethError) -> Self {
+impl From<ProviderError> for FilterError {
+    fn from(err: ProviderError) -> Self {
         FilterError::EthAPIError(err.into())
     }
 }

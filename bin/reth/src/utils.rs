@@ -18,13 +18,14 @@ use reth_interfaces::p2p::{
 use reth_primitives::{
     fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader,
 };
+use reth_rpc::{JwtError, JwtSecret};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
 };
-use tracing::info;
+use tracing::{debug, info};
 
 /// Exposing `open_db_read_only` function
 pub mod db {
@@ -245,5 +246,16 @@ impl ListFilter {
     pub fn update_page(&mut self, skip: usize, len: usize) {
         self.skip = skip;
         self.len = len;
+    }
+}
+/// Attempts to retrieve or create a JWT secret from the specified path.
+
+pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtError> {
+    if path.exists() {
+        debug!(target: "reth::cli", ?path, "Reading JWT auth secret file");
+        JwtSecret::from_file(path)
+    } else {
+        info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
+        JwtSecret::try_create(path)
     }
 }

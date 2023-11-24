@@ -1,19 +1,5 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
-use crate::{
-    disconnect::CanDisconnect,
-    errors::{P2PHandshakeError, P2PStreamError},
-    pinger::{Pinger, PingerEvent},
-    DisconnectReason, HelloMessage, HelloMessageWithProtocols,
-};
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
-use futures::{Sink, SinkExt, StreamExt};
-use pin_project::pin_project;
-use reth_codecs::derive_arbitrary;
-use reth_metrics::metrics::counter;
-use reth_primitives::{
-    bytes::{Buf, BufMut, Bytes, BytesMut},
-    hex, GotExpected,
-};
+
 use std::{
     collections::VecDeque,
     fmt, io,
@@ -21,12 +7,29 @@ use std::{
     task::{ready, Context, Poll},
     time::Duration,
 };
-use tokio_stream::Stream;
 
-use crate::capability::SharedCapabilities;
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
+use futures::{Sink, SinkExt, StreamExt};
+use pin_project::pin_project;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use tokio_stream::Stream;
 use tracing::{debug, trace};
+
+use reth_codecs::derive_arbitrary;
+use reth_metrics::metrics::counter;
+use reth_primitives::{
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    hex, GotExpected,
+};
+
+use crate::{
+    capability::SharedCapabilities,
+    disconnect::CanDisconnect,
+    errors::{P2PHandshakeError, P2PStreamError},
+    pinger::{Pinger, PingerEvent},
+    DisconnectReason, HelloMessage, HelloMessageWithProtocols,
+};
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
@@ -225,9 +228,10 @@ where
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#message-id-based-multiplexing>
 ///
-/// This stream emits Bytes that start with the normalized message id, so that the first byte of
-/// each message starts from 0. If this stream only supports a single capability, for example `eth`
-/// then the first byte of each message will match [EthMessageID](crate::types::EthMessageID).
+/// This stream emits _non-empty_ Bytes that start with the normalized message id, so that the first
+/// byte of each message starts from 0. If this stream only supports a single capability, for
+/// example `eth` then the first byte of each message will match
+/// [EthMessageID](crate::types::EthMessageID).
 #[pin_project]
 #[derive(Debug)]
 pub struct P2PStream<S> {
@@ -402,6 +406,11 @@ where
                 None => return Poll::Ready(None),
             };
 
+            if bytes.is_empty() {
+                // empty messages are not allowed
+                return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage)))
+            }
+
             // first check that the compressed message length does not exceed the max
             // payload size
             let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
@@ -427,7 +436,7 @@ where
                 err
             })?;
 
-            let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
+            let id = bytes[0];
             match id {
                 _ if id == P2PMessageID::Ping as u8 => {
                     trace!("Received Ping, Sending Pong");
@@ -785,26 +794,11 @@ impl Decodable for ProtocolVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{capability::SharedCapability, DisconnectReason, EthVersion};
-    use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_ecies::util::pk2id;
-    use secp256k1::{SecretKey, SECP256K1};
+    use crate::{
+        capability::SharedCapability, test_utils::eth_hello, DisconnectReason, EthVersion,
+    };
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
-
-    /// Returns a testing `HelloMessage` and new secretkey
-    fn eth_hello() -> (HelloMessageWithProtocols, SecretKey) {
-        let server_key = SecretKey::new(&mut rand::thread_rng());
-        let protocols = vec![EthVersion::Eth67.into()];
-        let hello = HelloMessageWithProtocols {
-            protocol_version: ProtocolVersion::V5,
-            client_version: "bitcoind/1.0.0".to_string(),
-            protocols,
-            port: DEFAULT_DISCOVERY_PORT,
-            id: pk2id(&server_key.public_key(SECP256K1)),
-        };
-        (hello, server_key)
-    }
 
     #[tokio::test]
     async fn test_can_disconnect() {

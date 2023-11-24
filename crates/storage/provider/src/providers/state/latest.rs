@@ -7,11 +7,12 @@ use reth_db::{
     tables,
     transaction::DbTx,
 };
-use reth_interfaces::{provider::ProviderError, RethError, RethResult};
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey,
     StorageValue, B256,
 };
+use reth_trie::updates::TrieUpdates;
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -29,14 +30,14 @@ impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> AccountReader for LatestStateProviderRef<'b, TX> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
+    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         self.db.get::<tables::PlainAccountState>(address).map_err(Into::into)
     }
 }
 
 impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
     /// Get block hash by number.
-    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
+    fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.db.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
     }
 
@@ -44,7 +45,7 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<B256>> {
+    ) -> ProviderResult<Vec<B256>> {
         let range = start..end;
         self.db
             .cursor_read::<tables::CanonicalHeaders>()
@@ -52,15 +53,24 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
                 cursor
                     .walk_range(range)?
                     .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-                    .collect::<RethResult<Vec<_>>>()
+                    .collect::<ProviderResult<Vec<_>>>()
             })?
             .map_err(Into::into)
     }
 }
 
 impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
-    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
-        bundle_state.state_root_slow(self.db).map_err(|err| RethError::Database(err.into()))
+    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+        bundle_state.state_root_slow(self.db).map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn state_root_with_updates(
+        &self,
+        bundle_state: &BundleStateWithReceipts,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        bundle_state
+            .state_root_slow_with_updates(self.db)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 
@@ -70,7 +80,7 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
         &self,
         account: Address,
         storage_key: StorageKey,
-    ) -> RethResult<Option<StorageValue>> {
+    ) -> ProviderResult<Option<StorageValue>> {
         let mut cursor = self.db.cursor_dup_read::<tables::PlainStorageState>()?;
         if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
             if entry.key == storage_key {
@@ -81,11 +91,11 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
-    fn proof(&self, address: Address, _keys: &[B256]) -> RethResult<AccountProof> {
+    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
         let _hashed_address = keccak256(address);
         let _root = self
             .db

@@ -41,10 +41,7 @@ impl Compact for StoredNibblesSubKey {
         64 + 1
     }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let len = buf[64] as usize;
         let inner = Vec::from(&buf[..len]).into();
         (Self(StoredNibbles { inner }), &buf[65..])

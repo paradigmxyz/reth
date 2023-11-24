@@ -13,6 +13,7 @@ use reth_primitives::{
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
+    updates::TrieUpdates,
     StateRoot, StateRootError,
 };
 use revm::{db::states::BundleState, primitives::AccountInfo};
@@ -154,6 +155,20 @@ impl BundleStateWithReceipts {
         hashed_state.sorted()
     }
 
+    /// Returns [StateRoot] calculator.
+    fn state_root_calculator<'a, 'b, TX: DbTx>(
+        &self,
+        tx: &'a TX,
+        hashed_post_state: &'b HashedPostState,
+    ) -> StateRoot<'a, TX, HashedPostStateCursorFactory<'a, 'b, TX>> {
+        let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, hashed_post_state);
+        StateRoot::new(tx)
+            .with_hashed_cursor_factory(hashed_cursor_factory)
+            .with_changed_account_prefixes(account_prefix_set)
+            .with_changed_storage_prefixes(storage_prefix_set)
+    }
+
     /// Calculate the state root for this [BundleState].
     /// Internally, function calls [Self::hash_state_slow] to obtain the [HashedPostState].
     /// Afterwards, it retrieves the prefixsets from the [HashedPostState] and uses them to
@@ -196,13 +211,17 @@ impl BundleStateWithReceipts {
     /// The state root for this [BundleState].
     pub fn state_root_slow<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
         let hashed_post_state = self.hash_state_slow();
-        let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
-        StateRoot::new(tx)
-            .with_hashed_cursor_factory(hashed_cursor_factory)
-            .with_changed_account_prefixes(account_prefix_set)
-            .with_changed_storage_prefixes(storage_prefix_set)
-            .root()
+        self.state_root_calculator(tx, &hashed_post_state).root()
+    }
+
+    /// Calculates the state root for this [BundleState] and returns it alongside trie updates.
+    /// See [Self::state_root_slow] for more info.
+    pub fn state_root_slow_with_updates<TX: DbTx>(
+        &self,
+        tx: &TX,
+    ) -> Result<(B256, TrieUpdates), StateRootError> {
+        let hashed_post_state = self.hash_state_slow();
+        self.state_root_calculator(tx, &hashed_post_state).root_with_updates()
     }
 
     /// Transform block number to the index of block.
@@ -362,7 +381,7 @@ impl BundleStateWithReceipts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AccountReader, BundleStateWithReceipts, ProviderFactory};
+    use crate::{test_utils::create_test_provider_factory, AccountReader, BundleStateWithReceipts};
     use reth_db::{
         cursor::{DbCursorRO, DbDupCursorRO},
         database::Database,
@@ -372,7 +391,7 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, MAINNET, U256,
+        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
     use reth_trie::test_utils::state_root;
     use revm::{
@@ -394,8 +413,7 @@ mod tests {
 
     #[test]
     fn write_to_db_account_info() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
         let address_a = Address::ZERO;
@@ -533,8 +551,7 @@ mod tests {
 
     #[test]
     fn write_to_db_storage() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
         let address_a = Address::ZERO;
@@ -722,8 +739,7 @@ mod tests {
 
     #[test]
     fn write_to_db_multiple_selfdestructs() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();
@@ -1031,8 +1047,7 @@ mod tests {
 
     #[test]
     fn storage_change_after_selfdestruct_within_block() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();

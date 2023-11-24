@@ -91,7 +91,10 @@ fn main() {
 
     // Enable debugging on debug builds
     #[cfg(debug_assertions)]
-    cc_builder.define("MDBX_DEBUG", "1");
+    {
+        cc_builder.define("MDBX_DEBUG", "1");
+        cc_builder.define("MDBX_ENABLE_PROFGC", "1");
+    }
 
     // Disables debug logging on optimized builds
     #[cfg(not(debug_assertions))]

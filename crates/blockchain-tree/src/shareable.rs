@@ -117,6 +117,11 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTreeViewer for ShareableBlockc
         self.tree.read().block_by_hash(block_hash).cloned()
     }
 
+    fn block_with_senders_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlockWithSenders> {
+        trace!(target: "blockchain_tree", ?block_hash, "Returning block by hash");
+        self.tree.read().block_with_senders_by_hash(block_hash).cloned()
+    }
+
     fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
         self.tree.read().get_buffered_block(&block_hash).map(|b| b.block.clone())
     }

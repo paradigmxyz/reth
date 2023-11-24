@@ -162,8 +162,8 @@ pub use crate::{
     error::PoolResult,
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
-        state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
-        TransactionEvents,
+        blob_tx_priority, fee_delta, state::SubPool, AllTransactionsEvents, FullTransactionEvent,
+        TransactionEvent, TransactionEvents,
     },
     traits::*,
     validate::{
@@ -351,6 +351,9 @@ where
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
+        if transactions.is_empty() {
+            return Ok(Vec::new())
+        }
         let validated = self.validate_all(origin, transactions).await?;
 
         let transactions =
@@ -468,6 +471,13 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
+    }
+
+    fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_transactions_by_origin(origin)
     }
 
     fn unique_senders(&self) -> HashSet<Address> {
