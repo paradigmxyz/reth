@@ -523,7 +523,8 @@ impl EthTransactionValidatorBuilder {
     pub fn no_cancun(self) -> Self {
         self.set_cancun(false)
     }
-    /// Set tge no locals transactions.
+
+    /// Whether to allow exemptions for local transaction exemptions.
     pub fn set_no_locals(mut self, no_locals: bool) -> Self {
         self.no_locals = no_locals;
         self
