@@ -223,16 +223,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             #[cfg(feature = "enable_execution_duration_record")]
             duration_record.add_process_state_duration();
 
-            #[cfg(feature = "enable_cache_record")]
+            #[cfg(all(feature = "enable_test_max_th", feature = "enable_cache_record"))]
             {
-                let cachedb_size = executor.get_cachedb_size();
-                if let Some(metrics_tx) = &mut self.metrics_tx {
-                    let _ = metrics_tx
-                        .send(MetricEvent::CacheDbSizeInfo { block_number, cachedb_size });
-                }
-
-                #[cfg(feature = "enable_test_max_th")]
-                {
+                // TODO: Need modify later.
+                if block_number == 500_000 {
+                    let cachedb_size = executor.get_cachedb_size();
                     println!(
                     "block_number: {:?}, start_block: {:?}, state.size_hint: {:?}, cache_size: {:?}",
                     block_number,
@@ -258,8 +253,14 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         #[cfg(feature = "enable_cache_record")]
         {
+            let cachedb_size = executor.get_cachedb_size();
             let cachedb_record = executor.get_cachedb_record();
             if let Some(metrics_tx) = &mut self.metrics_tx {
+                // This block_number should be delete latter.
+                let block_number = 0;
+                let _ =
+                    metrics_tx.send(MetricEvent::CacheDbSizeInfo { block_number, cachedb_size });
+
                 let _ =
                     metrics_tx.send(MetricEvent::CacheDbInfo { cache_db_record: cachedb_record });
             }
