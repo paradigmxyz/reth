@@ -158,6 +158,11 @@ impl SegmentHeader {
         *self.block_range.start()
     }
 
+    /// Returns the last block number of the segment.
+    pub fn block_end(&self) -> BlockNumber {
+        *self.block_range.end()
+    }
+
     /// Returns the first transaction number of the segment.
     pub fn tx_start(&self) -> TxNumber {
         *self.tx_range.start()
