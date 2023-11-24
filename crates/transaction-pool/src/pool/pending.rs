@@ -388,7 +388,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut total_size = 0;
 
         loop {
-            // check how many unique senders were removed
+            // check how many unique senders were removed last iteration
             let unique_removed = unique_senders - self.highest_nonces.len();
 
             // the new number of unique senders
