@@ -88,11 +88,11 @@ impl FeeHistoryCache {
             {
                 fee_history_entry.rewards = calculate_reward_percentiles_for_block(
                     &percentiles,
-                    &fee_history_entry,
+                    fee_history_entry.gas_used,
+                    fee_history_entry.base_fee_per_gas,
                     transactions,
                     receipts,
                 )
-                .await
                 .unwrap_or_default();
 
                 entries.insert(block.number, fee_history_entry);
@@ -100,14 +100,17 @@ impl FeeHistoryCache {
                 break
             }
         }
+
         while entries.len() > self.config.max_blocks as usize {
             entries.pop_first();
         }
+
         if entries.len() == 0 {
             self.upper_bound.store(0, SeqCst);
             self.lower_bound.store(0, SeqCst);
             return
         }
+
         let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
         let lower_bound = *entries.first_entry().expect("Contains at least one entry").key();
         self.upper_bound.store(upper_bound, SeqCst);
@@ -133,7 +136,7 @@ impl FeeHistoryCache {
         &self,
         start_block: u64,
         end_block: u64,
-    ) -> RethResult<Vec<FeeHistoryEntry>> {
+    ) -> RethResult<Option<Vec<FeeHistoryEntry>>> {
         let lower_bound = self.lower_bound();
         let upper_bound = self.upper_bound();
         if start_block >= lower_bound && end_block <= upper_bound {
@@ -142,9 +145,9 @@ impl FeeHistoryCache {
                 .range(start_block..=end_block + 1)
                 .map(|(_, fee_entry)| fee_entry.clone())
                 .collect();
-            Ok(result)
+            Ok(Some(result))
         } else {
-            Ok(Vec::new())
+            Ok(None)
         }
     }
 
@@ -200,9 +203,10 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
 /// the corresponding rewards for the transactions at each percentile.
 ///
 /// The results are returned as a vector of U256 values.
-async fn calculate_reward_percentiles_for_block(
+pub(crate) fn calculate_reward_percentiles_for_block(
     percentiles: &[f64],
-    fee_entry: &FeeHistoryEntry,
+    gas_used: u64,
+    base_fee_per_gas: u64,
     transactions: Vec<TransactionSigned>,
     receipts: Vec<Receipt>,
 ) -> Result<Vec<U256>, EthApiError> {
@@ -221,9 +225,7 @@ async fn calculate_reward_percentiles_for_block(
 
             Some(TxGasAndReward {
                 gas_used,
-                reward: tx
-                    .effective_tip_per_gas(Some(fee_entry.base_fee_per_gas))
-                    .unwrap_or_default(),
+                reward: tx.effective_tip_per_gas(Some(base_fee_per_gas)).unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();
@@ -245,7 +247,7 @@ async fn calculate_reward_percentiles_for_block(
             continue
         }
 
-        let threshold = (fee_entry.gas_used as f64 * percentile / 100.) as u64;
+        let threshold = (gas_used as f64 * percentile / 100.) as u64;
         while cumulative_gas_used < threshold && tx_index < transactions.len() - 1 {
             tx_index += 1;
             cumulative_gas_used += transactions[tx_index].gas_used;

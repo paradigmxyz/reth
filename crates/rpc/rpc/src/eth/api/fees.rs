@@ -13,7 +13,7 @@ use reth_transaction_pool::TransactionPool;
 
 use tracing::debug;
 
-use crate::eth::api::fee_history::FeeHistoryEntry;
+use crate::eth::api::fee_history::{calculate_reward_percentiles_for_block, FeeHistoryEntry};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -47,8 +47,10 @@ where
         self.gas_oracle().suggest_tip_cap().await
     }
 
-    /// Reports the fee history, for the given amount of blocks, up until the newest block
-    /// provided.
+    /// Reports the fee history, for the given amount of blocks, up until the given newest block.
+    ///
+    /// If `reward_percentiles` are provided the [FeeHistory] will include the _approximated_
+    /// rewards for the requested range.
     pub(crate) async fn fee_history(
         &self,
         mut block_count: u64,
@@ -101,65 +103,96 @@ where
         // Treat a request for 1 block as a request for `newest_block..=newest_block`,
         // otherwise `newest_block - 2
         // SAFETY: We ensured that block count is capped
-
         let start_block = end_block_plus - block_count;
 
-        let mut fee_entries = self.fee_history_cache().get_history(start_block, end_block).await?;
+        // Check if the requested range is within the cache bounds
+        let fee_entries = self.fee_history_cache().get_history(start_block, end_block).await?;
 
-        let mut fee_cache_flag = true;
-        if fee_entries.is_empty() {
-            for block in self.provider().block_range(start_block..=end_block)?.into_iter() {
-                let entry = FeeHistoryEntry::new(&block.seal_slow());
-                fee_entries.push(entry);
-            }
-            fee_cache_flag = false;
-        }
-
-        if fee_entries.len() != block_count as usize {
-            return Err(EthApiError::InvalidBlockRange)
-        }
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
         let mut base_fee_per_gas: Vec<U256> = Vec::new();
         let mut gas_used_ratio: Vec<f64> = Vec::new();
         let mut rewards: Vec<Vec<U256>> = Vec::new();
 
-        for entry in &fee_entries {
-            base_fee_per_gas.push(U256::try_from(entry.base_fee_per_gas).unwrap());
-            gas_used_ratio.push(entry.gas_used_ratio);
+        if let Some(fee_entries) = fee_entries {
+            if fee_entries.len() != block_count as usize {
+                return Err(EthApiError::InvalidBlockRange)
+            }
 
-            if fee_cache_flag {
+            for entry in &fee_entries {
+                base_fee_per_gas.push(U256::from(entry.base_fee_per_gas));
+                gas_used_ratio.push(entry.gas_used_ratio);
+
                 if let Some(percentiles) = &reward_percentiles {
-                    let mut block_rewards = Vec::new();
-
+                    let mut block_rewards = Vec::with_capacity(percentiles.len());
                     for &percentile in percentiles.iter() {
                         block_rewards.push(self.approximate_percentile(entry, percentile));
                     }
                     rewards.push(block_rewards);
                 }
             }
-        }
+            let last_entry = fee_entries.last().unwrap();
+            base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
+                last_entry.gas_used,
+                last_entry.gas_limit,
+                last_entry.base_fee_per_gas,
+                self.provider().chain_spec().base_fee_params,
+            )));
+        } else {
+            // read the requested header range
+            let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
+            if headers.len() != block_count as usize {
+                return Err(EthApiError::InvalidBlockRange)
+            }
 
-        // The spec states that `base_fee_per_gas` "[..] includes the next block after the newest of
-        // the returned range, because this value can be derived from the newest block"
-        //
-        // The unwrap is safe since we checked earlier that we got at least 1 header.
+            for header in &headers {
+                base_fee_per_gas.push(U256::from(header.base_fee_per_gas.unwrap_or_default()));
+                gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
 
-        let last_entry = fee_entries.last().unwrap();
+                // Percentiles were specified, so we need to collect reward percentile ino
+                if let Some(percentiles) = &reward_percentiles {
+                    let (transactions, receipts) = self
+                        .cache()
+                        .get_transactions_and_receipts(header.hash)
+                        .await?
+                        .ok_or(EthApiError::InvalidBlockRange)?;
+                    rewards.push(
+                        calculate_reward_percentiles_for_block(
+                            percentiles,
+                            header.gas_used,
+                            header.base_fee_per_gas.unwrap_or_default(),
+                            transactions,
+                            receipts,
+                        )
+                        .unwrap_or_default(),
+                    );
+                }
+            }
 
-        let chain_spec = self.provider().chain_spec();
+            // The spec states that `base_fee_per_gas` "[..] includes the next block after the
+            // newest of the returned range, because this value can be derived from the
+            // newest block"
+            //
+            // The unwrap is safe since we checked earlier that we got at least 1 header.
 
-        base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
-            last_entry.gas_used,
-            last_entry.gas_limit,
-            last_entry.base_fee_per_gas,
-            chain_spec.base_fee_params,
-        )));
+            // The spec states that `base_fee_per_gas` "[..] includes the next block after the
+            // newest of the returned range, because this value can be derived from the
+            // newest block"
+            //
+            // The unwrap is safe since we checked earlier that we got at least 1 header.
+            let last_header = headers.last().unwrap();
+            base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
+                last_header.gas_used,
+                last_header.gas_limit,
+                last_header.base_fee_per_gas.unwrap_or_default(),
+                self.provider().chain_spec().base_fee_params,
+            )));
+        };
 
         Ok(FeeHistory {
             base_fee_per_gas,
             gas_used_ratio,
             oldest_block: U256::from(start_block),
-            reward: if rewards.is_empty() { None } else { Some(rewards) },
+            reward: reward_percentiles.map(|_| rewards),
         })
     }
 
