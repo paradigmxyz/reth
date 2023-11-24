@@ -20,6 +20,14 @@ impl TraceStyle {
     }
 }
 
+/// How much of the stack to record. Nothing, just the items pushed, or the full stack
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum StackSnapshotType {
+    None,
+    Pushes,
+    Full,
+}
+
 /// Gives guidance to the [TracingInspector](crate::tracing::TracingInspector).
 ///
 /// Use [TracingInspectorConfig::default_parity] or [TracingInspectorConfig::default_geth] to get
@@ -31,7 +39,7 @@ pub struct TracingInspectorConfig {
     /// Whether to record individual memory snapshots.
     pub record_memory_snapshots: bool,
     /// Whether to record individual stack snapshots.
-    pub record_stack_snapshots: bool,
+    pub record_stack_snapshots: StackSnapshotType,
     /// Whether to record state diffs.
     pub record_state_diff: bool,
     /// Whether to ignore precompile calls.
@@ -48,7 +56,7 @@ impl TracingInspectorConfig {
         Self {
             record_steps: true,
             record_memory_snapshots: true,
-            record_stack_snapshots: true,
+            record_stack_snapshots: StackSnapshotType::Full,
             record_state_diff: false,
             exclude_precompile_calls: false,
             record_call_return_data: false,
@@ -63,7 +71,7 @@ impl TracingInspectorConfig {
         Self {
             record_steps: false,
             record_memory_snapshots: false,
-            record_stack_snapshots: false,
+            record_stack_snapshots: StackSnapshotType::None,
             record_state_diff: false,
             exclude_precompile_calls: true,
             record_call_return_data: false,
@@ -78,7 +86,7 @@ impl TracingInspectorConfig {
         Self {
             record_steps: true,
             record_memory_snapshots: true,
-            record_stack_snapshots: true,
+            record_stack_snapshots: StackSnapshotType::Full,
             record_state_diff: true,
             exclude_precompile_calls: false,
             record_call_return_data: false,
@@ -93,9 +101,11 @@ impl TracingInspectorConfig {
     #[inline]
     pub fn from_parity_config(trace_types: &HashSet<TraceType>) -> Self {
         let needs_vm_trace = trace_types.contains(&TraceType::VmTrace);
+        let snap_type =
+            if needs_vm_trace { StackSnapshotType::Pushes } else { StackSnapshotType::None };
         TracingInspectorConfig::default_parity()
             .set_steps(needs_vm_trace)
-            .set_stack_snapshots(needs_vm_trace)
+            .set_stack_snapshots(snap_type)
             .set_memory_snapshots(needs_vm_trace)
     }
 
@@ -104,7 +114,11 @@ impl TracingInspectorConfig {
     pub fn from_geth_config(config: &GethDefaultTracingOptions) -> Self {
         Self {
             record_memory_snapshots: config.enable_memory.unwrap_or_default(),
-            record_stack_snapshots: !config.disable_stack.unwrap_or_default(),
+            record_stack_snapshots: if config.disable_stack.unwrap_or_default() {
+                StackSnapshotType::None
+            } else {
+                StackSnapshotType::Full
+            },
             record_state_diff: !config.disable_storage.unwrap_or_default(),
             ..Self::default_geth()
         }
@@ -130,8 +144,8 @@ impl TracingInspectorConfig {
         self
     }
 
-    /// Configure whether the tracer should record stack snapshots
-    pub fn set_stack_snapshots(mut self, record_stack_snapshots: bool) -> Self {
+    /// Configure how the tracer should record stack snapshots
+    pub fn set_stack_snapshots(mut self, record_stack_snapshots: StackSnapshotType) -> Self {
         self.record_stack_snapshots = record_stack_snapshots;
         self
     }
