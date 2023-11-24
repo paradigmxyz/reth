@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use reth_interfaces::{
     executor::{self as reth_executor, BlockExecutionError},
     RethError,
@@ -11,6 +9,7 @@ use revm::{
     primitives::{BedrockSpec, Bytecode, HashMap, RegolithSpec},
     DatabaseCommit, L1BlockInfo,
 };
+use std::sync::Arc;
 use tracing::trace;
 
 /// Optimism-specific processor implementation for the `EVMProcessor`
