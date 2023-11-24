@@ -55,9 +55,9 @@ pub use block::{
 };
 pub use bytes::{self, Buf, BufMut, BytesMut};
 pub use chain::{
-    AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
-    DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, GOERLI, HOLESKY, MAINNET,
-    SEPOLIA,
+    AllGenesisFormats, BaseFeeParams, BaseFeeParamsWrapper, Chain, ChainInfo, ChainSpec,
+    ChainSpecBuilder, DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, GOERLI,
+    HOLESKY, MAINNET, SEPOLIA,
 };
 #[cfg(feature = "optimism")]
 pub use chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};

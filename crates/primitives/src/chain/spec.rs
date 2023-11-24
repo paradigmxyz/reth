@@ -63,7 +63,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             11052984,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
-        base_fee_params: vec![(Hardfork::London, BaseFeeParams::ethereum())],
+        base_fee_params: BaseFeeParamsWrapper::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 3500,
         snapshot_block_interval: 500_000,
     }
@@ -106,7 +106,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             4367322,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
-        base_fee_params: vec![(Hardfork::London, BaseFeeParams::ethereum())],
+        base_fee_params: BaseFeeParamsWrapper::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
     }
@@ -153,7 +153,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             1273020,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
-        base_fee_params: vec![(Hardfork::London, BaseFeeParams::ethereum())],
+        base_fee_params: BaseFeeParamsWrapper::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
     }
@@ -195,7 +195,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             0,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
-        base_fee_params: vec![(Hardfork::London, BaseFeeParams::ethereum())],
+        base_fee_params: BaseFeeParamsWrapper::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
     }
@@ -235,7 +235,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
-        base_fee_params: vec![(Hardfork::London, BaseFeeParams::ethereum())],
+        base_fee_params: BaseFeeParamsWrapper::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
         ..Default::default()
     }
@@ -277,10 +277,10 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
         ]),
-        base_fee_params: vec![
+        base_fee_params: BaseFeeParamsWrapper::Variable(vec![
             (Hardfork::London, BaseFeeParams::optimism_goerli()),
             (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
-        ],
+        ]),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
         ..Default::default()
@@ -323,10 +323,10 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
         ]),
-        base_fee_params: vec![
+        base_fee_params: BaseFeeParamsWrapper::Variable(vec![
             (Hardfork::London, BaseFeeParams::optimism_goerli()),
             (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
-        ],
+        ]),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
         ..Default::default()
@@ -367,16 +367,27 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
         ]),
-        base_fee_params: vec![
+        base_fee_params: BaseFeeParamsWrapper::Variable(vec![
             (Hardfork::London, BaseFeeParams::optimism()),
             (Hardfork::Canyon, BaseFeeParams::optimism_canyon()),
-        ],
+        ]),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
         ..Default::default()
     }
     .into()
 });
+
+/// A wrapper around [BaseFeeParams] that allows for specifying constant or dynamic EIP-1559
+/// parameters based on the active [Hardfork].
+#[derive(Clone, Debug)]
+pub enum BaseFeeParamsWrapper {
+    /// Constant [BaseFeeParams]; used for chains that don't have dynamic EIP-1559 parameters
+    Constant(BaseFeeParams),
+    /// Variable [BaseFeeParams]; used for chains that have dynamic EIP-1559 parameters like
+    /// Optimism
+    Variable(Vec<(Hardfork, BaseFeeParams)>),
+}
 
 /// BaseFeeParams contains the config parameters that control block base fee computation
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
@@ -481,7 +492,11 @@ pub struct ChainSpec {
     pub deposit_contract: Option<DepositContract>,
 
     /// The parameters that configure how a block's base fee is computed
-    pub base_fee_params: Vec<(Hardfork, BaseFeeParams)>,
+    #[serde(
+        serialize_with = "crate::serde_helper::serialize_base_fee_params",
+        deserialize_with = "crate::serde_helper::deserialize_base_fee_params"
+    )]
+    pub base_fee_params: BaseFeeParamsWrapper,
 
     /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
     /// the amount of blocks between pruner runs to account for the difference in amount of new
@@ -503,7 +518,7 @@ impl Default for ChainSpec {
             fork_timestamps: Default::default(),
             hardforks: Default::default(),
             deposit_contract: Default::default(),
-            base_fee_params: Default::default(),
+            base_fee_params: BaseFeeParamsWrapper::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET.prune_delete_limit,
             snapshot_block_interval: Default::default(),
         }
@@ -592,15 +607,21 @@ impl ChainSpec {
 
     /// Get the [BaseFeeParams] for the chain at the given timestamp.
     pub fn base_fee_params(&self, timestamp: u64) -> BaseFeeParams {
-        // Walk through the base fee params configuration in reverse order, and return the first
-        // one that corresponds to a hardfork that is active at the given timestamp.
-        for (fork, params) in self.base_fee_params.iter().rev() {
-            if self.is_fork_active_at_timestamp(*fork, timestamp) {
-                return *params
+        match self.base_fee_params {
+            BaseFeeParamsWrapper::Constant(bf_params) => bf_params,
+            BaseFeeParamsWrapper::Variable(ref bf_params) => {
+                // Walk through the base fee params configuration in reverse order, and return the
+                // first one that corresponds to a hardfork that is active at the
+                // given timestamp.
+                for (fork, params) in bf_params.iter().rev() {
+                    if self.is_fork_active_at_timestamp(*fork, timestamp) {
+                        return *params;
+                    }
+                }
+
+                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
             }
         }
-
-        self.base_fee_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
     }
 
     /// Get the hash of the genesis block.
@@ -705,8 +726,8 @@ impl ChainSpec {
         for (_, cond) in self.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block) |
-            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block)
+            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
                     if block != current_applied {
@@ -716,7 +737,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block }
+                    return ForkId { hash: forkhash, next: block };
                 }
             }
         }
@@ -737,7 +758,7 @@ impl ChainSpec {
                 // can safely return here because we have already handled all block forks and
                 // have handled all active timestamp forks, and set the next value to the
                 // timestamp that is known but not active yet
-                return ForkId { hash: forkhash, next: timestamp }
+                return ForkId { hash: forkhash, next: timestamp };
             }
         }
 
@@ -752,7 +773,7 @@ impl ChainSpec {
                 // to satisfy every timestamp ForkCondition, we find the last ForkCondition::Block
                 // if one exists, and include its block_num in the returned Head
                 if let Some(last_block_num) = self.last_block_fork_before_merge_or_timestamp() {
-                    return Head { timestamp, number: last_block_num, ..Default::default() }
+                    return Head { timestamp, number: last_block_num, ..Default::default() };
                 }
                 Head { timestamp, ..Default::default() }
             }
@@ -780,17 +801,17 @@ impl ChainSpec {
                     ForkCondition::TTD { fork_block, .. } => {
                         // handle Sepolia merge netsplit case
                         if fork_block.is_some() {
-                            return *fork_block
+                            return *fork_block;
                         }
                         // ensure curr_cond is indeed ForkCondition::Block and return block_num
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num)
+                            return Some(block_num);
                         }
                     }
                     ForkCondition::Timestamp(_) => {
                         // ensure curr_cond is indeed ForkCondition::Block and return block_num
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num)
+                            return Some(block_num);
                         }
                     }
                     ForkCondition::Block(_) | ForkCondition::Never => continue,
@@ -1246,9 +1267,9 @@ impl ForkCondition {
     /// - The condition is satisfied by the timestamp;
     /// - or the condition is satisfied by the total difficulty
     pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number) ||
-            self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty, head.difficulty)
+        self.active_at_block(head.number)
+            || self.active_at_timestamp(head.timestamp)
+            || self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.

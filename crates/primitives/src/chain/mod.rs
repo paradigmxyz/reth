@@ -13,8 +13,8 @@ use strum::{AsRefStr, EnumCount, EnumIter, EnumString, EnumVariantNames};
 // The chain spec module.
 mod spec;
 pub use spec::{
-    AllGenesisFormats, BaseFeeParams, ChainSpec, ChainSpecBuilder, DisplayHardforks, ForkCondition,
-    ForkTimestamps, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+    AllGenesisFormats, BaseFeeParams, BaseFeeParamsWrapper, ChainSpec, ChainSpecBuilder,
+    DisplayHardforks, ForkCondition, ForkTimestamps, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
 
 #[cfg(feature = "optimism")]
