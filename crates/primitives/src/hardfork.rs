@@ -37,19 +37,19 @@ pub enum Hardfork {
     GrayGlacier,
     /// Paris.
     Paris,
-    /// Shanghai.
-    Shanghai,
-    /// Cancun.
-    Cancun,
     /// Bedrock.
     #[cfg(feature = "optimism")]
     Bedrock,
     /// Regolith
     #[cfg(feature = "optimism")]
     Regolith,
+    /// Shanghai.
+    Shanghai,
     /// Canyon
     #[cfg(feature = "optimism")]
     Canyon,
+    /// Cancun.
+    Cancun,
 }
 
 impl Hardfork {
