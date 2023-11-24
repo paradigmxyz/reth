@@ -573,7 +573,7 @@ pub(crate) fn stack_push_count(step_op: OpCode) -> usize {
     let step_op = step_op.get();
     match step_op {
         opcode::PUSH0..=opcode::PUSH32 => 1,
-        opcode::SWAP1..=opcode::SWAP16 =>  (step_op - opcode::SWAP1) as usize + 2,
+        opcode::SWAP1..=opcode::SWAP16 => (step_op - opcode::SWAP1) as usize + 2,
         opcode::DUP1..=opcode::DUP16 => (step_op - opcode::DUP1) as usize + 2,
         opcode::CALLDATALOAD |
         opcode::SLOAD |
