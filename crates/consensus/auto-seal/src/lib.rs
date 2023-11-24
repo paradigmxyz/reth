@@ -333,7 +333,7 @@ impl StorageInner {
         bundle_state: &BundleStateWithReceipts,
         client: &S,
         gas_used: u64,
-        #[cfg(feature = "optimism")] chain_spec: Arc<ChainSpec>,
+        #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
     ) -> Result<Header, BlockExecutionError> {
         let receipts = bundle_state.receipts_by_block(header.number);
         header.receipts_root = if receipts.is_empty() {
@@ -405,7 +405,7 @@ impl StorageInner {
             client,
             gas_used,
             #[cfg(feature = "optimism")]
-            chain_spec,
+            chain_spec.as_ref(),
         )?;
 
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");

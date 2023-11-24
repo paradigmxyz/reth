@@ -922,7 +922,7 @@ where
         .receipts_root_slow(
             block_number,
             #[cfg(feature = "optimism")]
-            chain_spec.clone(),
+            chain_spec.as_ref(),
             #[cfg(feature = "optimism")]
             attributes.timestamp,
         )

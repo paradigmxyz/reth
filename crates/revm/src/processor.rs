@@ -531,7 +531,7 @@ pub fn verify_receipt<'a>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
-    #[cfg(feature = "optimism")] chain_spec: Arc<ChainSpec>,
+    #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
     #[cfg(feature = "optimism")] timestamp: u64,
 ) -> Result<(), BlockExecutionError> {
     // Check receipts root.

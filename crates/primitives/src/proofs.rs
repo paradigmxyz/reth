@@ -69,17 +69,23 @@ pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
 }
 
 /// Calculates the receipt root for a header.
+#[cfg(not(feature = "optimism"))]
+pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+}
+
+/// Calculates the receipt root for a header.
+#[cfg(feature = "optimism")]
 pub fn calculate_receipt_root(
     receipts: &[ReceiptWithBloom],
-    #[cfg(feature = "optimism")] chain_spec: std::sync::Arc<crate::ChainSpec>,
-    #[cfg(feature = "optimism")] timestamp: u64,
+    chain_spec: &crate::ChainSpec,
+    timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
     // the receipt root calculation does not include the deposit nonce in the receipt
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    #[cfg(feature = "optimism")]
     if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
         !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
@@ -103,17 +109,27 @@ pub fn calculate_receipt_root(
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
+#[cfg(not(feature = "optimism"))]
+pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
+    ordered_trie_root_with_encoder(receipts, |r, buf| {
+        ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
+    })
+}
+
+/// Calculates the receipt root for a header for the reference type of [Receipt].
+///
+/// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
+#[cfg(feature = "optimism")]
 pub fn calculate_receipt_root_ref(
     receipts: &[&Receipt],
-    #[cfg(feature = "optimism")] chain_spec: std::sync::Arc<crate::ChainSpec>,
-    #[cfg(feature = "optimism")] timestamp: u64,
+    chain_spec: &crate::ChainSpec,
+    timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
     // the receipt root calculation does not include the deposit nonce in the receipt
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    #[cfg(feature = "optimism")]
     if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
         !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
@@ -465,7 +481,7 @@ mod tests {
                     bloom: Bloom(hex!("00000000000000000000000000000000400000000000000000000000000000000000004000000000000001000000000000000002000000000100000000000000000000000000000000000008000000000000000000000000000000000000000004000000020000000000000000000800000000000000000000000010200100200008000002000000000000000000800000000000000000000002000000000000000000000000000000080000000000000000000000004000000000000000000000000002000000000000000000000000000000000000200000000000000020002000000000000000002000000000000000000000000000000000000000000000").into()),
                 },
             ];
-            let root = calculate_receipt_root(&receipts, OP_GOERLI.clone(), case.1);
+            let root = calculate_receipt_root(&receipts, OP_GOERLI.as_ref(), case.1);
             assert_eq!(root, case.2);
         }
     }
@@ -489,7 +505,7 @@ mod tests {
         let root = calculate_receipt_root(
             &receipt,
             #[cfg(feature = "optimism")]
-            crate::OP_GOERLI.clone(),
+            crate::OP_GOERLI.as_ref(),
             #[cfg(feature = "optimism")]
             0,
         );

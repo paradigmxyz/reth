@@ -40,7 +40,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 block.header.receipts_root,
                 block.header.logs_bloom,
                 receipts.iter(),
-                self.chain_spec.clone(),
+                self.chain_spec.as_ref(),
                 block.timestamp,
             ) {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
