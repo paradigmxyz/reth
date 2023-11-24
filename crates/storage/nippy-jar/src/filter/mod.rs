@@ -42,7 +42,7 @@ impl InclusionFilter for InclusionFilters {
     fn size(&self) -> usize {
         match self {
             InclusionFilters::Cuckoo(c) => c.size(),
-            InclusionFilters::Unused => todo!(),
+            InclusionFilters::Unused => 0,
         }
     }
 }
