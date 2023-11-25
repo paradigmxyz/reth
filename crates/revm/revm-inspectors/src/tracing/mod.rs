@@ -32,7 +32,7 @@ pub use builder::{
     geth::{self, GethTraceBuilder},
     parity::{self, ParityTraceBuilder},
 };
-pub use config::TracingInspectorConfig;
+pub use config::{StackSnapshotType, TracingInspectorConfig};
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
 
