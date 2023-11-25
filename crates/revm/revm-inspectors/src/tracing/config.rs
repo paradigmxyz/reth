@@ -1,33 +1,6 @@
 use reth_rpc_types::trace::{geth::GethDefaultTracingOptions, parity::TraceType};
 use std::collections::HashSet;
 
-/// What kind of tracing style this is.
-///
-/// This affects things like error messages.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum TraceStyle {
-    /// Parity style tracer
-    Parity,
-    /// Geth style tracer
-    #[allow(unused)]
-    Geth,
-}
-
-impl TraceStyle {
-    /// Returns true if this is a parity style tracer.
-    pub(crate) const fn is_parity(self) -> bool {
-        matches!(self, Self::Parity)
-    }
-}
-
-/// How much of the stack to record. Nothing, just the items pushed, or the full stack
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum StackSnapshotType {
-    None,
-    Pushes,
-    Full,
-}
-
 /// Gives guidance to the [TracingInspector](crate::tracing::TracingInspector).
 ///
 /// Use [TracingInspectorConfig::default_parity] or [TracingInspectorConfig::default_geth] to get
@@ -175,6 +148,50 @@ impl TracingInspectorConfig {
     pub fn set_record_logs(mut self, record_logs: bool) -> Self {
         self.record_logs = record_logs;
         self
+    }
+}
+
+/// How much of the stack to record. Nothing, just the items pushed, or the full stack
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum StackSnapshotType {
+    /// Don't record stack snapshots
+    None,
+    /// Record only the items pushed to the stack
+    Pushes,
+    /// Record the full stack
+    Full,
+}
+
+impl StackSnapshotType {
+    /// Returns true if this is the [StackSnapshotType::Full] variant
+    #[inline]
+    pub fn is_full(self) -> bool {
+        matches!(self, Self::Full)
+    }
+
+    /// Returns true if this is the [StackSnapshotType::Pushes] variant
+    #[inline]
+    pub fn is_pushes(self) -> bool {
+        matches!(self, Self::Pushes)
+    }
+}
+
+/// What kind of tracing style this is.
+///
+/// This affects things like error messages.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum TraceStyle {
+    /// Parity style tracer
+    Parity,
+    /// Geth style tracer
+    #[allow(unused)]
+    Geth,
+}
+
+impl TraceStyle {
+    /// Returns true if this is a parity style tracer.
+    pub(crate) const fn is_parity(self) -> bool {
+        matches!(self, Self::Parity)
     }
 }
 

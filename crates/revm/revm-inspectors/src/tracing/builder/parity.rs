@@ -390,7 +390,7 @@ impl ParityTraceBuilder {
 
         let maybe_execution = Some(VmExecutedOperation {
             used: step.gas_remaining,
-            push: step.push_stack.clone().expect("need push_stack for parity vmtrace"),
+            push: step.push_stack.clone().unwrap_or_default(),
             mem: maybe_memory,
             store: maybe_storage,
         });

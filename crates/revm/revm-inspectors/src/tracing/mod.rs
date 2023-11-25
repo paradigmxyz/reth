@@ -22,6 +22,7 @@ mod fourbyte;
 mod opcount;
 pub mod types;
 mod utils;
+use self::parity::stack_push_count;
 use crate::tracing::{
     arena::PushTraceKind,
     types::{CallTraceNode, RecordedMemory, StorageChange, StorageChangeReason},
@@ -34,8 +35,6 @@ pub use builder::{
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
-
-use self::{config::StackSnapshotType, parity::stack_push_count};
 
 #[cfg(feature = "js-tracer")]
 pub mod js;
@@ -284,7 +283,7 @@ impl TracingInspector {
             .record_memory_snapshots
             .then(|| RecordedMemory::new(interp.shared_memory.context_memory().to_vec()))
             .unwrap_or_default();
-        let stack = if self.config.record_stack_snapshots == StackSnapshotType::Full {
+        let stack = if self.config.record_stack_snapshots.is_full() {
             Some(interp.stack.data().clone())
         } else {
             None
@@ -331,7 +330,7 @@ impl TracingInspector {
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
 
-        if self.config.record_stack_snapshots == StackSnapshotType::Pushes {
+        if self.config.record_stack_snapshots.is_pushes() {
             let num_pushed = stack_push_count(step.op);
             let start = interp.stack.len() - num_pushed;
             step.push_stack = Some(interp.stack.data()[start..].to_vec());
