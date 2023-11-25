@@ -208,7 +208,17 @@ where
         &self,
         id: PayloadId,
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
-        self.payload_jobs.iter().find(|(_, job_id)| *job_id == id).map(|(j, _)| j.best_payload())
+        let res = self
+            .payload_jobs
+            .iter()
+            .find(|(_, job_id)| *job_id == id)
+            .map(|(j, _)| j.best_payload());
+        if let Some(Ok(ref best)) = res {
+            // TODO: remove `to`
+            self.metrics.set_best_revenue(best.block.number, best.fees().to::<u128>() as f64);
+        }
+
+        res
     }
 
     /// Returns the payload attributes for the given payload.
@@ -232,6 +242,19 @@ where
             let (_, id) = self.payload_jobs.remove(job);
             trace!(%id, "terminated resolved job");
         }
+
+        // Since the fees will not be known until the payload future is resolved / awaited, we wrap
+        // the future in a new future that will update the metrics.
+        let resolved_metrics = self.metrics.clone();
+        let fut = async move {
+            let res = fut.await;
+            if let Ok(ref payload) = res {
+                // TODO: remove `to`
+                resolved_metrics
+                    .set_resolved_revenue(payload.block.number, payload.fees().to::<u128>() as f64);
+            }
+            res
+        };
 
         Some(Box::pin(fut))
     }

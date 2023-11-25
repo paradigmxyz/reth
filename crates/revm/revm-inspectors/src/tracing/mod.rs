@@ -1,9 +1,9 @@
 use crate::tracing::{
-    types::{CallKind, LogCallOrder, RawLog},
+    types::{CallKind, LogCallOrder},
     utils::get_create_address,
 };
+use alloy_primitives::{Address, Bytes, Log, B256, U256};
 pub use arena::CallTraceArena;
-use reth_primitives::{Address, Bytes, B256, U256};
 use revm::{
     inspectors::GasInspector,
     interpreter::{
@@ -20,7 +20,7 @@ mod builder;
 mod config;
 mod fourbyte;
 mod opcount;
-mod types;
+pub mod types;
 mod utils;
 use crate::tracing::{
     arena::PushTraceKind,
@@ -408,7 +408,7 @@ where
 
         if self.config.record_logs {
             trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
-            trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+            trace.logs.push(Log::new_unchecked(topics.to_vec(), data.clone()));
         }
     }
 

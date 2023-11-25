@@ -82,3 +82,31 @@ impl AccessList {
             self.0.capacity() * mem::size_of::<AccessListItem>()
     }
 }
+
+impl From<reth_rpc_types::AccessList> for AccessList {
+    #[inline]
+    fn from(value: reth_rpc_types::AccessList) -> Self {
+        let converted_list = value
+            .0
+            .into_iter()
+            .map(|item| AccessListItem { address: item.address, storage_keys: item.storage_keys })
+            .collect();
+
+        AccessList(converted_list)
+    }
+}
+
+impl From<AccessList> for reth_rpc_types::AccessList {
+    #[inline]
+    fn from(value: AccessList) -> Self {
+        let list = value
+            .0
+            .into_iter()
+            .map(|item| reth_rpc_types::AccessListItem {
+                address: item.address,
+                storage_keys: item.storage_keys,
+            })
+            .collect();
+        reth_rpc_types::AccessList(list)
+    }
+}
