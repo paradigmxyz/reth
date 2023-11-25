@@ -248,7 +248,6 @@ where
         let fut = async move {
             let res = fut.await;
             if let Ok(ref payload) = res {
-                // TODO: remove `to`
                 resolved_metrics
                     .set_resolved_revenue(payload.block.number, f64::from(payload.fees));
             }
