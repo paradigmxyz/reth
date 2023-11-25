@@ -355,16 +355,24 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Traverses the pool, starting at the highest nonce set, removing the transactions which
     /// would put the pool under the specified limits.
     ///
-    /// The removed transactions will be added to the `end_removed` vector.
+    /// This attempts to remove transactions by roughly the same amount for each sender. This is
+    /// done by removing the highest-nonce transactions for each sender.
     ///
-    /// If the `remove_locals` flag is unset, then only non-local transactions will be removed.
-    pub(crate) fn limit_pool(
+    /// If the `remove_locals` flag is unset, transactions will be removed per-sender until a
+    /// local transaction is the highest nonce transaction for that sender. If all senders have a
+    /// local highest-nonce transaction, the pool will not be truncated further.
+    ///
+    /// Otherwise, if the `remove_locals` flag is set, transactions will be removed per-sender
+    /// until the pool is under the given limits.
+    ///
+    /// Any removed transactions will be added to the `end_removed` vector.
+    pub fn limit_pool(
         &mut self,
         limit: &SubPoolLimit,
         remove_locals: bool,
         end_removed: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
     ) {
-        // this serves as a termination condition for the loop - it represents the number of
+        // This serves as a termination condition for the loop - it represents the number of
         // _valid_ unique senders that might have descendants in the pool.
         //
         // If `remove_locals` is false, a value of zero means that there are no non-local txs in the
@@ -434,11 +442,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
-    /// Truncates the pool to the given limit.
+    /// Truncates the pool to the given [SubPoolLimit], removing transactions until the subpool
+    /// limits are met.
     ///
-    /// Removes transactions from the pending pool
-    /// The algorithm tries to reduce transaction counts by an approximately
-    /// equal number for all for accounts with many pending transactions.
+    /// This attempts to remove transactions by rougly the same amount for each sender. For more
+    /// information on this exact process see docs for [limit_pool](PendingPool::limit_pool).
+    ///
+    /// This first truncates all of the non-local transactions in the pool. If the subpool is still
+    /// not under the limit, this truncates the entire pool, including non-local transactions. The
+    /// removed transactions are returned.
     pub fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
