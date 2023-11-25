@@ -102,7 +102,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// descending order. Senders that have least recently submitted a transaction are first.
     ///
     /// Similar to `Heartbeat` in Geth
-    pub(crate) fn get_senders_by_submission_id(&self) -> Vec<SubmissionSenderId> {
+    pub fn get_senders_by_submission_id(&self) -> Vec<SubmissionSenderId> {
         // iterate through by_id, and get the last submission id for each sender
         let senders = self
             .by_id
@@ -136,8 +136,16 @@ impl<T: ParkedOrd> ParkedPool<T> {
         senders.into_sorted_vec()
     }
 
-    /// Truncates the pool by dropping transactions, first dropping transactions from senders that
-    /// have not recently submitted a transaction.
+    /// Truncates the pool by removing transactions, until the given [SubPoolLimit] has been met.
+    ///
+    /// This is done by first ordering senders by the last time they have submitted a transaction,
+    /// using [get_senders_by_submission_id](ParkedPool::get_senders_by_submission_id) to determine
+    /// this ordering.
+    ///
+    /// Then, for each sender, all transactions for that sender are removed, until the pool limits
+    /// have been met.
+    ///
+    /// Any removed transactions are returned.
     pub fn truncate_pool(
         &mut self,
         limit: SubPoolLimit,
@@ -325,7 +333,7 @@ impl<T: ParkedOrd> Ord for ParkedPoolTransaction<T> {
 /// Includes a [SenderId] and `submission_id`. This is used to sort senders by their last
 /// submission id.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) struct SubmissionSenderId {
+pub struct SubmissionSenderId {
     /// The sender id
     pub(crate) sender_id: SenderId,
     /// The submission id
