@@ -52,7 +52,7 @@ pub struct TracingInspector {
     /// Configures what and how the inspector records traces.
     config: TracingInspectorConfig,
     /// Records all call traces
-    traces: CallTraceArena,
+    pub traces: CallTraceArena,
     /// Tracks active calls
     trace_stack: Vec<usize>,
     /// Tracks active steps
