@@ -44,6 +44,7 @@ pub struct ValidatorRegistrationMessage {
 /// (not necessarily a value confirmed by the relay).
 #[serde_as]
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssz", derive(ssz_derive::Encode, ssz_derive::Decode))]
 pub struct BidTrace {
     #[serde_as(as = "DisplayFromStr")]
     pub slot: u64,
@@ -64,6 +65,7 @@ pub struct BidTrace {
 
 /// SignedBidTrace is a BidTrace with a signature
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssz", derive(ssz_derive::Encode, ssz_derive::Decode))]
 pub struct SignedBidTrace {
     pub message: BidTrace,
     pub signature: BlsSignature,
