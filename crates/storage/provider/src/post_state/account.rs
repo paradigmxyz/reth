@@ -86,23 +86,4 @@ impl AccountChanges {
             }
         });
     }
-
-    /// Calculate size of the [AccountChanges].
-    #[cfg(feature = "enable_db_speed_record")]
-    pub fn size(&self) -> usize {
-        self.inner
-            .iter()
-            .map(|(_, v)| {
-                v.iter()
-                    .map(|(_, v_in)| {
-                        if v_in.is_some() {
-                            std::mem::size_of::<Address>() + v_in.unwrap().size()
-                        } else {
-                            0
-                        }
-                    })
-                    .sum::<usize>()
-            })
-            .sum()
-    }
 }

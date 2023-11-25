@@ -719,37 +719,6 @@ impl PostState {
         }
         Ok(())
     }
-
-    /// Calculate size of the [PostState].
-    #[cfg(feature = "enable_db_speed_record")]
-    pub fn size(&self) -> usize {
-        let mut total_size = self
-            .accounts
-            .iter()
-            .map(|(_, v)| if v.is_some() { v.as_ref().unwrap().size() } else { 0 })
-            .sum();
-
-        total_size += self.storage.iter().map(|(_, v)| v.size()).sum::<usize>();
-
-        total_size += self.account_changes.size();
-        total_size += self.storage_changes.size();
-
-        total_size += self
-            .bytecode
-            .iter()
-            .map(|(_, v)| std::mem::size_of::<H256>() + v.size())
-            .sum::<usize>();
-
-        total_size += self
-            .receipts
-            .iter()
-            .map(|(_, v)| {
-                v.iter().map(|v_in| std::mem::size_of::<BlockNumber>() + v_in.size()).sum::<usize>()
-            })
-            .sum::<usize>();
-
-        total_size
-    }
 }
 
 #[cfg(test)]

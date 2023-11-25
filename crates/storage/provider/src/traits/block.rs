@@ -83,16 +83,6 @@ pub trait BlockReader:
     /// Returns `None` if block is not found.
     fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>>;
 
-    /// Returns the ommers/uncle headers of the given block from the database and the time of read
-    /// db.
-    ///
-    /// Returns `(None, 0)` if block is not found.
-    #[cfg(feature = "enable_db_speed_record")]
-    fn ommers_with_db_info(
-        &self,
-        id: BlockHashOrNumber,
-    ) -> Result<(Option<Vec<Header>>, u64, std::time::Duration, u64)>;
-
     /// Returns the block with matching hash from the database.
     ///
     /// Returns `None` if block is not found.
@@ -111,22 +101,6 @@ pub trait BlockReader:
     ///
     /// Returns `None` if block is not found.
     fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>>;
-
-    /// Returns the block body indices with matching number from database.
-    ///
-    /// Returns `None` if block is not found.
-    #[cfg(feature = "enable_db_speed_record")]
-    fn block_body_indices_with_db_info(
-        &self,
-        num: u64,
-    ) -> Result<(Option<StoredBlockBodyIndices>, u64, std::time::Duration, u64)>;
-
-    /// Returns (the block with senders with matching number, read db size, read db time).
-    #[cfg(feature = "enable_db_speed_record")]
-    fn block_with_senders_with_db_info(
-        &self,
-        number: BlockNumber,
-    ) -> Result<(Option<BlockWithSenders>, u64, std::time::Duration, u64)>;
 
     /// Returns the block with senders with matching number from database.
     ///

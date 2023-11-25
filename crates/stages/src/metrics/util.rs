@@ -178,15 +178,15 @@ impl ExecutionDurationRecord {
 #[derive(Debug, Clone, Copy)]
 pub struct DbSpeedRecord {
     /// time of read header td from db
-    pub read_header_td_db_time: (u64, Duration),
+    pub read_header_td_db_time: Duration,
     /// data size of read header td from db
     pub read_header_td_db_size: u64,
     /// time of read block with senders from db
-    pub read_block_with_senders_db_time: (u64, Duration),
+    pub read_block_with_senders_db_time: Duration,
     /// data size of read block with senders from db
     pub read_block_with_senders_db_size: u64,
     /// time of write to db
-    pub write_to_db_time: (u64, Duration),
+    pub write_to_db_time: Duration,
     /// data size of write to db
     pub write_to_db_size: u64,
 }
@@ -195,11 +195,11 @@ pub struct DbSpeedRecord {
 impl Default for DbSpeedRecord {
     fn default() -> Self {
         Self {
-            read_header_td_db_time: (0, Duration::default()),
+            read_header_td_db_time: Duration::default(),
             read_header_td_db_size: 0,
-            read_block_with_senders_db_time: (0, Duration::default()),
+            read_block_with_senders_db_time: Duration::default(),
             read_block_with_senders_db_size: 0,
-            write_to_db_time: (0, Duration::default()),
+            write_to_db_time: Duration::default(),
             write_to_db_size: 0,
         }
     }
@@ -207,86 +207,50 @@ impl Default for DbSpeedRecord {
 
 #[cfg(feature = "enable_db_speed_record")]
 impl DbSpeedRecord {
-    /// add time of write to db
-    pub(crate) fn add_read_header_td_db_time(&mut self, add_time: Duration, get_time_count: u64) {
-        self.read_header_td_db_time.0 =
-            self.read_header_td_db_time.0.checked_add(get_time_count).expect("overflow");
-        self.read_header_td_db_time.1 =
-            self.read_header_td_db_time.1.checked_add(add_time).expect("overflow");
-    }
-
-    /// add time of write to db
-    pub(crate) fn add_read_header_td_db_size(&mut self, add_size: u64) {
+    /// add record of read_header_td_db
+    pub(crate) fn add_read_header_td_db_record(&mut self, size: u64, time: Duration) {
         self.read_header_td_db_size =
-            self.read_header_td_db_size.checked_add(add_size).expect("overflow");
+            self.read_header_td_db_size.checked_add(size).expect("overflow");
+        self.read_header_td_db_time =
+            self.read_header_td_db_time.checked_add(time).expect("overflow");
     }
 
     /// add time of write to db
-    pub(crate) fn add_read_block_with_senders_db_time(
-        &mut self,
-        add_time: Duration,
-        get_time_count: u64,
-    ) {
-        self.read_block_with_senders_db_time.0 =
-            self.read_block_with_senders_db_time.0.checked_add(get_time_count).expect("overflow");
-        self.read_block_with_senders_db_time.1 =
-            self.read_block_with_senders_db_time.1.checked_add(add_time).expect("overflow");
-    }
-
-    /// add time of write to db
-    pub(crate) fn add_read_block_with_senders_db_size(&mut self, add_size: u64) {
+    pub(crate) fn add_read_block_with_senders_db_record(&mut self, size: u64, time: Duration) {
         self.read_block_with_senders_db_size =
-            self.read_block_with_senders_db_size.checked_add(add_size).expect("overflow");
+            self.read_block_with_senders_db_size.checked_add(size).expect("overflow");
+        self.read_block_with_senders_db_time =
+            self.read_block_with_senders_db_time.checked_add(time).expect("overflow");
     }
 
-    /// add time of write to db
-    pub(crate) fn add_write_to_db_time(&mut self, add_time: Duration, get_time_count: u64) {
-        self.write_to_db_time.0 =
-            self.write_to_db_time.0.checked_add(get_time_count).expect("overflow");
-        self.write_to_db_time.1 = self.write_to_db_time.1.checked_add(add_time).expect("overflow");
-    }
-
-    /// add time of write to db
-    pub(crate) fn add_write_to_db_size(&mut self, add_size: u64) {
-        self.write_to_db_size = self.write_to_db_size.checked_add(add_size).expect("overflow");
+    /// add record of write to db
+    pub(crate) fn add_write_to_db_record(&mut self, size: u64, time: Duration) {
+        self.write_to_db_size = self.write_to_db_size.checked_add(size).expect("overflow");
+        self.write_to_db_time = self.write_to_db_time.checked_add(time).expect("overflow");
     }
 
     /// add
     pub fn add(&mut self, other: Self) {
-        self.read_header_td_db_time = (
-            self.read_header_td_db_time
-                .0
-                .checked_add(other.read_header_td_db_time.0)
-                .expect("overflow"),
-            self.read_header_td_db_time
-                .1
-                .checked_add(other.read_header_td_db_time.1)
-                .expect("overflow"),
-        );
+        self.read_header_td_db_time = self
+            .read_header_td_db_time
+            .checked_add(other.read_header_td_db_time)
+            .expect("overflow");
         self.read_header_td_db_size = self
             .read_header_td_db_size
             .checked_add(other.read_header_td_db_size)
             .expect("overflow");
 
-        self.read_block_with_senders_db_time = (
-            self.read_block_with_senders_db_time
-                .0
-                .checked_add(other.read_block_with_senders_db_time.0)
-                .expect("overflow"),
-            self.read_block_with_senders_db_time
-                .1
-                .checked_add(other.read_block_with_senders_db_time.1)
-                .expect("overflow"),
-        );
+        self.read_block_with_senders_db_time = self
+            .read_block_with_senders_db_time
+            .checked_add(other.read_block_with_senders_db_time)
+            .expect("overflow");
         self.read_block_with_senders_db_size = self
             .read_block_with_senders_db_size
             .checked_add(other.read_block_with_senders_db_size)
             .expect("overflow");
 
-        self.write_to_db_time = (
-            self.write_to_db_time.0.checked_add(other.write_to_db_time.0).expect("overflow"),
-            self.write_to_db_time.1.checked_add(other.write_to_db_time.1).expect("overflow"),
-        );
+        self.write_to_db_time =
+            self.write_to_db_time.checked_add(other.write_to_db_time).expect("overflow");
         self.write_to_db_size =
             self.write_to_db_size.checked_add(other.write_to_db_size).expect("overflow");
     }
@@ -302,17 +266,17 @@ impl DbSpeedRecord {
 
         let col_len = 15;
 
-        let read_header_td_time = self.read_header_td_db_time.1.as_secs_f64();
+        let read_header_td_time = self.read_header_td_db_time.as_secs_f64();
         let read_header_td_size = self.cover_size_bytes_to_m(self.read_header_td_db_size);
         let read_header_td_rate = read_header_td_size / read_header_td_time;
 
-        let read_block_with_senders_time = self.read_block_with_senders_db_time.1.as_secs_f64();
+        let read_block_with_senders_time = self.read_block_with_senders_db_time.as_secs_f64();
         let read_block_with_senders_size =
             self.cover_size_bytes_to_m(self.read_block_with_senders_db_size);
         let read_block_with_senders_rate =
             read_block_with_senders_size / read_block_with_senders_time;
 
-        let write_to_db_time = self.write_to_db_time.1.as_secs_f64();
+        let write_to_db_time = self.write_to_db_time.as_secs_f64();
         let write_to_db_size = self.cover_size_bytes_to_m(self.write_to_db_size);
         let write_to_db_rate = write_to_db_size / write_to_db_time;
 

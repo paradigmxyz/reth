@@ -49,9 +49,6 @@ use std::{
     sync::Arc,
 };
 
-#[cfg(feature = "enable_db_speed_record")]
-use minstant::Instant;
-
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<'this, DB> = DatabaseProvider<'this, <DB as DatabaseGAT<'this>>::TX>;
 
@@ -877,27 +874,6 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
         }
     }
 
-    #[cfg(feature = "enable_db_speed_record")]
-    fn header_by_number_with_db_info(
-        &self,
-        num: u64,
-    ) -> Result<(Option<Header>, u64, std::time::Duration, u64)> {
-        let time_record = Instant::now();
-        let option_header = self.tx.get::<tables::Headers>(num)?;
-        let db_time = time_record.elapsed();
-
-        let db_size: u64 = if option_header.is_some() {
-            u64::try_from(
-                option_header.as_ref().unwrap().size() + std::mem::size_of::<BlockNumber>(),
-            )
-            .unwrap()
-        } else {
-            0
-        };
-
-        Ok((option_header, db_size, db_time, 1))
-    }
-
     fn header_by_number(&self, num: BlockNumber) -> Result<Option<Header>> {
         Ok(self.tx.get::<tables::Headers>(num)?)
     }
@@ -908,28 +884,6 @@ impl<'this, TX: DbTx<'this>> HeaderProvider for DatabaseProvider<'this, TX> {
         } else {
             Ok(None)
         }
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn header_td_by_number_with_db_info(
-        &self,
-        number: BlockNumber,
-    ) -> Result<(Option<U256>, u64, std::time::Duration, u64)> {
-        use std::time::Duration;
-
-        if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
-            // if this block is higher than the final paris(merge) block, return the final paris
-            // difficulty
-            return Ok((Some(td), 0, Duration::default(), 0))
-        }
-
-        let time_record = Instant::now();
-        let ret = self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0);
-
-        let db_time = time_record.elapsed();
-        let db_size = u64::try_from(std::mem::size_of::<U256>() * 2).unwrap();
-
-        Ok((ret, db_size, db_time, 1))
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
@@ -1073,156 +1027,8 @@ impl<'this, TX: DbTx<'this>> BlockReader for DatabaseProvider<'this, TX> {
         Ok(None)
     }
 
-    #[cfg(feature = "enable_db_speed_record")]
-    fn ommers_with_db_info(
-        &self,
-        id: BlockHashOrNumber,
-    ) -> Result<(Option<Vec<Header>>, u64, std::time::Duration, u64)> {
-        if let Some(number) = self.convert_hash_or_number(id)? {
-            // If the Paris (Merge) hardfork block is known and block is after it, return empty
-            // ommers.
-            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok((Some(Vec::new()), 0, std::time::Duration::default(), 0))
-            }
-
-            let time_record = Instant::now();
-            let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            let db_time = time_record.elapsed();
-
-            let db_size: u64 = if ommers.is_some() {
-                u64::try_from(
-                    std::mem::size_of::<BlockNumber>() +
-                        ommers.as_deref().unwrap().iter().map(|m| m.size()).sum::<usize>(),
-                )
-                .unwrap()
-            } else {
-                0
-            };
-
-            return Ok((ommers, db_size, db_time, 1))
-        }
-
-        Ok((None, 0, std::time::Duration::default(), 1))
-    }
-
     fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn block_body_indices_with_db_info(
-        &self,
-        num: u64,
-    ) -> Result<(Option<StoredBlockBodyIndices>, u64, std::time::Duration, u64)> {
-        let time_record = Instant::now();
-        let body = self.tx.get::<tables::BlockBodyIndices>(num)?;
-        let db_time = time_record.elapsed();
-
-        let db_size: u64 = if body.is_some() {
-            u64::try_from(
-                std::mem::size_of::<BlockNumber>() + std::mem::size_of::<StoredBlockBodyIndices>(),
-            )
-            .unwrap()
-        } else {
-            0
-        };
-
-        Ok((body, db_size, db_time, 1))
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn block_with_senders_with_db_info(
-        &self,
-        block_number: BlockNumber,
-    ) -> Result<(Option<BlockWithSenders>, u64, std::time::Duration, u64)> {
-        let mut total_db_time = std::time::Duration::default();
-        let mut total_read_db_size: u64 = 0;
-        let mut total_get_time_count = 0;
-
-        let (option_header, db_size, db_time, get_time_count) =
-            self.header_by_number_with_db_info(block_number)?;
-        let header =
-            option_header.ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-
-        total_db_time = total_db_time.checked_add(db_time).expect("overflow");
-        total_get_time_count += get_time_count;
-        total_read_db_size += db_size;
-
-        let (option_ommers, db_size, db_time, get_time_count) =
-            self.ommers_with_db_info(block_number.into())?;
-        let ommers = option_ommers.unwrap_or_default();
-        total_db_time = total_db_time.checked_add(db_time).expect("overflow");
-        total_get_time_count += get_time_count;
-        total_read_db_size += db_size;
-
-        let (withdrawals, db_size, db_time, get_time_count) =
-            self.withdrawals_by_block_with_db_info(block_number.into(), header.timestamp)?;
-        total_db_time = total_db_time.checked_add(db_time).expect("overflow");
-        total_get_time_count += get_time_count;
-        total_read_db_size += db_size;
-
-        // Get the block body
-        //
-        // If the body indices are not found, this means that the transactions either do not exist
-        // in the database yet, or they do exit but are not indexed. If they exist but are not
-        // indexed, we don't have enough information to return the block anyways, so we return
-        // `None`.
-        // let body = match self.block_body_indices(block_number)? {
-        //     Some(body) => body,
-        //     None => return Ok((None, total_db_time)),
-        // };
-
-        let (option_body, db_size, db_time, get_time_count) =
-            self.block_body_indices_with_db_info(block_number)?;
-        let body = match option_body {
-            Some(body) => body,
-            None => return Ok((None, total_read_db_size, total_db_time, total_get_time_count)),
-        };
-        total_db_time = total_db_time.checked_add(db_time).expect("overflow");
-        total_get_time_count += get_time_count;
-        total_read_db_size += db_size;
-
-        let tx_range = body.tx_num_range();
-
-        let (transactions, senders) = if tx_range.is_empty() {
-            (vec![], vec![])
-        } else {
-            let (txs, db_size, db_time, get_time_count) =
-                self.transactions_by_tx_range_with_db_info(tx_range.clone())?;
-
-            total_db_time = total_db_time.checked_add(db_time).expect("overflow");
-            total_get_time_count += get_time_count;
-            total_read_db_size += db_size;
-
-            let (senders, db_size, db_time, get_time_count) =
-                self.senders_by_tx_range_with_db_info(tx_range)?;
-            total_db_time = total_db_time.checked_add(db_time).expect("overflow");
-            total_get_time_count += get_time_count;
-            total_read_db_size += db_size;
-
-            (txs, senders)
-        };
-
-        let body = transactions
-            .into_iter()
-            .map(|tx| {
-                TransactionSigned {
-                    // TODO: This is the fastest way right now to make everything just work with
-                    // a dummy transaction hash.
-                    hash: Default::default(),
-                    signature: tx.signature,
-                    transaction: tx.transaction,
-                }
-            })
-            .collect();
-
-        // Ok(Some(Block { header, body, ommers, withdrawals }.with_senders(senders)))
-        Ok((
-            Some(Block { header, body, ommers, withdrawals }.with_senders(senders)),
-            total_read_db_size,
-            total_db_time,
-            total_get_time_count,
-        ))
     }
 
     /// Returns the block with senders with matching number from database.
@@ -1409,29 +1215,6 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-    #[cfg(feature = "enable_db_speed_record")]
-    fn transactions_by_tx_range_with_db_info(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<TransactionSignedNoHash>, u64, std::time::Duration, u64)> {
-        let time_record = Instant::now();
-
-        let txs = self
-            .tx
-            .cursor_read::<tables::Transactions>()?
-            .walk_range(range)?
-            .map(|entry| entry.map(|tx| tx.1))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        let db_time = time_record.elapsed();
-
-        let key_size = txs.len() * std::mem::size_of::<TxNumber>();
-        let txs_size: usize = txs.iter().map(|tx| tx.get_size()).sum();
-        let db_size = u64::try_from(key_size + txs_size).unwrap();
-
-        Ok((txs, db_size, db_time, 1))
-    }
-
     fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
         Ok(self
             .tx
@@ -1439,28 +1222,6 @@ impl<'this, TX: DbTx<'this>> TransactionsProvider for DatabaseProvider<'this, TX
             .walk_range(range)?
             .map(|entry| entry.map(|sender| sender.1))
             .collect::<std::result::Result<Vec<_>, _>>()?)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn senders_by_tx_range_with_db_info(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<Address>, u64, std::time::Duration, u64)> {
-        let time_record = Instant::now();
-
-        let senders = self
-            .tx
-            .cursor_read::<tables::TxSenders>()?
-            .walk_range(range)?
-            .map(|entry| entry.map(|sender| sender.1))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        let db_time = time_record.elapsed();
-        let senders_size =
-            senders.len() * (std::mem::size_of::<Address>() + std::mem::size_of::<TxNumber>());
-        let db_size = u64::try_from(senders_size).unwrap();
-
-        Ok((senders, db_size, db_time, 1))
     }
 
     fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
@@ -1520,35 +1281,6 @@ impl<'this, TX: DbTx<'this>> WithdrawalsProvider for DatabaseProvider<'this, TX>
             }
         }
         Ok(None)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn withdrawals_by_block_with_db_info(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> Result<(Option<Vec<Withdrawal>>, u64, std::time::Duration, u64)> {
-        if self.chain_spec.is_shanghai_activated_at_timestamp(timestamp) {
-            if let Some(number) = self.convert_hash_or_number(id)? {
-                let time_record = Instant::now();
-                // If we are past shanghai, then all blocks should have a withdrawal list, even if
-                // empty
-                let withdrawals = self
-                    .tx
-                    .get::<tables::BlockWithdrawals>(number)
-                    .map(|w| w.map(|w| w.withdrawals))?
-                    .unwrap_or_default();
-
-                let db_time = time_record.elapsed();
-                let key_size: u64 =
-                    u64::try_from(std::mem::size_of::<BlockNumber>() * withdrawals.len()).unwrap();
-
-                let db_size = key_size +
-                    u64::try_from(withdrawals.iter().map(|w| w.size()).sum::<usize>()).unwrap();
-                return Ok((Some(withdrawals), db_size, db_time, 1))
-            }
-        }
-        Ok((None, 0, std::time::Duration::default(), 0))
     }
 
     fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {

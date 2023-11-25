@@ -42,15 +42,6 @@ impl Receipt {
     pub fn with_bloom(self) -> ReceiptWithBloom {
         self.into()
     }
-
-    /// Calculate size of the [Receipt].
-    #[cfg(feature = "enable_db_speed_record")]
-    pub fn size(&self) -> usize {
-        std::mem::size_of::<u64>() +  // cumulative_gas_used
-        self.logs.iter().map(|v| {
-            v.size()
-        }).sum::<usize>()
-    }
 }
 
 impl From<Receipt> for ReceiptWithBloom {

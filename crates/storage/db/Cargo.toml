@@ -95,6 +95,8 @@ arbitrary = [
     "dep:proptest-derive",
 ]
 
+enable_db_speed_record =["reth-libmdbx/enable_db_speed_record"]
+
 [[bench]]
 name = "hash_keys"
 harness = false

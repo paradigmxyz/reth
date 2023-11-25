@@ -19,13 +19,3 @@ pub struct Log {
     /// Arbitrary length data.
     pub data: Bytes,
 }
-
-#[cfg(feature = "enable_db_speed_record")]
-impl Log {
-    /// Calculate size of the [Log].
-    pub fn size(&self) -> usize {
-        std::mem::size_of::<Address>() +
-            std::mem::size_of::<H256>() * self.topics.len() +
-            self.data.len()
-    }
-}

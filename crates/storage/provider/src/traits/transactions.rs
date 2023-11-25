@@ -52,22 +52,8 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
         range: impl RangeBounds<TxNumber>,
     ) -> Result<Vec<TransactionSignedNoHash>>;
 
-    /// Get transactions by tx range.
-    #[cfg(feature = "enable_db_speed_record")]
-    fn transactions_by_tx_range_with_db_info(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<TransactionSignedNoHash>, u64, std::time::Duration, u64)>;
-
     /// Get Senders from a tx range.
     fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>>;
-
-    /// Get Senders from a tx range.
-    #[cfg(feature = "enable_db_speed_record")]
-    fn senders_by_tx_range_with_db_info(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<Address>, u64, std::time::Duration, u64)>;
 
     /// Get transaction sender.
     ///

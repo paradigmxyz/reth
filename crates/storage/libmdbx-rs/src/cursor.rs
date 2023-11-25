@@ -15,6 +15,9 @@ use libc::c_void;
 use parking_lot::Mutex;
 use std::{borrow::Cow, fmt, marker::PhantomData, mem, ptr, rc::Rc, result};
 
+#[cfg(feature = "enable_db_speed_record")]
+use crate::metric::*;
+
 /// A cursor for navigating the items within a database.
 pub struct Cursor<'txn, K>
 where
@@ -82,6 +85,13 @@ where
             let key_ptr = key_val.iov_base;
             let data_ptr = data_val.iov_base;
             txn_execute(&self.txn, |txn| {
+                #[cfg(feature = "enable_db_speed_record")]
+                let _record = ReadRecord::new(
+                    key_ptr,
+                    &key_val as *const ffi::MDBX_val,
+                    &data_val as *const ffi::MDBX_val,
+                );
+
                 let v = mdbx_result(ffi::mdbx_cursor_get(
                     self.cursor,
                     &mut key_val,
@@ -432,6 +442,8 @@ impl<'txn> Cursor<'txn, RW> {
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
         mdbx_result(unsafe {
             txn_execute(&self.txn, |_| {
+                #[cfg(feature = "enable_db_speed_record")]
+                let _record = WriteRecord::new(data_val.iov_len);
                 ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
             })
         })?;

@@ -28,6 +28,8 @@ lifetimed-bytes = { version = "0.1", optional = true }
 default = []
 return-borrowed = []
 
+enable_db_speed_record =[]
+
 [dev-dependencies]
 pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion = "0.5"

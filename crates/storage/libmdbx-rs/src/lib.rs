@@ -23,6 +23,10 @@ pub mod ffi {
     pub use ffi::{MDBX_dbi as DBI, MDBX_log_level_t as LogLevel};
 }
 
+#[cfg(feature = "enable_db_speed_record")]
+/// for metric
+pub mod metric;
+
 mod codec;
 mod cursor;
 mod database;

@@ -328,7 +328,7 @@ pub(crate) struct DBSpeedDisplayer {
 #[cfg(feature = "enable_db_speed_record")]
 impl DBSpeedDisplayer {
     pub(crate) fn update_db_speed_record(&mut self, record: DbSpeedRecord) {
-        self.db_speed_record = record;
+        self.db_speed_record.add(record);
     }
 
     pub(crate) fn print(&self) {
@@ -390,14 +390,14 @@ impl CacheDBRecordDisplayer {
             self.cache_db_record.total_in_block_hash() as f64
     }
 
-    fn misses_in_load_account_pencentage(&self) -> f64 {
-        self.cache_db_record.misses.load_account as f64 /
-            self.cache_db_record.total_in_load_account() as f64
-    }
-
     fn total_misses_pencentage(&self) -> f64 {
         self.cache_db_record.total_miss() as f64 /
             (self.cache_db_record.total_hits() + self.cache_db_record.total_miss()) as f64
+    }
+
+    fn misses_in_load_account_pencentage(&self) -> f64 {
+        self.cache_db_record.misses.load_account as f64 /
+            self.cache_db_record.total_in_load_account() as f64
     }
 
     pub(crate) fn print(&self) {

@@ -43,18 +43,6 @@ impl Account {
             None => KECCAK_EMPTY,
         }
     }
-
-    /// Calculate size of the [Account].
-    #[cfg(feature = "enable_db_speed_record")]
-    pub fn size(&self) -> usize {
-        std::mem::size_of::<u64>() +  // Account nonce
-        std::mem::size_of::<U256>() + // Account balance
-        if self.has_bytecode() {      // Hash of the account's bytecode
-            std::mem::size_of::<H256>()
-        } else {
-            0
-        }
-    }
 }
 
 /// Bytecode for an account.
@@ -84,12 +72,6 @@ impl Bytecode {
     pub fn with_code_hash(mut self, code_hash: H256) -> Self {
         self.0.hash = code_hash;
         self
-    }
-
-    /// Calculates size of the [Bytecode].
-    #[cfg(feature = "enable_db_speed_record")]
-    pub fn size(&self) -> usize {
-        self.bytecode.len()
     }
 }
 

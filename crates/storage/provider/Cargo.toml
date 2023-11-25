@@ -37,8 +37,6 @@ reth-rlp = { workspace = true, optional = true }
 # revm-utils = { git = "https://github.com/megaeth-labs/revm", branch = "andy/debug/performance-dashboard", optional = true }
 revm-utils = { workspace = true, optional = true }
 
-minstant = { version = "0.1.3", optional = true }
-
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
@@ -55,6 +53,5 @@ test-utils = ["reth-rlp"]
 enable_opcode_metrics = ["revm-utils"]
 enable_cache_record = ["revm-utils"]
 enable_db_speed_record = [
-    "reth-primitives/enable_db_speed_record",
-    "minstant",
+    "reth-db/enable_db_speed_record",
 ]

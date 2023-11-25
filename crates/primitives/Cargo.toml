@@ -98,7 +98,6 @@ pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterio
 default = []
 arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 test-utils = []
-enable_db_speed_record = []
 
 [[bench]]
 name = "recover_ecdsa_crit"

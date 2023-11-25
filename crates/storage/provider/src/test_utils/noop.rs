@@ -79,32 +79,8 @@ impl BlockReader for NoopProvider {
         Ok(None)
     }
 
-    #[cfg(feature = "enable_db_speed_record")]
-    fn ommers_with_db_info(
-        &self,
-        id: BlockHashOrNumber,
-    ) -> Result<(Option<Vec<Header>>, u64, std::time::Duration, u64)> {
-        Ok((self.ommers(id)?, 0, std::time::Duration::default(), 0))
-    }
-
     fn block_body_indices(&self, _num: u64) -> Result<Option<StoredBlockBodyIndices>> {
         Ok(None)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn block_body_indices_with_db_info(
-        &self,
-        num: u64,
-    ) -> Result<(Option<StoredBlockBodyIndices>, u64, std::time::Duration, u64)> {
-        Ok((self.block_body_indices(num)?, 0, std::time::Duration::default(), 0))
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn block_with_senders_with_db_info(
-        &self,
-        number: BlockNumber,
-    ) -> Result<(Option<reth_primitives::BlockWithSenders>, u64, std::time::Duration, u64)> {
-        Ok((self.block_with_senders(number)?, 0, std::time::Duration::default(), 0))
     }
 
     fn block_with_senders(
@@ -193,27 +169,11 @@ impl TransactionsProvider for NoopProvider {
         Ok(Vec::default())
     }
 
-    #[cfg(feature = "enable_db_speed_record")]
-    fn senders_by_tx_range_with_db_info(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<Address>, u64, std::time::Duration, u64)> {
-        Ok((self.senders_by_tx_range(range)?, 0, std::time::Duration::default(), 0))
-    }
-
     fn transactions_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
     ) -> Result<Vec<reth_primitives::TransactionSignedNoHash>> {
         Ok(Vec::default())
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn transactions_by_tx_range_with_db_info(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<TransactionSignedNoHash>, u64, std::time::Duration, u64)> {
-        Ok((self.transactions_by_tx_range(range)?, 0, std::time::Duration::default(), 0))
     }
 
     fn transaction_sender(&self, _id: TxNumber) -> Result<Option<Address>> {
@@ -242,28 +202,12 @@ impl HeaderProvider for NoopProvider {
         Ok(None)
     }
 
-    #[cfg(feature = "enable_db_speed_record")]
-    fn header_by_number_with_db_info(
-        &self,
-        num: BlockNumber,
-    ) -> Result<(Option<Header>, u64, std::time::Duration, u64)> {
-        Ok((self.header_by_number(num)?, 0, std::time::Duration::default(), 0))
-    }
-
     fn header_by_number(&self, _num: u64) -> Result<Option<Header>> {
         Ok(None)
     }
 
     fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
         Ok(None)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn header_td_by_number_with_db_info(
-        &self,
-        number: BlockNumber,
-    ) -> Result<(Option<U256>, u64, std::time::Duration, u64)> {
-        Ok((self.header_td_by_number(number)?, 0, std::time::Duration::default(), 0))
     }
 
     fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>> {
@@ -415,15 +359,6 @@ impl WithdrawalsProvider for NoopProvider {
         _timestamp: u64,
     ) -> Result<Option<Vec<reth_primitives::Withdrawal>>> {
         Ok(None)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn withdrawals_by_block_with_db_info(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> Result<(Option<Vec<reth_primitives::Withdrawal>>, u64, std::time::Duration, u64)> {
-        Ok((self.withdrawals_by_block(id, timestamp)?, 0, std::time::Duration::default(), 0))
     }
 }
 

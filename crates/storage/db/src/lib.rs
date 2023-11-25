@@ -72,6 +72,11 @@
 pub mod abstraction;
 
 mod implementation;
+
+/// for metric
+#[cfg(feature = "enable_db_speed_record")]
+pub mod metric;
+
 pub mod tables;
 mod utils;
 pub mod version;
@@ -87,6 +92,9 @@ pub use abstraction::*;
 pub use reth_interfaces::db::{DatabaseError, DatabaseWriteOperation};
 pub use tables::*;
 pub use utils::is_database_empty;
+
+#[cfg(feature = "enable_db_speed_record")]
+pub use metric::*;
 
 #[cfg(feature = "mdbx")]
 use mdbx::{Env, EnvKind, NoWriteMap, WriteMap};

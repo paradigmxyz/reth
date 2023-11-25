@@ -14,15 +14,6 @@ pub struct StorageTransition {
     pub storage: BTreeMap<U256, U256>,
 }
 
-#[cfg(feature = "enable_db_speed_record")]
-impl StorageTransition {
-    /// Calculate size of the [StorageTransition].
-    #[cfg(feature = "enable_db_speed_record")]
-    pub fn size(&self) -> usize {
-        std::mem::size_of::<U256>() * 2 * self.storage.len()
-    }
-}
-
 /// The indicator of the storage wipe.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub enum StorageWipe {
@@ -71,13 +62,6 @@ impl Storage {
     /// Returns `true` if the storage was wiped at any point.
     pub fn wiped(&self) -> bool {
         self.times_wiped > 0
-    }
-
-    /// Calculate size of the [Storage].
-    #[cfg(feature = "enable_db_speed_record")]
-    pub fn size(&self) -> usize {
-        std::mem::size_of::<u64>() +        // times_wiped
-        self.storage.len() * (std::mem::size_of::<U256>() * 2) // storage
     }
 }
 
@@ -168,18 +152,5 @@ impl StorageChanges {
             }
         });
         updated_times_wiped
-    }
-
-    /// Calculate size of the [StorageChanges].
-    #[cfg(feature = "enable_db_speed_record")]
-    pub fn size(&self) -> usize {
-        self.inner
-            .iter()
-            .map(|(_, v)| {
-                v.iter()
-                    .map(|(_, v_in)| std::mem::size_of::<Address>() + v_in.size())
-                    .sum::<usize>()
-            })
-            .sum()
     }
 }

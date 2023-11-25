@@ -28,6 +28,9 @@ use reth_provider::{
 use std::{ops::RangeInclusive, time::Instant};
 use tracing::*;
 
+#[cfg(feature = "enable_db_speed_record")]
+use reth_db::metric::*;
+
 /// The execution stage executes all transactions and
 /// update history indexes.
 ///
@@ -153,34 +156,29 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             duration_record.start_time_recorder();
 
             #[cfg(feature = "enable_db_speed_record")]
-            let (td, block) = {
-                let (option_td, db_size, db_time, get_time_count) =
-                    provider.header_td_by_number_with_db_info(block_number)?;
-                let td =
-                    option_td.ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+            start_reth_db_record();
 
-                db_speed_record.add_read_header_td_db_time(db_time, get_time_count);
-                db_speed_record.add_read_header_td_db_size(db_size);
-
-                let (option_block, db_size, db_time, get_time_count) =
-                    provider.block_with_senders_with_db_info(block_number)?;
-                let block = option_block
-                    .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
-
-                db_speed_record.add_read_block_with_senders_db_size(db_size);
-                db_speed_record.add_read_block_with_senders_db_time(db_time, get_time_count);
-
-                (td, block)
-            };
-
-            #[cfg(not(feature = "enable_db_speed_record"))]
             let td = provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-            #[cfg(not(feature = "enable_db_speed_record"))]
+
+            #[cfg(feature = "enable_db_speed_record")]
+            {
+                let (read_size, read_time, _, _) = get_reth_db_record();
+                db_speed_record.add_read_header_td_db_record(read_size as u64, read_time);
+
+                start_reth_db_record();
+            }
+
             let block = provider
                 .block_with_senders(block_number)?
                 .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
+
+            #[cfg(feature = "enable_db_speed_record")]
+            {
+                let (read_size, read_time, _, _) = get_reth_db_record();
+                db_speed_record.add_read_block_with_senders_db_record(read_size as u64, read_time);
+            }
 
             #[cfg(feature = "enable_execution_duration_record")]
             duration_record.add_read_block_duration();
@@ -279,10 +277,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let start = Instant::now();
 
         #[cfg(feature = "enable_db_speed_record")]
-        let write_to_db_time = {
-            db_speed_record.add_write_to_db_size(u64::try_from(state.size()).unwrap());
-            Instant::now()
-        };
+        start_reth_db_record();
 
         #[cfg(feature = "enable_execution_duration_record")]
         duration_record.start_time_recorder();
@@ -294,7 +289,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         #[cfg(feature = "enable_db_speed_record")]
         {
-            db_speed_record.add_write_to_db_time(write_to_db_time.elapsed(), 1);
+            let (_, _, write_size, write_time) = get_reth_db_record();
+            db_speed_record.add_write_to_db_record(write_size as u64, write_time);
 
             if let Some(metrics_tx) = &mut self.metrics_tx {
                 let _ = metrics_tx.send(MetricEvent::DBSpeedInfo { db_speed_record });

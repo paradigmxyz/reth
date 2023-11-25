@@ -389,12 +389,6 @@ impl Transaction {
     }
 
     /// Calculates a heuristic for the in-memory size of the [Transaction].
-    #[cfg(feature = "enable_db_speed_record")]
-    pub fn get_size(&self) -> usize {
-        self.size()
-    }
-
-    /// Calculates a heuristic for the in-memory size of the [Transaction].
     #[inline]
     fn size(&self) -> usize {
         match self {

@@ -119,28 +119,12 @@ where
         self.database.provider()?.header(block_hash)
     }
 
-    #[cfg(feature = "enable_db_speed_record")]
-    fn header_by_number_with_db_info(
-        &self,
-        num: u64,
-    ) -> Result<(Option<Header>, u64, std::time::Duration, u64)> {
-        self.database.provider()?.header_by_number_with_db_info(num)
-    }
-
     fn header_by_number(&self, num: BlockNumber) -> Result<Option<Header>> {
         self.database.provider()?.header_by_number(num)
     }
 
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
         self.database.provider()?.header_td(hash)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn header_td_by_number_with_db_info(
-        &self,
-        number: BlockNumber,
-    ) -> Result<(Option<U256>, u64, std::time::Duration, u64)> {
-        self.database.provider()?.header_td_by_number_with_db_info(number)
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
@@ -260,32 +244,8 @@ where
         self.database.provider()?.ommers(id)
     }
 
-    #[cfg(feature = "enable_db_speed_record")]
-    fn ommers_with_db_info(
-        &self,
-        id: BlockHashOrNumber,
-    ) -> Result<(Option<Vec<Header>>, u64, std::time::Duration, u64)> {
-        self.database.provider()?.ommers_with_db_info(id)
-    }
-
     fn block_body_indices(&self, number: BlockNumber) -> Result<Option<StoredBlockBodyIndices>> {
         self.database.provider()?.block_body_indices(number)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn block_body_indices_with_db_info(
-        &self,
-        number: u64,
-    ) -> Result<(Option<StoredBlockBodyIndices>, u64, std::time::Duration, u64)> {
-        self.database.provider()?.block_body_indices_with_db_info(number)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn block_with_senders_with_db_info(
-        &self,
-        number: BlockNumber,
-    ) -> Result<(Option<BlockWithSenders>, u64, std::time::Duration, u64)> {
-        self.database.provider()?.block_with_senders_with_db_info(number)
     }
 
     /// Returns the block with senders with matching number from database.
@@ -352,24 +312,8 @@ where
         self.database.provider()?.transactions_by_tx_range(range)
     }
 
-    #[cfg(feature = "enable_db_speed_record")]
-    fn transactions_by_tx_range_with_db_info(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<TransactionSignedNoHash>, u64, std::time::Duration, u64)> {
-        self.database.provider()?.transactions_by_tx_range_with_db_info(range)
-    }
-
     fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> Result<Vec<Address>> {
         self.database.provider()?.senders_by_tx_range(range)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn senders_by_tx_range_with_db_info(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> Result<(Vec<Address>, u64, std::time::Duration, u64)> {
-        self.database.provider()?.senders_by_tx_range_with_db_info(range)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> Result<Option<Address>> {
@@ -433,15 +377,6 @@ where
         timestamp: u64,
     ) -> Result<Option<Vec<Withdrawal>>> {
         self.database.provider()?.withdrawals_by_block(id, timestamp)
-    }
-
-    #[cfg(feature = "enable_db_speed_record")]
-    fn withdrawals_by_block_with_db_info(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> Result<(Option<Vec<Withdrawal>>, u64, std::time::Duration, u64)> {
-        self.database.provider()?.withdrawals_by_block_with_db_info(id, timestamp)
     }
 
     fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {

@@ -14,6 +14,9 @@ use std::{
     sync::mpsc::sync_channel,
 };
 
+#[cfg(feature = "enable_db_speed_record")]
+use crate::metric::ReadValueRecord;
+
 mod private {
     use super::*;
 
@@ -128,6 +131,9 @@ where
         let mut data_val: ffi::MDBX_val = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
 
         txn_execute(&self.txn, |txn| unsafe {
+            #[cfg(feature = "enable_db_speed_record")]
+            let _record = ReadValueRecord::new(&data_val as *const ffi::MDBX_val);
+
             match ffi::mdbx_get(txn, dbi, &key_val, &mut data_val) {
                 ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, &data_val).map(Some),
                 ffi::MDBX_NOTFOUND => Ok(None),
