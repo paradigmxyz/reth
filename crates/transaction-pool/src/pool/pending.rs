@@ -772,25 +772,6 @@ mod tests {
         // * c1
         let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
 
-        // make sure to_remove is the same thing as expected
-        // let to_remove = pool.transactions_to_remove(&pool_limit, false, &mut Vec::new());
-
-        // ensure the result is sorted by decreasing nonce for each sender
-        // let mut starting_nonce = a4.nonce();
-        // for tx in to_remove.iter().filter(|id| id.sender == f.ids.sender_id(&a).unwrap()) {
-        //     assert_eq!(tx.nonce, starting_nonce);
-        //     starting_nonce -= 1;
-        // }
-
-        // let to_remove_mapped =
-        //     to_remove.into_iter().map(|id| (id.sender, id.nonce)).collect::<HashSet<_>>();
-        // let expected_removed_mapped = expected_removed
-        //     .clone()
-        //     .iter()
-        //     .map(|(addr, nonce)| (f.ids.sender_id(addr).unwrap(), *nonce))
-        //     .collect::<HashSet<_>>();
-        // assert_eq!(to_remove_mapped, expected_removed_mapped);
-
         // truncate the pool
         let removed = pool.truncate_pool(pool_limit);
         pool.assert_invariants();
