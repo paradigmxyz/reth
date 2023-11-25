@@ -2,6 +2,7 @@
 use std::{fs, path::Path};
 
 // Constants for page size calculations
+// source: https://gitflic.ru/project/erthink/libmdbx/blob?file=mdbx.h#line-num-821
 const LIBMDBX_MAX_PAGE_SIZE: usize = 0x10000; // Maximum page size defined by libmdbx
 const MIN_PAGE_SIZE: usize = 4096; // Minimum page size threshold
 
