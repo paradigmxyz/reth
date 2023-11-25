@@ -417,6 +417,37 @@ where
         (modules, auth_module, registry)
     }
 
+    /// Converts the builder into a [RethModuleRegistry] which can be used to create all components.
+    ///
+    /// This is useful for getting access to API handlers directly:
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use reth_network_api::noop::NoopNetwork;
+    /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
+    /// use reth_rpc_builder::RpcModuleBuilder;
+    /// use reth_tasks::TokioTaskExecutor;
+    /// use reth_transaction_pool::noop::NoopTransactionPool;
+    ///
+    /// let mut registry = RpcModuleBuilder::default()
+    ///     .with_provider(NoopProvider::default())
+    ///     .with_pool(NoopTransactionPool::default())
+    ///     .with_network(NoopNetwork::default())
+    ///     .with_executor(TokioTaskExecutor::default())
+    ///     .with_events(TestCanonStateSubscriptions::default())
+    ///     .into_registry(Default::default());
+    ///
+    /// let eth_api = registry.eth_api();
+    /// ```
+    pub fn into_registry(
+        self,
+        config: RpcModuleConfig,
+    ) -> RethModuleRegistry<Provider, Pool, Network, Tasks, Events> {
+        let Self { provider, pool, network, executor, events } = self;
+        RethModuleRegistry::new(provider, pool, network, executor, events, config)
+    }
+
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
     /// used to start the transport server(s).
     ///
@@ -918,6 +949,10 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
 {
     /// Register Eth Namespace
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
@@ -925,6 +960,10 @@ where
     }
 
     /// Register Otterscan Namespace
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn register_ots(&mut self) -> &mut Self {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -932,6 +971,10 @@ where
     }
 
     /// Register Debug Namespace
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn register_debug(&mut self) -> &mut Self {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -939,6 +982,10 @@ where
     }
 
     /// Register Trace Namespace
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn register_trace(&mut self) -> &mut Self {
         let trace_api = self.trace_api();
         self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
@@ -967,6 +1014,12 @@ where
     }
 
     /// Register Net Namespace
+    ///
+    /// See also [Self::eth_api]
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime.
     pub fn register_net(&mut self) -> &mut Self {
         let netapi = self.net_api();
         self.modules.insert(RethRpcModule::Net, netapi.into_rpc().into());
@@ -974,6 +1027,12 @@ where
     }
 
     /// Register Reth namespace
+    ///
+    /// See also [Self::eth_api]
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime.
     pub fn register_reth(&mut self) -> &mut Self {
         let rethapi = self.reth_api();
         self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
@@ -1002,6 +1061,10 @@ where
     ///
     /// If this is the first time the namespace is requested, a new instance of API implementation
     /// will be created.
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn reth_methods(
         &mut self,
         namespaces: impl Iterator<Item = RethRpcModule>,
@@ -1150,33 +1213,60 @@ where
     }
 
     /// Returns the configured [EthHandlers] or creates it if it does not exist yet
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events> {
         self.with_eth(|handlers| handlers.clone())
     }
 
     /// Returns the configured [EthApi] or creates it if it does not exist yet
+    ///
+    /// Caution: This will spawn the necessary tasks required by the [EthApi]: [EthStateCache].
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime.
     pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network> {
         self.with_eth(|handlers| handlers.api.clone())
     }
+
     /// Instantiates TraceApi
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn trace_api(&mut self) -> TraceApi<Provider, EthApi<Provider, Pool, Network>> {
         let eth = self.eth_handlers();
         TraceApi::new(self.provider.clone(), eth.api, self.blocking_pool_guard.clone())
     }
 
     /// Instantiates [EthBundle] Api
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn bundle_api(&mut self) -> EthBundle<EthApi<Provider, Pool, Network>> {
         let eth_api = self.eth_api();
         EthBundle::new(eth_api, self.blocking_pool_guard.clone())
     }
 
     /// Instantiates OtterscanApi
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn otterscan_api(&mut self) -> OtterscanApi<EthApi<Provider, Pool, Network>> {
         let eth_api = self.eth_api();
         OtterscanApi::new(eth_api)
     }
 
     /// Instantiates DebugApi
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn debug_api(&mut self) -> DebugApi<Provider, EthApi<Provider, Pool, Network>> {
         let eth_api = self.eth_api();
         DebugApi::new(
@@ -1188,6 +1278,10 @@ where
     }
 
     /// Instantiates NetApi
+    ///
+    /// # Panics
+    ///
+    /// If called outside of the tokio runtime. See also [Self::eth_api]
     pub fn net_api(&mut self) -> NetApi<Network, EthApi<Provider, Pool, Network>> {
         let eth_api = self.eth_api();
         NetApi::new(self.network.clone(), eth_api)
