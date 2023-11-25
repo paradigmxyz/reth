@@ -1,7 +1,7 @@
 #![allow(dead_code, unused)]
 use crate::{
     identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
-    PoolTransaction, ValidPoolTransaction,
+    PoolTransaction, ValidPoolTransaction, SubPoolLimit,
 };
 use std::{
     cmp::Ordering,
@@ -180,6 +180,13 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         self.reprioritize();
 
         removed
+    }
+
+    /// Removes blob transactions according to their priority, until the pool size limits are met.
+    ///
+    /// TODO: description about size limits and truncation policy
+    pub(crate) fn truncate(&mut self, size_limits: SubPoolLimit) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        todo!();
     }
 
     /// Returns `true` if the transaction with the given id is already included in this pool.
