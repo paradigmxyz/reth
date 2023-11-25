@@ -1273,8 +1273,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
     fn ensure_valid(
         &self,
         transaction: ValidPoolTransaction<T>,
-        pool_config: PoolConfig,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
+        let pool_config = PoolConfig::default();
         if !transaction.origin.is_local() || pool_config.no_locals {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
@@ -1443,8 +1443,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
         on_chain_nonce: u64,
     ) -> InsertResult<T> {
         assert!(on_chain_nonce <= transaction.nonce(), "Invalid transaction");
-        let pool_config = PoolConfig::default();
-        let mut transaction = self.ensure_valid(transaction, pool_config)?;
+
+        let mut transaction = self.ensure_valid(transaction)?;
 
         let inserted_tx_id = *transaction.id();
         let mut state = TxState::default();
