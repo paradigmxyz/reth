@@ -53,7 +53,6 @@ pub use block::{
 };
 pub use bytes::{self, Buf, BufMut, BytesMut};
 pub use chain::BaseFeeParams;
-#[cfg(feature = "optimism")]
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
