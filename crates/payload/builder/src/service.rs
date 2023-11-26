@@ -79,9 +79,9 @@ pub struct PayloadBuilderHandle {
 
 impl PayloadBuilderHandle {
     /// Creates a new payload builder handle for the given channel.
-    /// 
-    /// Note: this is only used internally by the [PayloadBuilderService] to manage the 
-    /// payload building flow. See its `Future` impl of `::poll` for implementation details.
+    ///
+    /// Note: this is only used internally by the [PayloadBuilderService] to manage the payload
+    /// building flow See [PayloadBuilderService::poll] for implementation details.
     pub fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand>) -> Self {
         Self { to_service }
     }
