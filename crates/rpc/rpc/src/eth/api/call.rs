@@ -21,7 +21,6 @@ use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
     StateContext,
 };
-use reth_rpc_types_compat::log::{from_primitive_access_list, to_primitive_access_list};
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -392,8 +391,7 @@ where
         let initial = request.access_list.take().unwrap_or_default();
 
         let precompiles = get_precompiles(env.cfg.spec_id);
-        let mut inspector =
-            AccessListInspector::new(to_primitive_access_list(initial), from, to, precompiles);
+        let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
         let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
@@ -410,10 +408,10 @@ where
         let access_list = inspector.into_access_list();
 
         // calculate the gas used using the access list
-        request.access_list = Some(from_primitive_access_list(access_list.clone()));
+        request.access_list = Some(access_list.clone());
         let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state())?;
 
-        Ok(AccessListWithGasUsed { access_list: from_primitive_access_list(access_list), gas_used })
+        Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 }
 

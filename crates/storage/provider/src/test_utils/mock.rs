@@ -502,14 +502,14 @@ impl AccountReader for MockEthProvider {
 
 impl StateRootProvider for MockEthProvider {
     fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
-        todo!()
+        Ok(B256::default())
     }
 
     fn state_root_with_updates(
         &self,
         _bundle_state: &BundleStateWithReceipts,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        todo!()
+        Ok((B256::default(), Default::default()))
     }
 }
 
@@ -536,7 +536,7 @@ impl StateProvider for MockEthProvider {
     }
 
     fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        todo!()
+        Ok(AccountProof::default())
     }
 }
 
