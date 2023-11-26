@@ -818,7 +818,9 @@ mod tests {
         where
             F: FnOnce(EthStream<S>) -> O + Send + 'static,
             O: Future<Output = ()> + Send + Sync,
-            S: Stream<Item = Result<BytesMut, E>> + Sink<Bytes> + CanDisconnect<Bytes>,
+            S: tokio_stream::Stream<Item = Result<reth_primitives::BytesMut, E>>
+                + futures::Sink<reth_primitives::Bytes>
+                + CanDisconnect<reth_primitives::Bytes>,
             EthStreamError: From<E>,
         {
             let status = self.status;
