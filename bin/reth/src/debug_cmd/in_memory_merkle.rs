@@ -13,9 +13,10 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
+use reth_ethereum_forks::ChainSpec;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
+use reth_primitives::{fs, stage::StageId, BlockHashOrNumber};
 use reth_provider::{
     AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,

@@ -1,8 +1,8 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
+use reth_ethereum_forks::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_primitives::{
-    revm::env::{fill_tx_env, fill_tx_env_with_recovered},
     Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use reth_rpc_types::{

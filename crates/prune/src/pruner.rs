@@ -6,7 +6,8 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment};
+use reth_ethereum_forks::ChainSpec;
+use reth_primitives::{BlockNumber, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{ProviderFactory, PruneCheckpointReader};
 use reth_snapshot::HighestSnapshotsTracker;
 use reth_tokio_util::EventListeners;
@@ -253,7 +254,7 @@ impl<DB: Database> Pruner<DB> {
 mod tests {
     use crate::Pruner;
     use reth_db::test_utils::create_test_rw_db;
-    use reth_primitives::MAINNET;
+    use reth_ethereum_forks::MAINNET;
     use tokio::sync::watch;
 
     #[test]

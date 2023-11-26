@@ -11,9 +11,8 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
-use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
-};
+use reth_ethereum_forks::{ChainSpec, ForkFilter, MAINNET};
+use reth_primitives::{mainnet_nodes, sepolia_nodes, Head, NodeRecord, PeerId};
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
@@ -516,7 +515,7 @@ mod tests {
     use super::*;
     use rand::thread_rng;
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::{Chain, ForkHash};
+    use reth_ethereum_forks::{Chain, ForkHash};
     use reth_provider::test_utils::NoopProvider;
     use std::collections::BTreeMap;
 

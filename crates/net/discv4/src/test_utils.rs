@@ -8,7 +8,8 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::{hex, ForkHash, ForkId, NodeRecord, B256};
+use reth_primitives::{hex, NodeRecord, B256};
+use reth_ethereum_forks::{ForkHash, ForkId};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
@@ -283,7 +284,8 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
 mod tests {
     use super::*;
     use crate::{Discv4Event, PingReason};
-    use reth_primitives::{hex_literal::hex, ForkHash, ForkId};
+    use reth_primitives::hex_literal::hex;
+    use reth_ethereum_forks::{ForkHash, ForkId};
     use std::net::{IpAddr, Ipv4Addr};
 
     /// This test creates two local UDP sockets. The mocked discovery service responds to specific

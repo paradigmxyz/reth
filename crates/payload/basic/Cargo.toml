@@ -11,6 +11,7 @@ description = "A basic payload builder for reth that uses the txpool API to buil
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
@@ -37,6 +38,7 @@ tracing.workspace = true
 [features]
 optimism = [
   "reth-primitives/optimism",
+  "reth-ethereum-forks/optimism",
   "reth-revm/optimism",
   "reth-transaction-pool/optimism",
   "reth-provider/optimism",

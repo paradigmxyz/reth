@@ -11,7 +11,7 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, ArgAction, Args, Parser, Subcommand, ValueEnum};
-use reth_primitives::ChainSpec;
+use reth_ethereum_forks::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},

@@ -8,11 +8,12 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_ethereum_forks::{ChainInfo, ChainSpec};
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
-    BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
+    BlockNumber, BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
 use reth_trie::updates::TrieUpdates;
@@ -42,7 +43,7 @@ impl Default for MockEthProvider {
             blocks: Default::default(),
             headers: Default::default(),
             accounts: Default::default(),
-            chain_spec: Arc::new(reth_primitives::ChainSpecBuilder::mainnet().build()),
+            chain_spec: Arc::new(reth_ethereum_forks::ChainSpecBuilder::mainnet().build()),
         }
     }
 }

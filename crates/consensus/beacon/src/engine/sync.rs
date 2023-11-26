@@ -3,12 +3,13 @@
 use crate::{engine::metrics::EngineSyncMetrics, BeaconConsensus};
 use futures::FutureExt;
 use reth_db::database::Database;
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
 };
-use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, B256};
+use reth_primitives::{BlockNumber, SealedBlock, B256};
 use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -394,11 +395,15 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use futures::poll;
-    use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
+    use reth_db::{
+        mdbx::DatabaseEnv,
+        test_utils::{create_test_rw_db, TempDatabase},
+    };
+    use reth_ethereum_forks::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpec,
-        ChainSpecBuilder, Header, SealedHeader, MAINNET,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, Header,
+        SealedHeader,
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},

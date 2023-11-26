@@ -6,9 +6,10 @@ use reth_db::{
     codecs::CompactU256,
     snapshot::{HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
 };
+use reth_ethereum_forks::ChainInfo;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, Header, Receipt, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
 use std::ops::{Deref, Range, RangeBounds};

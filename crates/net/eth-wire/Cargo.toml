@@ -12,6 +12,7 @@ repository.workspace = true
 # reth
 reth-codecs.workspace = true
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 reth-discv4.workspace = true
@@ -39,6 +40,7 @@ proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-ethereum-forks = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 ethers-core = { workspace = true, default-features = false }
 
@@ -54,8 +56,8 @@ proptest-derive.workspace = true
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
-arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-optimism = ["reth-primitives/optimism"]
+arbitrary = ["reth-primitives/arbitrary", "reth-ethereum-forks/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+optimism = ["reth-primitives/optimism", "reth-ethereum-forks/optimism"]
 
 [[test]]
 name = "fuzz_roundtrip"

@@ -8,7 +8,7 @@ use reth_db::{
     cursor::DbCursorRO, database::Database, init_db, table::TableImporter, tables,
     transaction::DbTx, DatabaseEnv,
 };
-use reth_primitives::ChainSpec;
+use reth_ethereum_forks::ChainSpec;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 

@@ -11,6 +11,7 @@ description = "reth specific revm utilities"
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
 reth-revm-inspectors.workspace = true
@@ -29,6 +30,7 @@ reth-trie.workspace = true
 optimism = [
   "revm/optimism",
   "reth-primitives/optimism",
+  "reth-ethereum-forks/optimism",
   "reth-consensus-common/optimism",
   "reth-interfaces/optimism",
 ]

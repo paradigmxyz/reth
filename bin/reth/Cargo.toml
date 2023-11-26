@@ -18,6 +18,7 @@ normal = [
 # reth
 reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
+reth-ethereum-forks = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -130,6 +131,7 @@ optimism = [
     "reth-basic-payload-builder/optimism",
     "reth-network/optimism",
     "reth-network-api/optimism",
+    "reth-ethereum-forks/optimism"
 ]
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []

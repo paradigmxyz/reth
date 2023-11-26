@@ -1,7 +1,8 @@
 use reth_db::DatabaseEnv;
+use reth_ethereum_forks::ChainSpec;
 use reth_primitives::{
     snapshot::{Compression, Filters},
-    ChainSpec, SnapshotSegment,
+    SnapshotSegment,
 };
 use reth_provider::{DatabaseProviderRO, ProviderFactory};
 use std::{fmt::Debug, sync::Arc, time::Instant};

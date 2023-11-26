@@ -1,15 +1,16 @@
 //! Support for building a pending block via local txpool.
 
 use crate::eth::error::{EthApiError, EthResult};
+use reth_ethereum_forks::{env::tx_env_with_recovered, ChainSpec};
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
-    revm::{compat::into_reth_log, env::tx_env_with_recovered},
+    revm::compat::into_reth_log,
     revm_primitives::{
         BlockEnv, CfgEnv, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
-    Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, BlockId, BlockNumberOrTag, Header, IntoRecoveredTransaction, Receipt, Receipts,
+    SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{

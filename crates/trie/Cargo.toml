@@ -11,6 +11,7 @@ description = "Merkle trie implementation"
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
 
@@ -33,6 +34,7 @@ triehash = { version = "0.8", optional = true }
 [dev-dependencies]
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-ethereum-forks = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 

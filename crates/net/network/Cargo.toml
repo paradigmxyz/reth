@@ -18,6 +18,7 @@ normal = [
 # reth
 reth-interfaces.workspace = true
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-net-common.workspace = true
 reth-network-api.workspace = true
 reth-discv4.workspace = true
@@ -69,6 +70,7 @@ tempfile = { workspace = true, optional = true }
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-ethereum-forks = { workspace = true, features = ["test-utils"] }
 
 # we need to enable the test-utils feature in our own crate to use utils in
 # integration tests
@@ -96,6 +98,7 @@ test-utils = ["reth-provider/test-utils", "dep:enr", "dep:tempfile", "reth-trans
 geth-tests = []
 optimism = [
     "reth-primitives/optimism",
+    "reth-ethereum-forks/optimism",
     "reth-transaction-pool/optimism",
     "reth-provider/optimism",
     "reth-network-api/optimism",

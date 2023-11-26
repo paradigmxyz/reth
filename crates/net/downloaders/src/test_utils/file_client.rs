@@ -267,7 +267,8 @@ mod tests {
         },
         test_utils::TestConsensus,
     };
-    use reth_primitives::{SealedHeader, MAINNET};
+    use reth_primitives::SealedHeader;
+    use reth_ethereum_forks::MAINNET;
     use reth_provider::ProviderFactory;
     use std::{
         io::{Read, Seek, SeekFrom, Write},

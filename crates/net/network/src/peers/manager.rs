@@ -9,9 +9,10 @@ use crate::{
 };
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
+use reth_ethereum_forks::ForkId;
 use reth_net_common::ban_list::BanList;
 use reth_network_api::{PeerKind, ReputationChangeKind};
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_primitives::{NodeRecord, PeerId};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     fmt::Display,

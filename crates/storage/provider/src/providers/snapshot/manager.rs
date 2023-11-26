@@ -6,12 +6,13 @@ use reth_db::{
     codecs::CompactU256,
     snapshot::{HeaderMask, TransactionMask},
 };
+use reth_ethereum_forks::ChainInfo;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::HighestSnapshots, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo,
-    Header, SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    snapshot::HighestSnapshots, Address, BlockHash, BlockHashOrNumber, BlockNumber, Header,
+    SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    TxHash, TxNumber, B256, U256,
 };
 use revm::primitives::HashMap;
 use std::{

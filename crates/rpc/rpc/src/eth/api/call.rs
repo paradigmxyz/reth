@@ -11,8 +11,9 @@ use crate::{
     },
     EthApi,
 };
+use reth_ethereum_forks::env::tx_env_with_recovered;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };

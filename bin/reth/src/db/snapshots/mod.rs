@@ -2,11 +2,12 @@ use clap::{builder::RangedU64ValueParser, Parser};
 use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_db::{database::Database, open_db_read_only, DatabaseEnv};
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
-    BlockNumber, ChainSpec, SnapshotSegment,
+    BlockNumber, SnapshotSegment,
 };
 use reth_provider::{BlockNumReader, ProviderFactory, TransactionsProviderExt};
 use reth_snapshot::{segments as snap_segments, segments::Segment};

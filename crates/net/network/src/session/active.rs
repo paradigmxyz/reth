@@ -777,7 +777,8 @@ mod tests {
         UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
-    use reth_primitives::{ForkFilter, Hardfork, MAINNET};
+    use reth_primitives::ForkFilter;
+    use reth_ethereum_forks::{Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::{net::TcpListener, sync::mpsc};

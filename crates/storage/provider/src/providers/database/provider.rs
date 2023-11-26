@@ -24,6 +24,11 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
+use reth_ethereum_forks::{
+    config::revm_spec,
+    env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
+    ChainInfo, ChainSpec, Hardfork,
+};
 use reth_interfaces::{
     p2p::headers::downloader::SyncTarget,
     provider::{ProviderResult, RootMismatch},
@@ -31,17 +36,13 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     keccak256,
-    revm::{
-        config::revm_spec,
-        env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
-    },
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    GotExpected, Head, Header, PruneCheckpoint, PruneModes, PruneSegment, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256,
+    U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};

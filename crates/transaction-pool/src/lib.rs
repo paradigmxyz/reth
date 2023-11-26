@@ -79,7 +79,7 @@
 //! Listen for new transactions and print them:
 //!
 //! ```
-//! use reth_primitives::MAINNET;
+//! use reth_ethereum_forks::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
@@ -107,7 +107,7 @@
 //!
 //! ```
 //! use futures_util::Stream;
-//! use reth_primitives::MAINNET;
+//! use reth_ethereum_forks::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
@@ -279,7 +279,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use reth_primitives::MAINNET;
+    /// use reth_ethereum_forks::MAINNET;
     /// use reth_provider::{BlockReaderIdExt, StateProviderFactory};
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::{

@@ -17,6 +17,7 @@ normal = [
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
 reth-tasks.workspace = true
@@ -52,6 +53,7 @@ proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-ethereum-forks = { workspace = true, features = ["arbitrary"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 paste = "1.0"
 rand = "0.8"
@@ -64,11 +66,12 @@ tempfile.workspace = true
 default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
-arbitrary = ["proptest", "reth-primitives/arbitrary"]
+arbitrary = ["proptest", "reth-primitives/arbitrary", "reth-ethereum-forks/arbitrary"]
 optimism = [
     "dep:reth-revm",
     "reth-revm?/optimism",
     "reth-primitives/optimism",
+    "reth-ethereum-forks/optimism",
     "reth-provider/test-utils",
     "reth-provider/optimism",
     "revm/optimism",

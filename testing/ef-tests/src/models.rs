@@ -6,10 +6,10 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_ethereum_forks::{ChainSpec, ChainSpecBuilder};
 use reth_primitives::{
-    keccak256, Account as RethAccount, Address, Bloom, Bytecode, Bytes, ChainSpec,
-    ChainSpecBuilder, Header as RethHeader, JsonU256, SealedHeader, StorageEntry, Withdrawal, B256,
-    B64, U256,
+    keccak256, Account as RethAccount, Address, Bloom, Bytecode, Bytes, Header as RethHeader,
+    JsonU256, SealedHeader, StorageEntry, Withdrawal, B256, B64, U256,
 };
 use serde::{self, Deserialize};
 use std::{collections::BTreeMap, ops::Deref};

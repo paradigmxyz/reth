@@ -1,0 +1,94 @@
+[package]
+name = "reth-ethereum-forks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Ethereum fork types"
+
+[dependencies]
+# reth
+reth-codecs.workspace = true
+reth-rpc-types.workspace = true
+revm-primitives.workspace = true
+reth-primitives.workspace = true
+revm.workspace = true
+
+# ethereum
+alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
+alloy-rlp = { workspace = true, features = ["arrayvec"] }
+ethers-core = { workspace = true, default-features = false, optional = true }
+
+# crypto
+secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
+
+# for eip-4844
+c-kzg = { workspace = true, features = ["serde"], optional = true }
+
+# used for forkid
+crc = "3"
+
+# tracing
+tracing.workspace = true
+
+# misc
+bytes.workspace = true
+byteorder = "1"
+clap = { workspace = true, features = ["derive"], optional = true }
+serde.workspace = true
+serde_json.workspace = true
+serde_with = "3.3.0"
+thiserror.workspace = true
+sucds = "~0.6"
+modular-bitfield = "0.11.2"
+derive_more = "0.99"
+url = "2.3"
+once_cell.workspace = true
+zstd = { version = "0.12", features = ["experimental"] }
+rayon.workspace = true
+tempfile.workspace = true
+sha2 = "0.10.7"
+itertools = "0.11"
+num_enum = "0.7"
+
+# `test-utils` feature
+plain_hasher = { version = "0.2", optional = true }
+hash-db = { version = "~0.15", optional = true }
+
+# arbitrary utils
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+strum = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+test-fuzz = "4"
+rand.workspace = true
+revm-primitives = { workspace = true, features = ["arbitrary"] }
+reth-primitives = { workspace = true, features = ["arbitrary"] }
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-derive.workspace = true
+assert_matches.workspace = true
+toml.workspace = true
+triehash = "0.8"
+
+plain_hasher = "0.2"
+hash-db = "~0.15"
+
+# necessary so we don't hit a "undeclared 'std'":
+# https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
+secp256k1.workspace = true
+criterion.workspace = true
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+
+[features]
+default = ["c-kzg"]
+arbitrary = ["revm-primitives/arbitrary", "reth-primitives/arbitrary", "reth-rpc-types/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "reth-primitives/c-kzg"]
+clap = ["dep:clap"]
+optimism = ["reth-codecs/optimism", "revm-primitives/optimism", "reth-primitives/optimism", "revm/optimism"]
+test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]

@@ -4,10 +4,11 @@ use super::{
 };
 use rand::{seq::SliceRandom, Rng};
 use reth_db::{open_db_read_only, snapshot::HeaderMask};
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::db::LogLevel;
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
-    BlockHash, ChainSpec, Header, SnapshotSegment,
+    BlockHash, Header, SnapshotSegment,
 };
 use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,

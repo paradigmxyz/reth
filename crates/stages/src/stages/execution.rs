@@ -495,9 +495,10 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_rw_db};
+    use reth_ethereum_forks::{ChainSpecBuilder, MAINNET};
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Bytecode,
-        ChainSpecBuilder, PruneModes, SealedBlock, StorageEntry, B256, MAINNET, U256,
+        PruneModes, SealedBlock, StorageEntry, B256, U256,
     };
     use reth_provider::{AccountReader, BlockWriter, ProviderFactory, ReceiptProvider};
     use reth_revm::EvmProcessorFactory;

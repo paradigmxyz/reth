@@ -7,7 +7,8 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives::{ChainSpec, SealedBlock};
+use reth_ethereum_forks::ChainSpec;
+use reth_primitives::SealedBlock;
 use reth_provider::BlockReaderIdExt;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};

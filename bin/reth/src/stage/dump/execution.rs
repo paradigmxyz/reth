@@ -5,7 +5,8 @@ use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
     DatabaseEnv,
 };
-use reth_primitives::{stage::StageCheckpoint, ChainSpec};
+use reth_ethereum_forks::ChainSpec;
+use reth_primitives::stage::StageCheckpoint;
 use reth_provider::ProviderFactory;
 use reth_revm::EvmProcessorFactory;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};

@@ -56,6 +56,11 @@ pub mod primitives {
     pub use reth_primitives::*;
 }
 
+/// Re-exported from `reth_ethereum_forks`.
+pub mod ethereum_forks {
+    pub use reth_ethereum_forks::*;
+}
+
 /// Re-exported from `reth_beacon_consensus`.
 pub mod beacon_consensus {
     pub use reth_beacon_consensus::*;

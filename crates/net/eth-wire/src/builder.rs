@@ -1,14 +1,16 @@
 //! Builder structs for messages.
 
 use crate::Status;
-use reth_primitives::{Chain, ForkId, B256, U256};
+use reth_ethereum_forks::{Chain, ForkId};
+use reth_primitives::{B256, U256};
 
 /// Builder for [`Status`] messages.
 ///
 /// # Example
 /// ```
 /// use reth_eth_wire::{types::Status, EthVersion};
-/// use reth_primitives::{Chain, Hardfork, B256, MAINNET, MAINNET_GENESIS_HASH, U256};
+/// use reth_ethereum_forks::{Chain, Hardfork, MAINNET};
+/// use reth_primitives::{B256, MAINNET_GENESIS_HASH, U256};
 ///
 /// // this is just an example status message!
 /// let status = Status::builder()

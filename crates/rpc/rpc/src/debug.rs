@@ -13,8 +13,8 @@ use crate::{
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use reth_ethereum_forks::env::tx_env_with_recovered;
 use reth_primitives::{
-    revm::env::tx_env_with_recovered,
     revm_primitives::{
         db::{DatabaseCommit, DatabaseRef},
         BlockEnv, CfgEnv,

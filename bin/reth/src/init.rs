@@ -5,10 +5,10 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
-use reth_primitives::{
-    stage::StageId, Account, Bytecode, ChainSpec, Receipts, StorageEntry, B256, U256,
-};
+use reth_primitives::{stage::StageId, Account, Bytecode, Receipts, StorageEntry, B256, U256};
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
@@ -228,9 +228,10 @@ mod tests {
         test_utils::create_test_rw_db,
         DatabaseEnv,
     };
+    use reth_ethereum_forks::{Chain, ForkTimestamps, GOERLI, MAINNET, SEPOLIA};
     use reth_primitives::{
-        Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
-        GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
+        Address, Genesis, GenesisAccount, IntegerList, GOERLI_GENESIS_HASH, MAINNET_GENESIS_HASH,
+        SEPOLIA_GENESIS_HASH,
     };
     use std::collections::HashMap;
 

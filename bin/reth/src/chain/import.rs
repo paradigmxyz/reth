@@ -18,8 +18,9 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::consensus::Consensus;
-use reth_primitives::{stage::StageId, ChainSpec, B256};
+use reth_primitives::{stage::StageId, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,

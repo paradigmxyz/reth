@@ -11,6 +11,7 @@ description = "Network interfaces"
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-eth-wire.workspace = true
 reth-rpc-types.workspace = true
 reth-discv4.workspace = true

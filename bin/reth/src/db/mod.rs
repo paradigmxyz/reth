@@ -17,7 +17,7 @@ use reth_db::{
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
     Tables,
 };
-use reth_primitives::ChainSpec;
+use reth_ethereum_forks::ChainSpec;
 use std::{
     io::{self, Write},
     sync::Arc,

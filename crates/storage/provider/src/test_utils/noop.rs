@@ -8,14 +8,15 @@ use crate::{
     WithdrawalsProvider,
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_ethereum_forks::{ChainInfo, ChainSpec, MAINNET};
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::AccountProof,
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode,
-    ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, MAINNET, U256,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, Bytecode, Header,
+    PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
+    TxNumber, B256, U256,
 };
 use reth_trie::updates::TrieUpdates;
 use revm::primitives::{BlockEnv, CfgEnv};

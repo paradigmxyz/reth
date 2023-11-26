@@ -4,9 +4,10 @@ use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
 use reth_config::Config;
 use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_ethereum_forks::ChainSpec;
 use reth_net_nat::NatResolver;
 use reth_network::{HelloMessageWithProtocols, NetworkConfigBuilder};
-use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
+use reth_primitives::{mainnet_nodes, NodeRecord};
 use secp256k1::SecretKey;
 use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 

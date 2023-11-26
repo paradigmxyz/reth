@@ -12,7 +12,7 @@
 //! cast rpc myrpcExt_customMethod
 //! ```
 use reth::{
-    primitives::ChainSpecBuilder,
+    ethereum_forks::ChainSpecBuilder,
     providers::{providers::BlockchainProvider, ProviderFactory},
     utils::db::open_db_read_only,
 };

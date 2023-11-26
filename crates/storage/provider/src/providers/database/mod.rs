@@ -10,14 +10,15 @@ use crate::{
     TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
+use reth_ethereum_forks::{ChainInfo, ChainSpec};
 use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
 use reth_primitives::{
     snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
-    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, B256, U256,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header,
+    PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
+    B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{

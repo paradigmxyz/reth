@@ -11,6 +11,7 @@ description = "Staged syncing primitives used in reth."
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-interfaces.workspace = true
 reth-codecs.workspace = true
 reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed"] }
@@ -56,6 +57,7 @@ proptest-derive = { workspace = true, optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-ethereum-forks = { workspace = true, features = ["arbitrary"] }
 reth-codecs = { workspace = true, features = ["arbitrary"] }
 reth-interfaces.workspace = true
 
@@ -93,6 +95,7 @@ mdbx = ["reth-libmdbx"]
 bench = []
 arbitrary = [
     "reth-primitives/arbitrary",
+    "reth-ethereum-forks/arbitrary",
     "reth-codecs/arbitrary",
     "dep:arbitrary",
     "dep:proptest",

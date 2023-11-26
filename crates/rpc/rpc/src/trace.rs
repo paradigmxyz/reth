@@ -10,10 +10,10 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
-use reth_primitives::{
-    revm::env::tx_env_with_recovered, revm_primitives::db::DatabaseCommit, BlockId,
+use reth_primitives::{revm_primitives::db::DatabaseCommit, BlockId,
     BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
 };
+use reth_ethereum_forks::env::tx_env_with_recovered;
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,

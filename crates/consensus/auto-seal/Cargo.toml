@@ -12,6 +12,7 @@ description = "A consensus impl for local testing purposes"
 # reth
 reth-beacon-consensus.workspace = true
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
 reth-stages.workspace = true

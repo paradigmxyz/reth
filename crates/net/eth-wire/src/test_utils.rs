@@ -5,7 +5,8 @@ use crate::{
 };
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_ecies::util::pk2id;
-use reth_primitives::{Chain, ForkFilter, Head, B256, U256};
+use reth_ethereum_forks::{Chain, ForkFilter};
+use reth_primitives::{Head, B256, U256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;

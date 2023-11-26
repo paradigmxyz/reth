@@ -13,12 +13,13 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, HelloMessageWithProtocols, Status, UnauthedEthStream,
     UnauthedP2PStream,
 };
+use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::{
     bandwidth_meter::{BandwidthMeter, MeteredStream},
     stream::HasRemoteAddr,
 };
-use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head, PeerId};
+use reth_primitives::{Head, PeerId};
 use reth_tasks::TaskSpawner;
 use secp256k1::SecretKey;
 use std::{

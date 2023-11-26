@@ -9,10 +9,11 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
 };
+use reth_ethereum_forks::MAINNET;
 use reth_interfaces::{provider::ProviderResult, test_utils::generators::ChangeSet, RethResult};
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
-    TxHash, TxNumber, B256, MAINNET, U256,
+    TxHash, TxNumber, B256, U256,
 };
 use reth_provider::{DatabaseProviderRO, DatabaseProviderRW, HistoryWriter, ProviderFactory};
 use std::{

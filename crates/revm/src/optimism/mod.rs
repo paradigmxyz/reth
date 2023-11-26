@@ -1,5 +1,6 @@
+use reth_ethereum_forks::{ChainSpec, Hardfork};
 use reth_interfaces::executor::{self as reth_executor, BlockExecutionError};
-use reth_primitives::{Block, Bytes, ChainSpec, Hardfork, TransactionKind, U256};
+use reth_primitives::{Block, Bytes, TransactionKind, U256};
 use revm::{
     primitives::{BedrockSpec, RegolithSpec},
     L1BlockInfo,

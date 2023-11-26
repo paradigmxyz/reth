@@ -10,6 +10,7 @@ once_cell.workspace = true
 eyre.workspace = true
 
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-network.workspace = true
 reth-discv4.workspace = true
 reth-eth-wire.workspace = true

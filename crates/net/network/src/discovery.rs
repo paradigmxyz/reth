@@ -9,7 +9,8 @@ use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_ethereum_forks::ForkId;
+use reth_primitives::{NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},

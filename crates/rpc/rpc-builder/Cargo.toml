@@ -11,6 +11,7 @@ description = "Helpers for configuring RPC"
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-ipc.workspace = true
 reth-interfaces.workspace = true
 reth-network-api.workspace = true

@@ -13,6 +13,7 @@ use crate::metrics::PayloadBuilderMetrics;
 use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
+use reth_ethereum_forks::{env::tx_env_with_recovered, ChainSpec};
 use reth_interfaces::{RethError, RethResult};
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
@@ -26,8 +27,8 @@ use reth_primitives::{
     },
     eip4844::calculate_excess_blob_gas,
     proofs,
-    revm::{compat::into_reth_log, env::tx_env_with_recovered},
-    Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts,
+    revm::compat::into_reth_log,
+    Block, BlockNumberOrTag, Bytes, Header, IntoRecoveredTransaction, Receipt, Receipts,
     SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
