@@ -5,6 +5,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
+use reth_ethereum_forks::MAINNET;
 use reth_interfaces::test_utils::{
     generators,
     generators::{
@@ -13,7 +14,6 @@ use reth_interfaces::test_utils::{
     },
 };
 use reth_primitives::{Account, Address, SealedBlock, B256};
-use reth_ethereum_forks::MAINNET;
 use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},

@@ -7,7 +7,6 @@ use reth_ethereum_forks::ChainSpec;
 use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
 use std::sync::Arc;
 
-
 /// Factory for creating [EVMProcessor].
 #[derive(Clone, Debug)]
 pub struct EvmProcessorFactory {

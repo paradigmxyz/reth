@@ -1,8 +1,8 @@
 //! Components that are used by the node command.
 
+use reth_ethereum_forks::ChainSpec;
 use reth_network::{NetworkEvents, NetworkProtocols};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_ethereum_forks::ChainSpec;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, StateProviderFactory,

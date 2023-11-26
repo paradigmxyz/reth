@@ -23,8 +23,8 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use reth_primitives::{NodeRecord, PeerId};
 use reth_ethereum_forks::ForkId;
+use reth_primitives::{NodeRecord, PeerId};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{

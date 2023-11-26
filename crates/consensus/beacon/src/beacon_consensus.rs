@@ -1,11 +1,11 @@
 //! Consensus for ethereum network
 use reth_consensus_common::validation;
+use reth_ethereum_forks::{Chain, ChainSpec, Hardfork};
 use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
     constants::{ALLOWED_FUTURE_BLOCK_TIME_SECONDS, MAXIMUM_EXTRA_DATA_SIZE},
     Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_ethereum_forks::{Chain, ChainSpec, Hardfork};
 
 use std::{sync::Arc, time::SystemTime};
 

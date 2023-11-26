@@ -15,6 +15,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::{
     consensus::Consensus,
     executor::BlockExecutionError,
@@ -24,7 +25,6 @@ use reth_interfaces::{
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, PruneModes, Receipt, B256, U256};
-use reth_ethereum_forks::ChainSpec;
 use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
     BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, ProviderFactory,

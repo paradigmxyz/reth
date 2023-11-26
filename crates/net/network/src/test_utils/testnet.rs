@@ -11,9 +11,9 @@ use crate::{
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
+use reth_ethereum_forks::MAINNET;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::PeerId;
-use reth_ethereum_forks::MAINNET;
 use reth_provider::{
     test_utils::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
 };

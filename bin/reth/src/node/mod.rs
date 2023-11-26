@@ -1055,9 +1055,9 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_ethereum_forks::DEV;
     use crate::args::utils::SUPPORTED_CHAINS;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
+    use reth_ethereum_forks::DEV;
     use std::{
         net::{IpAddr, Ipv4Addr},
         path::Path,

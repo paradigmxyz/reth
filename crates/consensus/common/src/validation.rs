@@ -483,16 +483,16 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 mod tests {
     use super::*;
     use mockall::mock;
+    use reth_ethereum_forks::{ChainSpecBuilder, MAINNET};
     use reth_interfaces::{
         provider::ProviderResult,
         test_utils::generators::{self, Rng},
     };
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
-        BlockBody, BlockHash, BlockHashOrNumber, Bytes, Signature,
-        TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
+        BlockBody, BlockHash, BlockHashOrNumber, Bytes, Signature, TransactionKind,
+        TransactionSigned, Withdrawal, MAINNET, U256,
     };
-    use reth_ethereum_forks::{ChainSpecBuilder, MAINNET};
     use std::ops::RangeBounds;
 
     mock! {

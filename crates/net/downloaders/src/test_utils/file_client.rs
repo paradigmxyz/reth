@@ -260,6 +260,7 @@ mod tests {
     use futures::SinkExt;
     use futures_util::stream::StreamExt;
     use reth_db::test_utils::create_test_rw_db;
+    use reth_ethereum_forks::MAINNET;
     use reth_interfaces::{
         p2p::{
             bodies::downloader::BodyDownloader,
@@ -268,7 +269,6 @@ mod tests {
         test_utils::TestConsensus,
     };
     use reth_primitives::SealedHeader;
-    use reth_ethereum_forks::MAINNET;
     use reth_provider::ProviderFactory;
     use std::{
         io::{Read, Seek, SeekFrom, Write},

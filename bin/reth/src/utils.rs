@@ -10,15 +10,13 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{
-    fs, BlockHashOrNumber, HeadersDirection, SealedBlock, SealedHeader,
-};
-use reth_ethereum_forks::ChainSpec;
+use reth_primitives::{fs, BlockHashOrNumber, HeadersDirection, SealedBlock, SealedHeader};
 use reth_rpc::{JwtError, JwtSecret};
 use std::{
     env::VarError,

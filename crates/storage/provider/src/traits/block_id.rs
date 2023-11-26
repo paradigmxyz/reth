@@ -3,7 +3,6 @@ use reth_ethereum_forks::ChainInfo;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, B256};
 
-
 /// Client trait for getting important block numbers (such as the latest block number), converting
 /// block hashes to numbers, and fetching a block hash from its block number.
 ///

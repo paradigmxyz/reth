@@ -9,8 +9,8 @@ use crate::{
 };
 use clap::{Parser, Subcommand};
 use reth_db::{cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx};
-use reth_primitives::BlockHashOrNumber;
 use reth_ethereum_forks::ChainSpec;
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{BlockExecutionWriter, ProviderFactory};
 use std::{ops::RangeInclusive, sync::Arc};
 

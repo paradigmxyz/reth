@@ -1953,9 +1953,9 @@ mod tests {
         BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
+    use reth_ethereum_forks::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_interfaces::test_utils::generators::{self, Rng};
     use reth_primitives::{stage::StageCheckpoint, B256};
-    use reth_ethereum_forks::{ChainSpec,ChainSpecBuilder,MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::try_block_to_payload_v1;
@@ -2409,12 +2409,12 @@ mod tests {
 
     mod new_payload {
         use super::*;
+        use reth_ethereum_forks::Hardfork;
         use reth_interfaces::test_utils::{
             generators,
             generators::{generate_keys, random_block},
         };
         use reth_primitives::{public_key_to_address, Genesis, GenesisAccount, U256};
-        use reth_ethereum_forks::Hardfork;
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]
