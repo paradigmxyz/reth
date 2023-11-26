@@ -279,7 +279,7 @@ where
         self.mxdmx.inner.start_send_unpin(item)?;
 
         // sink buffered bytes from `StreamClone`s
-        for _ in 0..self.mxdmx.demux.len() - 1 {
+        for _ in 0..self.mxdmx.demux.len() {
             let Ok(item) = self.mxdmx.mux.try_recv() else { break };
             self.mxdmx.inner.start_send_unpin(item)?;
         }
