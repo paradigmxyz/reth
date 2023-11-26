@@ -78,9 +78,9 @@ pub enum MuxDemuxError {
     SharedCapabilityError(#[from] SharedCapabilityError),
 }
 
-/// Each reth capability stream type is identified by the message type it handles. For example
-/// [`EthMessage`] maps to [`crate::EthStream`]. The stream type is be used to identify the
-/// channel on which the [`MuxDemuxer`] should send demuxed p2p outputs.
+/// The stream type is be used to identify the channel on which the [`MuxDemuxer`] should send
+/// demuxed p2p outputs. Each reth capability stream type is identified by the message type it
+/// handles. For example [`EthMessage`] maps to [`crate::EthStream`].
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub enum CapStreamType {
     /// Key for [`crate::EthStream`] type.
