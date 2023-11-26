@@ -1,6 +1,6 @@
 use reth_db::open_db_read_only;
-use reth_primitives::{Address, B256, U256};
 use reth_ethereum_forks::ChainSpecBuilder;
+use reth_primitives::{Address, B256, U256};
 use reth_provider::{
     AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
     StateProvider, TransactionsProvider,
