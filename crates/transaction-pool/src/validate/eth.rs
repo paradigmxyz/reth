@@ -5,8 +5,8 @@ use crate::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_SIZE, TX_MAX_SIZE},
-    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
-    TransactionValidationTaskExecutor, TransactionValidator,
+    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use reth_primitives::{
     constants::{
@@ -124,10 +124,10 @@ where
     propagate_local_transactions: bool,
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: Arc<KzgSettings>,
+    /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
+    local_transactions_config: LocalTransactionConfig,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
-    /// Flag to enforce no local transaction exemptions.
-    no_locals: bool,
 }
 
 // === impl EthTransactionValidatorInner ===
@@ -237,7 +237,7 @@ where
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if (!origin.is_local() || self.no_locals) &&
+        if (!origin.is_local() || self.local_transactions_config.no_local_exemptions()) &&
             transaction.is_eip1559() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
@@ -486,8 +486,8 @@ pub struct EthTransactionValidatorBuilder {
 
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: Arc<KzgSettings>,
-    /// Flag to enforce no local transaction exemptions
-    no_locals: bool,
+    /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
+    local_transactions_config: LocalTransactionConfig,
 }
 
 impl EthTransactionValidatorBuilder {
@@ -504,6 +504,7 @@ impl EthTransactionValidatorBuilder {
             // default to true, can potentially take this as a param in the future
             propagate_local_transactions: true,
             kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
+            local_transactions_config: Default::default(),
 
             // by default all transaction types are allowed
             eip2718: true,
@@ -515,7 +516,6 @@ impl EthTransactionValidatorBuilder {
 
             // TODO: can hard enable by default once mainnet transitioned
             cancun,
-            no_locals: false,
         }
     }
 
@@ -525,8 +525,11 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Whether to allow exemptions for local transaction exemptions.
-    pub fn set_no_locals(mut self, no_locals: bool) -> Self {
-        self.no_locals = no_locals;
+    pub fn set_local_transactions_config(
+        mut self,
+        local_transactions_config: LocalTransactionConfig,
+    ) -> Self {
+        self.local_transactions_config = local_transactions_config;
         self
     }
 
@@ -635,6 +638,7 @@ impl EthTransactionValidatorBuilder {
             minimum_priority_fee,
             propagate_local_transactions,
             kzg_settings,
+            local_transactions_config,
             ..
         } = self;
 
@@ -653,8 +657,8 @@ impl EthTransactionValidatorBuilder {
             propagate_local_transactions,
             blob_store: Box::new(blob_store),
             kzg_settings,
+            local_transactions_config,
             _marker: Default::default(),
-            no_locals: false,
         };
 
         EthTransactionValidator { inner: Arc::new(inner) }

@@ -1,6 +1,6 @@
 //! The internal transaction pool implementation.
 use crate::{
-    config::TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    config::{LocalTransactionConfig, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER},
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind},
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
@@ -918,6 +918,8 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     pending_fees: PendingFees,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
+    /// How to handle [TransactionOrigin::Local](crate::TransactionOrigin) transactions.
+    local_transactions_config: LocalTransactionConfig,
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
@@ -926,6 +928,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Self {
             max_account_slots: config.max_account_slots,
             price_bumps: config.price_bumps,
+            local_transactions_config: config.local_transactions_config.clone(),
             ..Default::default()
         }
     }
@@ -1274,8 +1277,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &self,
         transaction: ValidPoolTransaction<T>,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
-        let pool_config = PoolConfig::default();
-        if !transaction.origin.is_local() || pool_config.no_locals {
+        if !transaction.origin.is_local() || self.local_transactions_config.no_local_exemptions() {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
             if current_txs >= self.max_account_slots {
@@ -1665,6 +1667,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             last_seen_block_hash: Default::default(),
             pending_fees: Default::default(),
             price_bumps: Default::default(),
+            local_transactions_config: Default::default(),
         }
     }
 }
