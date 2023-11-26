@@ -820,7 +820,7 @@ mod tests {
             O: Future<Output = ()> + Send + Sync,
             S: tokio_stream::Stream<Item = Result<reth_primitives::BytesMut, E>>
                 + futures::Sink<reth_primitives::Bytes>
-                + CanDisconnect<reth_primitives::Bytes>,
+                + reth_eth_wire::CanDisconnect<reth_primitives::Bytes>,
             EthStreamError: From<E>,
         {
             let status = self.status;
