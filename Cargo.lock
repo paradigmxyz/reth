@@ -5822,6 +5822,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-discv5"
+version = "0.1.0-alpha.11"
+dependencies = [
+ "discv5",
+ "tokio-stream",
+]
+
+[[package]]
 name = "reth-dns-discovery"
 version = "0.1.0-alpha.11"
 dependencies = [
@@ -6079,6 +6087,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "reth-discv4",
+ "reth-discv5",
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",

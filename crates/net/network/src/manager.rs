@@ -175,6 +175,7 @@ where
             client,
             secret_key,
             mut discovery_v4_config,
+            mut discovery_v5_config,
             discovery_addr,
             listener_addr,
             peers_config,

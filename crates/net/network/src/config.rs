@@ -7,6 +7,7 @@ use crate::{
     session::SessionsConfig,
     NetworkHandle, NetworkManager,
 };
+use reth_discv5::{Discv5Config,Discv5ConfigBuilder};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
@@ -43,6 +44,8 @@ pub struct NetworkConfig<C> {
     pub dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
     pub discovery_v4_config: Option<Discv4Config>,
+    /// How to set up discovery
+    pub discovery_v5_config:Option<Discv5Config>,
     /// Address to use for discovery
     pub discovery_addr: SocketAddr,
     /// Address to listen for incoming connections
@@ -108,6 +111,12 @@ impl<C> NetworkConfig<C> {
         self
     }
 
+    /// Sets the config to use for the discovery v5 protocol.
+    pub fn set_discovery_v5(mut self, discovery_config: Discv5Config) -> Self{
+        self.discovery_v5_config = Some(discovery_config);
+        self
+    }
+
     /// Sets the address for the incoming connection listener.
     pub fn set_listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = listener_addr;
@@ -143,6 +152,8 @@ pub struct NetworkConfigBuilder {
     dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
+    #[serde(skip)]
+    discovery_v5_builder: Option<Discv5ConfigBuilder>,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<NodeRecord>,
     /// Address to use for discovery
@@ -192,6 +203,7 @@ impl NetworkConfigBuilder {
             secret_key,
             dns_discovery_config: Some(Default::default()),
             discovery_v4_builder: Some(Default::default()),
+            discovery_v5_builder: Default::default(),
             boot_nodes: Default::default(),
             discovery_addr: None,
             listener_addr: None,
@@ -415,6 +427,7 @@ impl NetworkConfigBuilder {
             secret_key,
             mut dns_discovery_config,
             discovery_v4_builder,
+            discovery_v5_builder,
             boot_nodes,
             discovery_addr,
             listener_addr,
@@ -468,6 +481,7 @@ impl NetworkConfigBuilder {
             boot_nodes,
             dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
+            discovery_v5_config: discovery_v5_builder.map(|mut builder| builder.build()),
             discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),

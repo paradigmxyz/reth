@@ -4,6 +4,7 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
+use reth_discv5::Discv5;
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
 use reth_dns_discovery::{
@@ -35,6 +36,8 @@ pub struct Discovery {
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
     discv4: Option<Discv4>,
+    /// Handler to interact with the Discovery v5 service
+    discv5: Option<Discv5>,
     /// All KAD table updates from the discv4 service.
     discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
     /// The handle to the spawned discv4 service
