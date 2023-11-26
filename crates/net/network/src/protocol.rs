@@ -3,9 +3,7 @@
 //! See also <https://github.com/ethereum/devp2p/blob/master/README.md>
 
 use futures::Stream;
-use reth_eth_wire::{
-    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
-};
+use reth_eth_wire::{capability::SharedCapabilities, protocol::Protocol, StreamClone};
 use reth_network_api::Direction;
 use reth_primitives::BytesMut;
 use reth_rpc_types::PeerId;
@@ -62,7 +60,7 @@ pub trait ConnectionHandler: Send + Sync + 'static {
         self,
         direction: Direction,
         peer_id: PeerId,
-        conn: ProtocolConnection,
+        conn: StreamClone,
     ) -> Self::Connection;
 }
 
@@ -159,7 +157,7 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
         self,
         direction: Direction,
         peer_id: PeerId,
-        conn: ProtocolConnection,
+        conn: StreamClone,
     ) -> Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>>;
 }
 
@@ -184,7 +182,7 @@ where
         self,
         direction: Direction,
         peer_id: PeerId,
-        conn: ProtocolConnection,
+        conn: StreamClone,
     ) -> Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>> {
         Box::pin(T::into_connection(self, direction, peer_id, conn))
     }
