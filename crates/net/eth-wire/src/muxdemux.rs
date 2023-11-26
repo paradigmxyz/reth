@@ -11,7 +11,7 @@
 //! message IDs are unmasked so that all message IDs start at 0x0. [`MuxDemuxStream`] and
 //! [`StreamClone`] mask message IDs before sinking bytes to the [`MuxDemuxer`].
 //!
-//! For example, `EthStream<MuxDemuxStream<P2PStream<S>>>`` is the main capability stream. 
+//! For example, `EthStream<MuxDemuxStream<P2PStream<S>>>` is the main capability stream.
 //! Subsequent capability streams clone the p2p connection via EthStream.
 //!
 //! When [`MuxDemuxStream`] is polled, [`MuxDemuxer`] receives bytes from the network. If these
