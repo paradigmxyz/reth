@@ -87,7 +87,7 @@ pub struct MuxDemuxer<S> {
     demux: HashMap<CapStreamType, mpsc::UnboundedSender<BytesMut>>,
     // sender to mux stored to make new stream clones
     mux_tx: mpsc::UnboundedSender<Bytes>,
-    // capabilities supported by underlying p2p stream
+    // capabilities supported by underlying p2p stream (makes testing easier to store here too).
     shared_capabilities: SharedCapabilities,
 }
 
