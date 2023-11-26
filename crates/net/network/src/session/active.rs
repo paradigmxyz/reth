@@ -810,18 +810,16 @@ mod tests {
         }
 
         /// Connects a new Eth stream and executes the given closure with that established stream
-        fn with_client_stream<F, O, S, E>(
+        fn with_client_stream<F, O>(
             &self,
             local_addr: SocketAddr,
             f: F,
         ) -> Pin<Box<dyn Future<Output = ()> + Send>>
         where
-            F: FnOnce(EthStream<S>) -> O + Send + 'static,
+            F: FnOnce(EthStream<MuxDemuxStream<P2PStream<ECIESStream<TcpStream>>>>) -> O
+                + Send
+                + 'static,
             O: Future<Output = ()> + Send + Sync,
-            S: tokio_stream::Stream<Item = Result<reth_primitives::BytesMut, E>>
-                + futures::Sink<reth_primitives::Bytes>
-                + reth_eth_wire::CanDisconnect<reth_primitives::Bytes>,
-            EthStreamError: From<E>,
         {
             let status = self.status;
             let fork_filter = self.fork_filter.clone();
@@ -835,10 +833,15 @@ mod tests {
 
                 let (p2p_stream, _) = UnauthedP2PStream::new(sink).handshake(hello).await.unwrap();
 
-                let (client_stream, _) = UnauthedEthStream::new(p2p_stream)
+                let shared_caps = p2p_stream.shared_capabilities().clone();
+                let mxdmx_stream = MuxDemuxStream::try_new::<EthMessage>(p2p_stream, shared_caps)
+                    .expect("eth should be shared cap on p2p conn");
+
+                let (client_stream, _) = UnauthedEthStream::new(mxdmx_stream)
                     .handshake(status, fork_filter)
                     .await
                     .unwrap();
+
                 f(client_stream).await
             })
         }
