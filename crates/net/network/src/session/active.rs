@@ -16,7 +16,7 @@ use reth_eth_wire::{
     capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    DisconnectReason, EthMessage, EthStream, P2PStream,
+    DisconnectReason, EthMessage, EthStream, MuxDemuxStream, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -54,7 +54,8 @@ const TIMEOUT_SCALING: u32 = 3;
 /// The type of the underlying peer network connection.
 // This type is boxed because the underlying stream is ~6KB,
 // mostly coming from `P2PStream`'s `snap::Encoder` (2072), and `ECIESStream` (3600).
-pub type PeerConnection = Box<EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>>;
+pub type PeerConnection =
+    Box<EthStream<MuxDemuxStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>>>;
 
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the
@@ -809,13 +810,13 @@ mod tests {
         }
 
         /// Connects a new Eth stream and executes the given closure with that established stream
-        fn with_client_stream<F, O>(
+        fn with_client_stream<F, O, S>(
             &self,
             local_addr: SocketAddr,
             f: F,
         ) -> Pin<Box<dyn Future<Output = ()> + Send>>
         where
-            F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>>) -> O + Send + 'static,
+            F: FnOnce(EthStream<S>) -> O + Send + 'static,
             O: Future<Output = ()> + Send + Sync,
         {
             let status = self.status;

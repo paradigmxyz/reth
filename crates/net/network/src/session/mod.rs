@@ -10,8 +10,8 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthVersion, HelloMessageWithProtocols, Status, UnauthedEthStream,
-    UnauthedP2PStream,
+    DisconnectReason, EthMessage, EthVersion, HelloMessageWithProtocols, MuxDemuxStream, Status,
+    UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::{
@@ -942,7 +942,20 @@ async fn authenticate_stream(
     //
     // Before trying status handshake, set up the version to shared_capability
     let status = Status { version, ..status };
-    let eth_unauthed = UnauthedEthStream::new(p2p_stream);
+    let shared_capabilities = p2p_stream.shared_capabilities().clone();
+    let mxdmx_stream = match MuxDemuxStream::try_new::<EthMessage>(p2p_stream, shared_capabilities)
+    {
+        Ok(stream_res) => stream_res,
+        Err(err) => {
+            return PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction,
+                error: Some(err.into()),
+            }
+        }
+    };
+    let eth_unauthed = UnauthedEthStream::new(mxdmx_stream);
     let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,
         Err(err) => {

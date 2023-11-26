@@ -335,7 +335,7 @@ impl SharedCapability {
 /// Non-empty,ordered list of recognized shared capabilities.
 ///
 /// Shared capabilities are ordered alphabetically by case sensitive name.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SharedCapabilities(Vec<SharedCapability>);
 
 impl SharedCapabilities {

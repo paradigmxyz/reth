@@ -284,8 +284,8 @@ where
             // least similar.
             //
             // Other parts of reth do not need traits like CanDisconnect because they work
-            // exclusively with EthStream<P2PStream<S>>, where the inner P2PStream is accessible,
-            // allowing for its start_disconnect method to be called.
+            // exclusively with EthStream<MuxDemuxStream<P2PStream<S>>>, where the inner P2PStream
+            // is accessible, allowing for its start_disconnect method to be called.
             //
             // self.project().inner.start_disconnect(DisconnectReason::ProtocolBreach);
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))

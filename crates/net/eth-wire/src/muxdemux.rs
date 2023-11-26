@@ -32,51 +32,16 @@ use std::{
 
 use futures::{Sink, SinkExt, StreamExt};
 use reth_primitives::bytes::{Bytes, BytesMut};
-use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 
 use crate::{
-    capability::{SharedCapabilities, SharedCapability, SharedCapabilityError},
+    capability::{SharedCapabilities, SharedCapability},
+    errors::MuxDemuxError,
     CanDisconnect, DisconnectReason, EthMessage,
 };
 
 use MuxDemuxError::*;
-
-/// Errors thrown by de-/muxing.
-#[derive(Error, Debug)]
-pub enum MuxDemuxError {
-    /// Stream is in use by secondary stream impeding disconnect.
-    #[error("secondary streams are still running")]
-    StreamInUse,
-    /// Stream has already been set up for this capability stream type.
-    #[error("stream already init for stream type")]
-    StreamAlreadyExists,
-    /// Capability stream type is not shared with peer on underlying p2p connection.
-    #[error("stream type is not shared on this p2p connection")]
-    CapabilityNotShared,
-    /// Capability stream type has not been configured in [`MuxDemuxer`].
-    #[error("stream type is not configured")]
-    CapabilityNotConfigured,
-    /// Capability stream type has not been configured for [`SharedCapabilities`] type.
-    #[error("stream type is not recognized")]
-    CapabilityNotRecognized,
-    /// Message ID is out of range.
-    #[error("message id out of range, {0}")]
-    MessageIdOutOfRange(u8),
-    /// Demux channel failed.
-    #[error("sending demuxed bytes to secondary stream failed")]
-    SendIngressBytesFailed,
-    /// Mux channel failed.
-    #[error("sending bytes from secondary stream to mux failed")]
-    SendEgressBytesFailed,
-    /// Attempt to disconnect the p2p stream via a stream clone.
-    #[error("secondary stream cannot disconnect p2p stream")]
-    CannotDisconnectP2PStream,
-    /// Shared capability error.
-    #[error(transparent)]
-    SharedCapabilityError(#[from] SharedCapabilityError),
-}
 
 /// The stream type is be used to identify the channel on which the [`MuxDemuxer`] should send
 /// demuxed p2p outputs. Each reth capability stream type is identified by the message type it
@@ -129,19 +94,21 @@ pub struct MuxDemuxer<S> {
 /// The main stream on top of the p2p stream. Wraps [`MuxDemuxer`] and enforces it can't be dropped
 /// before all secondary streams are dropped (stream clones).
 #[derive(Debug)]
-pub struct MuxDemuxStream<S>(ManuallyDrop<MuxDemuxer<S>>);
+pub struct MuxDemuxStream<S> {
+    mxdmx: ManuallyDrop<MuxDemuxer<S>>,
+}
 
 impl<S> Deref for MuxDemuxStream<S> {
-    type Target = MuxDemuxer<S>;
+    type Target = S;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.mxdmx.inner
     }
 }
 
 impl<S> DerefMut for MuxDemuxStream<S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.mxdmx.inner
     }
 }
 
@@ -161,14 +128,16 @@ impl<S> MuxDemuxStream<S> {
         let demux = HashMap::new();
         let (mux_tx, mux) = mpsc::unbounded_channel();
 
-        Ok(Self(ManuallyDrop::new(MuxDemuxer {
-            inner,
-            owner,
-            mux,
-            demux,
-            mux_tx,
-            shared_capabilities,
-        })))
+        Ok(Self {
+            mxdmx: ManuallyDrop::new(MuxDemuxer {
+                inner,
+                owner,
+                mux,
+                demux,
+                mux_tx,
+                shared_capabilities,
+            }),
+        })
     }
 
     /// Clones the stream if the given capability stream type is shared on the underlying p2p
@@ -176,13 +145,13 @@ impl<S> MuxDemuxStream<S> {
     pub fn try_clone_stream<M: 'static>(&mut self) -> Result<StreamClone, MuxDemuxError> {
         let cap = self.shared_cap::<M>()?.clone();
         let ingress = self.reg_new_ingress_buffer(&cap)?;
-        let mux_tx = self.mux_tx.clone();
+        let mux_tx = self.mxdmx.mux_tx.clone();
 
         Ok(StreamClone { stream: ingress, sink: mux_tx, cap })
     }
 
     fn shared_cap<M: 'static>(&self) -> Result<&SharedCapability, MuxDemuxError> {
-        for shared_cap in self.shared_capabilities.iter_caps() {
+        for shared_cap in self.mxdmx.shared_capabilities.iter_caps() {
             if let SharedCapability::Eth { .. } = shared_cap {
                 if TypeId::of::<M>() == TypeId::of::<EthMessage>() {
                     return Ok(shared_cap)
@@ -199,13 +168,13 @@ impl<S> MuxDemuxStream<S> {
         cap: &SharedCapability,
     ) -> Result<mpsc::UnboundedReceiver<BytesMut>, MuxDemuxError> {
         let cap = cap.into();
-        if let Some(tx) = self.demux.get(&cap) {
+        if let Some(tx) = self.mxdmx.demux.get(&cap) {
             if !tx.is_closed() {
                 return Err(StreamAlreadyExists)
             }
         }
         let (ingress_tx, ingress) = mpsc::unbounded_channel();
-        self.demux.insert(cap, ingress_tx);
+        self.mxdmx.demux.insert(cap, ingress_tx);
 
         Ok(ingress)
     }
@@ -213,7 +182,7 @@ impl<S> MuxDemuxStream<S> {
     fn unmask_msg_id(&self, id: &mut u8) -> Result<CapStreamType, MuxDemuxError> {
         use SharedCapability::*;
 
-        for cap in self.shared_capabilities.iter_caps() {
+        for cap in self.mxdmx.shared_capabilities.iter_caps() {
             let offset = cap.relative_message_id_offset();
             let next_offset = offset + cap.num_messages()?;
             if *id < next_offset {
@@ -234,14 +203,14 @@ impl<S> MuxDemuxStream<S> {
     /// once to avoid copying message to mutate id byte or sink BytesMut).
     fn mask_msg_id(&self, msg: Bytes) -> Bytes {
         let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0] + self.owner.relative_message_id_offset();
+        masked_bytes[0] = msg[0] + self.mxdmx.owner.relative_message_id_offset();
         masked_bytes[1..].copy_from_slice(&msg[1..]);
 
         masked_bytes.freeze()
     }
 
     fn can_drop(&mut self) -> bool {
-        for tx in self.demux.values() {
+        for tx in self.mxdmx.demux.values() {
             if !tx.is_closed() {
                 return false
             }
@@ -258,23 +227,23 @@ impl<S> MuxDemuxStream<S> {
         }
 
         Ok(|x: Self| {
-            let Self(s) = x;
-            _ = ManuallyDrop::into_inner(s)
+            let Self { mxdmx } = x;
+            _ = ManuallyDrop::into_inner(mxdmx)
         })
     }
 }
 
 impl<S, E> Stream for MuxDemuxStream<S>
 where
-    S: Stream<Item = Result<BytesMut, E>> + Unpin,
-    MuxDemuxError: From<E>,
+    S: Stream<Item = Result<BytesMut, E>> + CanDisconnect<Bytes> + Unpin,
+    MuxDemuxError: From<E> + From<<S as Sink<Bytes>>::Error>,
 {
     type Item = Result<BytesMut, MuxDemuxError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // poll once for each shared stream since shared stream clones cannot poll `MuxDemux`
-        for _ in 0..self.demux.len() {
-            let res = ready!(self.inner.poll_next_unpin(cx));
+        for _ in 0..self.mxdmx.demux.len() {
+            let res = ready!(self.mxdmx.inner.poll_next_unpin(cx));
             let mut bytes = match res {
                 Some(Ok(bytes)) => bytes,
                 Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
@@ -283,10 +252,10 @@ where
 
             // normalize message id suffix for capability
             let cap = self.unmask_msg_id(&mut bytes[0])?;
-            if cap == (&self.owner).into() {
+            if cap == (&self.mxdmx.owner).into() {
                 return Poll::Ready(Some(Ok(bytes)))
             }
-            let tx = self.demux.get(&cap).ok_or(CapabilityNotConfigured)?;
+            let tx = self.mxdmx.demux.get(&cap).ok_or(CapabilityNotConfigured)?;
             tx.send(bytes).map_err(|_| SendIngressBytesFailed)?;
         }
 
@@ -294,48 +263,48 @@ where
     }
 }
 
-impl<S> Sink<Bytes> for MuxDemuxStream<S>
+impl<S, E> Sink<Bytes> for MuxDemuxStream<S>
 where
-    S: CanDisconnect<Bytes> + Unpin,
-    MuxDemuxError: From<<S as Sink<Bytes>>::Error>,
+    S: Sink<Bytes, Error = E> + CanDisconnect<Bytes> + Unpin,
+    MuxDemuxError: From<E>,
 {
     type Error = MuxDemuxError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready_unpin(cx).map_err(Into::into)
+        self.mxdmx.inner.poll_ready_unpin(cx).map_err(Into::into)
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
         let item = self.mask_msg_id(item);
-        self.inner.start_send_unpin(item)?;
+        self.mxdmx.inner.start_send_unpin(item)?;
 
         // sink buffered bytes from `StreamClone`s
-        for _ in 0..self.demux.len() - 1 {
-            let Ok(item) = self.mux.try_recv() else { break };
-            self.inner.start_send_unpin(item)?;
+        for _ in 0..self.mxdmx.demux.len() - 1 {
+            let Ok(item) = self.mxdmx.mux.try_recv() else { break };
+            self.mxdmx.inner.start_send_unpin(item)?;
         }
 
         Ok(())
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_flush_unpin(cx).map_err(Into::into)
+        self.mxdmx.inner.poll_flush_unpin(cx).map_err(Into::into)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_close_unpin(cx).map_err(Into::into)
+        self.mxdmx.inner.poll_close_unpin(cx).map_err(Into::into)
     }
 }
 
 #[async_trait::async_trait]
-impl<S> CanDisconnect<Bytes> for MuxDemuxStream<S>
+impl<S, E> CanDisconnect<Bytes> for MuxDemuxStream<S>
 where
-    S: CanDisconnect<Bytes> + Send,
-    MuxDemuxError: From<<S as Sink<Bytes>>::Error>,
+    S: Sink<Bytes, Error = E> + CanDisconnect<Bytes> + Unpin + Send + Sync,
+    MuxDemuxError: From<E>,
 {
     async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), MuxDemuxError> {
         if self.can_drop() {
-            return self.inner.disconnect(reason).await.map_err(Into::into)
+            return self.mxdmx.inner.disconnect(reason).await.map_err(Into::into)
         }
         Err(StreamInUse)
     }
