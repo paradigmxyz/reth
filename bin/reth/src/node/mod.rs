@@ -1057,7 +1057,6 @@ mod tests {
     use super::*;
     use crate::args::utils::SUPPORTED_CHAINS;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_ethereum_forks::DEV;
     use std::{
         net::{IpAddr, Ipv4Addr},
         path::Path,
