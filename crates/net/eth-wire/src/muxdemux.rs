@@ -1,3 +1,26 @@
+//! [`MuxDemuxer`] allows for multiple capability streams to share the same p2p connection. De-/
+//! muxing the connection offers two stream types [`MuxDemuxStream`] and [`StreamClone`].
+//! [`MuxDemuxStream`] is the main stream that wraps the p2p connection, only this stream can
+//! advance transfer across the network. One [`MuxDemuxStream`] can have many [`StreamClone`]s,
+//! these are weak clones of the stream and depend on advancing the [`MuxDemuxStream`] to make
+//! progress.
+//!
+//! [`MuxDemuxer`] filters bytes according to message ID offset. The message ID offset is
+//! negotiated upon start of the p2p connection. Bytes received by polling the [`MuxDemuxStream`]
+//! or a [`StreamClone`] are specific to the capability stream wrapping it. When received the
+//! message IDs are unmasked so that all message IDs start at 0x0. [`MuxDemuxStream`] and
+//! [`StreamClone`] mask message IDs before sinking bytes to the [`MuxDemuxer`].
+//!
+//! For example, EthStream<MuxDemuxStream<P2PStream<S>>> is the main capability stream. Subsequent
+//! capability streams clone the p2p connection via EthStream.
+//!
+//! When [`MuxDemuxStream`] is polled, [`MuxDemuxer`] receives bytes from the network. If these
+//! bytes belong to the capability stream wrapping the [`MuxDemuxStream`] then they are passed up
+//! directly. If these bytes however belong to another capability stream, then they are buffered
+//! on a channel. When [`StreamClone`] is polled, bytes are read from this buffer. Similarly
+//! [`StreamClone`] buffers egress bytes for [`MuxDemuxer`] that are read and sent to the network
+//! when [`MuxDemuxStream`] is polled.
+
 use std::{
     any::TypeId,
     collections::HashMap,
@@ -56,11 +79,11 @@ pub enum MuxDemuxError {
 }
 
 /// Each reth capability stream type is identified by the message type it handles. For example
-/// [`EthMessage`] maps to [`EthStream`]. The stream type is be used to identify the channel on
-/// which the [`MuxDemux`] should send demuxed p2p outputs.
+/// [`EthMessage`] maps to [`crate::EthStream`]. The stream type is be used to identify the
+/// channel on which the [`MuxDemuxer`] should send demuxed p2p outputs.
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub enum CapStreamType {
-    /// Key for [`crates::EthStream`] type.
+    /// Key for [`crate::EthStream`] type.
     Eth,
 }
 
@@ -91,7 +114,7 @@ impl From<&SharedCapability> for CapStreamType {
 pub struct MuxDemuxer<S> {
     // receive and send muxed p2p outputs
     inner: S,
-    // owner of the stream
+    // owner of the stream. stores message id offset for this capability.
     owner: SharedCapability,
     // receive muxed p2p inputs from stream clones
     mux: mpsc::UnboundedReceiver<Bytes>,
@@ -103,7 +126,7 @@ pub struct MuxDemuxer<S> {
     shared_capabilities: SharedCapabilities,
 }
 
-/// The main stream on top of the p2p stream. Wraps [`MuxDemux`] and enforces it can't be dropped
+/// The main stream on top of the p2p stream. Wraps [`MuxDemuxer`] and enforces it can't be dropped
 /// before all secondary streams are dropped (stream clones).
 #[derive(Debug)]
 pub struct MuxDemuxStream<S>(ManuallyDrop<MuxDemuxer<S>>);
@@ -123,7 +146,7 @@ impl<S> DerefMut for MuxDemuxStream<S> {
 }
 
 impl<S> MuxDemuxStream<S> {
-    /// Creates a new [`MuxDemux`].
+    /// Creates a new [`MuxDemuxer`].
     pub fn try_new<M: 'static>(
         inner: S,
         shared_capabilities: SharedCapabilities,
@@ -194,7 +217,7 @@ impl<S> MuxDemuxStream<S> {
             let offset = cap.relative_message_id_offset();
             let next_offset = offset + cap.num_messages()?;
             if *id < next_offset {
-                *id = *id - offset;
+                *id -= offset;
 
                 return match cap {
                     Eth { .. } => Ok(CapStreamType::new::<EthMessage>()),
@@ -264,7 +287,7 @@ where
                 return Poll::Ready(Some(Ok(bytes)))
             }
             let tx = self.demux.get(&cap).ok_or(CapabilityNotConfigured)?;
-            tx.send(bytes.into()).map_err(|_| SendIngressBytesFailed)?;
+            tx.send(bytes).map_err(|_| SendIngressBytesFailed)?;
         }
 
         Poll::Ready(None)
@@ -284,12 +307,12 @@ where
 
     fn start_send(mut self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
         let item = self.mask_msg_id(item);
-        self.inner.start_send_unpin(item).map_err(|e| e.into())?;
+        self.inner.start_send_unpin(item)?;
 
         // sink buffered bytes from `StreamClone`s
         for _ in 0..self.demux.len() - 1 {
             let Ok(item) = self.mux.try_recv() else { break };
-            self.inner.start_send_unpin(item).map_err(|e| e.into())?;
+            self.inner.start_send_unpin(item)?;
         }
 
         Ok(())
@@ -318,12 +341,15 @@ where
     }
 }
 
-/// More or less a weak clone of the stream wrapped in [`MuxDemux`] but the bytes belonging to
+/// More or less a weak clone of the stream wrapped in [`MuxDemuxer`] but the bytes belonging to
 /// other capabilities have been filtered out.
 #[derive(Debug)]
 pub struct StreamClone {
+    // receive bytes from de-/muxer
     stream: mpsc::UnboundedReceiver<BytesMut>,
+    // send bytes to de-/muxer
     sink: mpsc::UnboundedSender<Bytes>,
+    // message id offset for capability holding this clone
     cap: SharedCapability,
 }
 
@@ -371,4 +397,59 @@ impl CanDisconnect<Bytes> for StreamClone {
     async fn disconnect(&mut self, _reason: DisconnectReason) -> Result<(), MuxDemuxError> {
         Err(CannotDisconnectP2PStream)
     }
+}
+
+#[cfg(test)]
+mod test {
+    use reth_primitives::bytes::{BufMut, BytesMut};
+
+    use crate::{
+        capability::{Capability, SharedCapabilities},
+        muxdemux::MuxDemuxStream,
+        protocol::Protocol,
+        EthMessage, EthVersion,
+    };
+
+    fn shared_caps_eth68() -> SharedCapabilities {
+        let local_capabilities: Vec<Protocol> = vec![Protocol::new(EthVersion::Eth68.into(), 10)];
+        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth68.into()];
+        SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap()
+    }
+
+    #[test]
+    fn test_unmask_msg_id() {
+        let mut msg = BytesMut::with_capacity(1);
+        msg.put_u8(0x07); // eth msg id
+
+        let mxdmx_stream = MuxDemuxStream::try_new::<EthMessage>((), shared_caps_eth68()).unwrap();
+        _ = mxdmx_stream.unmask_msg_id(&mut msg[0]).unwrap();
+
+        assert_eq!(msg.as_ref(), &[0x07]);
+    }
+
+    #[test]
+    fn test_mask_msg_id() {
+        let mut msg = BytesMut::with_capacity(2);
+        msg.put_u8(0x10); // eth msg id
+        msg.put_u8(0x20); // some msg data
+
+        let mxdmx_stream = MuxDemuxStream::try_new::<EthMessage>((), shared_caps_eth68()).unwrap();
+        let egress_bytes = mxdmx_stream.mask_msg_id(msg.freeze());
+
+        assert_eq!(egress_bytes.as_ref(), &[0x10, 0x20]);
+    }
+
+    #[test]
+    fn test_unmask_msg_id_cap_not_in_shared_range() {
+        let mut msg = BytesMut::with_capacity(1);
+        msg.put_u8(0x11);
+
+        let mxdmx_stream = MuxDemuxStream::try_new::<EthMessage>((), shared_caps_eth68()).unwrap();
+
+        assert!(mxdmx_stream.unmask_msg_id(&mut msg[0]).is_err());
+    }
+
+    #[test]
+    #[ignore = "more subprotocols than eth have to be implemented"]
+    fn test_try_drop_stream_owner() {}
 }
