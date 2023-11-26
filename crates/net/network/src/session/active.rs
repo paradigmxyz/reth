@@ -810,7 +810,7 @@ mod tests {
         }
 
         /// Connects a new Eth stream and executes the given closure with that established stream
-        fn with_client_stream<F, O, S>(
+        fn with_client_stream<F, O, S, E>(
             &self,
             local_addr: SocketAddr,
             f: F,
@@ -818,6 +818,8 @@ mod tests {
         where
             F: FnOnce(EthStream<S>) -> O + Send + 'static,
             O: Future<Output = ()> + Send + Sync,
+            S: Stream<Item = Result<BytesMut, E>> + Sink<Bytes> + CanDisconnect<Bytes>,
+            EthStreamError: From<E>,
         {
             let status = self.status;
             let fork_filter = self.fork_filter.clone();
