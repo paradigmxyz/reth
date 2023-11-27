@@ -728,9 +728,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         task_executor.spawn_critical("p2p eth request handler", eth);
 
         let known_peers_file = self.network.persistent_peers_file(default_peers_path);
-        task_executor.spawn_critical_with_shutdown_signal("p2p network task", |shutdown| {
-            run_network_until_shutdown(shutdown, network, known_peers_file)
-        });
+        task_executor
+            .spawn_critical_with_graceful_shutdown_signal("p2p network task", |shutdown| {
+                run_network_until_shutdown(shutdown, network, known_peers_file)
+            });
 
         handle
     }
@@ -1029,7 +1030,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 /// Drives the [NetworkManager] future until a [Shutdown](reth_tasks::shutdown::Shutdown) signal is
 /// received. If configured, this writes known peers to `persistent_peers_file` afterwards.
 async fn run_network_until_shutdown<C>(
-    shutdown: reth_tasks::shutdown::Shutdown,
+    shutdown: reth_tasks::shutdown::GracefulShutdown,
     network: NetworkManager<C>,
     persistent_peers_file: Option<PathBuf>,
 ) where
@@ -1037,9 +1038,12 @@ async fn run_network_until_shutdown<C>(
 {
     pin_mut!(network, shutdown);
 
+    let mut graceful_guard = None;
     tokio::select! {
         _ = &mut network => {},
-        _ = shutdown => {},
+        guard = shutdown => {
+            graceful_guard = Some(guard);
+        },
     }
 
     if let Some(file_path) = persistent_peers_file {
@@ -1057,6 +1061,8 @@ async fn run_network_until_shutdown<C>(
             }
         }
     }
+
+    drop(graceful_guard)
 }
 
 #[cfg(test)]
