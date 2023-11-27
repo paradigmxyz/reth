@@ -549,7 +549,7 @@ where
     }
 }
 
-/// Manages the reading of snapshot data using memory-mapped files.
+/// Manages reading snapshot data using memory-mapped files.
 ///
 /// Holds file and mmap descriptors of the data and offsets files of a snapshot.
 #[derive(Debug)]
