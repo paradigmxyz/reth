@@ -51,27 +51,6 @@ pub enum CapStreamType {
     Eth,
 }
 
-impl CapStreamType {
-    /// Translates the capability stream message type to a [`CapStreamType`] that is used as key
-    /// for the de-/mux channels in [`MuxDemuxer`].
-    pub fn new<M: 'static>() -> Self {
-        if TypeId::of::<M>() == TypeId::of::<EthMessage>() {
-            return CapStreamType::Eth
-        }
-
-        panic!("capability stream type not configured")
-    }
-}
-
-impl From<&SharedCapability> for CapStreamType {
-    fn from(value: &SharedCapability) -> Self {
-        match value {
-            SharedCapability::Eth { .. } => CapStreamType::Eth,
-            _ => panic!("capability stream type not configured"),
-        }
-    }
-}
-
 /// Stream MUX/DEMUX acts like a regular stream and sink for the owning stream, and handles bytes
 /// belonging to other streams over their respective channels.
 #[derive(Debug)]
@@ -83,7 +62,7 @@ pub struct MuxDemuxer<S> {
     // receive muxed p2p inputs from stream clones
     mux: mpsc::UnboundedReceiver<Bytes>,
     // send demuxed p2p outputs to app
-    demux: HashMap<CapStreamType, mpsc::UnboundedSender<BytesMut>>,
+    demux: HashMap<SharedCapability, mpsc::UnboundedSender<BytesMut>>,
     // sender to mux stored to make new stream clones
     mux_tx: mpsc::UnboundedSender<Bytes>,
     // capabilities supported by underlying p2p stream (makes testing easier to store here too).
@@ -115,12 +94,7 @@ impl<S> MuxDemuxStream<S> {
         inner: S,
         shared_capabilities: SharedCapabilities,
     ) -> Result<Self, MuxDemuxError> {
-        let stream = CapStreamType::new::<M>();
-        let owner = shared_capabilities
-            .iter_caps()
-            .find(|cap| stream == Into::<CapStreamType>::into(*cap))
-            .ok_or(CapabilityNotShared)?
-            .clone();
+        let owner = Self::shared_cap::<M>(&shared_capabilities)?.clone();
 
         let demux = HashMap::new();
         let (mux_tx, mux) = mpsc::unbounded_channel();
@@ -131,7 +105,7 @@ impl<S> MuxDemuxStream<S> {
     /// Clones the stream if the given capability stream type is shared on the underlying p2p
     /// connection.
     pub fn try_clone_stream<M: 'static>(&mut self) -> Result<StreamClone, MuxDemuxError> {
-        let cap = self.shared_cap::<M>()?.clone();
+        let cap = Self::shared_cap::<M>(&self.shared_capabilities)?.clone();
         let ingress = self.reg_new_ingress_buffer(&cap)?;
         let mux_tx = self.mux_tx.clone();
 
@@ -158,14 +132,17 @@ impl<S> MuxDemuxStream<S> {
         self.inner.is_disconnecting()
     }
 
-    fn shared_cap<M: 'static>(&self) -> Result<&SharedCapability, MuxDemuxError> {
-        for shared_cap in self.shared_capabilities.iter_caps() {
-            if let SharedCapability::Eth { .. } = shared_cap {
-                if TypeId::of::<M>() == TypeId::of::<EthMessage>() {
+    fn shared_cap<M: 'static>(
+        shared_capabilities: &SharedCapabilities,
+    ) -> Result<&SharedCapability, MuxDemuxError> {
+        for shared_cap in shared_capabilities.iter_caps() {
+            match shared_cap {
+                SharedCapability::Eth { .. } if TypeId::of::<M>() == TypeId::of::<EthMessage>() => {
                     return Ok(shared_cap)
                 }
+                _ => continue,
+                // more caps to come ..
             }
-            // more caps to come ...
         }
 
         Err(CapabilityNotShared)
@@ -175,31 +152,25 @@ impl<S> MuxDemuxStream<S> {
         &mut self,
         cap: &SharedCapability,
     ) -> Result<mpsc::UnboundedReceiver<BytesMut>, MuxDemuxError> {
-        let cap = cap.into();
-        if let Some(tx) = self.demux.get(&cap) {
+        if let Some(tx) = self.demux.get(cap) {
             if !tx.is_closed() {
                 return Err(StreamAlreadyExists)
             }
         }
         let (ingress_tx, ingress) = mpsc::unbounded_channel();
-        self.demux.insert(cap, ingress_tx);
+        self.demux.insert(cap.clone(), ingress_tx);
 
         Ok(ingress)
     }
 
-    fn unmask_msg_id(&self, id: &mut u8) -> Result<CapStreamType, MuxDemuxError> {
-        use SharedCapability::*;
-
+    fn unmask_msg_id(&self, id: &mut u8) -> Result<&SharedCapability, MuxDemuxError> {
         for cap in self.shared_capabilities.iter_caps() {
             let offset = cap.relative_message_id_offset();
             let next_offset = offset + cap.num_messages()?;
             if *id < next_offset {
                 *id -= offset;
 
-                return match cap {
-                    Eth { .. } => Ok(CapStreamType::new::<EthMessage>()),
-                    UnknownCapability { .. } => Err(CapabilityNotRecognized),
-                }
+                return Ok(cap)
             }
         }
 
@@ -261,12 +232,12 @@ where
             let cap = self.unmask_msg_id(&mut bytes[0])?;
 
             // yield message for main stream
-            if cap == (&self.owner).into() {
+            if *cap == self.owner {
                 return Poll::Ready(Some(Ok(bytes)))
             }
 
             // delegate message for stream clone
-            let tx = self.demux.get(&cap).ok_or(CapabilityNotConfigured)?;
+            let tx = self.demux.get(cap).ok_or(CapabilityNotConfigured)?;
             tx.send(bytes).map_err(|_| SendIngressBytesFailed)?;
         }
     }
