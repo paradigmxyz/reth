@@ -47,7 +47,6 @@ use reth_primitives::{
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
-    cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},

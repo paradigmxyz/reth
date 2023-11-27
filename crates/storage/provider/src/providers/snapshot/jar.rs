@@ -12,7 +12,7 @@ use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
-use std::ops::{Deref, Range, RangeBounds};
+use std::ops::{Deref, RangeBounds};
 
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
