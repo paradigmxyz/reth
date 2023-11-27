@@ -1114,7 +1114,6 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-
         let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
 
         let ommers = self.ommers(block_number.into())?.unwrap_or_default();
