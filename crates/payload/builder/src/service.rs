@@ -162,7 +162,7 @@ impl PayloadBuilderHandle {
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct PayloadBuilderService<Gen>
 where
-    Gen: PayloadJobGenerator,
+    Gen: PayloadJobGenerator<PayloadType = BuiltPayload>,
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
@@ -180,7 +180,7 @@ where
 
 impl<Gen> PayloadBuilderService<Gen>
 where
-    Gen: PayloadJobGenerator,
+    Gen: PayloadJobGenerator<PayloadType = BuiltPayload>,
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
@@ -264,7 +264,7 @@ where
 
 impl<Gen> Future for PayloadBuilderService<Gen>
 where
-    Gen: PayloadJobGenerator + Unpin + 'static,
+    Gen: PayloadJobGenerator<PayloadType = BuiltPayload> + Unpin,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
 {
     type Output = ();

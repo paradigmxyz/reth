@@ -142,6 +142,7 @@ where
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
 {
+    type PayloadType = BuiltPayload;
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
 
     fn new_payload_job(
@@ -415,7 +416,8 @@ where
     }
 }
 
-impl<Client, Pool, Tasks, Builder> PayloadJob for BasicPayloadJob<Client, Pool, Tasks, Builder>
+impl<Client, Pool, Tasks, Builder> PayloadJob<BuiltPayload>
+    for BasicPayloadJob<Client, Pool, Tasks, Builder>
 where
     Client: StateProviderFactory + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,

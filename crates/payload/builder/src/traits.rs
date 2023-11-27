@@ -1,6 +1,7 @@
 //! Trait abstractions used by the payload crate.
 
-use crate::{error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes};
+use crate::{error::PayloadBuilderError, PayloadBuilderAttributes};
+use reth_rpc_types::ExecutionPayload;
 use std::{future::Future, sync::Arc};
 
 /// A type that can build a payload.
@@ -14,9 +15,12 @@ use std::{future::Future, sync::Arc};
 /// empty.
 ///
 /// Note: A `PayloadJob` need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1` (see also [engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1))
-pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + Sync {
+pub trait PayloadJob<P>: Future<Output = Result<(), PayloadBuilderError>> + Send + Sync
+where
+    P: Into<ExecutionPayload> + Send + Sync + 'static,
+{
     /// Represents the future that resolves the block that's returned to the CL.
-    type ResolvePayloadFuture: Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>>
+    type ResolvePayloadFuture: Future<Output = Result<Arc<P>, PayloadBuilderError>>
         + Send
         + Sync
         + 'static;
@@ -24,7 +28,7 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// Returns the best payload that has been built so far.
     ///
     /// Note: This is never called by the CL.
-    fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError>;
+    fn best_payload(&self) -> Result<Arc<P>, PayloadBuilderError>;
 
     /// Returns the payload attributes for the payload being built.
     fn payload_attributes(&self) -> Result<PayloadBuilderAttributes, PayloadBuilderError>;
@@ -63,10 +67,12 @@ pub enum KeepPayloadJobAlive {
 
 /// A type that knows how to create new jobs for creating payloads.
 pub trait PayloadJobGenerator: Send + Sync {
+    /// The type that will be returned by the future of [`PayloadJob::resolve`] method.
+    type PayloadType: Into<ExecutionPayload> + Send + Sync + Clone + 'static;
     /// The type that manages the lifecycle of a payload.
     ///
     /// This type is a future that yields better payloads.
-    type Job: PayloadJob;
+    type Job: PayloadJob<Self::PayloadType>;
 
     /// Creates the initial payload and a new [`PayloadJob`] that yields better payloads over time.
     ///

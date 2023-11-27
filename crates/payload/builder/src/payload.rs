@@ -6,9 +6,12 @@ use reth_primitives::{
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
     Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, B256, U256,
 };
-use reth_rpc_types::engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
-    PayloadId,
+use reth_rpc_types::{
+    engine::{
+        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1,
+        PayloadAttributes, PayloadId,
+    },
+    ExecutionPayload,
 };
 
 use reth_rpc_types_compat::engine::payload::{
@@ -78,6 +81,12 @@ impl BuiltPayload {
     /// Converts the type into the response expected by `engine_getPayloadV2`
     pub fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
         self.into()
+    }
+}
+
+impl From<BuiltPayload> for ExecutionPayload {
+    fn from(value: BuiltPayload) -> Self {
+        ExecutionPayload::V3(block_to_payload_v3(value.block))
     }
 }
 

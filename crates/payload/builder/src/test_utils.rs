@@ -32,6 +32,7 @@ pub fn spawn_test_payload_service() -> PayloadBuilderHandle {
 pub struct TestPayloadJobGenerator;
 
 impl PayloadJobGenerator for TestPayloadJobGenerator {
+    type PayloadType = BuiltPayload;
     type Job = TestPayloadJob;
 
     fn new_payload_job(
@@ -56,7 +57,7 @@ impl Future for TestPayloadJob {
     }
 }
 
-impl PayloadJob for TestPayloadJob {
+impl PayloadJob<BuiltPayload> for TestPayloadJob {
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
 
