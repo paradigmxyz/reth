@@ -335,7 +335,8 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, U256,
+        revm::compat::{into_reth_acc, into_revm_acc},
+        Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
     use reth_trie::test_utils::state_root;
     use revm::{
