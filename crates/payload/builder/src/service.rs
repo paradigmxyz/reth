@@ -244,22 +244,7 @@ where
 
     /// Returns the best payload for the given identifier that has been built so far and terminates
     /// the job if requested.
-    fn resolve(
-        &mut self,
-        id: PayloadId,
-    ) -> Option<
-        Pin<
-            Box<
-                dyn Future<
-                        Output = Result<
-                            Arc<<Gen as PayloadJobGenerator>::PayloadType>,
-                            PayloadBuilderError,
-                        >,
-                    > + Send
-                    + Sync,
-            >,
-        >,
-    > {
+    fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture<Gen::PayloadType>> {
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve();
 
