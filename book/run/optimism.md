@@ -1,8 +1,5 @@
 # Running Reth on OP Stack chains
 
-> **Note**: `op-reth` does not currently support the Canyon Hardfork, which went live on 2023-14-11 12PM EST on Sepolia and Goerli. If the network being synced has enabled Canyon, `op-reth` will cease to sync at that blocktime (`1699981200`).
-> Please consult the [Canyon Hardfork tracking issue](https://github.com/paradigmxyz/reth/issues/5210) to follow along with the progress of the hardfork implementation.
-
 `reth` ships with the `optimism` feature flag in several crates, including the binary, enabling support for OP Stack chains out of the box. Optimism has a small diff from the [L1 EELS][l1-el-spec],
 comprising of the following key changes:
 1. A new transaction type, [`0x7E (Deposit)`][deposit-spec], which is used to deposit funds from L1 to L2.
