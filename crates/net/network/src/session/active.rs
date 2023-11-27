@@ -816,7 +816,7 @@ mod tests {
             F: FnOnce(EthStream<MuxDemuxStream<P2PStream<ECIESStream<TcpStream>>>>) -> O
                 + Send
                 + 'static,
-            O: Future<Output = ()> + Send + Sync,
+            O: Future<Output = ()> + Send,
         {
             let status = self.status;
             let fork_filter = self.fork_filter.clone();
