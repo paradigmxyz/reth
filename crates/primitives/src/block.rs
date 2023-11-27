@@ -57,10 +57,16 @@ impl Block {
     ///
     /// # Panics
     ///
-    /// If the number of senders does not match the number of transactions in the block.
+    /// If the number of senders does not match the number of transactions in the block
+    /// and the signer recovery for one of the transactions fails.
     #[track_caller]
     pub fn with_senders(self, senders: Vec<Address>) -> BlockWithSenders {
-        assert_eq!(self.body.len(), senders.len(), "Unequal number of senders");
+        let senders = if self.body.len() == senders.len() {
+            senders
+        } else {
+            TransactionSigned::recover_signers(&self.body, self.body.len())
+                .expect("stored block is valid")
+        };
 
         BlockWithSenders { block: self, senders }
     }
