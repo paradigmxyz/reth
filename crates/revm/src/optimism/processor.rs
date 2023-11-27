@@ -36,9 +36,13 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
             let time = Instant::now();
-            if let Err(error) =
-                verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
-            {
+            if let Err(error) = verify_receipt(
+                block.header.receipts_root,
+                block.header.logs_bloom,
+                receipts.iter(),
+                self.chain_spec.as_ref(),
+                block.timestamp,
+            ) {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
                 return Err(error)
             };

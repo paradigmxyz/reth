@@ -250,8 +250,22 @@ impl BundleStateWithReceipts {
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
+    #[cfg(not(feature = "optimism"))]
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<B256> {
         self.receipts.root_slow(self.block_number_to_index(block_number)?)
+    }
+
+    /// Returns the receipt root for all recorded receipts.
+    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
+    /// of receipt. This is a expensive operation.
+    #[cfg(feature = "optimism")]
+    pub fn receipts_root_slow(
+        &self,
+        block_number: BlockNumber,
+        chain_spec: &reth_primitives::ChainSpec,
+        timestamp: u64,
+    ) -> Option<B256> {
+        self.receipts.root_slow(self.block_number_to_index(block_number)?, chain_spec, timestamp)
     }
 
     /// Return reference to receipts.

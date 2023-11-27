@@ -88,9 +88,25 @@ impl Receipts {
     }
 
     /// Retrieves the receipt root for all recorded receipts from index.
+    #[cfg(not(feature = "optimism"))]
     pub fn root_slow(&self, index: usize) -> Option<B256> {
         Some(calculate_receipt_root_ref(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
+        ))
+    }
+
+    /// Retrieves the receipt root for all recorded receipts from index.
+    #[cfg(feature = "optimism")]
+    pub fn root_slow(
+        &self,
+        index: usize,
+        chain_spec: &crate::ChainSpec,
+        timestamp: u64,
+    ) -> Option<B256> {
+        Some(calculate_receipt_root_ref(
+            &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
+            chain_spec,
+            timestamp,
         ))
     }
 

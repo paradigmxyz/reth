@@ -201,7 +201,15 @@ impl PendingBlockEnv {
             block_number,
         );
 
-        let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
+        let receipts_root = bundle
+            .receipts_root_slow(
+                block_number,
+                #[cfg(feature = "optimism")]
+                chain_spec.as_ref(),
+                #[cfg(feature = "optimism")]
+                block_env.timestamp.to::<u64>(),
+            )
+            .expect("Block is present");
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
