@@ -272,7 +272,7 @@ where
             tx.send(bytes).map_err(|_| SendIngressBytesFailed)?;
         }
 
-        Poll::Ready(None)
+        Poll::Pending
     }
 }
 
