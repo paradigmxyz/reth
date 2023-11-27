@@ -22,7 +22,8 @@ pub enum MuxDemuxError {
     /// Capability stream type has not been configured in [`crate::muxdemux::MuxDemuxer`].
     #[error("stream type is not configured")]
     CapabilityNotConfigured,
-    /// Capability stream type has not been configured for [`crate::capability::SharedCapabilities`] type.
+    /// Capability stream type has not been configured for
+    /// [`crate::capability::SharedCapabilities`] type.
     #[error("stream type is not recognized")]
     CapabilityNotRecognized,
     /// Message ID is out of range.
