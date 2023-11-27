@@ -277,7 +277,8 @@ where
             latest.timestamp += 12;
             // base fee of the child block
             let chain_spec = self.provider().chain_spec();
-            latest.base_fee_per_gas = latest.next_block_base_fee(chain_spec.base_fee_params);
+            latest.base_fee_per_gas =
+                latest.next_block_base_fee(chain_spec.base_fee_params(latest.timestamp));
 
             PendingBlockEnvOrigin::DerivedFromLatest(latest)
         };

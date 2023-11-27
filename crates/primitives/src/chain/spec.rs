@@ -63,7 +63,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             11052984,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
-        base_fee_params: BaseFeeParams::ethereum(),
+        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 3500,
         snapshot_block_interval: 500_000,
     }
@@ -106,7 +106,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             4367322,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
-        base_fee_params: BaseFeeParams::ethereum(),
+        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
     }
@@ -153,8 +153,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             1273020,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
-
-        base_fee_params: BaseFeeParams::ethereum(),
+        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
     }
@@ -196,7 +195,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             0,
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
-        base_fee_params: BaseFeeParams::ethereum(),
+        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
     }
@@ -236,6 +235,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
+        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
         ..Default::default()
     }
@@ -277,7 +277,13 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
         ]),
-        base_fee_params: BaseFeeParams::optimism(),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism_goerli()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
+            ]
+            .into(),
+        ),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
         ..Default::default()
@@ -320,7 +326,13 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
         ]),
-        base_fee_params: BaseFeeParams::optimism_goerli(),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism_goerli()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
+            ]
+            .into(),
+        ),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
         ..Default::default()
@@ -361,13 +373,54 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
         ]),
-        base_fee_params: BaseFeeParams::optimism(),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_canyon()),
+            ]
+            .into(),
+        ),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
         ..Default::default()
     }
     .into()
 });
+
+/// A wrapper around [BaseFeeParams] that allows for specifying constant or dynamic EIP-1559
+/// parameters based on the active [Hardfork].
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum BaseFeeParamsKind {
+    /// Constant [BaseFeeParams]; used for chains that don't have dynamic EIP-1559 parameters
+    Constant(BaseFeeParams),
+    /// Variable [BaseFeeParams]; used for chains that have dynamic EIP-1559 parameters like
+    /// Optimism
+    Variable(ForkBaseFeeParams),
+}
+
+impl From<BaseFeeParams> for BaseFeeParamsKind {
+    fn from(params: BaseFeeParams) -> Self {
+        BaseFeeParamsKind::Constant(params)
+    }
+}
+
+impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
+    fn from(params: ForkBaseFeeParams) -> Self {
+        BaseFeeParamsKind::Variable(params)
+    }
+}
+
+/// A type alias to a vector of tuples of [Hardfork] and [BaseFeeParams], sorted by [Hardfork]
+/// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
+
+impl From<Vec<(Hardfork, BaseFeeParams)>> for ForkBaseFeeParams {
+    fn from(params: Vec<(Hardfork, BaseFeeParams)>) -> Self {
+        ForkBaseFeeParams(params)
+    }
+}
 
 /// BaseFeeParams contains the config parameters that control block base fee computation
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
@@ -398,12 +451,34 @@ impl BaseFeeParams {
         }
     }
 
+    /// Get the base fee parameters for optimism goerli (post Canyon)
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_goerli_canyon() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator:
+                crate::constants::OP_GOERLI_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
+            elasticity_multiplier:
+                crate::constants::OP_GOERLI_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
+
     /// Get the base fee parameters for optimism mainnet
     #[cfg(feature = "optimism")]
     pub const fn optimism() -> BaseFeeParams {
         BaseFeeParams {
             max_change_denominator:
                 crate::constants::OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+            elasticity_multiplier:
+                crate::constants::OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
+
+    /// Get the base fee parameters for optimism mainnet (post Canyon)
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_canyon() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator:
+                crate::constants::OP_MAINNET_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
             elasticity_multiplier:
                 crate::constants::OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         }
@@ -450,7 +525,7 @@ pub struct ChainSpec {
     pub deposit_contract: Option<DepositContract>,
 
     /// The parameters that configure how a block's base fee is computed
-    pub base_fee_params: BaseFeeParams,
+    pub base_fee_params: BaseFeeParamsKind,
 
     /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
     /// the amount of blocks between pruner runs to account for the difference in amount of new
@@ -472,7 +547,7 @@ impl Default for ChainSpec {
             fork_timestamps: Default::default(),
             hardforks: Default::default(),
             deposit_contract: Default::default(),
-            base_fee_params: BaseFeeParams::ethereum(),
+            base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET.prune_delete_limit,
             snapshot_block_interval: Default::default(),
         }
@@ -557,6 +632,25 @@ impl ChainSpec {
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
         (self.fork(Hardfork::London).active_at_block(0)).then_some(genesis_base_fee)
+    }
+
+    /// Get the [BaseFeeParams] for the chain at the given timestamp.
+    pub fn base_fee_params(&self, timestamp: u64) -> BaseFeeParams {
+        match self.base_fee_params {
+            BaseFeeParamsKind::Constant(bf_params) => bf_params,
+            BaseFeeParamsKind::Variable(ForkBaseFeeParams { 0: ref bf_params }) => {
+                // Walk through the base fee params configuration in reverse order, and return the
+                // first one that corresponds to a hardfork that is active at the
+                // given timestamp.
+                for (fork, params) in bf_params.iter().rev() {
+                    if self.is_fork_active_at_timestamp(*fork, timestamp) {
+                        return *params
+                    }
+                }
+
+                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
+            }
+        }
     }
 
     /// Get the hash of the genesis block.
