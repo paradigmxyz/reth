@@ -918,7 +918,15 @@ where
         Receipts::from_vec(vec![receipts]),
         block_number,
     );
-    let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
+    let receipts_root = bundle
+        .receipts_root_slow(
+            block_number,
+            #[cfg(feature = "optimism")]
+            chain_spec.as_ref(),
+            #[cfg(feature = "optimism")]
+            attributes.timestamp,
+        )
+        .expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
