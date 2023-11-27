@@ -46,7 +46,7 @@ pub enum EthStreamError {
 impl EthStreamError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
     pub fn as_disconnected(&self) -> Option<DisconnectReason> {
-        if let EthStreamError::P2PStreamError(err) = self {
+        if let EthStreamError::MuxDemuxError(MuxDemuxError::P2PStreamError(err)) = self {
             err.as_disconnected()
         } else {
             None

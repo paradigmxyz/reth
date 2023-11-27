@@ -238,8 +238,9 @@ where
     type Item = Result<BytesMut, MuxDemuxError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // poll once for each shared stream since shared stream clones cannot poll `MuxDemux`
-        for _ in 0..self.demux.len() {
+        // poll once for main stream and each stream clone, since stream clones cannot poll
+        // `MuxDemux`
+        for _ in 0..self.demux.len() + 1 {
             let res = ready!(self.inner.poll_next_unpin(cx));
             let mut bytes = match res {
                 Some(Ok(bytes)) => bytes,

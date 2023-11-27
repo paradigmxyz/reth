@@ -10,8 +10,8 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthMessage, EthVersion, HelloMessageWithProtocols, MuxDemuxStream, Status,
-    UnauthedEthStream, UnauthedP2PStream,
+    CanDisconnect, DisconnectReason, EthMessage, EthVersion, HelloMessageWithProtocols,
+    MuxDemuxStream, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::{

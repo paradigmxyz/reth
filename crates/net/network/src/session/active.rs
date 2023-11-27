@@ -14,7 +14,7 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::Capabilities,
-    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
+    errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
     DisconnectReason, EthMessage, EthStream, MuxDemuxStream, P2PStream,
 };
@@ -391,11 +391,8 @@ impl ActiveSession {
 
     /// Starts the disconnect process
     fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
-        self.conn
-            .inner_mut()
-            .start_disconnect(reason)
-            .map_err(P2PStreamError::from)
-            .map_err(Into::into)
+        self.conn.inner_mut().start_disconnect(reason)?;
+        Ok(())
     }
 
     /// Flushes the disconnect message and emits the corresponding message
@@ -774,8 +771,8 @@ mod tests {
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        GetBlockBodies, HelloMessageWithProtocols, Status, StatusBuilder, UnauthedEthStream,
-        UnauthedP2PStream,
+        CanDisconnect, GetBlockBodies, HelloMessageWithProtocols, Status, StatusBuilder,
+        UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
