@@ -128,6 +128,13 @@ where
             logs: result.logs().into_iter().map(into_reth_log).collect(),
             #[cfg(feature = "optimism")]
             deposit_nonce: depositor.map(|account| account.nonce),
+            // The deposit receipt version was introduced in Canyon to indicate an update to how
+            // receipt hashes should be computed when set. The state transition process
+            // ensures this is only set for post-Canyon deposit transactions.
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: chain_spec
+                .is_fork_active_at_timestamp(Hardfork::Canyon, attributes.timestamp)
+                .then_some(1),
         }));
 
         // append transaction to the list of executed transactions
@@ -204,6 +211,8 @@ where
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
             }));
 
             // update add to total fees

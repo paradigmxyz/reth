@@ -174,6 +174,8 @@ impl PendingBlockEnv {
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
             }));
 
             // append transaction to the list of executed transactions

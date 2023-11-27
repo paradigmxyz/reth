@@ -129,6 +129,14 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 logs: result.into_logs().into_iter().map(into_reth_log).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: depositor.map(|account| account.nonce),
+                // The deposit receipt version was introduced in Canyon to indicate an update to how
+                // receipt hashes should be computed when set. The state transition process ensures
+                // this is only set for post-Canyon deposit transactions.
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: self
+                    .chain_spec()
+                    .is_fork_active_at_timestamp(Hardfork::Canyon, block.timestamp)
+                    .then_some(1),
             });
         }
 
