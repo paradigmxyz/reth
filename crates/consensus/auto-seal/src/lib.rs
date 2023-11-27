@@ -254,11 +254,13 @@ impl StorageInner {
         transactions: &Vec<TransactionSigned>,
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+
         // check previous block for base fee
         let base_fee_per_gas = self
             .headers
             .get(&self.best_block)
-            .and_then(|parent| parent.next_block_base_fee(chain_spec.base_fee_params));
+            .and_then(|parent| parent.next_block_base_fee(chain_spec.base_fee_params(timestamp)));
 
         let mut header = Header {
             parent_hash: self.best_hash,
@@ -273,7 +275,7 @@ impl StorageInner {
             number: self.best_block + 1,
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             gas_used: 0,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+            timestamp,
             mix_hash: Default::default(),
             nonce: 0,
             base_fee_per_gas,

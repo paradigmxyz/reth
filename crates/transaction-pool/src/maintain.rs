@@ -92,7 +92,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             last_seen_block_hash: latest.hash,
             last_seen_block_number: latest.number,
             pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params)
+                .next_block_base_fee(chain_spec.base_fee_params(latest.timestamp + 12))
                 .unwrap_or_default(),
             pending_blob_fee: latest.next_block_blob_fee(),
         };
@@ -238,8 +238,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `new_tip+1`
-                let pending_block_base_fee =
-                    new_tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
+                let pending_block_base_fee = new_tip
+                    .next_block_base_fee(chain_spec.base_fee_params(new_tip.timestamp + 12))
+                    .unwrap_or_default();
                 let pending_block_blob_fee = new_tip.next_block_blob_fee();
 
                 // we know all changed account in the new chain
@@ -342,8 +343,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `tip+1`
-                let pending_block_base_fee =
-                    tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
+                let pending_block_base_fee = tip
+                    .next_block_base_fee(chain_spec.base_fee_params(tip.timestamp + 12))
+                    .unwrap_or_default();
                 let pending_block_blob_fee = tip.next_block_blob_fee();
 
                 let first_block = blocks.first();
