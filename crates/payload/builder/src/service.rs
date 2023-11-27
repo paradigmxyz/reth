@@ -78,7 +78,11 @@ pub struct PayloadBuilderHandle {
 // === impl PayloadBuilderHandle ===
 
 impl PayloadBuilderHandle {
-    pub(crate) fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand>) -> Self {
+    /// Creates a new payload builder handle for the given channel.
+    ///
+    /// Note: this is only used internally by the [PayloadBuilderService] to manage the payload
+    /// building flow See [PayloadBuilderService::poll] for implementation details.
+    pub fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand>) -> Self {
         Self { to_service }
     }
 
@@ -214,8 +218,7 @@ where
             .find(|(_, job_id)| *job_id == id)
             .map(|(j, _)| j.best_payload());
         if let Some(Ok(ref best)) = res {
-            // TODO: remove `to`
-            self.metrics.set_best_revenue(best.block.number, best.fees().to::<u128>() as f64);
+            self.metrics.set_best_revenue(best.block.number, f64::from(best.fees));
         }
 
         res
@@ -249,9 +252,8 @@ where
         let fut = async move {
             let res = fut.await;
             if let Ok(ref payload) = res {
-                // TODO: remove `to`
                 resolved_metrics
-                    .set_resolved_revenue(payload.block.number, payload.fees().to::<u128>() as f64);
+                    .set_resolved_revenue(payload.block.number, f64::from(payload.fees));
             }
             res
         };
@@ -351,7 +353,7 @@ type PayloadFuture =
     Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send + Sync>>;
 
 /// Message type for the [PayloadBuilderService].
-pub(crate) enum PayloadServiceCommand {
+pub enum PayloadServiceCommand {
     /// Start building a new payload.
     BuildNewPayload(
         PayloadBuilderAttributes,
