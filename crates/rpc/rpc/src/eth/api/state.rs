@@ -125,7 +125,10 @@ where
 mod tests {
     use super::*;
     use crate::{
-        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        eth::{
+            cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
+            FeeHistoryCacheConfig,
+        },
         BlockingTaskPool,
     };
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
@@ -144,9 +147,10 @@ mod tests {
             pool.clone(),
             (),
             cache.clone(),
-            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
+            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -166,9 +170,10 @@ mod tests {
             pool,
             (),
             cache.clone(),
-            GasPriceOracle::new(mock_provider, Default::default(), cache),
+            GasPriceOracle::new(mock_provider.clone(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
         );
 
         let storage_key: U256 = storage_key.into();
