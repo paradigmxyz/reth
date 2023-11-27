@@ -2,7 +2,6 @@
 
 use crate::{
     eth::{
-        cache::MultiConsumerLruCache,
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
             build_call_evm_env, caller_gas_allowance, cap_tx_gas_limit_with_caller_allowance,
