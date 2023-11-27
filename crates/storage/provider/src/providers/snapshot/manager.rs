@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
-    snapshot::{HeaderMask, TransactionMask},
+    snapshot::{HeaderMask, SnapshotCursor, TransactionMask},
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
@@ -238,6 +238,51 @@ impl SnapshotProvider {
 
         Ok(None)
     }
+
+    /// Fetches data within a specified range across multiple snapshot files.
+    ///
+    /// This function iteratively retrieves data using `get_fn` for each item in the given range.
+    /// It continues fetching until the end of the range is reached or the provided `predicate`
+    /// returns false.
+    fn fetch_range<T>(
+        &self,
+        segment: SnapshotSegment,
+        range: Range<u64>,
+        get_fn: impl Fn(&mut SnapshotCursor<'_>, u64) -> ProviderResult<Option<T>>,
+        mut predicate: impl FnMut(&T) -> bool,
+    ) -> ProviderResult<Vec<T>> {
+        let get_provider = |start: u64| match segment {
+            SnapshotSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
+            _ => self.get_segment_provider_from_transaction(segment, start, None),
+        };
+
+        let mut result = Vec::with_capacity((range.end - range.start).min(100) as usize);
+        let mut provider = get_provider(range.start)?;
+        let mut cursor = provider.cursor()?;
+
+        'outer: for number in range {
+            'inner: loop {
+                match get_fn(&mut cursor, number.into())? {
+                    Some(res) => {
+                        if !predicate(&res) {
+                            break 'outer
+                        }
+                        result.push(res);
+                        break 'inner;
+                    }
+                    None => {
+                        if number > self.get_highest_snapshot(segment).unwrap_or_default() {
+                            return Ok(result);
+                        }
+                        provider = get_provider(number)?;
+                        cursor = provider.cursor()?;
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 impl HeaderProvider for SnapshotProvider {
@@ -275,43 +320,12 @@ impl HeaderProvider for SnapshotProvider {
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        let range = to_range(range);
-
-        // Don't pre-allocate because the range might be high with a specific predicate
-        let mut headers = Vec::with_capacity((range.end - range.start) as usize);
-
-        let mut provider =
-            self.get_segment_provider_from_block(SnapshotSegment::Headers, range.start, None)?;
-        let mut cursor = provider.cursor()?;
-
-        'outer: for number in range {
-            'inner: loop {
-                match cursor.get_one::<HeaderMask<Header>>(number.into())? {
-                    Some(header) => {
-                        headers.push(header);
-                        break 'inner
-                    }
-                    None => {
-                        // If `None`, then we have reached the end of the current snapshot, and move
-                        // on to the next
-                        if number >
-                            self.get_highest_snapshot(SnapshotSegment::Headers)
-                                .unwrap_or_default()
-                        {
-                            break 'outer
-                        }
-                        provider = self.get_segment_provider_from_block(
-                            SnapshotSegment::Headers,
-                            number,
-                            None,
-                        )?;
-                        cursor = provider.cursor()?;
-                    }
-                }
-            }
-        }
-
-        Ok(headers)
+        self.fetch_range(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |cursor, number| Ok(cursor.get_one::<HeaderMask<Header>>(number.into())?),
+            |_| true,
+        )
     }
 
     fn sealed_header(&self, num: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
@@ -322,51 +336,18 @@ impl HeaderProvider for SnapshotProvider {
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        mut predicate: impl FnMut(&SealedHeader) -> bool,
+        predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        let range = to_range(range);
-
-        // Don't pre-allocate because the range might be high with a specific predicate
-        let mut headers = vec![];
-
-        let mut provider =
-            self.get_segment_provider_from_block(SnapshotSegment::Headers, range.start, None)?;
-        let mut cursor = provider.cursor()?;
-
-        'outer: for number in range {
-            'inner: loop {
-                match cursor
+        self.fetch_range(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |cursor, number| {
+                Ok(cursor
                     .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
-                    .map(|(header, hash)| header.seal(hash))
-                {
-                    Some(sealed) => {
-                        if !predicate(&sealed) {
-                            break 'outer
-                        }
-                        headers.push(sealed);
-                        break 'inner
-                    }
-                    None => {
-                        // If `None`, then we have reached the end of the current snapshot, and move
-                        // on to the next
-                        if number >
-                            self.get_highest_snapshot(SnapshotSegment::Headers)
-                                .unwrap_or_default()
-                        {
-                            break 'outer
-                        }
-                        provider = self.get_segment_provider_from_block(
-                            SnapshotSegment::Headers,
-                            number,
-                            None,
-                        )?;
-                        cursor = provider.cursor()?;
-                    }
-                }
-            }
-        }
-
-        Ok(headers)
+                    .map(|(header, hash)| header.seal(hash)))
+            },
+            predicate,
+        )
     }
 }
 
@@ -380,43 +361,12 @@ impl BlockHashReader for SnapshotProvider {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let range = to_range(start..end);
-
-        // Don't pre-allocate because the range might be high with a specific predicate
-        let mut hashes = Vec::with_capacity((range.end - range.start) as usize);
-
-        let mut provider =
-            self.get_segment_provider_from_block(SnapshotSegment::Headers, range.start, None)?;
-        let mut cursor = provider.cursor()?;
-
-        'outer: for number in range {
-            'inner: loop {
-                match cursor.get_one::<HeaderMask<BlockHash>>(number.into())? {
-                    Some(hash) => {
-                        hashes.push(hash);
-                        break 'inner
-                    }
-                    None => {
-                        // If `None`, then we have reached the end of the current snapshot, and move
-                        // on to the next
-                        if number >
-                            self.get_highest_snapshot(SnapshotSegment::Headers)
-                                .unwrap_or_default()
-                        {
-                            break 'outer
-                        }
-                        provider = self.get_segment_provider_from_block(
-                            SnapshotSegment::Headers,
-                            number,
-                            None,
-                        )?;
-                        cursor = provider.cursor()?;
-                    }
-                }
-            }
-        }
-
-        Ok(hashes)
+        self.fetch_range(
+            SnapshotSegment::Headers,
+            start..end,
+            |cursor, number| Ok(cursor.get_one::<HeaderMask<BlockHash>>(number.into())?),
+            |_| true,
+        )
     }
 }
 
