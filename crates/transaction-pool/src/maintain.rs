@@ -127,8 +127,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         // dirty accounts and correct if the pool drifted from current state, for example after
         // restart or a pipeline run
         if maintained_state.is_drifted() {
+            metrics.inc_drift();
             // assuming all senders are dirty
             dirty_addresses = pool.unique_senders();
+            // make sure we toggle the state back to in sync
             maintained_state = MaintainedPoolState::InSync;
         }
 
@@ -170,6 +172,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             match blob_store_tracker.on_finalized_block(finalized) {
                 BlobStoreUpdates::None => {}
                 BlobStoreUpdates::Finalized(blobs) => {
+                    metrics.inc_deleted_tracked_blobs(blobs.len());
                     // remove all finalized blobs from the blob store
                     pool.delete_blobs(blobs);
                 }
@@ -440,7 +443,7 @@ impl FinalizedBlockTracker {
 
 /// Keeps track of the pool's state, whether the accounts in the pool are in sync with the actual
 /// state.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 enum MaintainedPoolState {
     /// Pool is assumed to be in sync with the current state
     InSync,
@@ -450,6 +453,7 @@ enum MaintainedPoolState {
 
 impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
+    #[inline]
     fn is_drifted(&self) -> bool {
         matches!(self, MaintainedPoolState::Drifted)
     }
