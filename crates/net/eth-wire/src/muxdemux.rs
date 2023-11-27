@@ -24,7 +24,6 @@
 use std::{
     any::TypeId,
     collections::HashMap,
-    mem::ManuallyDrop,
     ops::{Deref, DerefMut},
     pin::Pin,
     task::{ready, Context, Poll},
@@ -38,7 +37,7 @@ use tokio_stream::Stream;
 use crate::{
     capability::{SharedCapabilities, SharedCapability},
     errors::MuxDemuxError,
-    CanDisconnect, DisconnectReason, EthMessage,
+    CanDisconnect, DisconnectP2P, DisconnectReason, EthMessage,
 };
 
 use MuxDemuxError::*;
@@ -94,21 +93,19 @@ pub struct MuxDemuxer<S> {
 /// The main stream on top of the p2p stream. Wraps [`MuxDemuxer`] and enforces it can't be dropped
 /// before all secondary streams are dropped (stream clones).
 #[derive(Debug)]
-pub struct MuxDemuxStream<S> {
-    mxdmx: ManuallyDrop<MuxDemuxer<S>>,
-}
+pub struct MuxDemuxStream<S>(MuxDemuxer<S>);
 
 impl<S> Deref for MuxDemuxStream<S> {
-    type Target = S;
+    type Target = MuxDemuxer<S>;
 
     fn deref(&self) -> &Self::Target {
-        &self.mxdmx.inner
+        &self.0
     }
 }
 
 impl<S> DerefMut for MuxDemuxStream<S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.mxdmx.inner
+        &mut self.0
     }
 }
 
@@ -128,16 +125,7 @@ impl<S> MuxDemuxStream<S> {
         let demux = HashMap::new();
         let (mux_tx, mux) = mpsc::unbounded_channel();
 
-        Ok(Self {
-            mxdmx: ManuallyDrop::new(MuxDemuxer {
-                inner,
-                owner,
-                mux,
-                demux,
-                mux_tx,
-                shared_capabilities,
-            }),
-        })
+        Ok(Self(MuxDemuxer { inner, owner, mux, demux, mux_tx, shared_capabilities }))
     }
 
     /// Clones the stream if the given capability stream type is shared on the underlying p2p
@@ -145,13 +133,33 @@ impl<S> MuxDemuxStream<S> {
     pub fn try_clone_stream<M: 'static>(&mut self) -> Result<StreamClone, MuxDemuxError> {
         let cap = self.shared_cap::<M>()?.clone();
         let ingress = self.reg_new_ingress_buffer(&cap)?;
-        let mux_tx = self.mxdmx.mux_tx.clone();
+        let mux_tx = self.mux_tx.clone();
 
         Ok(StreamClone { stream: ingress, sink: mux_tx, cap })
     }
 
+    /// Starts a graceful disconnect. Returns a closure to drop the stream.
+    pub fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), MuxDemuxError>
+    where
+        S: DisconnectP2P,
+    {
+        if !self.can_drop() {
+            return Err(StreamInUse)
+        }
+
+        self.inner.start_disconnect(reason).map_err(|e| e.into())
+    }
+
+    /// Returns `true` if the connection is about to disconnect.
+    pub fn is_disconnecting(&self) -> bool
+    where
+        S: DisconnectP2P,
+    {
+        self.inner.is_disconnecting()
+    }
+
     fn shared_cap<M: 'static>(&self) -> Result<&SharedCapability, MuxDemuxError> {
-        for shared_cap in self.mxdmx.shared_capabilities.iter_caps() {
+        for shared_cap in self.shared_capabilities.iter_caps() {
             if let SharedCapability::Eth { .. } = shared_cap {
                 if TypeId::of::<M>() == TypeId::of::<EthMessage>() {
                     return Ok(shared_cap)
@@ -168,13 +176,13 @@ impl<S> MuxDemuxStream<S> {
         cap: &SharedCapability,
     ) -> Result<mpsc::UnboundedReceiver<BytesMut>, MuxDemuxError> {
         let cap = cap.into();
-        if let Some(tx) = self.mxdmx.demux.get(&cap) {
+        if let Some(tx) = self.demux.get(&cap) {
             if !tx.is_closed() {
                 return Err(StreamAlreadyExists)
             }
         }
         let (ingress_tx, ingress) = mpsc::unbounded_channel();
-        self.mxdmx.demux.insert(cap, ingress_tx);
+        self.demux.insert(cap, ingress_tx);
 
         Ok(ingress)
     }
@@ -182,7 +190,7 @@ impl<S> MuxDemuxStream<S> {
     fn unmask_msg_id(&self, id: &mut u8) -> Result<CapStreamType, MuxDemuxError> {
         use SharedCapability::*;
 
-        for cap in self.mxdmx.shared_capabilities.iter_caps() {
+        for cap in self.shared_capabilities.iter_caps() {
             let offset = cap.relative_message_id_offset();
             let next_offset = offset + cap.num_messages()?;
             if *id < next_offset {
@@ -203,33 +211,22 @@ impl<S> MuxDemuxStream<S> {
     /// once to avoid copying message to mutate id byte or sink BytesMut).
     fn mask_msg_id(&self, msg: Bytes) -> Bytes {
         let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0] + self.mxdmx.owner.relative_message_id_offset();
+        masked_bytes[0] = msg[0] + self.owner.relative_message_id_offset();
         masked_bytes[1..].copy_from_slice(&msg[1..]);
 
         masked_bytes.freeze()
     }
 
+    /// Checks if all clones of this shared stream have been dropped, if true then returns //
+    /// function to drop the stream.
     fn can_drop(&mut self) -> bool {
-        for tx in self.mxdmx.demux.values() {
+        for tx in self.demux.values() {
             if !tx.is_closed() {
                 return false
             }
         }
 
         true
-    }
-
-    /// Checks if all clones of this shared stream have been dropped, if true then returns //
-    /// function to drop the stream.
-    pub fn try_drop(&mut self) -> Result<impl FnOnce(Self), MuxDemuxError> {
-        if !self.can_drop() {
-            return Err(StreamInUse)
-        }
-
-        Ok(|x: Self| {
-            let Self { mxdmx } = x;
-            _ = ManuallyDrop::into_inner(mxdmx)
-        })
     }
 }
 
@@ -242,8 +239,8 @@ where
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // poll once for each shared stream since shared stream clones cannot poll `MuxDemux`
-        for _ in 0..self.mxdmx.demux.len() {
-            let res = ready!(self.mxdmx.inner.poll_next_unpin(cx));
+        for _ in 0..self.demux.len() {
+            let res = ready!(self.inner.poll_next_unpin(cx));
             let mut bytes = match res {
                 Some(Ok(bytes)) => bytes,
                 Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
@@ -252,10 +249,10 @@ where
 
             // normalize message id suffix for capability
             let cap = self.unmask_msg_id(&mut bytes[0])?;
-            if cap == (&self.mxdmx.owner).into() {
+            if cap == (&self.owner).into() {
                 return Poll::Ready(Some(Ok(bytes)))
             }
-            let tx = self.mxdmx.demux.get(&cap).ok_or(CapabilityNotConfigured)?;
+            let tx = self.demux.get(&cap).ok_or(CapabilityNotConfigured)?;
             tx.send(bytes).map_err(|_| SendIngressBytesFailed)?;
         }
 
@@ -271,28 +268,28 @@ where
     type Error = MuxDemuxError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.mxdmx.inner.poll_ready_unpin(cx).map_err(Into::into)
+        self.inner.poll_ready_unpin(cx).map_err(Into::into)
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
         let item = self.mask_msg_id(item);
-        self.mxdmx.inner.start_send_unpin(item)?;
+        self.inner.start_send_unpin(item)?;
 
         // sink buffered bytes from `StreamClone`s
-        for _ in 0..self.mxdmx.demux.len() {
-            let Ok(item) = self.mxdmx.mux.try_recv() else { break };
-            self.mxdmx.inner.start_send_unpin(item)?;
+        for _ in 0..self.demux.len() {
+            let Ok(item) = self.mux.try_recv() else { break };
+            self.inner.start_send_unpin(item)?;
         }
 
         Ok(())
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.mxdmx.inner.poll_flush_unpin(cx).map_err(Into::into)
+        self.inner.poll_flush_unpin(cx).map_err(Into::into)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.mxdmx.inner.poll_close_unpin(cx).map_err(Into::into)
+        self.inner.poll_close_unpin(cx).map_err(Into::into)
     }
 }
 
@@ -304,7 +301,7 @@ where
 {
     async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), MuxDemuxError> {
         if self.can_drop() {
-            return self.mxdmx.inner.disconnect(reason).await.map_err(Into::into)
+            return self.inner.disconnect(reason).await.map_err(Into::into)
         }
         Err(StreamInUse)
     }
