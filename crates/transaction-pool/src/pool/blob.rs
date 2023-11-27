@@ -1,7 +1,7 @@
 #![allow(dead_code, unused)]
 use crate::{
     identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
-    PoolTransaction, ValidPoolTransaction,
+    PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
 use std::{
     cmp::Ordering,
@@ -182,6 +182,27 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         removed
     }
 
+    /// Removes transactions until the pool satisfies its [SubPoolLimit].
+    ///
+    /// This is done by removing transactions according to their ordering in the pool, defined by
+    /// the [BlobOrd] struct.
+    ///
+    /// Removed transactions are returned in the order they were removed.
+    pub(crate) fn truncate_pool(
+        &mut self,
+        limit: SubPoolLimit,
+    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let mut removed = Vec::new();
+
+        while self.size() > limit.max_size && self.len() > limit.max_txs {
+            let tx = self.all.last().expect("pool is not empty");
+            let id = *tx.transaction.id();
+            removed.push(self.remove_transaction(&id).expect("transaction exists"));
+        }
+
+        removed
+    }
+
     /// Returns `true` if the transaction with the given id is already included in this pool.
     #[cfg(test)]
     #[allow(unused)]
@@ -287,6 +308,13 @@ const LOG_2_1_125: f64 = 0.16992500144231237;
 ///
 /// This is supposed to get the number of fee jumps required to get from the current fee to the fee
 /// cap, or where the transaction would not be executable any more.
+///
+/// A positive value means that the transaction will remain executable unless the current fee
+/// increases.
+///
+/// A negative value means that the transaction is currently not executable, and requires the
+/// current fee to decrease by some number of jumps before the max fee is greater than the current
+/// fee.
 pub fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
     if max_tx_fee == current_fee {
         // if these are equal, then there's no fee jump
@@ -331,16 +359,29 @@ pub fn blob_tx_priority(
     let delta_blob_fee = fee_delta(blob_fee_cap, blob_fee);
     let delta_priority_fee = fee_delta(max_priority_fee, base_fee);
 
+    // TODO: this could be u64:
+    // * if all are positive, zero is returned
+    // * if all are negative, the min negative value is returned
+    // * if some are positive and some are negative, the min negative value is returned
+    //
+    // the BlobOrd could then just be a u64, and higher values represent worse transactions (more
+    // jumps for one of the fees until the cap satisfies)
+    //
     // priority = min(delta-basefee, delta-blobfee, 0)
     delta_blob_fee.min(delta_priority_fee).min(0)
 }
 
+/// A struct used to determine the ordering for a specific blob transaction in the pool. This uses
+/// a `priority` value to determine the ordering, and uses the `submission_id` to break ties.
+///
+/// The `priority` value is calculated using the [blob_tx_priority] function, and should be
+/// re-calculated on each block.
 #[derive(Debug, Clone)]
 struct BlobOrd {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,
-    // The priority for this transaction, calculated using the [`blob_tx_priority`] function,
-    // taking into account both the blob and priority fee.
+    /// The priority for this transaction, calculated using the [`blob_tx_priority`] function,
+    /// taking into account both the blob and priority fee.
     pub(crate) priority: i64,
 }
 
@@ -360,9 +401,14 @@ impl PartialOrd<Self> for BlobOrd {
 
 impl Ord for BlobOrd {
     fn cmp(&self, other: &Self) -> Ordering {
+        // order in reverse, so transactions with a lower ordering return Greater - this is
+        // important because transactions with larger negative values will take more fee jumps and
+        // it will take longer to become executable, so those should be evicted first
         let ord = other.priority.cmp(&self.priority);
 
         // use submission_id to break ties
+        // TODO: should earlier or later transactions be evicted first in case of a tie?
+        // right now, later transactions are evicted first
         if ord == Ordering::Equal {
             self.submission_id.cmp(&other.submission_id)
         } else {
