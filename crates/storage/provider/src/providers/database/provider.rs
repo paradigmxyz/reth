@@ -1,5 +1,5 @@
 use crate::{
-    bundle_state::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
+    bundle_state::BundleStateWithReceipts,
     providers::{database::metrics, SnapshotProvider},
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
@@ -32,6 +32,7 @@ use reth_interfaces::{
 use reth_primitives::{
     keccak256,
     revm::{
+        compat::{into_reth_acc, into_revm_acc},
         config::revm_spec,
         env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
     },
@@ -39,14 +40,17 @@ use reth_primitives::{
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    PruneSegment, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
-use revm::primitives::{BlockEnv, CfgEnv, SpecId};
+use revm::{
+    db::states::{BundleBuilder, PlainStorageChangeset},
+    primitives::{BlockEnv, CfgEnv, HashMap as HashMapRevm, SpecId},
+};
 use std::{
-    collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
@@ -137,7 +141,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break
+            break;
         }
         cursor.delete_current()?;
 
@@ -146,12 +150,12 @@ where
         let first = list.iter(0).next().expect("List can't be empty");
         if first >= block_number as usize {
             item = cursor.prev()?;
-            continue
+            continue;
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
-            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
+            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>());
         } else {
-            return Ok(list.iter(0).collect::<Vec<_>>())
+            return Ok(list.iter(0).collect::<Vec<_>>());
         }
     }
 
@@ -234,7 +238,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BundleStateWithReceipts> {
         if range.is_empty() {
-            return Ok(BundleStateWithReceipts::default())
+            return Ok(BundleStateWithReceipts::default());
         }
         let start_block_number = *range.start();
 
@@ -251,14 +255,14 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let storage_changeset =
             self.get_or_take::<tables::StorageChangeSet, UNWIND>(storage_range)?;
-        let account_changeset = self.get_or_take::<tables::AccountChangeSet, UNWIND>(range)?;
+        let account_changeset =
+            self.get_or_take::<tables::AccountChangeSet, UNWIND>(range.clone())?;
 
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
 
-        let mut state: BundleStateInit = HashMap::new();
-
+        let mut bundle_builder = BundleBuilder::new(range);
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
@@ -266,90 +270,94 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-        let mut reverts: RevertsInit = HashMap::new();
-
         // add account changeset changes
         for (block_number, account_before) in account_changeset.into_iter().rev() {
             let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::new()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    // overwrite old account state.
-                    entry.get_mut().0 = old_info;
+            if !bundle_builder.get_states().contains(&address) {
+                if let Some(new_info) = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1) {
+                    bundle_builder =
+                        bundle_builder.state_present_account_info(address, into_revm_acc(new_info));
                 }
             }
+            if let Some(old_info) = old_info {
+                bundle_builder =
+                    bundle_builder.state_original_account_info(address, into_revm_acc(old_info));
+            }
+
             // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
+            bundle_builder = bundle_builder.revert_account_info(
+                block_number,
+                address,
+                Some(old_info.map(into_revm_acc)),
+            );
         }
 
         // add storage changeset changes
         for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
             let BlockNumberAddress((block_number, address)) = block_and_address;
-            // get account state or insert from plain state.
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((present_info, present_info, HashMap::new()))
+            if !bundle_builder.get_states().contains(&address) {
+                if let Some(present_info) =
+                    plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1)
+                {
+                    bundle_builder = bundle_builder
+                        .state_original_account_info(address, into_revm_acc(present_info));
+                    bundle_builder = bundle_builder
+                        .state_present_account_info(address, into_revm_acc(present_info));
                 }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
-
-            // match storage.
-            match account_state.2.entry(old_storage.key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_storage = plain_storage_cursor
-                        .seek_by_key_subkey(address, old_storage.key)?
-                        .filter(|storage| storage.key == old_storage.key)
-                        .unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage.value));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
+            }
+            let new_storage = plain_storage_cursor
+                .seek_by_key_subkey(address, old_storage.key)?
+                .filter(|storage| storage.key == old_storage.key)
+                .unwrap_or_default();
+            bundle_builder = bundle_builder.state_storage(
+                address,
+                HashMapRevm::from([(
+                    new_storage.key.into(),
+                    (old_storage.value, new_storage.value),
+                )]),
+            );
+            // insert old storage into reverts.
+            bundle_builder = bundle_builder.revert_storage(
+                block_number,
+                address,
+                vec![(old_storage.key.into(), old_storage.value)],
+            );
         }
+
+        // build the `BundleState`
+        let bundle_state = bundle_builder.build();
 
         if UNWIND {
             // iterate over local plain state remove all account and all storages.
-            for (address, (old_account, new_account, storage)) in state.iter() {
-                // revert account if needed.
-                if old_account != new_account {
-                    let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
-                    if let Some(account) = old_account {
-                        plain_accounts_cursor.upsert(*address, *account)?;
-                    } else if existing_entry.is_some() {
-                        plain_accounts_cursor.delete_current()?;
-                    }
+            let state_changeset = bundle_state.clone().into_plain_state(OriginalValuesKnown::No);
+            // revert account if needed.
+            for (address, account) in state_changeset.accounts {
+                let existing_entry = plain_accounts_cursor.seek_exact(address)?;
+                if let Some(account) = account {
+                    plain_accounts_cursor.upsert(address, into_reth_acc(account))?;
+                } else if existing_entry.is_some() {
+                    plain_accounts_cursor.delete_current()?;
                 }
+            }
 
-                // revert storages
-                for (storage_key, (old_storage_value, _new_storage_value)) in storage {
-                    let storage_entry =
-                        StorageEntry { key: *storage_key, value: *old_storage_value };
+            // revert storages
+            for storage_changeset in state_changeset.storage {
+                let PlainStorageChangeset { address, wipe_storage, storage } = storage_changeset;
+                for (key, value) in storage {
                     // delete previous value
                     // TODO: This does not use dupsort features
                     if plain_storage_cursor
-                        .seek_by_key_subkey(*address, *storage_key)?
-                        .filter(|s| s.key == *storage_key)
+                        .seek_by_key_subkey(address, key.into())?
+                        .filter(|s| s.key == key.to_le_bytes())
                         .is_some()
                     {
                         plain_storage_cursor.delete_current()?
                     }
+                    let storage_entry = StorageEntry { key: key.into(), value };
 
                     // insert value if needed
-                    if *old_storage_value != U256::ZERO {
-                        plain_storage_cursor.upsert(*address, storage_entry)?;
+                    if !wipe_storage {
+                        plain_storage_cursor.upsert(address, storage_entry)?;
                     }
                 }
             }
@@ -372,11 +380,9 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             receipts.push(block_receipts);
         }
 
-        Ok(BundleStateWithReceipts::new_init(
-            state,
-            reverts,
-            Vec::new(),
-            reth_primitives::Receipts::from_vec(receipts),
+        Ok(BundleStateWithReceipts::new(
+            bundle_state,
+            Receipts::from_vec(receipts),
             start_block_number,
         ))
     }
@@ -412,7 +418,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         // Compute the first and last tx ID in the range
@@ -421,7 +427,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect());
         }
 
         // Get transactions and senders
@@ -550,7 +556,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let block_headers = self.get_or_take::<tables::Headers, TAKE>(range.clone())?;
         if block_headers.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         let block_header_hashes =
@@ -656,7 +662,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         while let Some(Ok((entry_key, _))) = reverse_walker.next() {
             if selector(entry_key.clone()) <= key {
-                break
+                break;
             }
             reverse_walker.delete_current()?;
             deleted += 1;
@@ -703,7 +709,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 if deleted == limit {
-                    break
+                    break;
                 }
             }
         }
@@ -734,7 +740,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 if deleted == limit {
-                    break
+                    break;
                 }
             }
         }
@@ -754,7 +760,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             // delete old shard so new one can be inserted.
             self.tx.delete::<T>(shard_key, None)?;
             let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-            return Ok(list)
+            return Ok(list);
         }
         Ok(Vec::new())
     }
@@ -946,7 +952,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td))
+            return Ok(Some(td));
         }
 
         Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
@@ -984,7 +990,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
                 .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
             let sealed = header.seal(hash);
             if !predicate(&sealed) {
-                break
+                break;
             }
             headers.push(sealed);
         }
@@ -1062,7 +1068,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     None => return Ok(None),
                 };
 
-                return Ok(Some(Block { header, body: transactions, ommers, withdrawals }))
+                return Ok(Some(Block { header, body: transactions, ommers, withdrawals }));
             }
         }
 
@@ -1086,11 +1092,11 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
             if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()))
+                return Ok(Some(Vec::new()));
             }
 
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
+            return Ok(ommers);
         }
 
         Ok(None)
@@ -1156,7 +1162,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         if range.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         let len = range.end().saturating_sub(*range.start()) as usize;
@@ -1334,7 +1340,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                                 excess_blob_gas: header.excess_blob_gas,
                             };
 
-                            return Ok(Some((transaction, meta)))
+                            return Ok(Some((transaction, meta)));
                         }
                     }
                 }
@@ -1365,7 +1371,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                         .map(|result| result.map(|(_, tx)| tx.into()))
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok(Some(transactions))
-                }
+                };
             }
         }
         Ok(None)
@@ -1450,7 +1456,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
                         .map(|result| result.map(|(_, receipt)| receipt))
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok(Some(receipts))
-                }
+                };
             }
         }
         Ok(None)
@@ -1472,7 +1478,7 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
                     .get::<tables::BlockWithdrawals>(number)
                     .map(|w| w.map(|w| w.withdrawals))?
                     .unwrap_or_default();
-                return Ok(Some(withdrawals))
+                return Ok(Some(withdrawals));
             }
         }
         Ok(None)
@@ -1737,7 +1743,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     root: GotExpected { got: state_root, expected: expected_state_root },
                     block_number: *range.end(),
                     block_hash: end_block_hash,
-                })))
+                })));
             }
             trie_updates.flush(&self.tx)?;
         }
@@ -2119,7 +2125,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     root: GotExpected { got: new_state_root, expected: parent_state_root },
                     block_number: parent_number,
                     block_hash: parent_hash,
-                })))
+                })));
             }
             trie_updates.flush(&self.tx)?;
         }
@@ -2294,7 +2300,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
-            return Ok(())
+            return Ok(());
         }
         let new_tip = blocks.last().unwrap();
         let new_tip_number = new_tip.number;

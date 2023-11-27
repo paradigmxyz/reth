@@ -6,20 +6,16 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_primitives::{
-    keccak256, logs_bloom,
-    revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, B256,
-    U256,
+    keccak256, logs_bloom, revm::compat::into_reth_acc, Account, Address, BlockNumber, Bloom,
+    Bytecode, Log, Receipt, Receipts, B256, U256,
 };
 use reth_trie::{
     hashed_cursor::{HashedPostState, HashedPostStateCursorFactory, HashedStorage},
     updates::TrieUpdates,
     StateRoot, StateRootError,
 };
-use revm::{db::states::BundleState, primitives::AccountInfo};
-use std::collections::HashMap;
-
 pub use revm::db::states::OriginalValuesKnown;
+use revm::{db::states::BundleState, primitives::AccountInfo};
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -36,57 +32,9 @@ pub struct BundleStateWithReceipts {
     first_block: BlockNumber,
 }
 
-/// Type used to initialize revms bundle state.
-pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
-
-/// Types used inside RevertsInit to initialize revms reverts.
-pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
-
-/// Type used to initialize revms reverts.
-pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
-
 impl BundleStateWithReceipts {
     /// Create Bundle State.
     pub fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
-        Self { bundle, receipts, first_block }
-    }
-
-    /// Create new bundle state with receipts.
-    pub fn new_init(
-        state_init: BundleStateInit,
-        revert_init: RevertsInit,
-        contracts_init: Vec<(B256, Bytecode)>,
-        receipts: Receipts,
-        first_block: BlockNumber,
-    ) -> Self {
-        // sort reverts by block number
-        let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
-        reverts.sort_unstable_by_key(|a| a.0);
-
-        // initialize revm bundle
-        let bundle = BundleState::new(
-            state_init.into_iter().map(|(address, (original, present, storage))| {
-                (
-                    address,
-                    original.map(into_revm_acc),
-                    present.map(into_revm_acc),
-                    storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
-                )
-            }),
-            reverts.into_iter().map(|(_, reverts)| {
-                // does not needs to be sorted, it is done when taking reverts.
-                reverts.into_iter().map(|(address, (original, storage))| {
-                    (
-                        address,
-                        original.map(|i| i.map(into_revm_acc)),
-                        storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
-                    )
-                })
-            }),
-            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
-        );
-
         Self { bundle, receipts, first_block }
     }
 
@@ -178,28 +126,24 @@ impl BundleStateWithReceipts {
     ///
     /// ```
     /// use reth_db::{database::Database, test_utils::create_test_rw_db};
-    /// use reth_primitives::{Account, Receipts, U256};
+    /// use reth_primitives::{revm_primitives::HashMap, Account, Receipts, U256};
     /// use reth_provider::BundleStateWithReceipts;
-    /// use std::collections::HashMap;
+    /// use reth_revm_primitives::into_revm_acc;
+    /// use revm::db::states::BundleBuilder;
     ///
     /// // Initialize the database
     /// let db = create_test_rw_db();
     ///
     /// // Initialize the bundle state
-    /// let bundle = BundleStateWithReceipts::new_init(
-    ///     HashMap::from([(
-    ///         [0x11; 20].into(),
-    ///         (
-    ///             None,
-    ///             Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
-    ///             HashMap::from([]),
-    ///         ),
-    ///     )]),
-    ///     HashMap::from([]),
-    ///     vec![],
-    ///     Receipts::new(),
-    ///     0,
+    /// let mut bundle_builder = BundleBuilder::new(0..=0);
+    ///
+    /// bundle_builder = bundle_builder.state_present_account_info(
+    ///     [0x11; 20].into(),
+    ///     into_revm_acc(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
     /// );
+    /// bundle_builder = bundle_builder.state_storage([0x11; 20].into(), HashMap::from([]));
+    ///
+    /// let bundle = BundleStateWithReceipts::new(bundle_builder.build(), Receipts::default(), 0);
     ///
     /// // Calculate the state root
     /// let tx = db.tx().expect("failed to create transaction");
@@ -227,11 +171,11 @@ impl BundleStateWithReceipts {
     /// Transform block number to the index of block.
     fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
-            return None
+            return None;
         }
         let index = block_number - self.first_block;
         if index >= self.receipts.len() as u64 {
-            return None
+            return None;
         }
         Some(index as usize)
     }
@@ -324,7 +268,7 @@ impl BundleStateWithReceipts {
     /// If the target block number is not included in the state block range.
     pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self) {
         if at == self.first_block {
-            return (None, self)
+            return (None, self);
         }
 
         let (mut lower_state, mut higher_state) = (self.clone(), self);
@@ -405,7 +349,8 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256, U256,
+        revm::compat::{into_reth_acc, into_revm_acc},
+        Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
     use reth_trie::test_utils::state_root;
     use revm::{
