@@ -16,6 +16,9 @@ use tracing::warn;
 /// The number of transactions sampled in a block
 pub const SAMPLE_NUMBER: usize = 3_usize;
 
+/// The default maximum number of blocks to use for the gas price oracle.
+pub const MAX_HEADER_HISTORY: u64 = 1024;
+
 /// The default maximum gas price to use for the estimate
 pub const DEFAULT_MAX_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
 
@@ -53,8 +56,8 @@ impl Default for GasPriceOracleConfig {
         GasPriceOracleConfig {
             blocks: 20,
             percentile: 60,
-            max_header_history: 1024,
-            max_block_history: 1024,
+            max_header_history: MAX_HEADER_HISTORY,
+            max_block_history: MAX_HEADER_HISTORY,
             default: None,
             max_price: Some(DEFAULT_MAX_PRICE),
             ignore_price: Some(DEFAULT_IGNORE_PRICE),
@@ -73,8 +76,8 @@ impl GasPriceOracleConfig {
         Self {
             blocks: blocks.unwrap_or(20),
             percentile: percentile.unwrap_or(60),
-            max_header_history: 1024,
-            max_block_history: 1024,
+            max_header_history: MAX_HEADER_HISTORY,
+            max_block_history: MAX_HEADER_HISTORY,
             default: None,
             max_price: max_price.map(U256::from).or(Some(DEFAULT_MAX_PRICE)),
             ignore_price: ignore_price.map(U256::from).or(Some(DEFAULT_IGNORE_PRICE)),

@@ -1,12 +1,10 @@
 //! Consist of types adjacent to the fee history cache and its configs
 
-use crate::eth::{cache::EthStateCache, error::EthApiError};
-
+use crate::eth::{cache::EthStateCache, error::EthApiError, gas_oracle::MAX_HEADER_HISTORY};
 use futures::{Stream, StreamExt};
 use metrics::atomics::AtomicU64;
-use reth_interfaces::RethResult;
 use reth_primitives::{Receipt, SealedBlock, TransactionSigned, B256, U256};
-use reth_provider::{BlockReaderIdExt, CanonStateNotification, Chain, ChainSpecProvider};
+use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider};
 use reth_rpc_types::TxGasAndReward;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -21,7 +19,8 @@ use std::{
 pub struct FeeHistoryCacheConfig {
     /// Max number of blocks in cache.
     ///
-    /// Default is 1024.
+    /// Default is [MAX_HEADER_HISTORY] plus some change to also serve slightly older blocks from
+    /// cache, since fee_history supports the entire range
     pub max_blocks: u64,
     /// Percentile approximation resolution
     ///
@@ -31,7 +30,7 @@ pub struct FeeHistoryCacheConfig {
 
 impl Default for FeeHistoryCacheConfig {
     fn default() -> Self {
-        FeeHistoryCacheConfig { max_blocks: 1024, resolution: 4 }
+        FeeHistoryCacheConfig { max_blocks: MAX_HEADER_HISTORY + 100, resolution: 4 }
     }
 }
 
@@ -73,39 +72,29 @@ impl FeeHistoryCache {
     }
 
     /// Processing of the arriving blocks
-    async fn on_new_chain<'a, I>(&self, chain: Arc<Chain>)
+    async fn insert_blocks<I>(&self, blocks: I)
     where
-        I: Iterator<Item = &'a SealedBlock>,
+        I: Iterator<Item = (SealedBlock, Vec<TransactionSigned>, Vec<Receipt>)>,
     {
         let mut entries = self.entries.write().await;
 
-        // we're only interested in new committed blocks
-        let (blocks, state) = chain.inner();
-        // TODO: need iterator
+        let percentiles = self.predefined_percentiles();
+        // Insert all new blocks and calculate approximated rewards
+        for (block, transactions, receipts) in blocks {
+            let mut fee_history_entry = FeeHistoryEntry::new(&block);
 
-        for block in blocks {
-            let mut fee_history_entry = FeeHistoryEntry::new(block);
-            let percentiles = self.predefined_percentiles();
-
-            if let Ok(Some((transactions, receipts))) =
-                self.eth_cache.get_transactions_and_receipts(fee_history_entry.header_hash).await
-            {
-                fee_history_entry.rewards = calculate_reward_percentiles_for_block(
-                    &percentiles,
-                    fee_history_entry.gas_used,
-                    fee_history_entry.base_fee_per_gas,
-                    transactions,
-                    receipts,
-                )
-                .unwrap_or_default();
-
-                entries.insert(block.number, fee_history_entry);
-            } else {
-                break
-            }
+            fee_history_entry.rewards = calculate_reward_percentiles_for_block(
+                &percentiles,
+                fee_history_entry.gas_used,
+                fee_history_entry.base_fee_per_gas,
+                transactions,
+                receipts,
+            )
+            .unwrap_or_default();
+            entries.insert(block.number, fee_history_entry);
         }
 
-        // enforce bounds
+        // enforce bounds by popping the oldest entries
         while entries.len() > self.config.max_blocks as usize {
             entries.pop_first();
         }
@@ -141,7 +130,7 @@ impl FeeHistoryCache {
         &self,
         start_block: u64,
         end_block: u64,
-    ) -> RethResult<Option<Vec<FeeHistoryEntry>>> {
+    ) -> Option<Vec<FeeHistoryEntry>> {
         let lower_bound = self.lower_bound();
         let upper_bound = self.upper_bound();
         if start_block >= lower_bound && end_block <= upper_bound {
@@ -149,10 +138,15 @@ impl FeeHistoryCache {
             let result = entries
                 .range(start_block..=end_block + 1)
                 .map(|(_, fee_entry)| fee_entry.clone())
-                .collect();
-            Ok(Some(result))
+                .collect::<Vec<_>>();
+
+            if result.is_empty() {
+                return None
+            }
+
+            Some(result)
         } else {
-            Ok(None)
+            None
         }
     }
 
@@ -175,25 +169,25 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
     Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
 {
-    // Init default state
-    if fee_history_cache.upper_bound() == 0 {
-        let last_block_number = provider.last_block_number().unwrap_or(0);
-
-        let start_block = if last_block_number > fee_history_cache.config.max_blocks {
-            last_block_number - fee_history_cache.config.max_blocks
-        } else {
-            0
-        };
-
-        // let blocks = provider.block_range(start_block..=last_block_number).unwrap_or_default();
-        // let sealed = blocks.into_iter().map(|block| block.seal_slow()).collect::<Vec<_>>();
-        //
-        // fee_history_cache.on_new_chain(sealed.iter()).await;
-    }
+    // // Init default state
+    // if fee_history_cache.upper_bound() == 0 {
+    //     let last_block_number = provider.last_block_number().unwrap_or(0);
+    //
+    //     let start_block = if last_block_number > fee_history_cache.config.max_blocks {
+    //         last_block_number - fee_history_cache.config.max_blocks
+    //     } else {
+    //         0
+    //     };
+    //
+    //     // let blocks =
+    // provider.block_range(start_block..=last_block_number).unwrap_or_default();     // let
+    // sealed = blocks.into_iter().map(|block| block.seal_slow()).collect::<Vec<_>>();     //
+    //     // fee_history_cache.on_new_chain(sealed.iter()).await;
+    // }
 
     while let Some(event) = events.next().await {
         if let Some(committed) = event.committed() {
-            fee_history_cache.on_new_chain(committed).await;
+            // fee_history_cache.insert_blocks(committed).await;
         }
     }
 }
@@ -258,17 +252,27 @@ pub(crate) fn calculate_reward_percentiles_for_block(
     Ok(rewards_in_block)
 }
 
+/// A cached entry for a block's fee history.
 #[derive(Debug, Clone)]
 pub struct FeeHistoryEntry {
+    /// The base fee per gas for this block.
     pub base_fee_per_gas: u64,
+    /// Gas used ratio this block.
     pub gas_used_ratio: f64,
+    /// Gas used by this block.
     pub gas_used: u64,
+    /// Gas limit by this block.
     pub gas_limit: u64,
+    /// Hash of the block.
     pub header_hash: B256,
+    /// Approximated rewards for the configured percentiles.
     pub rewards: Vec<U256>,
 }
 
 impl FeeHistoryEntry {
+    /// Creates a new entry from a sealed block.
+    ///
+    /// Note: This does not calculate the rewards for the block.
     pub fn new(block: &SealedBlock) -> Self {
         FeeHistoryEntry {
             base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),

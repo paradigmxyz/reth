@@ -106,7 +106,7 @@ where
         let start_block = end_block_plus - block_count;
 
         // Check if the requested range is within the cache bounds
-        let fee_entries = self.fee_history_cache().get_history(start_block, end_block).await?;
+        let fee_entries = self.fee_history_cache().get_history(start_block, end_block).await;
 
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
         let mut base_fee_per_gas: Vec<U256> = Vec::new();
