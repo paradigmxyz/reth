@@ -17,15 +17,16 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::{
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
 };
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
-    proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec,
-    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, Header,
+    ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
 use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,

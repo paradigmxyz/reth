@@ -1,4 +1,5 @@
-use reth_primitives::{BlockNumHash, ChainInfo, Receipt, TxHash, U256};
+use reth_ethereum_forks::ChainInfo;
+use reth_primitives::{BlockNumHash, Receipt, TxHash, U256};
 use reth_rpc_types::{FilteredParams, Log};
 use reth_rpc_types_compat::log::from_primitive_log;
 

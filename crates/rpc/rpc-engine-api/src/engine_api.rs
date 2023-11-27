@@ -5,9 +5,10 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
+use reth_ethereum_forks::{ChainSpec, Hardfork};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
+use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
@@ -808,9 +809,10 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::BeaconEngineMessage;
+    use reth_ethereum_forks::MAINNET;
     use reth_interfaces::test_utils::generators::random_block;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{SealedBlock, B256, MAINNET};
+    use reth_primitives::{SealedBlock, B256};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;

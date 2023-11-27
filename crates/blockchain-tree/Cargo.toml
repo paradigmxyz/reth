@@ -16,6 +16,7 @@ normal = [
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
@@ -38,6 +39,7 @@ linked_hash_set = "0.1.4"
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-ethereum-forks = { workspace = true , features = ["test-utils"] }
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 parking_lot.workspace = true

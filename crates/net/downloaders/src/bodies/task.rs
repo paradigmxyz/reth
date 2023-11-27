@@ -170,8 +170,8 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::test_utils::create_test_rw_db;
+    use reth_ethereum_forks::MAINNET;
     use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
-    use reth_primitives::MAINNET;
     use reth_provider::ProviderFactory;
     use std::sync::Arc;
 

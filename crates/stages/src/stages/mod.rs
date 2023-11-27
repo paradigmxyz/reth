@@ -56,9 +56,10 @@ mod tests {
     };
     use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_primitives::{
-        address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
+        address, hex_literal::hex, keccak256, Account, Bytecode, PruneMode,
         PruneModes, SealedBlock, U256,
     };
+    use reth_ethereum_forks::ChainSpecBuilder;
     use reth_provider::{
         AccountExtReader, BlockWriter, ProviderFactory, ReceiptProvider, StorageReader,
     };

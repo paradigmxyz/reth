@@ -20,13 +20,14 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
 };
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
+use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,

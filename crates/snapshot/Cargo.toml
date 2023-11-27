@@ -11,6 +11,7 @@ description = "Snapshotting implementation"
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true

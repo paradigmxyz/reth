@@ -582,8 +582,9 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::test_utils::create_test_rw_db;
+    use reth_ethereum_forks::MAINNET;
     use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
-    use reth_primitives::{BlockBody, B256, MAINNET};
+    use reth_primitives::{BlockBody, B256};
     use reth_provider::ProviderFactory;
     use std::{collections::HashMap, sync::Arc};
 

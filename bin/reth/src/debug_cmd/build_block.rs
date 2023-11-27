@@ -18,6 +18,7 @@ use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
 use reth_db::{init_db, DatabaseEnv};
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::{consensus::Consensus, RethResult};
 use reth_payload_builder::{database::CachedReads, PayloadBuilderAttributes};
 use reth_primitives::{
@@ -25,7 +26,7 @@ use reth_primitives::{
     fs,
     revm_primitives::KzgSettings,
     stage::StageId,
-    Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
+    Address, BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement,
     SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{

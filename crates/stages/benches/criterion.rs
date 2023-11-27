@@ -4,8 +4,9 @@ use criterion::{
 };
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::DatabaseEnv;
+use reth_ethereum_forks::MAINNET;
 use reth_interfaces::test_utils::TestConsensus;
-use reth_primitives::{stage::StageCheckpoint, MAINNET};
+use reth_primitives::stage::StageCheckpoint;
 use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},

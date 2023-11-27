@@ -11,11 +11,12 @@ use crate::eth::{
     signer::EthSigner,
 };
 use async_trait::async_trait;
+use reth_ethereum_forks::ChainInfo;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnv},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, B256, U256, U64,
+    Address, BlockId, BlockNumberOrTag, SealedBlockWithSenders, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,

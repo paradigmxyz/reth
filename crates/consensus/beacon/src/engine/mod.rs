@@ -9,6 +9,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use reth_db::database::Database;
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -22,8 +23,8 @@ use reth_interfaces::{
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, ChainSpec, Head, Header,
-    SealedBlock, SealedHeader, B256, U256,
+    constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
+    SealedHeader, B256, U256,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
@@ -1953,7 +1954,8 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::{self, Rng};
-    use reth_primitives::{stage::StageCheckpoint, ChainSpec, ChainSpecBuilder, B256, MAINNET};
+    use reth_primitives::{stage::StageCheckpoint, B256};
+    use reth_ethereum_forks::{ChainSpec,ChainSpecBuilder,MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::try_block_to_payload_v1;
@@ -2411,7 +2413,8 @@ mod tests {
             generators,
             generators::{generate_keys, random_block},
         };
-        use reth_primitives::{public_key_to_address, Genesis, GenesisAccount, Hardfork, U256};
+        use reth_primitives::{public_key_to_address, Genesis, GenesisAccount, U256};
+        use reth_ethereum_forks::Hardfork;
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]

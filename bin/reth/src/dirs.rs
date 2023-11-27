@@ -1,6 +1,6 @@
 //! reth data directories.
 use crate::utils::parse_path;
-use reth_primitives::Chain;
+use reth_ethereum_forks::Chain;
 use std::{
     env::VarError,
     fmt::{Debug, Display, Formatter},

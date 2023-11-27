@@ -1,6 +1,7 @@
 //! Clap parser utilities
 
-use reth_primitives::{fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
+use reth_ethereum_forks::{AllGenesisFormats, ChainSpec};
+use reth_primitives::{fs, BlockHashOrNumber, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -10,10 +11,10 @@ use std::{
 };
 
 #[cfg(feature = "optimism")]
-use reth_primitives::{BASE_GOERLI, BASE_MAINNET};
+use reth_ethereum_forks::{BASE_GOERLI, BASE_MAINNET};
 
 #[cfg(not(feature = "optimism"))]
-use reth_primitives::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
+use reth_ethereum_forks::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
@@ -158,9 +159,8 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 mod tests {
     use super::*;
     use proptest::prelude::Rng;
-    use reth_primitives::{
-        hex, Address, ChainConfig, ChainSpecBuilder, Genesis, GenesisAccount, U256,
-    };
+    use reth_ethereum_forks::ChainSpecBuilder;
+    use reth_primitives::{hex, Address, ChainConfig, Genesis, GenesisAccount, U256};
     use secp256k1::rand::thread_rng;
     use std::collections::HashMap;
 

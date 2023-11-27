@@ -13,13 +13,13 @@ use crate::{
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use reth_ethereum_forks::env::tx_env_with_recovered;
 use reth_primitives::{
-    revm::env::tx_env_with_recovered,
     revm_primitives::{
         db::{DatabaseCommit, DatabaseRef},
         BlockEnv, CfgEnv,
     },
-    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
+    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
@@ -610,16 +610,7 @@ where
         while let Some(req) = stream.next().await {
             match req {
                 JsDbRequest::Basic { address, resp } => {
-                    let acc = db
-                        .basic_ref(address)
-                        .map(|maybe_acc| {
-                            maybe_acc.map(|acc| Account {
-                                nonce: acc.nonce,
-                                balance: acc.balance,
-                                bytecode_hash: Some(acc.code_hash),
-                            })
-                        })
-                        .map_err(|err| err.to_string());
+                    let acc = db.basic_ref(address).map_err(|err| err.to_string());
                     let _ = resp.send(acc);
                 }
                 JsDbRequest::Code { code_hash, resp } => {

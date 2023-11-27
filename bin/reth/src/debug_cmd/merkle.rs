@@ -14,13 +14,14 @@ use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     fs,
     stage::{StageCheckpoint, StageId},
-    BlockHashOrNumber, ChainSpec, PruneModes,
+    BlockHashOrNumber, PruneModes,
 };
 use reth_provider::{BlockWriter, ProviderFactory, StageCheckpointReader};
 use reth_stages::{

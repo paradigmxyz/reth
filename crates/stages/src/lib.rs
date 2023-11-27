@@ -18,7 +18,8 @@
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::{PeerId, MAINNET, B256};
+//! # use reth_primitives::{PeerId, B256};
+//! # use reth_ethereum_forks::MAINNET;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;

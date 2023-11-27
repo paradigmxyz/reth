@@ -1,9 +1,9 @@
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    constants::SYSTEM_ADDRESS, revm::env::fill_tx_env_with_beacon_root_contract_call, Address,
-    ChainSpec, Header, Withdrawal, B256, U256,
+    constants::SYSTEM_ADDRESS, Address, Header, Withdrawal, B256, U256,
 };
+use reth_ethereum_forks::{env::fill_tx_env_with_beacon_root_contract_call, ChainSpec};
 use revm::{Database, DatabaseCommit, EVM};
 use std::collections::HashMap;
 

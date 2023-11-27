@@ -10,7 +10,7 @@ use reth_db::{
     init_db, tables,
     transaction::DbTx,
 };
-use reth_primitives::ChainSpec;
+use reth_ethereum_forks::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
 use reth_trie::StateRoot;
 use std::{fs, sync::Arc};

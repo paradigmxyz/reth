@@ -1,5 +1,3 @@
-use crate::log::to_primitive_access_list;
-
 /// Converts a typed transaction request into a primitive transaction.
 ///
 /// Returns `None` if any of the following are true:
@@ -30,7 +28,7 @@ pub fn to_primitive_transaction(
             to: to_primitive_transaction_kind(tx.kind),
             value: tx.value.into(),
             input: tx.input,
-            access_list: to_primitive_access_list(tx.access_list),
+            access_list: tx.access_list.into(),
         }),
         TypedTransactionRequest::EIP1559(tx) => Transaction::Eip1559(TxEip1559 {
             chain_id: tx.chain_id,
@@ -40,7 +38,7 @@ pub fn to_primitive_transaction(
             to: to_primitive_transaction_kind(tx.kind),
             value: tx.value.into(),
             input: tx.input,
-            access_list: to_primitive_access_list(tx.access_list),
+            access_list: tx.access_list.into(),
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),
         }),
         TypedTransactionRequest::EIP4844(tx) => Transaction::Eip4844(TxEip4844 {
@@ -51,7 +49,7 @@ pub fn to_primitive_transaction(
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),
             to: to_primitive_transaction_kind(tx.kind),
             value: tx.value.into(),
-            access_list: to_primitive_access_list(tx.access_list),
+            access_list: tx.access_list.into(),
             blob_versioned_hashes: tx.blob_versioned_hashes,
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas.to(),
             input: tx.input,

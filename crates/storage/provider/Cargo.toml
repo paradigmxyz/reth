@@ -11,6 +11,7 @@ description = "Reth storage provider."
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
 reth-trie.workspace = true
@@ -45,6 +46,7 @@ rayon.workspace = true
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
+reth-ethereum-forks = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 
@@ -58,5 +60,6 @@ rand.workspace = true
 test-utils = ["alloy-rlp"]
 optimism = [
   "reth-primitives/optimism",
+  "reth-ethereum-forks/optimism",
   "reth-interfaces/optimism"
 ]

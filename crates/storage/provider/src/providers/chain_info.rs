@@ -1,5 +1,6 @@
 use parking_lot::RwLock;
-use reth_primitives::{BlockNumHash, BlockNumber, ChainInfo, SealedHeader};
+use reth_ethereum_forks::ChainInfo;
+use reth_primitives::{BlockNumHash, BlockNumber, SealedHeader};
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},

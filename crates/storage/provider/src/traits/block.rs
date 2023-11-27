@@ -4,11 +4,11 @@ use crate::{
 };
 use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
-    ChainSpec, Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    B256,
+    Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
 };
 use std::ops::RangeInclusive;
 

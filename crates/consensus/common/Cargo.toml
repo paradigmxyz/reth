@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 # reth 
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
 
@@ -23,4 +24,4 @@ assert_matches.workspace = true
 mockall = "0.11.3"
 
 [features]
-optimism = ["reth-primitives/optimism"]
+optimism = ["reth-primitives/optimism", "reth-ethereum-forks/optimism"]

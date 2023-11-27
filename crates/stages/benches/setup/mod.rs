@@ -12,7 +12,8 @@ use reth_interfaces::test_utils::{
         random_eoa_account_range,
     },
 };
-use reth_primitives::{Account, Address, SealedBlock, B256, MAINNET};
+use reth_primitives::{Account, Address, SealedBlock, B256};
+use reth_ethereum_forks::MAINNET;
 use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},

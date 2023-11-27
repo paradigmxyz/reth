@@ -7,6 +7,7 @@ use crate::{
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
 use reth_db::database::Database;
+use reth_ethereum_forks::Hardfork;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -17,7 +18,7 @@ use reth_interfaces::{
     RethResult,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, PruneModes, Receipt, SealedBlock,
+    BlockHash, BlockNumHash, BlockNumber, ForkBlock, PruneModes, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
@@ -1205,10 +1206,9 @@ mod tests {
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
+    use reth_ethereum_forks::{ChainSpecBuilder, MAINNET};
     use reth_interfaces::test_utils::TestConsensus;
-    use reth_primitives::{
-        constants::EMPTY_ROOT_HASH, stage::StageCheckpoint, ChainSpecBuilder, B256, MAINNET,
-    };
+    use reth_primitives::{constants::EMPTY_ROOT_HASH, stage::StageCheckpoint, B256};
     use reth_provider::{
         test_utils::{
             blocks::BlockChainTestData, create_test_provider_factory_with_chain_spec,

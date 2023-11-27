@@ -40,6 +40,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_ethereum_forks::{ChainSpec, DisplayHardforks};
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -55,7 +56,7 @@ use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
     stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
+    BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
@@ -1054,6 +1055,7 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_ethereum_forks::DEV;
     use crate::args::utils::SUPPORTED_CHAINS;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use std::{
@@ -1161,7 +1163,7 @@ mod tests {
     #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
     fn parse_dev() {
         let cmd = NodeCommand::<()>::parse_from(["reth", "--dev"]);
-        let chain = reth_primitives::DEV.clone();
+        let chain = reth_ethereum_forks::DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
         assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
         assert_eq!(

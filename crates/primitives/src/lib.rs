@@ -25,10 +25,8 @@ mod compression;
 pub mod constants;
 pub mod eip4844;
 mod error;
-mod forkid;
 pub mod fs;
 mod genesis;
-mod hardfork;
 mod header;
 mod integer_list;
 mod log;
@@ -53,23 +51,16 @@ pub use block::{
     Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
     BlockWithSenders, ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
-pub use bytes::{Buf, BufMut, BytesMut};
-pub use chain::{
-    AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
-    DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, GOERLI, HOLESKY, MAINNET,
-    SEPOLIA,
-};
+pub use bytes::{self, Buf, BufMut, BytesMut};
+pub use chain::BaseFeeParams;
 #[cfg(feature = "optimism")]
-pub use chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
-pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
-pub use hardfork::Hardfork;
 pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};

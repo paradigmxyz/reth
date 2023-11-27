@@ -37,7 +37,7 @@ pub trait Segment: Default {
     ) -> ProviderResult<()>;
 
     /// Returns this struct's [`SnapshotSegment`].
-    fn segment() -> SnapshotSegment;
+    fn segment(&self) -> SnapshotSegment;
 
     /// Generates the dataset to train a zstd dictionary with the most recent rows (at most 1000).
     fn dataset_for_compression<DB: Database, T: Table<Key = u64>>(

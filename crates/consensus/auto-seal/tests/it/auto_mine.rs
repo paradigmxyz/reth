@@ -10,7 +10,8 @@ use reth::{
     runner::CliRunner,
     tasks::TaskSpawner,
 };
-use reth_primitives::{hex, revm_primitives::FixedBytes, ChainSpec, Genesis};
+use reth_ethereum_forks::ChainSpec;
+use reth_primitives::{hex, revm_primitives::FixedBytes, Genesis};
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Duration};

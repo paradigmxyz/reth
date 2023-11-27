@@ -13,7 +13,7 @@
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::MAINNET;
+//! # use reth_ethereum_forks::MAINNET;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //!
 //! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone());
@@ -26,7 +26,7 @@
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::{StageSet, sets::OfflineStages};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::MAINNET;
+//! # use reth_ethereum_forks::MAINNET;
 //! // Build a pipeline with all offline stages and a custom stage at the end.
 //! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone());
 //! Pipeline::builder()

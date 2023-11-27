@@ -7,6 +7,7 @@ license.workspace = true
 
 [dev-dependencies]
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 
 reth-db.workspace = true
 reth-provider.workspace = true

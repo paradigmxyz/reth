@@ -12,10 +12,10 @@ use crate::{
     EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
+use reth_ethereum_forks::env::{fill_block_env_with_coinbase, tx_env_with_recovered};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
-    revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock,

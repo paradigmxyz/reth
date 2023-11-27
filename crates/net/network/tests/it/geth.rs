@@ -9,7 +9,8 @@ use reth_network::{
     NetworkConfig, NetworkEvents, NetworkManager,
 };
 use reth_network_api::Peers;
-use reth_primitives::{ChainSpec, Genesis, PeerId, SealedHeader};
+use reth_primitives::{Genesis, PeerId, SealedHeader};
+use reth_ethereum_forks::ChainSpec;
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc};

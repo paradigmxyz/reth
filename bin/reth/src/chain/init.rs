@@ -8,7 +8,7 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::init_db;
-use reth_primitives::ChainSpec;
+use reth_ethereum_forks::ChainSpec;
 use std::sync::Arc;
 use tracing::info;
 

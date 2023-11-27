@@ -1,4 +1,5 @@
 //! Collection of methods for block validation.
+use reth_ethereum_forks::{ChainSpec, Hardfork};
 use reth_interfaces::{consensus::ConsensusError, RethResult};
 use reth_primitives::{
     constants::{
@@ -6,9 +7,8 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     },
     eip4844::calculate_excess_blob_gas,
-    BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
-    SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
-    TxLegacy,
+    BlockNumber, GotExpected, Header, InvalidTransactionError, SealedBlock, SealedHeader,
+    Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
 };
 use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
 use std::collections::{hash_map::Entry, HashMap};
@@ -489,9 +489,10 @@ mod tests {
     };
     use reth_primitives::{
         constants::eip4844::DATA_GAS_PER_BLOB, hex_literal::hex, proofs, Account, Address,
-        BlockBody, BlockHash, BlockHashOrNumber, Bytes, ChainSpecBuilder, Header, Signature,
+        BlockBody, BlockHash, BlockHashOrNumber, Bytes, Signature,
         TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
+    use reth_ethereum_forks::{ChainSpecBuilder, MAINNET};
     use std::ops::RangeBounds;
 
     mock! {

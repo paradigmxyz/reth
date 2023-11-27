@@ -210,9 +210,10 @@ impl<DB: Database> Snapshotter<DB> {
             let temp = self.snapshots_path.join(TEMPORARY_SUBDIRECTORY);
             let provider = self.provider_factory.provider()?;
             let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
-            let filename = S::segment().filename(&block_range, &tx_range);
+            let segment = S::default();
+            let filename = segment.segment().filename(&block_range, &tx_range);
 
-            S::default().snapshot::<DB>(&provider, temp.clone(), block_range)?;
+            segment.snapshot::<DB>(&provider, temp.clone(), block_range)?;
 
             reth_primitives::fs::rename(temp.join(&filename), self.snapshots_path.join(filename))?;
         }

@@ -535,20 +535,14 @@ where
 {
     while let Some(event) = events.next().await {
         if let Some(committed) = event.committed() {
-            // we're only interested in new committed blocks
-            let (blocks, state) = committed.inner();
-
-            let blocks = blocks.iter().map(|(_, block)| block.clone()).collect::<Vec<_>>();
-
-            // also cache all receipts of the blocks
-            let mut receipts = Vec::with_capacity(blocks.len());
-            for block in &blocks {
-                let block_receipts = BlockReceipts {
-                    block_hash: block.block.hash,
-                    receipts: state.receipts_by_block(block.number).to_vec(),
-                };
-                receipts.push(block_receipts);
-            }
+            let (blocks, receipts): (Vec<_>, Vec<_>) = committed
+                .blocks_and_receipts()
+                .map(|(block, receipts)| {
+                    let block_receipts =
+                        BlockReceipts { block_hash: block.block.hash, receipts: receipts.clone() };
+                    (block.clone(), block_receipts)
+                })
+                .unzip();
 
             let _ = eth_state_cache
                 .to_service

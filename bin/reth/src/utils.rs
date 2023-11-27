@@ -16,8 +16,9 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{
-    fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader,
+    fs, BlockHashOrNumber, HeadersDirection, SealedBlock, SealedHeader,
 };
+use reth_ethereum_forks::ChainSpec;
 use reth_rpc::{JwtError, JwtSecret};
 use std::{
     env::VarError,

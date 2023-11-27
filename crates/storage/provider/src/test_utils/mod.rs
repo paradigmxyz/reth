@@ -3,7 +3,7 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_primitives::{ChainSpec, MAINNET};
+use reth_ethereum_forks::{ChainSpec, MAINNET};
 use std::sync::Arc;
 
 pub mod blocks;

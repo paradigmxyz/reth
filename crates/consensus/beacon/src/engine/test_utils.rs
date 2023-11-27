@@ -23,7 +23,8 @@ use reth_interfaces::{
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneModes, Receipt, B256, U256};
+use reth_primitives::{BlockNumber, PruneModes, Receipt, B256, U256};
+use reth_ethereum_forks::ChainSpec;
 use reth_provider::{
     providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
     BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, ProviderFactory,

@@ -8,9 +8,9 @@ use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    ForkFilter, GotExpected,
+    bytes::{Bytes, BytesMut}, GotExpected,
 };
+use reth_ethereum_forks::ForkFilter;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -332,7 +332,8 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::{stream::ECIESStream, util::pk2id};
-    use reth_primitives::{ForkFilter, Head, NamedChain, B256, U256};
+    use reth_primitives::{Head, B256, U256};
+    use reth_ethereum_forks::{ForkFilter, NamedChain};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;

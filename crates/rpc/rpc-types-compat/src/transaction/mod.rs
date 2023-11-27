@@ -162,22 +162,6 @@ pub fn from_primitive_access_list(
     )
 }
 
-/// Convert [reth_rpc_types::AccessList] to [reth_primitives::AccessList]
-pub fn to_primitive_access_list(
-    access_list: reth_rpc_types::AccessList,
-) -> reth_primitives::AccessList {
-    reth_primitives::AccessList(
-        access_list
-            .0
-            .into_iter()
-            .map(|item| reth_primitives::AccessListItem {
-                address: item.address.0.into(),
-                storage_keys: item.storage_keys.into_iter().map(|key| key.0.into()).collect(),
-            })
-            .collect(),
-    )
-}
-
 /// Convert [TransactionSignedEcRecovered] to [CallRequest]
 pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequest {
     let from = tx.signer();

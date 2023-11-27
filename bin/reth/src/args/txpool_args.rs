@@ -2,9 +2,9 @@
 
 use clap::Args;
 use reth_transaction_pool::{
-    PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
-    TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
-    TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+    LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
+    REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 
 /// Parameters for debugging purposes
@@ -43,12 +43,16 @@ pub struct TxPoolArgs {
     /// Price bump percentage to replace an already existing blob transaction
     #[arg(long = "blobpool.pricebump", default_value_t = REPLACE_BLOB_PRICE_BUMP)]
     pub blob_transaction_price_bump: u128,
+    /// Flag to disable local transaction exemptions.
+    #[arg(long = "txpool.nolocals")]
+    pub no_locals: bool,
 }
 
 impl TxPoolArgs {
     /// Returns transaction pool configuration.
     pub fn pool_config(&self) -> PoolConfig {
         PoolConfig {
+            local_transactions_config: LocalTransactionConfig { no_exemptions: self.no_locals },
             pending_limit: SubPoolLimit {
                 max_txs: self.pending_max_count,
                 max_size: self.pending_max_size * 1024 * 1024,

@@ -1,12 +1,12 @@
 //! Builtin functions
 
+use alloy_primitives::{hex, Address, B256, U256};
 use boa_engine::{
     object::builtins::{JsArray, JsArrayBuffer},
     property::Attribute,
     Context, JsArgs, JsError, JsNativeError, JsResult, JsString, JsValue, NativeFunction, Source,
 };
 use boa_gc::{empty_trace, Finalize, Trace};
-use reth_primitives::{hex, Address, B256, U256};
 use std::collections::HashSet;
 
 /// bigIntegerJS is the minified version of <https://github.com/peterolson/BigInteger.js>.

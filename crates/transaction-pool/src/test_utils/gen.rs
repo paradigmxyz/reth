@@ -5,12 +5,12 @@ use crate::{
     EthPooledTransaction,
 };
 use rand::Rng;
+use reth_ethereum_forks::MAINNET;
 use reth_primitives::{
     constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes,
     FromRecoveredTransaction, Transaction, TransactionKind, TransactionSigned, TxEip1559, TxLegacy,
-    TxValue, B256, MAINNET,
+    TxValue, B256,
 };
-
 /// A generator for transactions for testing purposes
 pub struct TransactionGenerator<R> {
     rng: R,

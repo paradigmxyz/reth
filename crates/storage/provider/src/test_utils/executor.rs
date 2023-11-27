@@ -3,8 +3,9 @@ use crate::{
     PrunableBlockExecutor, StateProvider,
 };
 use parking_lot::Mutex;
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, Receipt, U256};
+use reth_primitives::{Address, Block, BlockNumber, PruneModes, Receipt, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
 #[derive(Debug)]

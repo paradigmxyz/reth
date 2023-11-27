@@ -11,6 +11,7 @@ description = "Implementation of Engine API"
 [dependencies]
 # reth 
 reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
@@ -42,4 +43,4 @@ reth-payload-builder = { workspace = true, features = ["test-utils"] }
 assert_matches.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism", "reth-rpc-types/optimism"]
+optimism = ["reth-primitives/optimism", "reth-ethereum-forks/optimism", "reth-rpc-types/optimism"]

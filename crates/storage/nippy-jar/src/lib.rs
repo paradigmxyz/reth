@@ -201,6 +201,21 @@ where
         &self.user_header
     }
 
+    /// Gets a reference to `self.offsets`.
+    pub fn offsets_size(&self) -> usize {
+        self.offsets.size_in_bytes()
+    }
+
+    /// Gets a reference to `self.offsets`.
+    pub fn filter_size(&self) -> usize {
+        self.size()
+    }
+
+    /// Gets a reference to `self.offsets_index`.
+    pub fn offsets_index_size(&self) -> usize {
+        self.offsets_index.size_in_bytes()
+    }
+
     /// Gets a reference to the compressor.
     pub fn compressor(&self) -> Option<&Compressors> {
         self.compressor.as_ref()
@@ -479,6 +494,10 @@ where
 
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
         self.filter.as_ref().ok_or(NippyJarError::FilterMissing)?.contains(element)
+    }
+
+    fn size(&self) -> usize {
+        self.filter.as_ref().map(|f| f.size()).unwrap_or(0)
     }
 }
 

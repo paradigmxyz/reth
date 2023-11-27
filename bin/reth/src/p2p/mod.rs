@@ -13,8 +13,9 @@ use clap::{Parser, Subcommand};
 use reth_config::Config;
 use reth_db::open_db;
 use reth_discv4::NatResolver;
+use reth_ethereum_forks::ChainSpec;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
+use reth_primitives::{BlockHashOrNumber, NodeRecord};
 use reth_provider::ProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 

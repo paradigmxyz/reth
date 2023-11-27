@@ -187,8 +187,7 @@ mod tests {
         constants::EMPTY_ROOT_HASH,
         hex_literal::hex,
         proofs::{calculate_receipt_root, calculate_transaction_root, genesis_state_root},
-        Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256, GOERLI,
-        HOLESKY, MAINNET, SEPOLIA, U256,
+        Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256, U256,
     };
     use alloy_primitives::b256;
     use alloy_rlp::Decodable;
@@ -507,40 +506,5 @@ b256!("000000000000000000000000000000000000000000000000000000000011a1d3"),
 
             assert_eq!(root, expected_root);
         }
-    }
-
-    #[test]
-    fn test_chain_state_roots() {
-        let expected_mainnet_state_root =
-            b256!("d7f8974fb5ac78d9ac099b9ad5018bedc2ce0a72dad1827a1709da30580f0544");
-        let calculated_mainnet_state_root = genesis_state_root(&MAINNET.genesis.alloc);
-        assert_eq!(
-            expected_mainnet_state_root, calculated_mainnet_state_root,
-            "mainnet state root mismatch"
-        );
-
-        let expected_goerli_state_root =
-            b256!("5d6cded585e73c4e322c30c2f782a336316f17dd85a4863b9d838d2d4b8b3008");
-        let calculated_goerli_state_root = genesis_state_root(&GOERLI.genesis.alloc);
-        assert_eq!(
-            expected_goerli_state_root, calculated_goerli_state_root,
-            "goerli state root mismatch"
-        );
-
-        let expected_sepolia_state_root =
-            b256!("5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494");
-        let calculated_sepolia_state_root = genesis_state_root(&SEPOLIA.genesis.alloc);
-        assert_eq!(
-            expected_sepolia_state_root, calculated_sepolia_state_root,
-            "sepolia state root mismatch"
-        );
-
-        let expected_holesky_state_root =
-            b256!("69d8c9d72f6fa4ad42d4702b433707212f90db395eb54dc20bc85de253788783");
-        let calculated_holesky_state_root = genesis_state_root(&HOLESKY.genesis.alloc);
-        assert_eq!(
-            expected_holesky_state_root, calculated_holesky_state_root,
-            "holesky state root mismatch"
-        );
     }
 }

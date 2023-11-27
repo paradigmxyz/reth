@@ -7,6 +7,7 @@ use crate::{
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, models::StoredBlockBodyIndices};
+use reth_ethereum_forks::{ChainInfo, ChainSpec};
 use reth_interfaces::{
     blockchain_tree::{BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::ForkchoiceState,
@@ -16,9 +17,9 @@ use reth_interfaces::{
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, PruneCheckpoint,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
+    BlockNumberOrTag, BlockWithSenders, Header, PruneCheckpoint, PruneSegment, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{

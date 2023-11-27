@@ -28,7 +28,7 @@ impl Default for Receipts {
 }
 
 impl Segment for Receipts {
-    fn segment() -> SnapshotSegment {
+    fn segment(&self) -> SnapshotSegment {
         SnapshotSegment::Receipts
     }
 
@@ -44,7 +44,7 @@ impl Segment for Receipts {
         let mut jar = prepare_jar::<DB, 1>(
             provider,
             directory,
-            Self::segment(),
+            self.segment(),
             self.config,
             block_range,
             tx_range_len,
