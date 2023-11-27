@@ -37,13 +37,13 @@ pub struct MaintainPoolConfig {
     pub max_update_depth: u64,
     /// Maximum number of accounts to reload from state at once when updating the transaction pool.
     ///
-    /// Default: 250
+    /// Default: 100
     pub max_reload_accounts: usize,
 }
 
 impl Default for MaintainPoolConfig {
     fn default() -> Self {
-        Self { max_update_depth: 64, max_reload_accounts: 250 }
+        Self { max_update_depth: 64, max_reload_accounts: 100 }
     }
 }
 
