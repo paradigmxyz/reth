@@ -888,6 +888,8 @@ where
             logs: result.logs().into_iter().map(into_reth_log).collect(),
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
         }));
 
         // update add to total fees

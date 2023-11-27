@@ -30,9 +30,17 @@ pub struct Receipt {
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
     pub logs: Vec<Log>,
-    /// Deposit nonce for Optimism deposited transactions
+    /// Deposit nonce for Optimism deposit transactions
     #[cfg(feature = "optimism")]
     pub deposit_nonce: Option<u64>,
+    /// Deposit receipt version for Optimism deposit transactions
+    ///
+    ///
+    /// The deposit receipt version was introduced in Canyon to indicate an update to how
+    /// receipt hashes should be computed when set. The state transition process
+    /// ensures this is only set for post-Canyon deposit transactions.
+    #[cfg(feature = "optimism")]
+    pub deposit_receipt_version: Option<u64>,
 }
 
 impl Receipt {
@@ -210,15 +218,29 @@ impl proptest::arbitrary::Arbitrary for Receipt {
                         success in any::<bool>(),
                         cumulative_gas_used in any::<u64>(),
                         logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
-                        _deposit_nonce in any::<Option<u64>>()) -> Receipt
+                        _deposit_nonce in any::<Option<u64>>(),
+                        _deposit_receipt_version in any::<Option<u64>>()) -> Receipt
             {
+                // Only receipts for deposit transactions may contain a deposit nonce
+                #[cfg(feature = "optimism")]
+                let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
+                    // The deposit receipt version is only present if the deposit nonce is present
+                    let deposit_receipt_version = _deposit_nonce.and(_deposit_receipt_version);
+                    (_deposit_nonce, deposit_receipt_version)
+                } else {
+                    (None, None)
+                };
+
                 Receipt { tx_type,
                     success,
                     cumulative_gas_used,
                     logs,
                     // Only receipts for deposit transactions may contain a deposit nonce
                     #[cfg(feature = "optimism")]
-                    deposit_nonce: (tx_type == TxType::DEPOSIT).then_some(_deposit_nonce).flatten()
+                    deposit_nonce,
+                    // Only receipts for deposit transactions may contain a deposit nonce
+                    #[cfg(feature = "optimism")]
+                    deposit_receipt_version
                 }
             }
         };
@@ -238,8 +260,14 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 
         // Only receipts for deposit transactions may contain a deposit nonce
         #[cfg(feature = "optimism")]
-        let deposit_nonce =
-            if tx_type == TxType::DEPOSIT { Option::<u64>::arbitrary(u)? } else { None };
+        let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
+            let deposit_nonce = Option::<u64>::arbitrary(u)?;
+            let deposit_nonce_version =
+                deposit_nonce.map(|_| Option::<u64>::arbitrary(u)).transpose()?.flatten();
+            (deposit_nonce, deposit_nonce_version)
+        } else {
+            (None, None)
+        };
 
         Ok(Self {
             tx_type,
@@ -248,6 +276,8 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
             logs,
             #[cfg(feature = "optimism")]
             deposit_nonce,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version,
         })
     }
 }
@@ -275,12 +305,20 @@ impl ReceiptWithBloom {
         let receipt = match tx_type {
             #[cfg(feature = "optimism")]
             TxType::DEPOSIT => {
-                let consumed = started_len - b.len();
-                let has_nonce = rlp_head.payload_length - consumed > 0;
+                let remaining = |b: &[u8]| rlp_head.payload_length - (started_len - b.len()) > 0;
                 let deposit_nonce =
-                    if has_nonce { Some(alloy_rlp::Decodable::decode(b)?) } else { None };
+                    remaining(b).then(|| alloy_rlp::Decodable::decode(b)).transpose()?;
+                let deposit_receipt_version =
+                    remaining(b).then(|| alloy_rlp::Decodable::decode(b)).transpose()?;
 
-                Receipt { tx_type, success, cumulative_gas_used, logs, deposit_nonce }
+                Receipt {
+                    tx_type,
+                    success,
+                    cumulative_gas_used,
+                    logs,
+                    deposit_nonce,
+                    deposit_receipt_version,
+                }
             }
             _ => Receipt {
                 tx_type,
@@ -289,6 +327,8 @@ impl ReceiptWithBloom {
                 logs,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
             },
         };
 
@@ -421,6 +461,9 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             if let Some(deposit_nonce) = self.receipt.deposit_nonce {
                 rlp_head.payload_length += deposit_nonce.length();
             }
+            if let Some(deposit_receipt_version) = self.receipt.deposit_receipt_version {
+                rlp_head.payload_length += deposit_receipt_version.length();
+            }
         }
 
         rlp_head
@@ -437,6 +480,9 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         if self.receipt.tx_type == TxType::DEPOSIT {
             if let Some(deposit_nonce) = self.receipt.deposit_nonce {
                 deposit_nonce.encode(out)
+            }
+            if let Some(deposit_receipt_version) = self.receipt.deposit_receipt_version {
+                deposit_receipt_version.encode(out)
             }
         }
     }
@@ -528,6 +574,8 @@ mod tests {
                 success: false,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
             },
             bloom: [0; 256].into(),
         };
@@ -560,6 +608,8 @@ mod tests {
                 success: false,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
             },
             bloom: [0; 256].into(),
         };
@@ -581,6 +631,7 @@ mod tests {
                 logs: vec![],
                 success: true,
                 deposit_nonce: Some(4012991),
+                deposit_receipt_version: None,
             },
             bloom: [0; 256].into(),
         };
@@ -590,6 +641,32 @@ mod tests {
 
         let mut buf = BytesMut::default();
         receipt.encode_inner(&mut buf, false);
+        assert_eq!(buf.freeze(), &data[..]);
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn decode_deposit_receipt_canyon_roundtrip() {
+        let data = hex!("7ef9010d0182b741b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0833d3bbf01");
+
+        // Deposit Receipt (post-regolith)
+        let expected = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::DEPOSIT,
+                cumulative_gas_used: 46913,
+                logs: vec![],
+                success: true,
+                deposit_nonce: Some(4012991),
+                deposit_receipt_version: Some(1),
+            },
+            bloom: [0; 256].into(),
+        };
+
+        let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
+        assert_eq!(receipt, expected);
+
+        let mut buf = BytesMut::default();
+        expected.encode_inner(&mut buf, false);
         assert_eq!(buf.freeze(), &data[..]);
     }
 
@@ -617,6 +694,8 @@ mod tests {
             ],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
         };
 
         let mut data = vec![];
