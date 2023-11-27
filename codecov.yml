@@ -63,7 +63,6 @@ component_management:
       name: primitives
       paths:
         - crates/primitives/**
-        - crates/ethereum-forks/**
         - crates/tasks/**
         - crates/rlp/**
         - crates/interfaces/**

@@ -141,7 +141,6 @@ Crates related to building and validating payloads (blocks).
 These crates define primitive types or algorithms such as RLP.
 
 - [`primitives`](../../crates/primitives): Commonly used types in Reth.
-- [`ethereum-forks`](../../crates/ethereum-forks): Helper crate for ethereum fork types used in Reth.
 - [`rlp`](../../crates/rlp): An implementation of RLP, forked from an earlier Apache-licensed version of [`fastrlp`][fastrlp]
 - [`rlp/rlp-derive`](../../crates/rlp/rlp-derive): Forked from an earlier Apache licenced version of the [`fastrlp-derive`][fastrlp-derive] crate, before it changed licence to GPL.
 - [`trie`](../../crates/trie): An implementation of a Merkle Patricia Trie used for various roots (e.g. the state root) in Ethereum.
