@@ -1,5 +1,5 @@
 use super::{LoadedJar, SnapshotJarProvider};
-use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
+use crate::{to_range, BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_db::{
@@ -16,7 +16,7 @@ use reth_primitives::{
 use revm::primitives::HashMap;
 use std::{
     collections::BTreeMap,
-    ops::{RangeBounds, RangeInclusive},
+    ops::{Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
 };
 use tokio::sync::watch;
@@ -274,8 +274,44 @@ impl HeaderProvider for SnapshotProvider {
             .header_td_by_number(num)
     }
 
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        todo!();
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+        let range = to_range(range);
+
+        // Don't pre-allocate because the range might be high with a specific predicate
+        let mut headers = Vec::with_capacity((range.end - range.start) as usize);
+
+        let mut provider =
+            self.get_segment_provider_from_block(SnapshotSegment::Headers, range.start, None)?;
+        let mut cursor = provider.cursor()?;
+
+        'outer: for number in range {
+            'inner: loop {
+                match cursor.get_one::<HeaderMask<Header>>(number.into())? {
+                    Some(header) => {
+                        headers.push(header);
+                        break 'inner
+                    }
+                    None => {
+                        // If `None`, then we have reached the end of the current snapshot, and move
+                        // on to the next
+                        if number >
+                            self.get_highest_snapshot(SnapshotSegment::Headers)
+                                .unwrap_or_default()
+                        {
+                            break 'outer
+                        }
+                        provider = self.get_segment_provider_from_block(
+                            SnapshotSegment::Headers,
+                            number,
+                            None,
+                        )?;
+                        cursor = provider.cursor()?;
+                    }
+                }
+            }
+        }
+
+        Ok(headers)
     }
 
     fn sealed_header(&self, num: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
@@ -285,10 +321,52 @@ impl HeaderProvider for SnapshotProvider {
 
     fn sealed_headers_while(
         &self,
-        _range: impl RangeBounds<BlockNumber>,
-        _predicate: impl FnMut(&SealedHeader) -> bool,
+        range: impl RangeBounds<BlockNumber>,
+        mut predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        todo!()
+        let range = to_range(range);
+
+        // Don't pre-allocate because the range might be high with a specific predicate
+        let mut headers = vec![];
+
+        let mut provider =
+            self.get_segment_provider_from_block(SnapshotSegment::Headers, range.start, None)?;
+        let mut cursor = provider.cursor()?;
+
+        'outer: for number in range {
+            'inner: loop {
+                match cursor
+                    .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+                    .map(|(header, hash)| header.seal(hash))
+                {
+                    Some(sealed) => {
+                        if !predicate(&sealed) {
+                            break 'outer
+                        }
+                        headers.push(sealed);
+                        break 'inner
+                    }
+                    None => {
+                        // If `None`, then we have reached the end of the current snapshot, and move
+                        // on to the next
+                        if number >
+                            self.get_highest_snapshot(SnapshotSegment::Headers)
+                                .unwrap_or_default()
+                        {
+                            break 'outer
+                        }
+                        provider = self.get_segment_provider_from_block(
+                            SnapshotSegment::Headers,
+                            number,
+                            None,
+                        )?;
+                        cursor = provider.cursor()?;
+                    }
+                }
+            }
+        }
+
+        Ok(headers)
     }
 }
 
@@ -299,10 +377,46 @@ impl BlockHashReader for SnapshotProvider {
 
     fn canonical_hashes_range(
         &self,
-        _start: BlockNumber,
-        _end: BlockNumber,
+        start: BlockNumber,
+        end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        todo!()
+        let range = to_range(start..end);
+
+        // Don't pre-allocate because the range might be high with a specific predicate
+        let mut hashes = Vec::with_capacity((range.end - range.start) as usize);
+
+        let mut provider =
+            self.get_segment_provider_from_block(SnapshotSegment::Headers, range.start, None)?;
+        let mut cursor = provider.cursor()?;
+
+        'outer: for number in range {
+            'inner: loop {
+                match cursor.get_one::<HeaderMask<BlockHash>>(number.into())? {
+                    Some(hash) => {
+                        hashes.push(hash);
+                        break 'inner
+                    }
+                    None => {
+                        // If `None`, then we have reached the end of the current snapshot, and move
+                        // on to the next
+                        if number >
+                            self.get_highest_snapshot(SnapshotSegment::Headers)
+                                .unwrap_or_default()
+                        {
+                            break 'outer
+                        }
+                        provider = self.get_segment_provider_from_block(
+                            SnapshotSegment::Headers,
+                            number,
+                            None,
+                        )?;
+                        cursor = provider.cursor()?;
+                    }
+                }
+            }
+        }
+
+        Ok(hashes)
     }
 }
 

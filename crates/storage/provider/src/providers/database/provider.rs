@@ -1,6 +1,7 @@
 use crate::{
     bundle_state::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
     providers::{database::metrics, SnapshotProvider},
+    to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
@@ -39,13 +40,14 @@ use reth_primitives::{
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment,
+    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use reth_trie::{prefix_set::PrefixSetMut, StateRoot};
 use revm::primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{
+    cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
@@ -931,6 +933,15 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
+        if let Some(provider) = &self.snapshot_provider {
+            if provider
+                .get_highest_snapshot(SnapshotSegment::Headers)
+                .map_or(false, |block| block > num)
+            {
+                return provider.header_by_number(num);
+            }
+        }
+
         Ok(self.tx.get::<tables::Headers>(num)?)
     }
 
@@ -949,18 +960,54 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
             return Ok(Some(td))
         }
 
+        if let Some(provider) = &self.snapshot_provider {
+            if provider
+                .get_highest_snapshot(SnapshotSegment::Headers)
+                .map_or(false, |block| block >= number)
+            {
+                return provider.header_td_by_number(number);
+            }
+        }
+
         Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        let mut cursor = self.tx.cursor_read::<tables::Headers>()?;
-        cursor
-            .walk_range(range)?
-            .map(|result| result.map(|(_, header)| header).map_err(Into::into))
-            .collect::<ProviderResult<Vec<_>>>()
+        let mut range = to_range(range);
+        let mut headers = Vec::with_capacity((range.end - range.start) as usize);
+
+        if let Some(provider) = &self.snapshot_provider {
+            if let Some(highest) = provider.get_highest_snapshot(SnapshotSegment::Headers) {
+                if range.start <= highest {
+                    headers
+                        .extend(provider.headers_range(range.start..range.end.min(highest + 1))?);
+                }
+                range.start = range.start.max(highest + 1);
+            }
+        }
+
+        if range.end > range.start {
+            headers.extend(
+                self.tx
+                    .cursor_read::<tables::Headers>()?
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, header)| header).map_err(Into::into))
+                    .collect::<ProviderResult<Vec<_>>>()?,
+            )
+        }
+        Ok(headers)
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
+        if let Some(provider) = &self.snapshot_provider {
+            if provider
+                .get_highest_snapshot(SnapshotSegment::Headers)
+                .map_or(false, |block| block >= number)
+            {
+                return provider.sealed_header(number);
+            }
+        }
+
         if let Some(header) = self.header_by_number(number)? {
             let hash = self
                 .block_hash(number)?
@@ -976,17 +1023,33 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         range: impl RangeBounds<BlockNumber>,
         mut predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
+        let mut range = to_range(range);
         let mut headers = vec![];
-        for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
-            let (number, header) = entry?;
-            let hash = self
-                .block_hash(number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-            let sealed = header.seal(hash);
-            if !predicate(&sealed) {
-                break
+
+        if let Some(provider) = &self.snapshot_provider {
+            if let Some(highest) = provider.get_highest_snapshot(SnapshotSegment::Headers) {
+                if range.start <= highest {
+                    headers.extend(provider.sealed_headers_while(
+                        range.start..range.end.min(highest + 1),
+                        &mut predicate,
+                    )?);
+                }
+                range.start = range.start.max(highest + 1);
             }
-            headers.push(sealed);
+        }
+
+        if range.end > range.start {
+            for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
+                let (number, header) = entry?;
+                let hash = self
+                    .block_hash(number)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+                let sealed = header.seal(hash);
+                if !predicate(&sealed) {
+                    break
+                }
+                headers.push(sealed);
+            }
         }
         Ok(headers)
     }
@@ -994,6 +1057,15 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
+        if let Some(provider) = &self.snapshot_provider {
+            if provider
+                .get_highest_snapshot(SnapshotSegment::Headers)
+                .map_or(false, |block| block >= number)
+            {
+                return provider.block_hash(number);
+            }
+        }
+
         Ok(self.tx.get::<tables::CanonicalHeaders>(number)?)
     }
 
@@ -1002,12 +1074,30 @@ impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let range = start..end;
-        let mut cursor = self.tx.cursor_read::<tables::CanonicalHeaders>()?;
-        cursor
-            .walk_range(range)?
-            .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-            .collect::<ProviderResult<Vec<_>>>()
+        let mut range = start..end;
+        let mut hashes = Vec::with_capacity((range.end - range.start) as usize);
+
+        if let Some(provider) = &self.snapshot_provider {
+            if let Some(highest) = provider.get_highest_snapshot(SnapshotSegment::Headers) {
+                if range.start <= highest {
+                    hashes.extend(
+                        provider.canonical_hashes_range(range.start, range.end.min(highest + 1))?,
+                    );
+                }
+                range.start = range.start.max(highest + 1);
+            }
+        }
+
+        if range.end > range.start {
+            hashes.extend(
+                self.tx
+                    .cursor_read::<tables::CanonicalHeaders>()?
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
+                    .collect::<ProviderResult<Vec<_>>>()?,
+            )
+        }
+        Ok(hashes)
     }
 }
 

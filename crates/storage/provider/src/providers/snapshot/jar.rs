@@ -1,6 +1,7 @@
 use super::LoadedJarRef;
 use crate::{
-    BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider, TransactionsProvider,
+    to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
+    TransactionsProvider,
 };
 use reth_db::{
     codecs::CompactU256,
@@ -285,20 +286,4 @@ impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
         // provider with `receipt()` instead for each
         Err(ProviderError::UnsupportedProvider)
     }
-}
-
-fn to_range<R: RangeBounds<u64>>(bounds: R) -> Range<u64> {
-    let start = match bounds.start_bound() {
-        std::ops::Bound::Included(&v) => v,
-        std::ops::Bound::Excluded(&v) => v + 1,
-        std::ops::Bound::Unbounded => 0,
-    };
-
-    let end = match bounds.end_bound() {
-        std::ops::Bound::Included(&v) => v + 1,
-        std::ops::Bound::Excluded(&v) => v,
-        std::ops::Bound::Unbounded => u64::MAX,
-    };
-
-    start..end
 }
