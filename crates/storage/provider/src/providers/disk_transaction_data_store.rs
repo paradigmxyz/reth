@@ -88,8 +88,12 @@ impl TransactionDataStore for DiskFileTransactionDataStore {
     /// Removes transactions data by specified hash.
     fn remove(&self, hash: TxHash) -> Result<(), TransactionDataStoreError> {
         let filepath = self.filepath(hash);
-        tracing::trace!(target: "provider::txdata", %hash, ?filepath, "Removing transaction data from disk");
-        Ok(fs::remove_file(filepath)?)
+        let exists = filepath.try_exists()?;
+        tracing::trace!(target: "provider::txdata", %hash, ?filepath, exists, "Removing transaction data from disk");
+        if exists {
+            fs::remove_file(filepath)?;
+        }
+        Ok(())
     }
 
     /// Converts stored transaction into [TransactionSignedNoHash].
