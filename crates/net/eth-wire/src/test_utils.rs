@@ -78,7 +78,7 @@ pub mod proto {
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum TesProtoMessage {
+    pub enum TestProtoMessageKind {
         Message(String),
         Ping,
         Pong,
@@ -88,7 +88,7 @@ pub mod proto {
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct TestProtoMessage {
         pub message_type: TestProtoMessageId,
-        pub message: TesProtoMessage,
+        pub message: TestProtoMessageKind,
     }
 
     impl TestProtoMessage {
@@ -104,19 +104,19 @@ pub mod proto {
 
         /// Creates a ping message
         pub fn ping() -> Self {
-            Self { message_type: TestProtoMessageId::Ping, message: TesProtoMessage::Ping }
+            Self { message_type: TestProtoMessageId::Ping, message: TestProtoMessageKind::Ping }
         }
 
         /// Creates a pong message
         pub fn pong() -> Self {
-            Self { message_type: TestProtoMessageId::Pong, message: TesProtoMessage::Pong }
+            Self { message_type: TestProtoMessageId::Pong, message: TestProtoMessageKind::Pong }
         }
 
         /// Creates a message
         pub fn message(msg: impl Into<String>) -> Self {
             Self {
                 message_type: TestProtoMessageId::Message,
-                message: TesProtoMessage::Message(msg.into()),
+                message: TestProtoMessageKind::Message(msg.into()),
             }
         }
 
@@ -125,9 +125,9 @@ pub mod proto {
             let mut buf = BytesMut::new();
             buf.put_u8(self.message_type as u8);
             match &self.message {
-                TesProtoMessage::Ping => {}
-                TesProtoMessage::Pong => {}
-                TesProtoMessage::Message(msg) => {
+                TestProtoMessageKind::Ping => {}
+                TestProtoMessageKind::Pong => {}
+                TestProtoMessageKind::Message(msg) => {
                     buf.put(msg.as_bytes());
                 }
             }
@@ -148,10 +148,10 @@ pub mod proto {
                 _ => return None,
             };
             let message = match message_type {
-                TestProtoMessageId::Ping => TesProtoMessage::Ping,
-                TestProtoMessageId::Pong => TesProtoMessage::Pong,
+                TestProtoMessageId::Ping => TestProtoMessageKind::Ping,
+                TestProtoMessageId::Pong => TestProtoMessageKind::Pong,
                 TestProtoMessageId::Message => {
-                    TesProtoMessage::Message(String::from_utf8_lossy(&buf[..]).into_owned())
+                    TestProtoMessageKind::Message(String::from_utf8_lossy(&buf[..]).into_owned())
                 }
             };
             Some(Self { message_type, message })
