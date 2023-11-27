@@ -287,7 +287,7 @@ where
         ))
     }
 
-    /// Returns a [`MmapHandle`] of the data file
+    /// Returns a [`DataReader`] of the data and offset file
     pub fn open_data(&self) -> Result<DataReader, NippyJarError> {
         DataReader::new(self.data_path())
     }
