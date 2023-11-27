@@ -11,6 +11,15 @@ pub struct Bundle {
     /// Block overrides to apply
     pub block_override: Option<BlockOverrides>,
 }
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+/// Prototype eth_multicallV1 RPC API endpoint
+pub struct MulticallBundle {
+    /// All transactions to execute
+    pub transactions: Vec<CallRequest>,
+    /// Block overrides to apply
+    pub block_override: Option<BlockOverrides>,
+}
 
 /// State context for callMany
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
