@@ -104,15 +104,8 @@ impl Case for BlockchainTestCase {
                 let mut stage = ExecutionStage::new_with_factory(
                     reth_revm::EvmProcessorFactory::new(Arc::new(case.network.clone().into())),
                 );
-
                 let target = last_block.as_ref().map(|b| b.number);
-                tokio::runtime::Builder::new_current_thread()
-                    .build()
-                    .expect("Could not build tokio RT")
-                    .block_on(async {
-                        // ignore error
-                        let _ = stage.execute(&provider, ExecInput { target, checkpoint: None });
-                    });
+                let _ = stage.execute(&provider, ExecInput { target, checkpoint: None });
             }
 
             // Validate post state
