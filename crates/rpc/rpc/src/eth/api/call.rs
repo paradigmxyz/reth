@@ -2,6 +2,7 @@
 
 use crate::{
     eth::{
+        cache::MultiConsumerLruCache,
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
             build_call_evm_env, caller_gas_allowance, cap_tx_gas_limit_with_caller_allowance,
@@ -19,7 +20,7 @@ use reth_provider::{
 use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
-    StateContext,
+    MulticallBundle, StateContext,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{
@@ -40,7 +41,93 @@ where
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
 {
-    /// Estimate gas needed for execution of the `request` at the [BlockId].
+    /// Executes   complex RPC calls to Ethereum nodes
+
+    pub async fn eth_multicall_v1(
+        &self,
+        multicall_bundle: MulticallBundle,
+        state_context: Option<StateContext>,
+        mut state_override: Option<StateOverride>,
+    ) -> EthResult<Vec<EthCallResponse>> {
+        if multicall_bundle.transactions.is_empty() {
+            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")))
+        }
+
+        let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
+        let transaction_index = transaction_index.unwrap_or_default();
+
+        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+
+        let ((cfg, block_env, _), block) =
+            futures::try_join!(self.evm_env_at(target_block), self.block_by_id(target_block))?;
+
+        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let gas_limit = self.inner.gas_cap;
+
+        // we're essentially replaying the transactions in the block here, hence we need the state
+        // that points to the beginning of the block, which is the state at the parent block
+        let mut at = block.parent_hash;
+        let mut replay_block_txs = true;
+
+        // but if all transactions are to be replayed, we can use the state at the block itself
+        let num_txs = transaction_index.index().unwrap_or(block.body.len());
+        if num_txs == block.body.len() {
+            at = block.hash;
+            replay_block_txs = false;
+        }
+
+        self.spawn_with_state_at_block(at.into(), move |state| {
+            let mut results = Vec::with_capacity(multicall_bundle.transactions.len());
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+            if replay_block_txs {
+                let transactions = block.body.into_iter().take(num_txs);
+
+                for tx in transactions {
+                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                    let tx = tx_env_with_recovered(&tx);
+                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let (res, _) = transact(&mut db, env)?;
+                    db.commit(res.state);
+                }
+            }
+
+            let b_l = multicall_bundle.block_override.map(Box::new);
+            let mut transactions = multicall_bundle.transactions.into_iter().peekable();
+            while let Some(tx) = transactions.next() {
+                // apply state overrides only once, before the first transaction
+                let state_overrides = state_override.take();
+                let overrides = EvmOverrides::new(state_overrides, b_l.clone());
+
+                let env = prepare_call_env(
+                    cfg.clone(),
+                    block_env.clone(),
+                    tx,
+                    gas_limit,
+                    &mut db,
+                    overrides,
+                )?;
+                let (res, _) = transact(&mut db, env)?;
+
+                match ensure_success(res.result) {
+                    Ok(output) => {
+                        results.push(EthCallResponse { value: Some(output), error: None });
+                    }
+                    Err(err) => {
+                        results.push(EthCallResponse { value: None, error: Some(err.to_string()) });
+                    }
+                }
+
+                if transactions.peek().is_some() {
+                    // need to apply the state changes of this call before executing the next call
+                    db.commit(res.state);
+                }
+            }
+
+            Ok(results)
+        })
+        .await
+    }
     pub async fn estimate_gas_at(&self, request: CallRequest, at: BlockId) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
 
