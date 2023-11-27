@@ -83,6 +83,16 @@ impl TracingInspector {
         }
     }
 
+    /// Gets a reference to the recorded call traces.
+    pub fn get_traces(&self) -> &CallTraceArena {
+        &self.traces
+    }
+
+    /// Gets a mutable reference to the recorded call traces.
+    pub fn get_traces_mut(&mut self) -> &mut CallTraceArena {
+        &mut self.traces
+    }
+
     /// Manually the gas used of the root trace.
     ///
     /// This is useful if the root trace's gasUsed should mirror the actual gas used by the

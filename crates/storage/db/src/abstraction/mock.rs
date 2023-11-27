@@ -1,6 +1,6 @@
 //! Mock database
 use crate::{
-    common::{PairResult, ValueOnlyResult},
+    common::{IterPairResult, PairResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
@@ -10,6 +10,7 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
+use core::ops::Bound;
 use std::{collections::BTreeMap, ops::RangeBounds};
 
 /// Mock database used for testing with inner BTreeMap structure
@@ -132,15 +133,35 @@ impl<T: Table> DbCursorRO<T> for CursorMock {
         Ok(None)
     }
 
-    fn walk(&mut self, _start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
-        todo!()
+    fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
+        let start: IterPairResult<T> = match start_key {
+            Some(key) => <CursorMock as DbCursorRO<T>>::seek(self, key).transpose(),
+            None => <CursorMock as DbCursorRO<T>>::first(self).transpose(),
+        };
+
+        Ok(Walker::new(self, start))
     }
 
     fn walk_range(
         &mut self,
-        _range: impl RangeBounds<T::Key>,
+        range: impl RangeBounds<T::Key>,
     ) -> Result<RangeWalker<'_, T, Self>, DatabaseError> {
-        todo!()
+        let start_key = match range.start_bound() {
+            Bound::Included(key) | Bound::Excluded(key) => Some((*key).clone()),
+            Bound::Unbounded => None,
+        };
+
+        let end_key = match range.end_bound() {
+            Bound::Included(key) | Bound::Excluded(key) => Bound::Included((*key).clone()),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+
+        let start: IterPairResult<T> = match start_key {
+            Some(key) => <CursorMock as DbCursorRO<T>>::seek(self, key).transpose(),
+            None => <CursorMock as DbCursorRO<T>>::first(self).transpose(),
+        };
+
+        Ok(RangeWalker::new(self, start, end_key))
     }
 
     fn walk_back(

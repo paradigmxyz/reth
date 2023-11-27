@@ -5,7 +5,7 @@ use reth_rpc::{
     eth::{
         cache::{EthStateCache, EthStateCacheConfig},
         gas_oracle::GasPriceOracleConfig,
-        EthFilterConfig, RPC_DEFAULT_GAS_CAP,
+        EthFilterConfig, FeeHistoryCacheConfig, RPC_DEFAULT_GAS_CAP,
     },
     BlockingTaskPool, EthApi, EthFilter, EthPubSub,
 };
@@ -46,6 +46,8 @@ pub struct EthConfig {
     ///
     /// Sets TTL for stale filters
     pub stale_filter_ttl: std::time::Duration,
+    /// Settings for the fee history cache
+    pub fee_history_cache: FeeHistoryCacheConfig,
 }
 
 impl EthConfig {
@@ -71,6 +73,7 @@ impl Default for EthConfig {
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
+            fee_history_cache: FeeHistoryCacheConfig::default(),
         }
     }
 }

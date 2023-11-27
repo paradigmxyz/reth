@@ -168,8 +168,9 @@ use reth_provider::{
 use reth_rpc::{
     eth::{
         cache::{cache_new_blocks_task, EthStateCache},
+        fee_history_cache_new_blocks_task,
         gas_oracle::GasPriceOracle,
-        EthBundle,
+        EthBundle, FeeHistoryCache,
     },
     AdminApi, AuthLayer, BlockingTaskGuard, BlockingTaskPool, Claims, DebugApi, EngineEthApi,
     EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
@@ -1153,6 +1154,10 @@ where
     }
 
     /// Creates the [EthHandlers] type the first time this is called.
+    ///
+    /// This will spawn the required service tasks for [EthApi] for:
+    ///   - [EthStateCache]
+    ///   - [FeeHistoryCache]
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events>) -> R,
@@ -1170,10 +1175,24 @@ where
             );
             let new_canonical_blocks = self.events.canonical_state_stream();
             let c = cache.clone();
+
             self.executor.spawn_critical(
                 "cache canonical blocks task",
                 Box::pin(async move {
                     cache_new_blocks_task(c, new_canonical_blocks).await;
+                }),
+            );
+
+            let fee_history_cache =
+                FeeHistoryCache::new(cache.clone(), self.config.eth.fee_history_cache.clone());
+            let new_canonical_blocks = self.events.canonical_state_stream();
+            let fhc = fee_history_cache.clone();
+            let provider_clone = self.provider.clone();
+            self.executor.spawn_critical(
+                "cache canonical blocks for fee history task",
+                Box::pin(async move {
+                    fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider_clone)
+                        .await;
                 }),
             );
 
@@ -1189,6 +1208,7 @@ where
                 self.config.eth.rpc_gas_cap,
                 executor.clone(),
                 blocking_task_pool.clone(),
+                fee_history_cache,
             );
             let filter = EthFilter::new(
                 self.provider.clone(),
