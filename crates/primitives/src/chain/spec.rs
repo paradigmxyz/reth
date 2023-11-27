@@ -277,10 +277,13 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
         ]),
-        base_fee_params: BaseFeeParamsKind::Variable(vec![
-            (Hardfork::London, BaseFeeParams::optimism_goerli()),
-            (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
-        ]),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism_goerli()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
+            ]
+            .into(),
+        ),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
         ..Default::default()
@@ -323,10 +326,13 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
         ]),
-        base_fee_params: BaseFeeParamsKind::Variable(vec![
-            (Hardfork::London, BaseFeeParams::optimism_goerli()),
-            (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
-        ]),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism_goerli()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
+            ]
+            .into(),
+        ),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
         ..Default::default()
@@ -367,10 +373,13 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Bedrock, ForkCondition::Block(0)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
         ]),
-        base_fee_params: BaseFeeParamsKind::Variable(vec![
-            (Hardfork::London, BaseFeeParams::optimism()),
-            (Hardfork::Canyon, BaseFeeParams::optimism_canyon()),
-        ]),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_canyon()),
+            ]
+            .into(),
+        ),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
         ..Default::default()
@@ -404,7 +413,14 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 
 /// A type alias to a vector of tuples of [Hardfork] and [BaseFeeParams], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
-pub type ForkBaseFeeParams = Vec<(Hardfork, BaseFeeParams)>;
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
+
+impl From<Vec<(Hardfork, BaseFeeParams)>> for ForkBaseFeeParams {
+    fn from(params: Vec<(Hardfork, BaseFeeParams)>) -> Self {
+        ForkBaseFeeParams(params)
+    }
+}
 
 /// BaseFeeParams contains the config parameters that control block base fee computation
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
@@ -622,7 +638,7 @@ impl ChainSpec {
     pub fn base_fee_params(&self, timestamp: u64) -> BaseFeeParams {
         match self.base_fee_params {
             BaseFeeParamsKind::Constant(bf_params) => bf_params,
-            BaseFeeParamsKind::Variable(ref bf_params) => {
+            BaseFeeParamsKind::Variable(ForkBaseFeeParams { 0: ref bf_params }) => {
                 // Walk through the base fee params configuration in reverse order, and return the
                 // first one that corresponds to a hardfork that is active at the
                 // given timestamp.
