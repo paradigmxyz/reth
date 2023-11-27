@@ -130,11 +130,18 @@ where
                 }
             }
             let last_entry = fee_entries.last().expect("is not empty");
+
+            let last_entry_timestamp = self
+                .provider()
+                .header_by_hash_or_number(last_entry.header_hash.into())?
+                .map(|h| h.timestamp)
+                .unwrap_or_default();
+
             base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
                 last_entry.gas_used,
                 last_entry.gas_limit,
                 last_entry.base_fee_per_gas,
-                self.provider().chain_spec().base_fee_params,
+                self.provider().chain_spec().base_fee_params(last_entry_timestamp),
             )));
         } else {
             // read the requested header range
@@ -183,7 +190,7 @@ where
                 last_header.gas_used,
                 last_header.gas_limit,
                 last_header.base_fee_per_gas.unwrap_or_default(),
-                self.provider().chain_spec().base_fee_params,
+                self.provider().chain_spec().base_fee_params(last_header.timestamp),
             )));
         };
 
