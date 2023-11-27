@@ -240,18 +240,16 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // sink buffered bytes from `StreamClone`s
         for _ in 0..self.demux.len() {
-            let Ok(item) = self.mux.try_recv() else { break };
-            if let Poll::Pending = self.poll_ready_unpin(cx) {
+            if self.inner.poll_ready_unpin(cx).is_pending() {
                 break
             }
+            let Ok(item) = self.mux.try_recv() else { break };
             self.inner.start_send_unpin(item)?;
         }
+        _ = self.inner.poll_flush_unpin(cx);
 
         // advances the wire and either yields or delegates the message
-        //
-        // poll once for main stream and each stream clone, since stream clones are weak and
-        // cannot poll the `MuxDemuxer` themselves
-        for _ in 0..self.demux.len() + 1 {
+        loop {
             let res = ready!(self.inner.poll_next_unpin(cx));
             let mut bytes = match res {
                 Some(Ok(bytes)) => bytes,
@@ -271,8 +269,6 @@ where
             let tx = self.demux.get(&cap).ok_or(CapabilityNotConfigured)?;
             tx.send(bytes).map_err(|_| SendIngressBytesFailed)?;
         }
-
-        Poll::Pending
     }
 }
 
