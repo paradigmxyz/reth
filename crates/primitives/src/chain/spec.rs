@@ -252,7 +252,7 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis_hash: Some(b256!(
             "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
         )),
-        fork_timestamps: ForkTimestamps::default(),
+        fork_timestamps: ForkTimestamps::default().shanghai(1699981200).canyon(1699981200),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -295,7 +295,7 @@ pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis_hash: Some(b256!(
             "a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76"
         )),
-        fork_timestamps: ForkTimestamps::default(),
+        fork_timestamps: ForkTimestamps::default().shanghai(1699981200).canyon(1699981200),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -831,6 +831,12 @@ pub struct ForkTimestamps {
     pub shanghai: Option<u64>,
     /// The timestamp of the cancun fork
     pub cancun: Option<u64>,
+    /// The timestamp of the Regolith fork
+    #[cfg(feature = "optimism")]
+    pub regolith: Option<u64>,
+    /// The timestamp of the Canyon fork
+    #[cfg(feature = "optimism")]
+    pub canyon: Option<u64>,
 }
 
 impl ForkTimestamps {
@@ -842,6 +848,15 @@ impl ForkTimestamps {
         }
         if let Some(cancun) = forks.get(&Hardfork::Cancun).and_then(|f| f.as_timestamp()) {
             timestamps = timestamps.cancun(cancun);
+        }
+        #[cfg(feature = "optimism")]
+        {
+            if let Some(regolith) = forks.get(&Hardfork::Regolith).and_then(|f| f.as_timestamp()) {
+                timestamps = timestamps.regolith(regolith);
+            }
+            if let Some(canyon) = forks.get(&Hardfork::Canyon).and_then(|f| f.as_timestamp()) {
+                timestamps = timestamps.canyon(canyon);
+            }
         }
         timestamps
     }
@@ -855,6 +870,20 @@ impl ForkTimestamps {
     /// Sets the given cancun timestamp
     pub fn cancun(mut self, cancun: u64) -> Self {
         self.cancun = Some(cancun);
+        self
+    }
+
+    /// Sets the given regolith timestamp
+    #[cfg(feature = "optimism")]
+    pub fn regolith(mut self, regolith: u64) -> Self {
+        self.regolith = Some(regolith);
+        self
+    }
+
+    /// Sets the given canyon timestamp
+    #[cfg(feature = "optimism")]
+    pub fn canyon(mut self, canyon: u64) -> Self {
+        self.canyon = Some(canyon);
         self
     }
 }

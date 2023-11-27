@@ -54,6 +54,17 @@ where
     let is_regolith =
         chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp);
 
+    // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
+    // blocks will always have at least a single transaction in them (the L1 info transaction),
+    // so we can safely assume that this will always be triggered upon the transition and that
+    // the above check for empty blocks will never be hit on OP chains.
+    reth_revm::optimism::ensure_create2_deployer(chain_spec.clone(), attributes.timestamp, &mut db)
+        .map_err(|_| {
+            PayloadBuilderError::Internal(RethError::Custom(
+                "Failed to force create2deployer account code".to_string(),
+            ))
+        })?;
+
     let mut receipts = Vec::new();
     for sequencer_tx in attributes.optimism_payload_attributes.transactions {
         // Check if the job was cancelled, if so we can exit early.
