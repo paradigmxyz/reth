@@ -15,12 +15,12 @@ use std::{
 
 /// Creates a new [PayloadBuilderService] for testing purposes.
 pub fn test_payload_service(
-) -> (PayloadBuilderService<TestPayloadJobGenerator>, PayloadBuilderHandle) {
+) -> (PayloadBuilderService<TestPayloadJobGenerator>, PayloadBuilderHandle<BuiltPayload>) {
     PayloadBuilderService::new(Default::default())
 }
 
 /// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
-pub fn spawn_test_payload_service() -> PayloadBuilderHandle {
+pub fn spawn_test_payload_service() -> PayloadBuilderHandle<BuiltPayload> {
     let (service, handle) = test_payload_service();
     tokio::spawn(service);
     handle

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_payload_builder::PayloadStore;
+use reth_payload_builder::{BuiltPayload, PayloadStore};
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
@@ -44,7 +44,7 @@ struct EngineApiInner<Provider> {
     /// The channel to send messages to the beacon consensus engine.
     beacon_consensus: BeaconConsensusEngineHandle,
     /// The type that can communicate with the payload service to retrieve payloads.
-    payload_store: PayloadStore,
+    payload_store: PayloadStore<BuiltPayload>,
     /// For spawning and executing async tasks
     task_spawner: Box<dyn TaskSpawner>,
     /// The metrics for engine api calls
@@ -60,7 +60,7 @@ where
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
         beacon_consensus: BeaconConsensusEngineHandle,
-        payload_store: PayloadStore,
+        payload_store: PayloadStore<BuiltPayload>,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {

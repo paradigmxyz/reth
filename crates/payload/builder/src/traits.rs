@@ -1,7 +1,9 @@
 //! Trait abstractions used by the payload crate.
 
 use crate::{error::PayloadBuilderError, PayloadBuilderAttributes};
-use reth_rpc_types::ExecutionPayload;
+use reth_primitives::{BlobTransactionSidecar, SealedBlock};
+use reth_rpc_types::{engine::PayloadId, ExecutionPayload};
+use revm_primitives::U256;
 use std::{future::Future, sync::Arc};
 
 /// A type that can build a payload.
@@ -17,7 +19,7 @@ use std::{future::Future, sync::Arc};
 /// Note: A `PayloadJob` need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1` (see also [engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1))
 pub trait PayloadJob<P>: Future<Output = Result<(), PayloadBuilderError>> + Send + Sync
 where
-    P: Into<ExecutionPayload> + Send + Sync + 'static,
+    P: Into<ExecutionPayload> + PayloadInfo + Send + Sync + 'static,
 {
     /// Represents the future that resolves the block that's returned to the CL.
     type ResolvePayloadFuture: Future<Output = Result<Arc<P>, PayloadBuilderError>>
@@ -65,10 +67,22 @@ pub enum KeepPayloadJobAlive {
     No,
 }
 
+/// Helper trait to get information about the payload.
+pub trait PayloadInfo {
+    /// Returns the payload id.
+    fn payload_id(&self) -> PayloadId;
+    /// Returns the block.
+    fn block(&self) -> SealedBlock;
+    /// Returns the fees.
+    fn fees(&self) -> U256;
+    /// Returns the sidecars.
+    fn sidecars(&self) -> Vec<BlobTransactionSidecar>;
+}
+
 /// A type that knows how to create new jobs for creating payloads.
 pub trait PayloadJobGenerator: Send + Sync {
     /// The type that will be returned by the future of [`PayloadJob::resolve`] method.
-    type PayloadType: Into<ExecutionPayload> + Send + Sync + Clone + 'static;
+    type PayloadType: Into<ExecutionPayload> + PayloadInfo + Send + Sync + Clone + 'static;
     /// The type that manages the lifecycle of a payload.
     ///
     /// This type is a future that yields better payloads.

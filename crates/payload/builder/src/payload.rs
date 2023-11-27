@@ -22,6 +22,8 @@ use reth_rpc_types_compat::engine::payload::{
 #[cfg(feature = "optimism")]
 use reth_primitives::TransactionSigned;
 
+use crate::traits::PayloadInfo;
+
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
@@ -84,6 +86,23 @@ impl BuiltPayload {
     }
 }
 
+impl PayloadInfo for BuiltPayload {
+    fn payload_id(&self) -> PayloadId {
+        self.id
+    }
+
+    fn block(&self) -> SealedBlock {
+        self.block.clone()
+    }
+
+    fn fees(&self) -> U256 {
+        self.fees
+    }
+
+    fn sidecars(&self) -> Vec<BlobTransactionSidecar> {
+        self.sidecars.clone()
+    }
+}
 impl From<BuiltPayload> for ExecutionPayload {
     fn from(value: BuiltPayload) -> Self {
         ExecutionPayload::V3(block_to_payload_v3(value.block))
