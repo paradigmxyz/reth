@@ -21,7 +21,9 @@ mod work;
 
 pub use account::*;
 pub use block::*;
-pub use call::{Bundle, CallInput, CallInputError, CallRequest, EthCallResponse, StateContext};
+pub use call::{
+    Bundle, CallInput, CallInputError, CallRequest, EthCallResponse, MulticallBundle, StateContext,
+};
 pub use engine::{ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, PayloadError};
 pub use fee::{FeeHistory, TxGasAndReward};
 pub use filter::*;
