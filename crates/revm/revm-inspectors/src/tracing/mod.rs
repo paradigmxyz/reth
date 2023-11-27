@@ -52,7 +52,7 @@ pub struct TracingInspector {
     /// Configures what and how the inspector records traces.
     config: TracingInspectorConfig,
     /// Records all call traces
-    pub traces: CallTraceArena,
+    traces: CallTraceArena,
     /// Tracks active calls
     trace_stack: Vec<usize>,
     /// Tracks active steps
@@ -81,6 +81,16 @@ impl TracingInspector {
             gas_inspector: Default::default(),
             spec_id: None,
         }
+    }
+
+    /// Gets a reference to the recorded call traces.
+    pub fn get_traces(&self) -> &CallTraceArena {
+        &self.traces
+    }
+
+    /// Gets a mutable reference to the recorded call traces.
+    pub fn get_traces_mut(&mut self) -> &mut CallTraceArena {
+        &mut self.traces
     }
 
     /// Manually the gas used of the root trace.
