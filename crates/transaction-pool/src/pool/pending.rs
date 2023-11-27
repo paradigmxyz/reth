@@ -446,7 +446,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// limits are met.
     ///
     /// This attempts to remove transactions by rougly the same amount for each sender. For more
-    /// information on this exact process see docs for [limit_pool](PendingPool::limit_pool).
+    /// information on this exact process see docs for
+    /// [remove_to_limit](PendingPool::remove_to_limit).
     ///
     /// This first truncates all of the non-local transactions in the pool. If the subpool is still
     /// not under the limit, this truncates the entire pool, including non-local transactions. The
