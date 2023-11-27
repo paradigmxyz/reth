@@ -1,12 +1,12 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
-    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
+    Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Bundle, CallRequest, EIP1186AccountProofResponse,
-    EthCallResponse, FeeHistory, Index, RichBlock, StateContext, SyncStatus, Transaction,
-    TransactionReceipt, TransactionRequest, Work,
+    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
+    SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -74,10 +74,8 @@ pub trait EthApi {
 
     /// Returns all transaction receipts for a given block.
     #[method(name = "getBlockReceipts")]
-    async fn block_receipts(
-        &self,
-        number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Vec<TransactionReceipt>>>;
+    async fn block_receipts(&self, block_id: BlockId)
+        -> RpcResult<Option<Vec<TransactionReceipt>>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]
@@ -198,13 +196,17 @@ pub trait EthApi {
     #[method(name = "gasPrice")]
     async fn gas_price(&self) -> RpcResult<U256>;
 
-    /// Introduced in EIP-1159, returns suggestion for the priority for dynamic fee transactions.
+    /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
+    /// Introduced in EIP-4844, returns the current blob gas price in wei.
+    #[method(name = "blobGasPrice")]
+    async fn blob_gas_price(&self) -> RpcResult<U256>;
+
     /// Returns the Transaction fee history
     ///
-    /// Introduced in EIP-1159 for getting information on the appropriate priority fee to use.
+    /// Introduced in EIP-1559 for getting information on the appropriate priority fee to use.
     ///
     /// Returns transaction base fee per gas and effective priority fee per gas for the
     /// requested/supported block range. The returned Fee history for the returned block range

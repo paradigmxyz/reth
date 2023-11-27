@@ -24,13 +24,15 @@ impl<C> StorageTrieCursor<C> {
     }
 }
 
-impl<'a, C> TrieCursor<StoredNibblesSubKey> for StorageTrieCursor<C>
+impl<C> TrieCursor for StorageTrieCursor<C>
 where
-    C: DbDupCursorRO<'a, tables::StoragesTrie> + DbCursorRO<'a, tables::StoragesTrie>,
+    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie>,
 {
+    type Key = StoredNibblesSubKey;
+
     fn seek_exact(
         &mut self,
-        key: StoredNibblesSubKey,
+        key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self
             .cursor
@@ -41,7 +43,7 @@ where
 
     fn seek(
         &mut self,
-        key: StoredNibblesSubKey,
+        key: Self::Key,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, DatabaseError> {
         Ok(self
             .cursor
@@ -58,20 +60,14 @@ where
 mod tests {
 
     use super::*;
-    use reth_db::{
-        cursor::DbCursorRW, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
-    };
-    use reth_primitives::{
-        trie::{BranchNodeCompact, StorageTrieEntry},
-        MAINNET,
-    };
-    use reth_provider::ProviderFactory;
+    use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
+    use reth_primitives::trie::{BranchNodeCompact, StorageTrieEntry};
+    use reth_provider::test_utils::create_test_provider_factory;
 
     // tests that upsert and seek match on the storagetrie cursor
     #[test]
     fn test_storage_cursor_abstraction() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 

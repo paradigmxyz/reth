@@ -5,10 +5,7 @@ use crate::{
 use bytes::{Buf, BufMut};
 use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::{Display, Formatter},
-    ops::RangeInclusive,
-};
+use std::ops::RangeInclusive;
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -17,6 +14,7 @@ pub struct MerkleCheckpoint {
     pub target_block: BlockNumber,
     /// The last hashed account key processed.
     pub last_account_key: B256,
+    // TODO: remove in the next breaking release.
     /// The last walker key processed.
     pub last_walker_key: Vec<u8>,
     /// Previously recorded walker stack.
@@ -30,11 +28,16 @@ impl MerkleCheckpoint {
     pub fn new(
         target_block: BlockNumber,
         last_account_key: B256,
-        last_walker_key: Vec<u8>,
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
     ) -> Self {
-        Self { target_block, last_account_key, last_walker_key, walker_stack, state }
+        Self {
+            target_block,
+            last_account_key,
+            walker_stack,
+            state,
+            last_walker_key: Vec::default(),
+        }
     }
 }
 
@@ -65,10 +68,7 @@ impl Compact for MerkleCheckpoint {
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let target_block = buf.get_u64();
 
         let last_account_key = B256::from_slice(&buf[..32]);
@@ -166,9 +166,16 @@ pub struct EntitiesCheckpoint {
     pub total: u64,
 }
 
-impl Display for EntitiesCheckpoint {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.1}%", 100.0 * self.processed as f64 / self.total as f64)
+impl EntitiesCheckpoint {
+    /// Formats entities checkpoint as percentage, i.e. `processed / total`.
+    ///
+    /// Return [None] if `total == 0`.
+    pub fn fmt_percentage(&self) -> Option<String> {
+        if self.total == 0 {
+            return None
+        }
+
+        Some(format!("{:.2}%", 100.0 * self.processed as f64 / self.total as f64))
     }
 }
 
@@ -240,15 +247,6 @@ impl StageCheckpoint {
     }
 }
 
-impl Display for StageCheckpoint {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.entities() {
-            Some(entities) => entities.fmt(f),
-            None => write!(f, "{}", self.block_number),
-        }
-    }
-}
-
 // TODO(alexey): add a merkle checkpoint. Currently it's hard because [`MerkleCheckpoint`]
 //  is not a Copy type.
 /// Stage-specific checkpoint metrics.
@@ -289,10 +287,7 @@ macro_rules! stage_unit_checkpoints {
                 }
             }
 
-            fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-            where
-                Self: Sized,
-            {
+            fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
                 match buf[0] {
                     $(
                         $index => {

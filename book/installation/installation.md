@@ -16,7 +16,7 @@ The most important requirement is by far the disk, whereas CPU and RAM requireme
 
 |           | Archive Node                          | Full Node                           |
 |-----------|---------------------------------------|-------------------------------------|
-| Disk      | At least 2.1TB (TLC NVMe recommended) | At least 1TB (TLC NVMe recommended) |
+| Disk      | At least 2.2TB (TLC NVMe recommended) | At least 1TB (TLC NVMe recommended) |
 | Memory    | 8GB+                                  | 8GB+                                |
 | CPU       | Higher clock speed over core count    | Higher clock speeds over core count |
 | Bandwidth | Stable 24Mbps+                        | Stable 24Mbps+                      |
@@ -34,9 +34,9 @@ Prior to purchasing an NVMe drive, it is advisable to research and determine whe
 ### Disk
 
 There are multiple types of disks to sync Reth, with varying size requirements, depending on the syncing mode.
-As of August 2023 at block number 17.9M:
+As of October 2023 at block number 18.3M:
 
-* Archive Node: At least 2.1TB is required
+* Archive Node: At least 2.2TB is required
 * Full Node: At least 1TB is required
 
 NVMe drives are recommended for the best performance, with SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.

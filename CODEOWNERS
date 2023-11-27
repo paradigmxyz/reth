@@ -8,6 +8,8 @@ crates/stages/              @onbjerg @rkrasiuk @shekhirin
 crates/storage/             @rakita @joshieDo
 crates/transaction-pool/    @mattsse
 crates/rpc/                 @mattsse @Rjected
+crates/rpc/rpc-types        @mattsse @Rjected @Evalir
+crates/rpc/rpc-types-compat @mattsse @Rjected @Evalir
 crates/payload/             @mattsse @Rjected
 crates/consensus/auto-seal  @mattsse
 crates/consensus/beacon     @rkrasiuk @mattsse @Rjected
@@ -17,4 +19,5 @@ crates/metrics              @onbjerg
 crates/tracing              @onbjerg
 crates/tasks                @mattsse
 crates/prune                @shekhirin @joshieDo
-.github/                    @onbjerg @gakonst
+crates/snapshot             @joshieDo
+.github/                    @onbjerg @gakonst @DaniPopes

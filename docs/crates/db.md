@@ -65,24 +65,23 @@ There are many tables within the node, all used to store different types of data
 
 ## Database
 
-Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/eaca2a4a7fbbdc2f5cd15eab9a8a18ede1891bda/crates/storage/db/src/abstraction/database.rs#L21), which takes advantage of [generic associated types](https://blog.rust-lang.org/2022/10/28/gats-stabilization.html) and [a few design tricks](https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats) to implement the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
+Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/eaca2a4a7fbbdc2f5cd15eab9a8a18ede1891bda/crates/storage/db/src/abstraction/database.rs#L21), which implements the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
 
 [File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/eaca2a4a7fbbdc2f5cd15eab9a8a18ede1891bda/crates/storage/db/src/abstraction/database.rs#L21)
 
 ```rust ignore
 /// Main Database trait that spawns transactions to be executed.
-pub trait Database: for<'a> DatabaseGAT<'a> {
-    /// Create read only transaction.
-    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error>;
-
-    /// Create read write transaction only possible if database is open with write access.
-    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error>;
+pub trait Database {
+    /// RO database transaction
+    type TX: DbTx + Send + Sync + Debug;
+    /// RW database transaction
+    type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug;
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
     /// end of the execution.
     fn view<T, F>(&self, f: F) -> Result<T, Error>
     where
-        F: Fn(&<Self as DatabaseGAT<'_>>::TX) -> T,
+        F: Fn(&<Self as Database>::TX) -> T,
     {
         let tx = self.tx()?;
 
@@ -96,7 +95,7 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
     /// the end of the execution.
     fn update<T, F>(&self, f: F) -> Result<T, Error>
     where
-        F: Fn(&<Self as DatabaseGAT<'_>>::TXMut) -> T,
+        F: Fn(&<Self as Database>::TXMut) -> T,
     {
         let tx = self.tx_mut()?;
 
@@ -116,7 +115,7 @@ Any type that implements the `Database` trait can create a database transaction,
 pub struct Transaction<'this, DB: Database> {
     /// A handle to the DB.
     pub(crate) db: &'this DB,
-    tx: Option<<DB as DatabaseGAT<'this>>::TXMut>,
+    tx: Option<<DB as Database>::TXMut>,
 }
 
 //--snip--
@@ -134,26 +133,10 @@ where
 }
 ```
 
-The `Database` trait also implements the `DatabaseGAT` trait which defines two associated types `TX` and `TXMut`.
+The `Database` defines two associated types `TX` and `TXMut`.
 
 [File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/database.rs#L11)
 
-```rust ignore
-/// Implements the GAT method from:
-/// https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats.
-///
-/// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
-pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
-    /// RO database transaction
-    type TX: DbTx<'a> + Send + Sync;
-    /// RW database transaction
-    type TXMut: DbTxMut<'a> + DbTx<'a> + Send + Sync;
-}
-```
-
-In Rust, associated types are like generics in that they can be any type fitting the generic's definition, with the difference being that associated types are associated with a trait and can only be used in the context of that trait.
-
-In the code snippet above, the `DatabaseGAT` trait has two associated types, `TX` and `TXMut`.
 
 The `TX` type can be any type that implements the `DbTx` trait, which provides a set of functions to interact with read only transactions.
 
@@ -161,26 +144,40 @@ The `TX` type can be any type that implements the `DbTx` trait, which provides a
 
 ```rust ignore
 /// Read only transaction
-pub trait DbTx<'tx>: for<'a> DbTxGAT<'a> {
+pub trait DbTx: Send + Sync {
+    /// Cursor type for this read-only transaction
+    type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
+    /// DupCursor type for this read-only transaction
+    type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
+    
     /// Get value
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
     fn commit(self) -> Result<bool, Error>;
     /// Iterate over read only values in table.
-    fn cursor<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error>;
+    fn cursor<T: Table>(&self) -> Result<Self::Cursor<T>, Error>;
     /// Iterate over read only values in dup sorted table.
-    fn cursor_dup<T: DupSort>(&self) -> Result<<Self as DbTxGAT<'_>>::DupCursor<T>, Error>;
+    fn cursor_dup<T: DupSort>(&self) -> Result<Self::DupCursor<T>, Error>;
 }
 ```
 
-The `TXMut` type can be any type that implements the `DbTxMut` trait, which provides a set of functions to interact with read/write transactions.
+The `TXMut` type can be any type that implements the `DbTxMut` trait, which provides a set of functions to interact with read/write transactions and the associated cursor types.
 
 [File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L49)
 
 ```rust ignore
 /// Read write transaction that allows writing to database
-pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
+pub trait DbTxMut: Send + Sync {
+    /// Read-Write Cursor type
+    type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
+    /// Read-Write DupCursor type
+    type DupCursorMut<T: DupSort>: DbDupCursorRW<T>
+        + DbCursorRW<T>
+        + DbDupCursorRO<T>
+        + DbCursorRO<T>
+        + Send
+        + Sync;
     /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error>;
     /// Delete value from database
@@ -188,11 +185,11 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
     /// Clears database.
     fn clear<T: Table>(&self) -> Result<(), Error>;
     /// Cursor for writing
-    fn cursor_write<T: Table>(&self) -> Result<<Self as DbTxMutGAT<'_>>::CursorMut<T>, Error>;
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, Error>;
     /// DupCursor for writing
     fn cursor_dup_write<T: DupSort>(
         &self,
-    ) -> Result<<Self as DbTxMutGAT<'_>>::DupCursorMut<T>, Error>;
+    ) -> Result<Self::DupCursorMut<T>, Error>;
 }
 ```
 
@@ -220,14 +217,14 @@ where
 
 //--snip--
 impl<'a, DB: Database> Deref for Transaction<'a, DB> {
-    type Target = <DB as DatabaseGAT<'a>>::TXMut;
+    type Target = <DB as Database>::TXMut;
     fn deref(&self) -> &Self::Target {
         self.tx.as_ref().expect("Tried getting a reference to a non-existent transaction")
     }
 }
 ```
 
-The `Transaction` struct implements the `Deref` trait, which returns a reference to its `tx` field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `DatabaseGAT` trait, which is defined as `type TXMut: DbTxMut<'a> + DbTx<'a> + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
+The `Transaction` struct implements the `Deref` trait, which returns a reference to its `tx` field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
 
 Notice that the function uses a [turbofish](https://techblog.tonsser.com/posts/what-is-rusts-turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter.
 
@@ -266,19 +263,6 @@ This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Curso
     // Skip sender recovery and load signer from database.
     let mut tx_sender = db_tx.cursor_read::<tables::TxSenders>()?;
 
-```
-
-We are almost at the last stop in the tour of the `db` crate. In addition to the methods provided by the `DbTx` and `DbTxMut` traits, `DbTx` also inherits the `DbTxGAT` trait, while `DbTxMut` inherits `DbTxMutGAT`. These next two traits provide various associated types related to cursors as well as methods to utilize the cursor types.
-
-[File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L12-L17)
-
-```rust ignore
-pub trait DbTxGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {
-    /// Cursor GAT
-    type Cursor<T: Table>: DbCursorRO<'a, T> + Send + Sync;
-    /// DupCursor GAT
-    type DupCursor<T: DupSort>: DbDupCursorRO<'a, T> + DbCursorRO<'a, T> + Send + Sync;
-}
 ```
 
 Lets look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.

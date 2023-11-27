@@ -2,15 +2,16 @@
 
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStepStackItem},
+    utils::load_account_code,
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_rpc_types::trace::geth::{
-    AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode, GethDefaultTracingOptions,
-    PreStateConfig, PreStateFrame, PreStateMode, StructLog,
+    AccountChangeKind, AccountState, CallConfig, CallFrame, DefaultFrame, DiffMode,
+    GethDefaultTracingOptions, PreStateConfig, PreStateFrame, PreStateMode, StructLog,
 };
 use revm::{db::DatabaseRef, primitives::ResultAndState};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{btree_map::Entry, BTreeMap, HashMap, VecDeque};
 
 /// A type for creating geth style traces
 #[derive(Clone, Debug)]
@@ -176,68 +177,149 @@ impl GethTraceBuilder {
     /// * `state` - The state post-transaction execution.
     /// * `diff_mode` - if prestate is in diff or prestate mode.
     /// * `db` - The database to fetch state pre-transaction execution.
-    pub fn geth_prestate_traces<DB>(
+    pub fn geth_prestate_traces<DB: DatabaseRef>(
         &self,
         ResultAndState { state, .. }: &ResultAndState,
         prestate_config: PreStateConfig,
         db: DB,
-    ) -> Result<PreStateFrame, DB::Error>
-    where
-        DB: DatabaseRef,
-    {
-        let account_diffs: Vec<_> =
-            state.into_iter().map(|(addr, acc)| (*addr, &acc.info)).collect();
+    ) -> Result<PreStateFrame, DB::Error> {
+        let account_diffs = state.into_iter().map(|(addr, acc)| (*addr, acc));
 
-        if !prestate_config.is_diff_mode() {
+        if prestate_config.is_default_mode() {
             let mut prestate = PreStateMode::default();
-            for (addr, _) in account_diffs {
-                let db_acc = db.basic(addr)?.unwrap_or_default();
+            // in default mode we __only__ return the touched state
+            for node in self.nodes.iter() {
+                let addr = node.trace.address;
 
-                prestate.0.insert(
-                    addr,
-                    AccountState::from_account_info(
-                        db_acc.nonce,
-                        db_acc.balance,
-                        db_acc.code.as_ref().map(|code| code.original_bytes()),
-                    ),
-                );
+                let acc_state = match prestate.0.entry(addr) {
+                    Entry::Vacant(entry) => {
+                        let db_acc = db.basic_ref(addr)?.unwrap_or_default();
+                        let code = load_account_code(&db, &db_acc);
+                        let acc_state =
+                            AccountState::from_account_info(db_acc.nonce, db_acc.balance, code);
+                        entry.insert(acc_state)
+                    }
+                    Entry::Occupied(entry) => entry.into_mut(),
+                };
+
+                for (key, value) in node.touched_slots() {
+                    match acc_state.storage.entry(key.into()) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(value.into());
+                        }
+                        Entry::Occupied(_) => {
+                            // we've already recorded this slot
+                        }
+                    }
+                }
             }
-            self.update_storage_from_trace(&mut prestate.0, false);
+
+            // also need to check changed accounts for things like balance changes etc
+            for (addr, changed_acc) in account_diffs {
+                let acc_state = match prestate.0.entry(addr) {
+                    Entry::Vacant(entry) => {
+                        let db_acc = db.basic_ref(addr)?.unwrap_or_default();
+                        let code = load_account_code(&db, &db_acc);
+                        let acc_state =
+                            AccountState::from_account_info(db_acc.nonce, db_acc.balance, code);
+                        entry.insert(acc_state)
+                    }
+                    Entry::Occupied(entry) => {
+                        // already recorded via touched accounts
+                        entry.into_mut()
+                    }
+                };
+
+                // in case we missed anything during the trace, we need to add the changed accounts
+                // storage
+                for (key, slot) in changed_acc.storage.iter() {
+                    match acc_state.storage.entry((*key).into()) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(slot.previous_or_original_value.into());
+                        }
+                        Entry::Occupied(_) => {
+                            // we've already recorded this slot
+                        }
+                    }
+                }
+            }
+
             Ok(PreStateFrame::Default(prestate))
         } else {
             let mut state_diff = DiffMode::default();
+            let mut account_change_kinds = HashMap::with_capacity(account_diffs.len());
             for (addr, changed_acc) in account_diffs {
-                let db_acc = db.basic(addr)?.unwrap_or_default();
-                let pre_state = AccountState::from_account_info(
-                    db_acc.nonce,
-                    db_acc.balance,
-                    db_acc.code.as_ref().map(|code| code.original_bytes()),
+                let db_acc = db.basic_ref(addr)?.unwrap_or_default();
+
+                let pre_code = load_account_code(&db, &db_acc);
+
+                let mut pre_state =
+                    AccountState::from_account_info(db_acc.nonce, db_acc.balance, pre_code);
+
+                let mut post_state = AccountState::from_account_info(
+                    changed_acc.info.nonce,
+                    changed_acc.info.balance,
+                    changed_acc.info.code.as_ref().map(|code| code.original_bytes()),
                 );
-                let post_state = AccountState::from_account_info(
-                    changed_acc.nonce,
-                    changed_acc.balance,
-                    changed_acc.code.as_ref().map(|code| code.original_bytes()),
-                );
+
+                // handle storage changes
+                for (key, slot) in changed_acc.storage.iter().filter(|(_, slot)| slot.is_changed())
+                {
+                    pre_state.storage.insert((*key).into(), slot.previous_or_original_value.into());
+                    post_state.storage.insert((*key).into(), slot.present_value.into());
+                }
+
                 state_diff.pre.insert(addr, pre_state);
                 state_diff.post.insert(addr, post_state);
+
+                // determine the change type
+                let pre_change = if changed_acc.is_created() {
+                    AccountChangeKind::Create
+                } else {
+                    AccountChangeKind::Modify
+                };
+                let post_change = if changed_acc.is_selfdestructed() {
+                    AccountChangeKind::SelfDestruct
+                } else {
+                    AccountChangeKind::Modify
+                };
+
+                account_change_kinds.insert(addr, (pre_change, post_change));
             }
-            self.update_storage_from_trace(&mut state_diff.pre, false);
-            self.update_storage_from_trace(&mut state_diff.post, true);
 
             // ensure we're only keeping changed entries
-            state_diff.retain_changed();
+            state_diff.retain_changed().remove_zero_storage_values();
 
+            self.diff_traces(&mut state_diff.pre, &mut state_diff.post, account_change_kinds);
             Ok(PreStateFrame::Diff(state_diff))
         }
     }
 
-    fn update_storage_from_trace(
+    /// Returns the difference between the pre and post state of the transaction depending on the
+    /// kind of changes of that account (pre,post)
+    fn diff_traces(
         &self,
-        account_states: &mut BTreeMap<Address, AccountState>,
-        post_value: bool,
+        pre: &mut BTreeMap<Address, AccountState>,
+        post: &mut BTreeMap<Address, AccountState>,
+        change_type: HashMap<Address, (AccountChangeKind, AccountChangeKind)>,
     ) {
-        for node in self.nodes.iter() {
-            node.geth_update_account_storage(account_states, post_value);
-        }
+        post.retain(|addr, post_state| {
+            // Don't keep destroyed accounts in the post state
+            if change_type.get(addr).map(|ty| ty.1.is_selfdestruct()).unwrap_or(false) {
+                return false
+            }
+            if let Some(pre_state) = pre.get(addr) {
+                // remove any unchanged account info
+                post_state.remove_matching_account_info(pre_state);
+            }
+
+            true
+        });
+
+        // Don't keep created accounts the pre state
+        pre.retain(|addr, _pre_state| {
+            // only keep accounts that are not created
+            change_type.get(addr).map(|ty| !ty.0.is_created()).unwrap_or(true)
+        });
     }
 }

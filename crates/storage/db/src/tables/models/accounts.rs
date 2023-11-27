@@ -41,10 +41,7 @@ impl Compact for AccountBeforeTx {
         acc_len + 20
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         let address = Address::from_slice(&buf[..20]);
         buf.advance(20);
 
@@ -116,8 +113,7 @@ impl Encode for BlockNumberAddress {
 impl Decode for BlockNumberAddress {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let value = value.as_ref();
-        let num =
-            u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::DecodeError)?);
+        let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
         let hash = Address::from_slice(&value[8..]);
 
         Ok(BlockNumberAddress((num, hash)))

@@ -1,4 +1,5 @@
-use reth_primitives::{serde_helper::num::from_int_or_hex_opt, Address, Bytes, B256, U256};
+use crate::serde_helpers::num::from_int_or_hex_opt;
+use alloy_primitives::{Address, Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map, BTreeMap};
 
@@ -54,6 +55,9 @@ pub struct PreStateMode(pub BTreeMap<Address, AccountState>);
 /// Represents the account states before and after the transaction is executed.
 ///
 /// This corresponds to the [DiffMode] of the [PreStateConfig].
+///
+/// This will only contain changed [AccountState]s, created accounts will not be included in the pre
+/// state and selfdestructed accounts will not be included in the post state.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiffMode {
@@ -71,7 +75,7 @@ impl DiffMode {
     /// This will remove all unchanged [AccountState]s from the sets.
     ///
     /// In other words it removes entries that are equal (unchanged) in both the pre and post sets.
-    pub fn retain_changed(&mut self) {
+    pub fn retain_changed(&mut self) -> &mut Self {
         self.pre.retain(|address, pre| {
             if let btree_map::Entry::Occupied(entry) = self.post.entry(*address) {
                 if entry.get() == pre {
@@ -83,6 +87,38 @@ impl DiffMode {
 
             true
         });
+        self
+    }
+
+    /// Removes all zero values from the storage of the [AccountState]s.
+    pub fn remove_zero_storage_values(&mut self) {
+        self.pre.values_mut().for_each(|state| {
+            state.storage.retain(|_, value| *value != B256::ZERO);
+        });
+        self.post.values_mut().for_each(|state| {
+            state.storage.retain(|_, value| *value != B256::ZERO);
+        });
+    }
+}
+
+/// Helper type for [DiffMode] to represent a specific set
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffStateKind {
+    /// Corresponds to the pre state of the [DiffMode]
+    Pre,
+    /// Corresponds to the post state of the [DiffMode]
+    Post,
+}
+
+impl DiffStateKind {
+    /// Returns true if this is the pre state of the [DiffMode]
+    pub fn is_pre(&self) -> bool {
+        matches!(self, DiffStateKind::Pre)
+    }
+
+    /// Returns true if this is the post state of the [DiffMode]
+    pub fn is_post(&self) -> bool {
+        matches!(self, DiffStateKind::Post)
     }
 }
 
@@ -117,8 +153,54 @@ impl AccountState {
             storage: Default::default(),
         }
     }
+
+    /// Removes balance,nonce or code if they match the given account info.
+    ///
+    /// This is useful for comparing pre vs post state and only keep changed values in post state.
+    pub fn remove_matching_account_info(&mut self, other: &AccountState) {
+        if self.balance == other.balance {
+            self.balance = None;
+        }
+        if self.nonce == other.nonce {
+            self.nonce = None;
+        }
+        if self.code == other.code {
+            self.code = None;
+        }
+    }
 }
 
+/// Helper type to track the kind of change of an [AccountState].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AccountChangeKind {
+    #[default]
+    Modify,
+    Create,
+    SelfDestruct,
+}
+
+impl AccountChangeKind {
+    /// Returns true if the account was created
+    pub fn is_created(&self) -> bool {
+        matches!(self, AccountChangeKind::Create)
+    }
+
+    /// Returns true the account was modified
+    pub fn is_modified(&self) -> bool {
+        matches!(self, AccountChangeKind::Modify)
+    }
+
+    /// Returns true the account was modified
+    pub fn is_selfdestruct(&self) -> bool {
+        matches!(self, AccountChangeKind::SelfDestruct)
+    }
+}
+
+/// The config for the prestate tracer.
+///
+/// If `diffMode` is set to true, the response frame includes all the account and storage diffs for
+/// the transaction. If it's missing or set to false it only returns the accounts and storage
+/// necessary to execute the transaction.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreStateConfig {
@@ -127,8 +209,16 @@ pub struct PreStateConfig {
 }
 
 impl PreStateConfig {
+    /// Returns true if this trace was requested with diffmode.
+    #[inline]
     pub fn is_diff_mode(&self) -> bool {
         self.diff_mode.unwrap_or_default()
+    }
+
+    /// Is default mode if diff_mode is not set
+    #[inline]
+    pub fn is_default_mode(&self) -> bool {
+        !self.is_diff_mode()
     }
 }
 

@@ -11,7 +11,7 @@ description = "Support for EIP-1459 Node Discovery via DNS"
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-net-common = { path = "../common" }
+reth-net-common.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
@@ -29,7 +29,7 @@ trust-dns-resolver = "0.23"
 data-encoding = "2"
 async-trait.workspace = true
 linked_hash_set = "0.1"
-schnellru = "0.2"
+schnellru.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
@@ -38,7 +38,7 @@ serde_with = { version = "3.3.0", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 
 [features]
 default = ["serde"]

@@ -1,4 +1,4 @@
-use reth_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// Ethereum Log emitted by a transaction
@@ -24,23 +24,6 @@ pub struct Log {
     /// Geth Compatibility Field: whether this log was removed
     #[serde(default)]
     pub removed: bool,
-}
-
-impl Log {
-    /// Creates a new rpc Log from a primitive log type from DB
-    pub fn from_primitive(log: reth_primitives::Log) -> Self {
-        Self {
-            address: log.address,
-            topics: log.topics,
-            data: log.data,
-            block_hash: None,
-            block_number: None,
-            transaction_hash: None,
-            transaction_index: None,
-            log_index: None,
-            removed: false,
-        }
-    }
 }
 
 #[cfg(test)]

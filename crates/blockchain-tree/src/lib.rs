@@ -20,7 +20,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod blockchain_tree;
-pub use blockchain_tree::{BlockHashes, BlockchainTree};
+pub use blockchain_tree::BlockchainTree;
 
 pub mod block_indices;
 pub use block_indices::BlockIndices;
@@ -37,8 +37,8 @@ pub use externals::TreeExternals;
 pub mod shareable;
 pub use shareable::ShareableBlockchainTree;
 
-pub mod post_state_data;
-pub use post_state_data::{BundleStateData, BundleStateDataRef};
+mod bundle;
+pub use bundle::{BundleStateData, BundleStateDataRef};
 
 /// Buffer of not executed blocks.
 pub mod block_buffer;
@@ -51,3 +51,5 @@ pub use block_buffer::BlockBuffer;
 
 /// Implementation of Tree traits that does nothing.
 pub mod noop;
+
+mod state;

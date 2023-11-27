@@ -3,19 +3,19 @@ use crate::{
     trie_cursor::{CursorSubNode, TrieCursor},
     updates::TrieUpdates,
 };
-use reth_db::{table::Key, DatabaseError};
+use reth_db::DatabaseError;
 use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles},
     B256,
 };
-use std::marker::PhantomData;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
-/// It allows moving through the trie in a depth-first manner, skipping certain branches if the .
+/// It allows moving through the trie in a depth-first manner, skipping certain branches
+/// if they have not changed.
 #[derive(Debug)]
-pub struct TrieWalker<'a, K, C> {
+pub struct TrieWalker<C> {
     /// A mutable reference to a trie cursor instance used for navigating the trie.
-    pub cursor: &'a mut C,
+    pub cursor: C,
     /// A vector containing the trie nodes that have been visited.
     pub stack: Vec<CursorSubNode>,
     /// A flag indicating whether the current node can be skipped when traversing the trie. This
@@ -26,12 +26,11 @@ pub struct TrieWalker<'a, K, C> {
     pub changes: PrefixSet,
     /// The trie updates to be applied to the trie.
     trie_updates: Option<TrieUpdates>,
-    __phantom: PhantomData<K>,
 }
 
-impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
+impl<C: TrieCursor> TrieWalker<C> {
     /// Constructs a new TrieWalker, setting up the initial state of the stack and cursor.
-    pub fn new(cursor: &'a mut C, changes: PrefixSet) -> Self {
+    pub fn new(cursor: C, changes: PrefixSet) -> Self {
         // Initialize the walker with a single empty stack element.
         let mut this = Self {
             cursor,
@@ -39,7 +38,6 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             trie_updates: None,
-            __phantom: PhantomData,
         };
 
         // Set up the root node of the trie in the stack, if it exists.
@@ -53,15 +51,9 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     }
 
     /// Constructs a new TrieWalker from existing stack and a cursor.
-    pub fn from_stack(cursor: &'a mut C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
-        let mut this = Self {
-            cursor,
-            changes,
-            stack,
-            can_skip_current_node: false,
-            trie_updates: None,
-            __phantom: PhantomData,
-        };
+    pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
+        let mut this =
+            Self { cursor, changes, stack, can_skip_current_node: false, trie_updates: None };
         this.update_skip_node();
         this
     }
@@ -255,17 +247,14 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::{
         prefix_set::PrefixSetMut,
         trie_cursor::{AccountTrieCursor, StorageTrieCursor},
     };
-    use reth_db::{
-        cursor::DbCursorRW, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
-    };
-    use reth_primitives::{trie::StorageTrieEntry, MAINNET};
-    use reth_provider::ProviderFactory;
+    use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
+    use reth_primitives::trie::StorageTrieEntry;
+    use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
     fn walk_nodes_with_common_prefix() {
@@ -290,9 +279,7 @@ mod tests {
             vec![0x5, 0x8, 0x2],
         ];
 
-        let db = create_test_rw_db();
-
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap();
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
@@ -316,10 +303,9 @@ mod tests {
         test_cursor(storage_trie, &expected);
     }
 
-    fn test_cursor<K, T>(mut trie: T, expected: &[Vec<u8>])
+    fn test_cursor<T>(mut trie: T, expected: &[Vec<u8>])
     where
-        K: Key + From<Vec<u8>>,
-        T: TrieCursor<K>,
+        T: TrieCursor,
     {
         let mut walker = TrieWalker::new(&mut trie, Default::default());
         assert!(walker.key().unwrap().is_empty());
@@ -337,8 +323,7 @@ mod tests {
 
     #[test]
     fn cursor_rootnode_with_changesets() {
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db.as_ref(), MAINNET.clone());
+        let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap();
         let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 

@@ -159,11 +159,16 @@ impl TxEip1559 {
         signature.encode(out);
     }
 
-    /// Output the length of the RLP signed transaction encoding. This encodes with a RLP header.
-    pub(crate) fn payload_len_with_signature(&self, signature: &Signature) -> usize {
+    /// Output the length of the RLP signed transaction encoding, _without_ a RLP string header.
+    pub(crate) fn payload_len_with_signature_without_header(&self, signature: &Signature) -> usize {
         let payload_length = self.fields_len() + signature.payload_len();
         // 'transaction type byte length' + 'header length' + 'payload length'
-        let len = 1 + length_of_length(payload_length) + payload_length;
+        1 + length_of_length(payload_length) + payload_length
+    }
+
+    /// Output the length of the RLP signed transaction encoding. This encodes with a RLP header.
+    pub(crate) fn payload_len_with_signature(&self, signature: &Signature) -> usize {
+        let len = self.payload_len_with_signature_without_header(signature);
         length_of_length(len) + len
     }
 

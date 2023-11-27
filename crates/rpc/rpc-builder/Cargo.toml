@@ -11,13 +11,13 @@ description = "Helpers for configuring RPC"
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-ipc = { path = "../ipc" }
+reth-ipc.workspace = true
 reth-interfaces.workspace = true
 reth-network-api.workspace = true
 reth-provider.workspace = true
-reth-rpc = { path = "../rpc" }
-reth-rpc-api = { path = "../rpc-api" }
-reth-rpc-engine-api = { path = "../rpc-engine-api" }
+reth-rpc.workspace = true
+reth-rpc-api.workspace = true
+reth-rpc-engine-api.workspace = true
 reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
@@ -40,13 +40,13 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-reth-tracing = { path = "../../tracing" }
-reth-rpc-api = { path = "../rpc-api", features = ["client"] }
+reth-tracing.workspace = true
+reth-rpc-api = { workspace = true, features = ["client"] }
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-beacon-consensus = { path = "../../consensus/beacon" }
+reth-beacon-consensus.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }

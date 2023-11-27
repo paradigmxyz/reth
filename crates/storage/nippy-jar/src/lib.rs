@@ -10,6 +10,7 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::{
     clone::Clone,
@@ -17,7 +18,9 @@ use std::{
     fs::File,
     io::{Seek, Write},
     marker::Sync,
+    ops::Deref,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use sucds::{
     int_vectors::PrefixSummedEliasFano,
@@ -182,13 +185,13 @@ where
     }
 
     /// Adds [`phf::Fmph`] perfect hashing function.
-    pub fn with_mphf(mut self) -> Self {
+    pub fn with_fmph(mut self) -> Self {
         self.phf = Some(Functions::Fmph(Fmph::new()));
         self
     }
 
     /// Adds [`phf::GoFmph`] perfect hashing function.
-    pub fn with_gomphf(mut self) -> Self {
+    pub fn with_gofmph(mut self) -> Self {
         self.phf = Some(Functions::GoFmph(GoFmph::new()));
         self
     }
@@ -196,6 +199,21 @@ where
     /// Gets a reference to the user header.
     pub fn user_header(&self) -> &H {
         &self.user_header
+    }
+
+    /// Gets a reference to `self.offsets`.
+    pub fn offsets_size(&self) -> usize {
+        self.offsets.size_in_bytes()
+    }
+
+    /// Gets a reference to `self.offsets`.
+    pub fn filter_size(&self) -> usize {
+        self.size()
+    }
+
+    /// Gets a reference to `self.offsets_index`.
+    pub fn offsets_index_size(&self) -> usize {
+        self.offsets_index.size_in_bytes()
     }
 
     /// Gets a reference to the compressor.
@@ -245,6 +263,11 @@ where
             .parent()
             .expect("exists")
             .join(format!("{}.idx", data_path.file_name().expect("exists").to_string_lossy()))
+    }
+
+    /// Returns a [`MmapHandle`] of the data file
+    pub fn open_data(&self) -> Result<MmapHandle, NippyJarError> {
+        MmapHandle::new(self.data_path())
     }
 
     /// If required, prepares any compression algorithm to an early pass of the data.
@@ -323,7 +346,7 @@ where
         // implementation
         let mut maybe_zstd_compressors = None;
         if let Some(Compressors::Zstd(zstd)) = &self.compressor {
-            maybe_zstd_compressors = zstd.generate_compressors()?;
+            maybe_zstd_compressors = zstd.compressors()?;
         }
 
         // Temporary buffer to avoid multiple reallocations if compressing to a buffer (eg. zstd w/
@@ -393,6 +416,9 @@ where
 
             column_iterators = iterators.into_iter();
         }
+
+        // drops immutable borrow
+        drop(maybe_zstd_compressors);
 
         // Write offsets and offset index to file
         self.freeze_offsets(offsets)?;
@@ -469,6 +495,10 @@ where
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
         self.filter.as_ref().ok_or(NippyJarError::FilterMissing)?.contains(element)
     }
+
+    fn size(&self) -> usize {
+        self.filter.as_ref().map(|f| f.size()).unwrap_or(0)
+    }
 }
 
 impl<H> PerfectHashingFunction for NippyJar<H>
@@ -481,6 +511,34 @@ where
 
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
         self.phf.as_ref().ok_or(NippyJarError::PHFMissing)?.get_index(key)
+    }
+}
+
+/// Holds an `Arc` over a file and its associated mmap handle.
+#[derive(Debug, Clone)]
+pub struct MmapHandle {
+    /// File descriptor. Needs to be kept alive as long as the mmap handle.
+    #[allow(unused)]
+    file: Arc<File>,
+    /// Mmap handle.
+    mmap: Arc<Mmap>,
+}
+
+impl MmapHandle {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, NippyJarError> {
+        let file = File::open(path)?;
+
+        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
+        let mmap = unsafe { Mmap::map(&file)? };
+
+        Ok(Self { file: Arc::new(file), mmap: Arc::new(mmap) })
+    }
+}
+
+impl Deref for MmapHandle {
+    type Target = Mmap;
+    fn deref(&self) -> &Self::Target {
+        &self.mmap
     }
 }
 
@@ -556,12 +614,12 @@ mod tests {
             assert_eq!(indexes, collect_indexes(&loaded_nippy));
         };
 
-        // mphf bytes size for 100 values of 32 bytes: 54
-        nippy = nippy.with_mphf();
+        // fmph bytes size for 100 values of 32 bytes: 54
+        nippy = nippy.with_fmph();
         check_phf(&mut nippy);
 
-        // mphf bytes size for 100 values of 32 bytes: 46
-        nippy = nippy.with_gomphf();
+        // fmph bytes size for 100 values of 32 bytes: 46
+        nippy = nippy.with_gofmph();
         check_phf(&mut nippy);
     }
 
@@ -622,7 +680,7 @@ mod tests {
         assert!(nippy.compressor().is_some());
 
         if let Some(Compressors::Zstd(zstd)) = &mut nippy.compressor_mut() {
-            assert!(matches!(zstd.generate_compressors(), Err(NippyJarError::CompressorNotReady)));
+            assert!(matches!(zstd.compressors(), Err(NippyJarError::CompressorNotReady)));
 
             // Make sure the number of column iterators match the initial set up ones.
             assert!(matches!(
@@ -642,27 +700,26 @@ mod tests {
 
         if let Some(Compressors::Zstd(zstd)) = &nippy.compressor() {
             assert!(matches!(
-                (&zstd.state, zstd.raw_dictionaries.as_ref().map(|dict| dict.len())),
+                (&zstd.state, zstd.dictionaries.as_ref().map(|dict| dict.len())),
                 (compression::ZstdState::Ready, Some(columns)) if columns == num_columns
             ));
         }
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
-        let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-        assert_eq!(nippy, loaded_nippy);
-
-        let mut dicts = vec![];
-        if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor_mut() {
-            dicts = zstd.generate_decompress_dictionaries().unwrap()
-        }
+        let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        assert_eq!(nippy.version, loaded_nippy.version);
+        assert_eq!(nippy.columns, loaded_nippy.columns);
+        assert_eq!(nippy.filter, loaded_nippy.filter);
+        assert_eq!(nippy.phf, loaded_nippy.phf);
+        assert_eq!(nippy.offsets_index, loaded_nippy.offsets_index);
+        assert_eq!(nippy.offsets, loaded_nippy.offsets);
+        assert_eq!(nippy.max_row_size, loaded_nippy.max_row_size);
+        assert_eq!(nippy.path, loaded_nippy.path);
 
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
-            let mut cursor = NippyJarCursor::new(
-                &loaded_nippy,
-                Some(zstd.generate_decompressors(&dicts).unwrap()),
-            )
-            .unwrap();
+            assert!(zstd.use_dict);
+            let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
@@ -673,6 +730,8 @@ mod tests {
                 );
                 row_index += 1;
             }
+        } else {
+            panic!("Expected Zstd compressor")
         }
     }
 
@@ -695,7 +754,7 @@ mod tests {
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Lz4(_)) = loaded_nippy.compressor() {
-            let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
+            let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
@@ -733,7 +792,7 @@ mod tests {
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
             assert!(!zstd.use_dict);
 
-            let mut cursor = NippyJarCursor::new(&loaded_nippy, None).unwrap();
+            let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
             // Iterate over compressed values and compare
             let mut row_index = 0usize;
@@ -771,7 +830,7 @@ mod tests {
                 NippyJar::new(num_columns, file_path.path(), BlockJarHeader { block_start })
                     .with_zstd(true, 5000)
                     .with_cuckoo_filter(col1.len())
-                    .with_mphf();
+                    .with_fmph();
 
             nippy.prepare_compression(data.clone()).unwrap();
             nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
@@ -782,23 +841,15 @@ mod tests {
 
         // Read file
         {
-            let mut loaded_nippy = NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap();
+            let loaded_nippy = NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap();
 
             assert!(loaded_nippy.compressor().is_some());
             assert!(loaded_nippy.filter.is_some());
             assert!(loaded_nippy.phf.is_some());
             assert_eq!(loaded_nippy.user_header().block_start, block_start);
 
-            let mut dicts = vec![];
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor_mut() {
-                dicts = zstd.generate_decompress_dictionaries().unwrap()
-            }
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
-                let mut cursor = NippyJarCursor::new(
-                    &loaded_nippy,
-                    Some(zstd.generate_decompressors(&dicts).unwrap()),
-                )
-                .unwrap();
+            if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
+                let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
                 // Iterate over compressed values and compare
                 let mut row_num = 0usize;
@@ -849,9 +900,9 @@ mod tests {
             let mut nippy = NippyJar::new_without_header(num_columns, file_path.path())
                 .with_zstd(true, 5000)
                 .with_cuckoo_filter(col1.len())
-                .with_mphf();
+                .with_fmph();
 
-            nippy.prepare_compression(data.clone()).unwrap();
+            nippy.prepare_compression(data).unwrap();
             nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
@@ -860,18 +911,10 @@ mod tests {
 
         // Read file
         {
-            let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+            let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
 
-            let mut dicts = vec![];
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor_mut() {
-                dicts = zstd.generate_decompress_dictionaries().unwrap()
-            }
-            if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
-                let mut cursor = NippyJarCursor::new(
-                    &loaded_nippy,
-                    Some(zstd.generate_decompressors(&dicts).unwrap()),
-                )
-                .unwrap();
+            if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
+                let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
 
                 // Shuffled for chaos.
                 let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
@@ -879,14 +922,13 @@ mod tests {
 
                 // Imagine `Blocks` snapshot file has two columns: `Block | StoredWithdrawals`
                 const BLOCKS_FULL_MASK: usize = 0b11;
-                const BLOCKS_COLUMNS: usize = 2;
 
                 // Read both columns
                 for (row_num, (v0, v1)) in &data {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_key_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols(v0, BLOCKS_FULL_MASK)
                         .unwrap()
                         .unwrap()
                         .iter()
@@ -896,7 +938,7 @@ mod tests {
 
                     // Simulates `by_number` queries
                     let row_by_num = cursor
-                        .row_by_number_with_cols::<BLOCKS_FULL_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .row_by_number_with_cols(*row_num, BLOCKS_FULL_MASK)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_value, row_by_num);
@@ -908,7 +950,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_key_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols(v0, BLOCKS_BLOCK_MASK)
                         .unwrap()
                         .unwrap()
                         .iter()
@@ -919,7 +961,7 @@ mod tests {
 
                     // Simulates `by_number` queries
                     let row_by_num = cursor
-                        .row_by_number_with_cols::<BLOCKS_BLOCK_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .row_by_number_with_cols(*row_num, BLOCKS_BLOCK_MASK)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_num.len(), 1);
@@ -932,7 +974,7 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     let row_by_value = cursor
-                        .row_by_key_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols(v0, BLOCKS_WITHDRAWAL_MASK)
                         .unwrap()
                         .unwrap()
                         .iter()
@@ -943,7 +985,7 @@ mod tests {
 
                     // Simulates `by_number` queries
                     let row_by_num = cursor
-                        .row_by_number_with_cols::<BLOCKS_WITHDRAWAL_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .row_by_number_with_cols(*row_num, BLOCKS_WITHDRAWAL_MASK)
                         .unwrap()
                         .unwrap();
                     assert_eq!(row_by_num.len(), 1);
@@ -956,14 +998,14 @@ mod tests {
                     // Simulates `by_hash` queries by iterating col1 values, which were used to
                     // create the inner index.
                     assert!(cursor
-                        .row_by_key_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(v0)
+                        .row_by_key_with_cols(v0, BLOCKS_EMPTY_MASK)
                         .unwrap()
                         .unwrap()
                         .is_empty());
 
                     // Simulates `by_number` queries
                     assert!(cursor
-                        .row_by_number_with_cols::<BLOCKS_EMPTY_MASK, BLOCKS_COLUMNS>(*row_num)
+                        .row_by_number_with_cols(*row_num, BLOCKS_EMPTY_MASK)
                         .unwrap()
                         .unwrap()
                         .is_empty());

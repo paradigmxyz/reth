@@ -13,6 +13,7 @@ reth-provider.workspace = true
 
 reth-rpc-builder.workspace = true
 reth-rpc-types.workspace = true
+reth-rpc-types-compat.workspace = true
 
 reth-revm.workspace = true
 reth-blockchain-tree.workspace = true
@@ -21,8 +22,7 @@ reth-network-api.workspace = true
 reth-network.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
-
-eyre = "0.6.8"
+eyre.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 tokio.workspace = true

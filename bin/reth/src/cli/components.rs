@@ -1,12 +1,15 @@
 //! Components that are used by the node command.
 
+use reth_network::{NetworkEvents, NetworkProtocols};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::ChainSpec;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, StateProviderFactory,
 };
-use reth_rpc_builder::{RethModuleRegistry, TransportRpcModules};
+use reth_rpc_builder::{
+    auth::AuthServerHandle, RethModuleRegistry, RpcServerHandle, TransportRpcModules,
+};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
@@ -39,13 +42,13 @@ impl<T> FullProvider for T where
 }
 
 /// The trait that is implemented for the Node command.
-pub trait RethNodeComponents {
+pub trait RethNodeComponents: Clone + Send + Sync + 'static {
     /// The Provider type that is provided by the not itself
     type Provider: FullProvider;
     /// The transaction pool type
     type Pool: TransactionPool + Clone + Unpin + 'static;
     /// The network type used to communicate with p2p.
-    type Network: NetworkInfo + Peers + Clone + 'static;
+    type Network: NetworkInfo + Peers + NetworkProtocols + NetworkEvents + Clone + 'static;
     /// The events type used to create subscriptions.
     type Events: CanonStateSubscriptions + Clone + 'static;
     /// The type that is used to spawn tasks.
@@ -114,7 +117,7 @@ where
     Provider: FullProvider + Clone + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + Unpin + 'static,
-    Network: NetworkInfo + Peers + Clone + 'static,
+    Network: NetworkInfo + Peers + NetworkProtocols + NetworkEvents + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
 {
     type Provider = Provider;
@@ -142,4 +145,25 @@ where
     fn events(&self) -> Self::Events {
         self.events.clone()
     }
+}
+
+/// Contains the handles to the spawned RPC servers.
+///
+/// This can be used to access the endpoints of the servers.
+///
+/// # Example
+///
+/// ```rust
+/// use reth::{cli::components::RethRpcServerHandles, rpc::api::EthApiClient};
+/// # async fn t(handles: RethRpcServerHandles) {
+/// let client = handles.rpc.http_client().expect("http server not started");
+/// let block_number = client.block_number().await.unwrap();
+/// # }
+/// ```
+#[derive(Debug, Clone)]
+pub struct RethRpcServerHandles {
+    /// The regular RPC server handle.
+    pub rpc: RpcServerHandle,
+    /// The handle to the auth server (engine API)
+    pub auth: AuthServerHandle,
 }

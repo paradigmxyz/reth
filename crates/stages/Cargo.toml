@@ -19,9 +19,10 @@ normal = [
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
-reth-codecs = { path = "../storage/codecs" }
+reth-codecs.workspace = true
 reth-provider.workspace = true
-reth-trie = { path = "../trie" }
+reth-trie.workspace = true
+reth-tokio-util.workspace = true
 
 # revm
 revm.workspace = true
@@ -49,17 +50,18 @@ aquamarine.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 num-traits = "0.2.15"
+auto_impl = "1"
 
 [dev-dependencies]
 # reth
-reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-downloaders = { path = "../net/downloaders" }
-reth-eth-wire = { path = "../net/eth-wire" } # TODO(onbjerg): We only need this for [BlockBody]
-reth-blockchain-tree = { path = "../blockchain-tree" }
-reth-revm = { path = "../revm" }
-reth-trie = { path = "../trie", features = ["test-utils"] }
+reth-downloaders.workspace = true
+reth-eth-wire.workspace = true # TODO(onbjerg): We only need this for [BlockBody]
+reth-blockchain-tree.workspace = true
+reth-revm.workspace = true
+reth-trie = { workspace = true, features = ["test-utils"] }
 
 alloy-rlp.workspace = true
 itertools.workspace = true
@@ -69,14 +71,14 @@ rand.workspace = true
 paste = "1.0"
 
 # Stage benchmarks
-pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
-criterion = { version = "0.5", features = ["async_futures"] }
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+criterion = { workspace = true, features = ["async_futures"] }
 
 # io
 serde_json.workspace = true
 
 [features]
-test-utils = ["reth-interfaces/test-utils"]
+test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils"]
 
 [[bench]]
 name = "criterion"

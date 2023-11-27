@@ -12,8 +12,8 @@ description = "Implementations of various block downloaders"
 # reth
 reth-interfaces.workspace = true
 reth-primitives.workspace = true
-reth-db.workspace = true
 reth-tasks.workspace = true
+reth-provider.workspace = true
 
 # async
 futures.workspace = true
@@ -33,6 +33,7 @@ rayon.workspace = true
 thiserror.workspace = true
 
 # optional deps for the test-utils feature
+reth-db = { workspace = true, optional = true }
 alloy-rlp = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 itertools = { workspace = true, optional = true }
@@ -40,7 +41,7 @@ itertools = { workspace = true, optional = true }
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 
 assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -50,4 +51,4 @@ itertools.workspace = true
 tempfile.workspace = true
 
 [features]
-test-utils = ["dep:alloy-rlp", "dep:tempfile", "dep:itertools"]
+test-utils = ["dep:alloy-rlp", "dep:tempfile", "dep:itertools", "reth-db/test-utils", "reth-interfaces/test-utils"]

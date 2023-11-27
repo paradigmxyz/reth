@@ -44,7 +44,6 @@ impl Default for StorageHashingStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for StorageHashingStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -52,9 +51,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     }
 
     /// Execute the stage.
-    async fn execute(
+    fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
@@ -175,7 +174,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
-            let storages = provider.plainstate_storages(lists)?;
+            let storages = provider.plain_state_storages(lists)?;
             provider.insert_storage_for_hashing(storages)?;
         }
 
@@ -191,9 +190,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     }
 
     /// Unwind the stage.
-    async fn unwind(
+    fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<'_, &DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
@@ -214,7 +213,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 }
 
 fn stage_checkpoint_progress<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<DB>,
 ) -> Result<EntitiesCheckpoint, DatabaseError> {
     Ok(EntitiesCheckpoint {
         processed: provider.tx_ref().entries::<tables::HashedStorage>()? as u64,
@@ -227,7 +226,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use rand::Rng;
@@ -283,7 +282,7 @@ mod tests {
                         },
                         ..
                     }) if processed == previous_checkpoint.progress.processed + 1 &&
-                        total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64);
+                        total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64);
 
                     // Continue from checkpoint
                     input.checkpoint = Some(checkpoint);
@@ -297,7 +296,7 @@ mod tests {
                         },
                         ..
                     }) if processed == total &&
-                        total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64);
+                        total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64);
 
                     // Validate the stage execution
                     assert!(
@@ -332,7 +331,7 @@ mod tests {
         let result = rx.await.unwrap();
 
         let (progress_address, progress_key) = runner
-            .tx
+            .db
             .query(|tx| {
                 let (address, entry) = tx
                     .cursor_read::<tables::PlainStorageState>()?
@@ -364,9 +363,9 @@ mod tests {
                 },
                 done: false
             }) if address == progress_address && storage == progress_key &&
-                total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
+                total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64
         );
-        assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 500);
+        assert_eq!(runner.db.table::<tables::HashedStorage>().unwrap().len(), 500);
 
         // second run with commit threshold of 2 to check if subkey is set.
         runner.set_commit_threshold(2);
@@ -376,7 +375,7 @@ mod tests {
         let result = rx.await.unwrap();
 
         let (progress_address, progress_key) = runner
-            .tx
+            .db
             .query(|tx| {
                 let (address, entry) = tx
                     .cursor_read::<tables::PlainStorageState>()?
@@ -410,9 +409,9 @@ mod tests {
                 },
                 done: false
             }) if address == progress_address && storage == progress_key &&
-                total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
+                total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64
         );
-        assert_eq!(runner.tx.table::<tables::HashedStorage>().unwrap().len(), 502);
+        assert_eq!(runner.db.table::<tables::HashedStorage>().unwrap().len(), 502);
 
         // third last run, hash rest of storages.
         runner.set_commit_threshold(1000);
@@ -442,11 +441,11 @@ mod tests {
                 },
                 done: true
             }) if processed == total &&
-                total == runner.tx.table::<tables::PlainStorageState>().unwrap().len() as u64
+                total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64
         );
         assert_eq!(
-            runner.tx.table::<tables::HashedStorage>().unwrap().len(),
-            runner.tx.table::<tables::PlainStorageState>().unwrap().len()
+            runner.db.table::<tables::HashedStorage>().unwrap().len(),
+            runner.db.table::<tables::PlainStorageState>().unwrap().len()
         );
 
         // Validate the stage execution
@@ -454,22 +453,22 @@ mod tests {
     }
 
     struct StorageHashingTestRunner {
-        tx: TestTransaction,
+        db: TestStageDB,
         commit_threshold: u64,
         clean_threshold: u64,
     }
 
     impl Default for StorageHashingTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), commit_threshold: 1000, clean_threshold: 1000 }
+            Self { db: TestStageDB::default(), commit_threshold: 1000, clean_threshold: 1000 }
         }
     }
 
     impl StageTestRunner for StorageHashingTestRunner {
         type S = StorageHashingStage;
 
-        fn tx(&self) -> &TestTransaction {
-            &self.tx
+        fn db(&self) -> &TestStageDB {
+            &self.db
         }
 
         fn stage(&self) -> Self::S {
@@ -494,7 +493,7 @@ mod tests {
 
             let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..3);
 
-            self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
+            self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;
@@ -502,7 +501,7 @@ mod tests {
             for progress in iter {
                 // Insert last progress data
                 let block_number = progress.number;
-                self.tx.commit(|tx| {
+                self.db.commit(|tx| {
                     progress.body.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
                             tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
@@ -553,7 +552,8 @@ mod tests {
 
                     first_tx_num = next_tx_num;
 
-                    tx.put::<tables::BlockBodyIndices>(progress.number, body)
+                    tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
+                    Ok(())
                 })?;
             }
 
@@ -593,7 +593,7 @@ mod tests {
         }
 
         fn check_hashed_storage(&self) -> Result<(), TestRunnerError> {
-            self.tx
+            self.db
                 .query(|tx| {
                     let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
                     let mut hashed_storage_cursor =
@@ -620,9 +620,9 @@ mod tests {
                 .map_err(|e| e.into())
         }
 
-        fn insert_storage_entry<'a, TX: DbTxMut<'a>>(
+        fn insert_storage_entry<TX: DbTxMut>(
             &self,
-            tx: &'a TX,
+            tx: &TX,
             tid_address: BlockNumberAddress,
             entry: StorageEntry,
             hash: bool,
@@ -662,7 +662,7 @@ mod tests {
         fn unwind_storage(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             tracing::debug!("unwinding storage...");
             let target_block = input.unwind_to;
-            self.tx.commit(|tx| {
+            self.db.commit(|tx| {
                 let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                 let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
 

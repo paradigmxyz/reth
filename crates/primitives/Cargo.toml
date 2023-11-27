@@ -10,20 +10,21 @@ description = "Commonly used types in reth."
 
 [dependencies]
 # reth
-reth-codecs = { path = "../storage/codecs" }
-revm-primitives = { workspace = true, features = ["serde"] }
+reth-codecs.workspace = true
+reth-rpc-types.workspace = true
+revm-primitives.workspace = true
+revm.workspace = true
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-sol-types.workspace = true
 ethers-core = { workspace = true, default-features = false, optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 
 # for eip-4844
-c-kzg = { workspace = true, features = ["serde"] }
+c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # used for forkid
 crc = "3"
@@ -31,13 +32,10 @@ crc = "3"
 # tracing
 tracing.workspace = true
 
-# tokio
-tokio = { workspace = true, default-features = false, features = ["sync"] }
-tokio-stream.workspace = true
-
 # misc
 bytes.workspace = true
 byteorder = "1"
+clap = { workspace = true, features = ["derive"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 serde_with = "3.3.0"
@@ -46,9 +44,8 @@ sucds = "~0.6"
 modular-bitfield = "0.11.2"
 derive_more = "0.99"
 url = "2.3"
-once_cell = "1.17.0"
+once_cell.workspace = true
 zstd = { version = "0.12", features = ["experimental"] }
-paste = "1.0"
 rayon.workspace = true
 tempfile.workspace = true
 sha2 = "0.10.7"
@@ -79,23 +76,20 @@ triehash = "0.8"
 
 plain_hasher = "0.2"
 hash-db = "~0.15"
-# value-256 is needed for the main_codec proptests to pass
-reth-primitives = { path = ".", features = ["value-256"] }
 
-
-# necessary so we don't hit a "undeclared 'std'": 
-# https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
+# necessary so we don't hit a "undeclared 'std'":
+# https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 secp256k1.workspace = true
-criterion = "0.5"
-pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
+criterion.workspace = true
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
-default = []
-arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+default = ["c-kzg"]
+arbitrary = ["revm-primitives/arbitrary", "reth-rpc-types/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg"]
+clap = ["dep:clap"]
+optimism = ["reth-codecs/optimism", "revm-primitives/optimism", "revm/optimism"]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
-# value-256 controls whether transaction Value fields are DB-encoded as 256 bits instead of the
-# default of 128 bits.
-value-256 = ["reth-codecs/value-256"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

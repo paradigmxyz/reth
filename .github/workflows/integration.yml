@@ -1,3 +1,7 @@
+# Runs integration tests.
+
+name: integration
+
 on:
   pull_request:
   merge_group:
@@ -6,63 +10,38 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  GETH_BUILD: 1.12.0-e501b3b0
   SEED: rustethereumethereumrust
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
-name: integration
 jobs:
   test:
-    name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
+    name: test / ${{ matrix.network }} (${{ matrix.partition }}/2)
     runs-on:
       group: Reth
     strategy:
       matrix:
         partition: [1, 2]
+        network: ["ethereum", "optimism"]
     timeout-minutes: 60
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Geth
+        run: .github/scripts/install_geth.sh
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-
-      - name: Install geth
-        run: |
-          mkdir -p "$HOME/bin"
-          wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
-          tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
-          mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
-          chmod u+x "$HOME/bin/geth"
-          export PATH=$HOME/bin:$PATH
-          echo $HOME/bin >> $GITHUB_PATH
-          geth version
-
-      - name: Install latest nextest release
-        uses: taiki-e/install-action@nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
       - name: Run tests
         run: |
-          cargo llvm-cov nextest --lcov --output-path lcov.info \
-            --locked --all-features --workspace --exclude examples --exclude ef-tests \
-            --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
+          cargo nextest run \
+            --locked --features "${{ matrix.network }}" \
+            --workspace --exclude examples --exclude ef-tests \
+            --partition hash:${{ matrix.partition }}/2 \
             -E 'kind(test)'
-
-      - name: Upload coverage data to codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
-          flags: integration-tests
 
   sync:
     name: sync / 100k blocks
@@ -74,34 +53,31 @@ jobs:
       RUST_LOG: info,sync=error
     timeout-minutes: 60
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-
-      - name: Run sync (${{ matrix.profile }})
+      - name: Run sync
         run: |
-          cargo run --profile release --features jemalloc,min-error-logs \
-            --bin reth -- node \
+          cargo run --release --features jemalloc,min-error-logs --bin reth \
+            -- node \
             --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 \
             --debug.max-block 100000 \
             --debug.terminate
+      - name: Verify the target block hash
+        run: |
+          cargo run --release --bin reth \
+            -- db \
+            get CanonicalHeaders 100000 \
+            | grep 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4
 
   integration-success:
-    if: always()
     name: integration success
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
+    if: always()
     needs: [test]
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1

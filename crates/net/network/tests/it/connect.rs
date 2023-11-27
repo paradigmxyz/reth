@@ -12,7 +12,7 @@ use reth_interfaces::{
 use reth_net_common::ban_list::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
-    NetworkConfigBuilder, NetworkEvent, NetworkManager, PeersConfig,
+    NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
 use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId};
@@ -156,7 +156,7 @@ async fn test_get_peer() {
     handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
 
-    let peers = handle0.get_peers().await.unwrap();
+    let peers = handle0.get_all_peers().await.unwrap();
     assert_eq!(handle0.num_connected_peers(), peers.len());
 }
 

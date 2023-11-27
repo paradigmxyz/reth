@@ -56,6 +56,16 @@ impl CallTraceArena {
             }
         }
     }
+
+    /// Returns the nodes in the arena
+    pub fn nodes(&self) -> &[CallTraceNode] {
+        &self.arena
+    }
+
+    /// Consumes the arena and returns the nodes
+    pub fn into_nodes(self) -> Vec<CallTraceNode> {
+        self.arena
+    }
 }
 
 /// How to push a trace into the arena
@@ -68,6 +78,7 @@ pub(crate) enum PushTraceKind {
 }
 
 impl PushTraceKind {
+    #[inline]
     fn is_attach_to_parent(&self) -> bool {
         matches!(self, PushTraceKind::PushAndAttachToParent)
     }

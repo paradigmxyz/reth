@@ -68,10 +68,7 @@ impl Compact for HashBuilderState {
         len
     }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let (key, mut buf) = Vec::from_compact(buf, 0);
 
         let stack_len = buf.get_u16() as usize;

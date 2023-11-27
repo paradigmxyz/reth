@@ -3,23 +3,27 @@ use crate::{
         error::{EthApiError, EthResult},
         revm_utils::{
             clone_into_empty_db, inspect, inspect_and_return_db, prepare_call_env,
-            replay_transactions_until, result_output, transact, EvmOverrides,
+            replay_transactions_until, transact, EvmOverrides,
         },
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
-    EthApiSpec, TracingCallGuard,
+    BlockingTaskGuard, EthApiSpec,
 };
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    Account, Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
+    revm::env::tx_env_with_recovered,
+    revm_primitives::{
+        db::{DatabaseCommit, DatabaseRef},
+        BlockEnv, CfgEnv,
+    },
+    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
 use reth_revm::{
     database::{StateProviderDatabase, SubState},
-    env::tx_env_with_recovered,
     tracing::{
         js::{JsDbRequest, JsInspector},
         FourByteInspector, TracingInspector, TracingInspectorConfig,
@@ -37,10 +41,6 @@ use reth_tasks::TaskSpawner;
 use revm::{
     db::{CacheDB, EmptyDB},
     primitives::Env,
-};
-use revm_primitives::{
-    db::{DatabaseCommit, DatabaseRef},
-    BlockEnv, CfgEnv,
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
@@ -61,10 +61,10 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
         provider: Provider,
         eth: Eth,
         task_spawner: Box<dyn TaskSpawner>,
-        tracing_call_guard: TracingCallGuard,
+        blocking_task_guard: BlockingTaskGuard,
     ) -> Self {
         let inner =
-            Arc::new(DebugApiInner { provider, eth_api: eth, task_spawner, tracing_call_guard });
+            Arc::new(DebugApiInner { provider, eth_api: eth, task_spawner, blocking_task_guard });
         Self { inner }
     }
 }
@@ -78,7 +78,7 @@ where
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
-        self.inner.tracing_call_guard.clone().acquire_owned().await
+        self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
     /// Trace the entire block asynchronously
@@ -96,7 +96,7 @@ where
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut db = SubState::new(StateProviderDatabase::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let mut transactions = transactions.into_iter().peekable();
                 while let Some(tx) = transactions.next() {
@@ -190,7 +190,7 @@ where
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let mut db = SubState::new(StateProviderDatabase::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 // replay all transactions prior to the targeted transaction
                 replay_transactions_until(
                     &mut db,
@@ -263,7 +263,10 @@ where
                             .into_pre_state_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config),
+                            TracingInspectorConfig::from_geth_config(&config)
+                                // if in default mode, we need to return all touched storages, for
+                                // which we need to record steps and statediff
+                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
 
                         let frame =
@@ -289,7 +292,7 @@ where
                     // because JSTracer and all JS types are not Send
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
                     let state = self.inner.eth_api.state_at(at)?;
-                    let db = SubState::new(StateProviderDatabase::new(state));
+                    let db = CacheDB::new(StateProviderDatabase::new(state));
                     let has_state_overrides = overrides.has_state();
 
                     // If the caller provided state overrides we need to clone the DB so the js
@@ -330,7 +333,7 @@ where
             })
             .await?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default();
+        let return_value = res.result.into_output().unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok(frame.into())
@@ -351,7 +354,8 @@ where
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
 
-        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let target_block = block_number
+            .unwrap_or(reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Latest));
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(target_block),
             self.inner.eth_api.block_by_id(target_block),
@@ -380,7 +384,7 @@ where
             .spawn_with_state_at_block(at.into(), move |state| {
                 // the outer vec for the bundles
                 let mut all_bundles = Vec::with_capacity(bundles.len());
-                let mut db = SubState::new(StateProviderDatabase::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -454,7 +458,7 @@ where
         opts: GethDebugTracingOptions,
         env: Env,
         at: BlockId,
-        db: &mut SubState<StateProviderBox<'_>>,
+        db: &mut SubState<StateProviderBox>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -490,7 +494,10 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config),
+                            TracingInspectorConfig::from_geth_config(&config)
+                                // if in default mode, we need to return all touched storages, for
+                                // which we need to record steps and statediff
+                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
                         let (res, _) = inspect(&mut *db, env, &mut inspector)?;
 
@@ -533,7 +540,7 @@ where
 
         let (res, _) = inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
-        let return_value = result_output(&res.result).unwrap_or_default();
+        let return_value = res.result.into_output().unwrap_or_default();
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))
@@ -603,27 +610,18 @@ where
         while let Some(req) = stream.next().await {
             match req {
                 JsDbRequest::Basic { address, resp } => {
-                    let acc = db
-                        .basic(address)
-                        .map(|maybe_acc| {
-                            maybe_acc.map(|acc| Account {
-                                nonce: acc.nonce,
-                                balance: acc.balance,
-                                bytecode_hash: Some(acc.code_hash),
-                            })
-                        })
-                        .map_err(|err| err.to_string());
+                    let acc = db.basic_ref(address).map_err(|err| err.to_string());
                     let _ = resp.send(acc);
                 }
                 JsDbRequest::Code { code_hash, resp } => {
                     let code = db
-                        .code_by_hash(code_hash)
+                        .code_by_hash_ref(code_hash)
                         .map(|code| code.bytecode)
                         .map_err(|err| err.to_string());
                     let _ = resp.send(code);
                 }
                 JsDbRequest::StorageAt { address, index, resp } => {
-                    let value = db.storage(address, index).map_err(|err| err.to_string());
+                    let value = db.storage_ref(address, index).map_err(|err| err.to_string());
                     let _ = resp.send(value);
                 }
             }
@@ -891,13 +889,10 @@ where
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
         let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
-
-        let mut res = Vec::new();
-        if let Some(tx) = tx.map(TransactionSource::into_recovered) {
-            tx.encode(&mut res);
-        }
-
-        Ok(res.into())
+        Ok(tx
+            .map(TransactionSource::into_recovered)
+            .map(|tx| tx.envelope_encoded())
+            .unwrap_or_default())
     }
 
     /// Handler for `debug_getRawReceipts`
@@ -1010,8 +1005,8 @@ struct DebugApiInner<Provider, Eth> {
     provider: Provider,
     /// The implementation of `eth` API
     eth_api: Eth,
-    // restrict the number of concurrent calls to tracing calls
-    tracing_call_guard: TracingCallGuard,
+    // restrict the number of concurrent calls to blocking calls
+    blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
 }

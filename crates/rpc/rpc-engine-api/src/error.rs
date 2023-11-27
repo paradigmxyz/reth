@@ -1,4 +1,6 @@
-use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
+use jsonrpsee_types::error::{
+    INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
+};
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{B256, U256};
@@ -14,26 +16,31 @@ pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
 /// Request too large error code.
 pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
+/// Error message for the request too large error.
+const REQUEST_TOO_LARGE_MESSAGE: &str = "Too large request";
+
 /// Error returned by [`EngineApi`][crate::EngineApi]
 ///
-/// Note: This is a high-fidelity error type which can be converted to an RPC error that adheres to the spec: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
+/// Note: This is a high-fidelity error type which can be converted to an RPC error that adheres to
+/// the [Engine API spec](https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors).
 #[derive(Error, Debug)]
 pub enum EngineApiError {
-    /// Unknown payload requested.
+    // **IMPORTANT**: keep error messages in sync with the Engine API spec linked above.
+    /// Payload does not exist / is not available.
     #[error("Unknown payload")]
     UnknownPayload,
     /// The payload body request length is too large.
-    #[error("Payload request too large: {len}")]
+    #[error("requested count too large: {len}")]
     PayloadRequestTooLarge {
         /// The length that was requested.
         len: u64,
     },
     /// Thrown if engine_getPayloadBodiesByRangeV1 contains an invalid range
-    #[error("invalid start or count, start: {start} count: {count}")]
+    #[error("invalid start ({start}) or count ({count})")]
     InvalidBodiesRange {
         /// Start of the range
         start: u64,
-        /// requested number of items
+        /// Requested number of items
         count: u64,
     },
     /// Thrown if `PayloadAttributes` provided in engine_forkchoiceUpdated before V3 contains a
@@ -44,10 +51,10 @@ pub enum EngineApiError {
     #[error("withdrawals not supported in V1")]
     WithdrawalsNotSupportedInV1,
     /// Thrown if engine_forkchoiceUpdated contains no withdrawals after Shanghai
-    #[error("no withdrawals post-shanghai")]
+    #[error("no withdrawals post-Shanghai")]
     NoWithdrawalsPostShanghai,
     /// Thrown if engine_forkchoiceUpdated contains withdrawals before Shanghai
-    #[error("withdrawals pre-shanghai")]
+    #[error("withdrawals pre-Shanghai")]
     HasWithdrawalsPreShanghai,
     /// Thrown if the `PayloadAttributes` provided in engine_forkchoiceUpdated contains no parent
     /// beacon block root after Cancun
@@ -55,11 +62,12 @@ pub enum EngineApiError {
     NoParentBeaconBlockRootPostCancun,
     /// Thrown if `PayloadAttributes` were provided with a timestamp, but the version of the engine
     /// method called is meant for a fork that occurs after the provided timestamp.
-    #[error("unsupported fork")]
+    #[error("Unsupported fork")]
     UnsupportedFork,
     /// Terminal total difficulty mismatch during transition configuration exchange.
     #[error(
-        "Invalid transition terminal total difficulty. Execution: {execution}. Consensus: {consensus}"
+        "invalid transition terminal total difficulty: \
+         execution: {execution}, consensus: {consensus}"
     )]
     TerminalTD {
         /// Execution terminal total difficulty value.
@@ -69,7 +77,8 @@ pub enum EngineApiError {
     },
     /// Terminal block hash mismatch during transition configuration exchange.
     #[error(
-        "Invalid transition terminal block hash. Execution: {execution:?}. Consensus: {consensus:?}"
+        "invalid transition terminal block hash: \
+         execution: {execution:?}, consensus: {consensus}"
     )]
     TerminalBlockHash {
         /// Execution terminal block hash. `None` if block number is not found in the database.
@@ -85,48 +94,179 @@ pub enum EngineApiError {
     NewPayload(#[from] BeaconOnNewPayloadError),
     /// Encountered an internal error.
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
     /// Fetching the payload failed
     #[error(transparent)]
     GetPayloadError(#[from] PayloadBuilderError),
+    /// If the optimism feature flag is enabled, the payload attributes must have a present
+    /// gas limit for the forkchoice updated method.
+    #[cfg(feature = "optimism")]
+    #[error("Missing gas limit in payload attributes")]
+    MissingGasLimitInPayloadAttributes,
+}
+
+/// Helper type to represent the `error` field in the error response:
+/// <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
+#[derive(serde::Serialize)]
+struct ErrorData {
+    err: String,
+}
+
+impl ErrorData {
+    #[inline]
+    fn new(err: impl std::fmt::Display) -> Self {
+        Self { err: err.to_string() }
+    }
 }
 
 impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
-        let code = match error {
+        match error {
             EngineApiError::InvalidBodiesRange { .. } |
             EngineApiError::WithdrawalsNotSupportedInV1 |
             EngineApiError::ParentBeaconBlockRootNotSupportedBeforeV3 |
             EngineApiError::NoParentBeaconBlockRootPostCancun |
             EngineApiError::NoWithdrawalsPostShanghai |
-            EngineApiError::HasWithdrawalsPreShanghai => INVALID_PARAMS_CODE,
-            EngineApiError::UnknownPayload => UNKNOWN_PAYLOAD_CODE,
-            EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
-            EngineApiError::UnsupportedFork => UNSUPPORTED_FORK_CODE,
-
+            EngineApiError::HasWithdrawalsPreShanghai => {
+                // Note: the data field is not required by the spec, but is also included by other
+                // clients
+                jsonrpsee_types::error::ErrorObject::owned(
+                    INVALID_PARAMS_CODE,
+                    INVALID_PARAMS_MSG,
+                    Some(ErrorData::new(error)),
+                )
+            }
+            EngineApiError::UnknownPayload => jsonrpsee_types::error::ErrorObject::owned(
+                UNKNOWN_PAYLOAD_CODE,
+                error.to_string(),
+                None::<()>,
+            ),
+            EngineApiError::PayloadRequestTooLarge { .. } => {
+                jsonrpsee_types::error::ErrorObject::owned(
+                    REQUEST_TOO_LARGE_CODE,
+                    REQUEST_TOO_LARGE_MESSAGE,
+                    Some(ErrorData::new(error)),
+                )
+            }
+            EngineApiError::UnsupportedFork => jsonrpsee_types::error::ErrorObject::owned(
+                UNSUPPORTED_FORK_CODE,
+                error.to_string(),
+                None::<()>,
+            ),
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
-                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => return (*err).into(),
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => (*err).into(),
                 BeaconForkChoiceUpdateError::EngineUnavailable |
-                BeaconForkChoiceUpdateError::Internal(_) => INTERNAL_ERROR_CODE,
+                BeaconForkChoiceUpdateError::Internal(_) => {
+                    jsonrpsee_types::error::ErrorObject::owned(
+                        INTERNAL_ERROR_CODE,
+                        SERVER_ERROR_MSG,
+                        Some(ErrorData::new(error)),
+                    )
+                }
             },
             EngineApiError::NewPayload(ref err) => match err {
-                BeaconOnNewPayloadError::Internal(_) |
-                BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions => INVALID_PARAMS_CODE,
-                BeaconOnNewPayloadError::EngineUnavailable => INTERNAL_ERROR_CODE,
+                BeaconOnNewPayloadError::Internal(_) => jsonrpsee_types::error::ErrorObject::owned(
+                    INTERNAL_ERROR_CODE,
+                    SERVER_ERROR_MSG,
+                    Some(ErrorData::new(error)),
+                ),
+                BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions => {
+                    jsonrpsee_types::error::ErrorObject::owned(
+                        INVALID_PARAMS_CODE,
+                        INVALID_PARAMS_MSG,
+                        Some(ErrorData::new(error)),
+                    )
+                }
+                BeaconOnNewPayloadError::EngineUnavailable => {
+                    jsonrpsee_types::error::ErrorObject::owned(
+                        INTERNAL_ERROR_CODE,
+                        SERVER_ERROR_MSG,
+                        Some(ErrorData::new(error)),
+                    )
+                }
             },
+            // Optimism errors
+            #[cfg(feature = "optimism")]
+            EngineApiError::MissingGasLimitInPayloadAttributes => {
+                jsonrpsee_types::error::ErrorObject::owned(
+                    INVALID_PARAMS_CODE,
+                    INVALID_PARAMS_MSG,
+                    Some(ErrorData::new(error)),
+                )
+            }
             // Any other server error
             EngineApiError::TerminalTD { .. } |
             EngineApiError::TerminalBlockHash { .. } |
             EngineApiError::Internal(_) |
-            EngineApiError::GetPayloadError(_) => INTERNAL_ERROR_CODE,
-        };
-        jsonrpsee_types::error::ErrorObject::owned(code, error.to_string(), None::<()>)
+            EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
+                INTERNAL_ERROR_CODE,
+                SERVER_ERROR_MSG,
+                Some(ErrorData::new(error)),
+            ),
+        }
     }
 }
 
 impl From<EngineApiError> for jsonrpsee_core::error::Error {
     fn from(error: EngineApiError) -> Self {
         jsonrpsee_core::error::Error::Call(error.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_rpc_types::engine::ForkchoiceUpdateError;
+
+    #[track_caller]
+    fn ensure_engine_rpc_error(
+        code: i32,
+        message: &str,
+        err: impl Into<jsonrpsee_types::error::ErrorObject<'static>>,
+    ) {
+        let err = err.into();
+        dbg!(&err);
+        assert_eq!(err.code(), code);
+        assert_eq!(err.message(), message);
+    }
+
+    // Tests that engine errors are formatted correctly according to the engine API spec
+    // <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
+    #[test]
+    fn engine_error_rpc_error_test() {
+        ensure_engine_rpc_error(
+            UNSUPPORTED_FORK_CODE,
+            "Unsupported fork",
+            EngineApiError::UnsupportedFork,
+        );
+
+        ensure_engine_rpc_error(
+            REQUEST_TOO_LARGE_CODE,
+            "Too large request",
+            EngineApiError::PayloadRequestTooLarge { len: 0 },
+        );
+
+        ensure_engine_rpc_error(
+            -38002,
+            "Invalid forkchoice state",
+            EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                ForkchoiceUpdateError::InvalidState,
+            )),
+        );
+
+        ensure_engine_rpc_error(
+            -38003,
+            "Invalid payload attributes",
+            EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
+            )),
+        );
+
+        ensure_engine_rpc_error(
+            UNKNOWN_PAYLOAD_CODE,
+            "Unknown payload",
+            EngineApiError::UnknownPayload,
+        );
     }
 }

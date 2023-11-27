@@ -5,7 +5,7 @@ use crate::{
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkHandle,
+    NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use reth_eth_wire::{
@@ -19,8 +19,8 @@ use reth_interfaces::{
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
-    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
-    TransactionSigned, TxHash, B256,
+    FromRecoveredPooledTransaction, PeerId, PooledTransactionsElement, TransactionSigned, TxHash,
+    B256,
 };
 use reth_transaction_pool::{
     error::PoolResult, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
@@ -33,9 +33,9 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
+use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -55,11 +55,14 @@ const GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES: usize = 256;
 const GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE: GetPooledTransactionLimit =
     GetPooledTransactionLimit::SizeSoftLimit(2 * 1024 * 1024);
 
+/// How many peers we keep track of for each missing transaction.
+const MAX_ALTERNATIVE_PEERS_PER_TX: usize = 3;
+
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
 /// Api to interact with [`TransactionsManager`] task.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransactionsHandle {
     /// Command channel to the [`TransactionsManager`]
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
@@ -69,6 +72,32 @@ pub struct TransactionsHandle {
 impl TransactionsHandle {
     fn send(&self, cmd: TransactionsCommand) {
         let _ = self.manager_tx.send(cmd);
+    }
+
+    /// Fetch the [`PeerRequestSender`] for the given peer.
+    async fn peer_handle(&self, peer_id: PeerId) -> Result<Option<PeerRequestSender>, RecvError> {
+        let (tx, rx) = oneshot::channel();
+        self.send(TransactionsCommand::GetPeerSender { peer_id, peer_request_sender: tx });
+        rx.await
+    }
+
+    /// Requests the transactions directly from the given peer.
+    ///
+    /// Returns `None` if the peer is not connected.
+    ///
+    /// **Note**: this returns the response from the peer as received.
+    pub async fn get_pooled_transactions_from(
+        &self,
+        peer_id: PeerId,
+        hashes: Vec<B256>,
+    ) -> Result<Option<Vec<PooledTransactionsElement>>, RequestError> {
+        let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
+
+        let (tx, rx) = oneshot::channel();
+        let request = PeerRequest::GetPooledTransactions { request: hashes.into(), response: tx };
+        peer.try_send(request).ok();
+
+        rx.await?.map(|res| Some(res.0))
     }
 
     /// Manually propagate the transaction that belongs to the hash.
@@ -149,8 +178,8 @@ pub struct TransactionsManager<Pool> {
     ///
     /// From which we get all new incoming transaction related messages.
     network_events: UnboundedReceiverStream<NetworkEvent>,
-    /// All currently active requests for pooled transactions.
-    inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
+    /// Transaction fetcher to handle inflight and missing transaction requests.
+    transaction_fetcher: TransactionFetcher,
     /// All currently pending transactions grouped by peers.
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
@@ -192,7 +221,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             pool,
             network,
             network_events,
-            inflight_requests: Default::default(),
+            transaction_fetcher: Default::default(),
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
             peers: Default::default(),
@@ -212,13 +241,18 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
 impl<Pool> TransactionsManager<Pool>
 where
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool,
 {
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
+}
 
+impl<Pool> TransactionsManager<Pool>
+where
+    Pool: TransactionPool + 'static,
+{
     #[inline]
     fn update_import_metrics(&self) {
         self.metrics.pending_pool_imports.set(self.pool_imports.len() as f64);
@@ -226,7 +260,9 @@ where
 
     #[inline]
     fn update_request_metrics(&self) {
-        self.metrics.inflight_transaction_requests.set(self.inflight_requests.len() as f64);
+        self.metrics
+            .inflight_transaction_requests
+            .set(self.transaction_fetcher.inflight_requests.len() as f64);
     }
 
     /// Request handler for an incoming request for transactions
@@ -237,6 +273,10 @@ where
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     ) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            if self.network.tx_gossip_disabled() {
+                let _ = response.send(Ok(PooledTransactions::default()));
+                return
+            }
             let transactions = self
                 .pool
                 .get_pooled_transaction_elements(request.0, GET_POOLED_TRANSACTION_SOFT_LIMIT_SIZE);
@@ -266,8 +306,11 @@ where
         if self.network.is_initially_syncing() {
             return
         }
+        if self.network.tx_gossip_disabled() {
+            return
+        }
 
-        trace!(target: "net::tx", "Start propagating transactions");
+        trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
 
         // This fetches all transaction from the pool, including the blob transactions, which are
         // only ever sent as hashes.
@@ -290,6 +333,9 @@ where
         to_propagate: Vec<PropagateTransaction>,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
+        if self.network.tx_gossip_disabled() {
+            return propagated
+        }
 
         // send full transactions to a fraction fo the connected peers (square root of the total
         // number of connected peers)
@@ -324,8 +370,9 @@ where
             let mut new_pooled_hashes = hashes.build();
 
             if !new_pooled_hashes.is_empty() {
-                // determine whether to send full tx objects or hashes.
-                if peer_idx > max_num_full {
+                // determine whether to send full tx objects or hashes. If there are no full
+                // transactions, try to send hashes.
+                if peer_idx > max_num_full || full_transactions.is_empty() {
                     // enforce tx soft limit per message for the (unlikely) event the number of
                     // hashes exceeds it
                     new_pooled_hashes.truncate(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
@@ -333,6 +380,9 @@ where
                     for hash in new_pooled_hashes.iter_hashes().copied() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
                     }
+
+                    trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
+
                     // send hashes of transactions
                     self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
                 } else {
@@ -345,6 +395,9 @@ where
                             .or_default()
                             .push(PropagateKind::Full(*peer_id));
                     }
+
+                    trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
+
                     // send full transactions
                     self.network.send_transactions(*peer_id, new_full_transactions);
                 }
@@ -365,9 +418,10 @@ where
         txs: Vec<TxHash>,
         peer_id: PeerId,
     ) -> Option<PropagatedTransactions> {
+        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
+
         let peer = self.peers.get_mut(&peer_id)?;
         let mut propagated = PropagatedTransactions::default();
-        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
 
         // filter all transactions unknown to the peer
         let mut full_transactions = FullTransactionsBuilder::default();
@@ -442,6 +496,7 @@ where
             for hash in new_pooled_hashes.iter_hashes().copied() {
                 propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
             }
+
             // send hashes of transactions
             self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
 
@@ -463,6 +518,9 @@ where
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
+            return
+        }
+        if self.network.tx_gossip_disabled() {
             return
         }
 
@@ -489,23 +547,16 @@ where
             hashes.truncate(GET_POOLED_TRANSACTION_SOFT_LIMIT_NUM_HASHES);
 
             // request the missing transactions
-            let (response, rx) = oneshot::channel();
-            let req = PeerRequest::GetPooledTransactions {
-                request: GetPooledTransactions(hashes),
-                response,
-            };
-
-            if peer.request_tx.try_send(req).is_ok() {
-                self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, rx))
-            } else {
-                // peer channel is saturated, drop the request
+            let request_sent =
+                self.transaction_fetcher.request_transactions_from_peer(hashes, peer);
+            if !request_sent {
                 self.metrics.egress_peer_channel_full.increment(1);
                 return
             }
 
             if num_already_seen > 0 {
                 self.metrics.messages_with_already_seen_hashes.increment(1);
-                debug!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen hashes");
+                trace!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen hashes");
             }
         }
 
@@ -527,7 +578,13 @@ where
                     .0
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
-                    .filter_map(Result::ok);
+                    .filter_map(Result::ok)
+                    .collect::<Vec<_>>();
+
+                // mark the transactions as received
+                self.transaction_fetcher.on_received_full_transactions_broadcast(
+                    non_blob_txs.iter().map(|tx| tx.hash()),
+                );
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
@@ -572,6 +629,10 @@ where
                 }
                 tx.send(res).ok();
             }
+            TransactionsCommand::GetPeerSender { peer_id, peer_request_sender } => {
+                let sender = self.peers.get(&peer_id).map(|peer| peer.request_tx.clone());
+                peer_request_sender.send(sender).ok();
+            }
         }
     }
 
@@ -602,6 +663,9 @@ where
                 // `NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT` transactions in the
                 // pool
                 if !self.network.is_initially_syncing() {
+                    if self.network.tx_gossip_disabled() {
+                        return
+                    }
                     let peer = self.peers.get_mut(&peer_id).expect("is present; qed");
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
@@ -630,11 +694,14 @@ where
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
-        transactions: impl IntoIterator<Item = PooledTransactionsElement>,
+        transactions: Vec<PooledTransactionsElement>,
         source: TransactionSource,
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
+            return
+        }
+        if self.network.tx_gossip_disabled() {
             return
         }
 
@@ -667,7 +734,7 @@ where
                     }
                     Entry::Vacant(entry) => {
                         // this is a new transaction that should be imported into the pool
-                        let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_transaction(tx);
+                        let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
 
                         let pool = self.pool.clone();
 
@@ -683,7 +750,7 @@ where
 
             if num_already_seen > 0 {
                 self.metrics.messages_with_already_seen_transactions.increment(1);
-                debug!(target: "net::tx", num_txs=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
+                trace!(target: "net::tx", num_txs=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
             }
         }
 
@@ -693,7 +760,7 @@ where
     }
 
     fn report_peer(&self, peer_id: PeerId, kind: ReputationChangeKind) {
-        trace!(target: "net::tx", ?peer_id, ?kind);
+        trace!(target: "net::tx", ?peer_id, ?kind, "reporting reputation change");
         self.network.reputation_change(peer_id, kind);
         self.metrics.reported_bad_transactions.increment(1);
     }
@@ -737,7 +804,6 @@ where
 impl<Pool> Future for TransactionsManager<Pool>
 where
     Pool: TransactionPool + Unpin + 'static,
-    <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
     type Output = ();
 
@@ -761,20 +827,15 @@ where
 
         this.update_request_metrics();
 
-        // Advance all requests.
-        while let Poll::Ready(Some(GetPooledTxResponse { peer_id, result })) =
-            this.inflight_requests.poll_next_unpin(cx)
-        {
-            match result {
-                Ok(Ok(txs)) => {
-                    this.import_transactions(peer_id, txs.0, TransactionSource::Response)
+        // drain fetching transaction events
+        while let Poll::Ready(fetch_event) = this.transaction_fetcher.poll(cx) {
+            match fetch_event {
+                FetchEvent::TransactionsFetched { peer_id, transactions } => {
+                    this.import_transactions(peer_id, transactions, TransactionSource::Response);
                 }
-                Ok(Err(req_err)) => {
-                    this.on_request_error(peer_id, req_err);
-                }
-                Err(_) => {
-                    // request channel closed/dropped
-                    this.on_request_error(peer_id, RequestError::ChannelClosed)
+                FetchEvent::FetchError { peer_id, error } => {
+                    trace!(target: "net::tx", ?peer_id, ?error, "requesting transactions from peer failed");
+                    this.on_request_error(peer_id, error);
                 }
             }
         }
@@ -795,11 +856,11 @@ where
                     // known that this transaction is bad. (e.g. consensus
                     // rules)
                     if err.is_bad_transaction() && !this.network.is_syncing() {
-                        trace!(target: "net::tx", ?err, "Bad transaction import");
-                        this.on_bad_import(*err.hash());
+                        trace!(target: "net::tx", ?err, "bad pool transaction import");
+                        this.on_bad_import(err.hash);
                         continue
                     }
-                    this.on_good_import(*err.hash());
+                    this.on_good_import(err.hash);
                 }
             }
         }
@@ -836,7 +897,7 @@ impl PropagateTransaction {
 
     /// Create a new instance from a pooled transaction
     fn new<T: PoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
-        let size = tx.encoded_length;
+        let size = tx.encoded_length();
         let transaction = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
         Self { size, transaction }
     }
@@ -864,6 +925,11 @@ impl FullTransactionsBuilder {
         self.transactions.push(Arc::clone(&transaction.transaction));
     }
 
+    /// Returns whether or not any transactions are in the [FullTransactionsBuilder].
+    fn is_empty(&self) -> bool {
+        self.transactions.is_empty()
+    }
+
     /// returns the list of transactions.
     fn build(self) -> Vec<Arc<TransactionSigned>> {
         self.transactions
@@ -886,7 +952,7 @@ impl PooledTransactionsHashesBuilder {
             PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
             PooledTransactionsHashesBuilder::Eth68(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
-                msg.sizes.push(pooled_tx.encoded_length);
+                msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.tx_type());
             }
         }
@@ -941,11 +1007,15 @@ impl TransactionSource {
 /// An inflight request for `PooledTransactions` from a peer
 struct GetPooledTxRequest {
     peer_id: PeerId,
+    /// Transaction hashes that were requested, for cleanup purposes
+    requested_hashes: Vec<TxHash>,
     response: oneshot::Receiver<RequestResult<PooledTransactions>>,
 }
 
 struct GetPooledTxResponse {
     peer_id: PeerId,
+    /// Transaction hashes that were requested, for cleanup purposes
+    requested_hashes: Vec<TxHash>,
     result: Result<RequestResult<PooledTransactions>, RecvError>,
 }
 
@@ -957,11 +1027,13 @@ struct GetPooledTxRequestFut {
 }
 
 impl GetPooledTxRequestFut {
+    #[inline]
     fn new(
         peer_id: PeerId,
+        requested_hashes: Vec<TxHash>,
         response: oneshot::Receiver<RequestResult<PooledTransactions>>,
     ) -> Self {
-        Self { inner: Some(GetPooledTxRequest { peer_id, response }) }
+        Self { inner: Some(GetPooledTxRequest { peer_id, requested_hashes, response }) }
     }
 }
 
@@ -971,9 +1043,11 @@ impl Future for GetPooledTxRequestFut {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut req = self.as_mut().project().inner.take().expect("polled after completion");
         match req.response.poll_unpin(cx) {
-            Poll::Ready(result) => {
-                Poll::Ready(GetPooledTxResponse { peer_id: req.peer_id, result })
-            }
+            Poll::Ready(result) => Poll::Ready(GetPooledTxResponse {
+                peer_id: req.peer_id,
+                requested_hashes: req.requested_hashes,
+                result,
+            }),
             Poll::Pending => {
                 self.project().inner.set(Some(req));
                 Poll::Pending
@@ -993,7 +1067,167 @@ struct Peer {
     version: EthVersion,
     /// The peer's client version.
     #[allow(unused)]
-    client_version: Arc<String>,
+    client_version: Arc<str>,
+}
+
+/// The type responsible for fetching missing transactions from peers.
+///
+/// This will keep track of unique transaction hashes that are currently being fetched and submits
+/// new requests on announced hashes.
+#[derive(Debug, Default)]
+struct TransactionFetcher {
+    /// All currently active requests for pooled transactions.
+    inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
+    /// Set that tracks all hashes that are currently being fetched.
+    inflight_hash_to_fallback_peers: HashMap<TxHash, Vec<PeerId>>,
+}
+
+// === impl TransactionFetcher ===
+
+impl TransactionFetcher {
+    /// Removes the specified hashes from inflight tracking.
+    #[inline]
+    fn remove_inflight_hashes<'a, I>(&mut self, hashes: I)
+    where
+        I: IntoIterator<Item = &'a TxHash>,
+    {
+        for &hash in hashes {
+            self.inflight_hash_to_fallback_peers.remove(&hash);
+        }
+    }
+
+    /// Advances all inflight requests and returns the next event.
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchEvent> {
+        if let Poll::Ready(Some(GetPooledTxResponse { peer_id, requested_hashes, result })) =
+            self.inflight_requests.poll_next_unpin(cx)
+        {
+            return match result {
+                Ok(Ok(transactions)) => {
+                    // clear received hashes
+                    self.remove_inflight_hashes(transactions.hashes());
+
+                    // TODO: re-request missing hashes, for now clear all of them
+                    self.remove_inflight_hashes(requested_hashes.iter());
+
+                    Poll::Ready(FetchEvent::TransactionsFetched {
+                        peer_id,
+                        transactions: transactions.0,
+                    })
+                }
+                Ok(Err(req_err)) => {
+                    // TODO: re-request missing hashes
+                    self.remove_inflight_hashes(&requested_hashes);
+                    Poll::Ready(FetchEvent::FetchError { peer_id, error: req_err })
+                }
+                Err(_) => {
+                    // TODO: re-request missing hashes
+                    self.remove_inflight_hashes(&requested_hashes);
+                    // request channel closed/dropped
+                    Poll::Ready(FetchEvent::FetchError {
+                        peer_id,
+                        error: RequestError::ChannelClosed,
+                    })
+                }
+            }
+        }
+        Poll::Pending
+    }
+
+    /// Removes the provided transaction hashes from the inflight requests set.
+    ///
+    /// This is called when we receive full transactions that are currently scheduled for fetching.
+    #[inline]
+    fn on_received_full_transactions_broadcast<'a>(
+        &mut self,
+        hashes: impl IntoIterator<Item = &'a TxHash>,
+    ) {
+        self.remove_inflight_hashes(hashes)
+    }
+
+    /// Requests the missing transactions from the announced hashes of the peer
+    ///
+    /// This filters all announced hashes that are already in flight, and requests the missing,
+    /// while marking the given peer as an alternative peer for the hashes that are already in
+    /// flight.
+    fn request_transactions_from_peer(
+        &mut self,
+        mut announced_hashes: Vec<TxHash>,
+        peer: &Peer,
+    ) -> bool {
+        let peer_id: PeerId = peer.request_tx.peer_id;
+        // 1. filter out inflight hashes, and register the peer as fallback for all inflight hashes
+        announced_hashes.retain(|&hash| {
+            match self.inflight_hash_to_fallback_peers.entry(hash) {
+                Entry::Vacant(entry) => {
+                    // the hash is not in inflight hashes, insert it and retain in the vector
+                    entry.insert(vec![peer_id]);
+                    true
+                }
+                Entry::Occupied(mut entry) => {
+                    // the hash is already in inflight, add this peer as a backup if not more than 3
+                    // backups already
+                    let backups = entry.get_mut();
+                    if backups.len() < MAX_ALTERNATIVE_PEERS_PER_TX {
+                        backups.push(peer_id);
+                    }
+                    false
+                }
+            }
+        });
+
+        // 2. request all missing from peer
+        if announced_hashes.is_empty() {
+            // nothing to request
+            return false
+        }
+
+        let (response, rx) = oneshot::channel();
+        let req: PeerRequest = PeerRequest::GetPooledTransactions {
+            request: GetPooledTransactions(announced_hashes.clone()),
+            response,
+        };
+
+        // try to send the request to the peer
+        if let Err(err) = peer.request_tx.try_send(req) {
+            // peer channel is full
+            match err {
+                TrySendError::Full(req) | TrySendError::Closed(req) => {
+                    // need to do some cleanup so
+                    let req = req.into_get_pooled_transactions().expect("is get pooled tx");
+
+                    // we know that the peer is the only entry in the map, so we can remove all
+                    for hash in req.0.into_iter() {
+                        self.inflight_hash_to_fallback_peers.remove(&hash);
+                    }
+                }
+            }
+            return false
+        } else {
+            //create a new request for it, from that peer
+            self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, announced_hashes, rx))
+        }
+
+        true
+    }
+}
+
+/// Represents possible events from fetching transactions.
+#[derive(Debug)]
+enum FetchEvent {
+    /// Triggered when transactions are successfully fetched.
+    TransactionsFetched {
+        /// The ID of the peer from which transactions were fetched.
+        peer_id: PeerId,
+        /// The transactions that were fetched, if available.
+        transactions: Vec<PooledTransactionsElement>,
+    },
+    /// Triggered when there is an error in fetching transactions.
+    FetchError {
+        /// The ID of the peer from which an attempt to fetch transactions resulted in an error.
+        peer_id: PeerId,
+        /// The specific error that occurred while fetching.
+        error: RequestError,
+    },
 }
 
 /// Commands to send to the [`TransactionsManager`]
@@ -1011,6 +1245,11 @@ enum TransactionsCommand {
     GetTransactionHashes {
         peers: Vec<PeerId>,
         tx: oneshot::Sender<HashMap<PeerId, HashSet<TxHash>>>,
+    },
+    /// Requests a clone of the sender sender channel to the peer.
+    GetPeerSender {
+        peer_id: PeerId,
+        peer_request_sender: oneshot::Sender<Option<PeerRequestSender>>,
     },
 }
 

@@ -46,10 +46,9 @@
 //!
 //! ```
 //! # async fn launch() {
-//! use reth_network::config::rng_secret_key;
-//! use reth_network::{NetworkConfig, NetworkManager};
-//! use reth_provider::test_utils::NoopProvider;
+//! use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
 //! use reth_primitives::mainnet_nodes;
+//! use reth_provider::test_utils::NoopProvider;
 //!
 //! // This block provider implementation is used for testing purposes.
 //! let client = NoopProvider::default();
@@ -57,9 +56,7 @@
 //! // The key that's used for encrypting sessions and to identify our node.
 //! let local_key = rng_secret_key();
 //!
-//! let config = NetworkConfig::builder(local_key).boot_nodes(
-//!     mainnet_nodes()
-//! ).build(client);
+//! let config = NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client);
 //!
 //! // create the network instance
 //! let network = NetworkManager::new(config).await.unwrap();
@@ -74,11 +71,10 @@
 //! ### Configure all components of the Network with the [`NetworkBuilder`]
 //!
 //! ```
+//! use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+//! use reth_primitives::mainnet_nodes;
 //! use reth_provider::test_utils::NoopProvider;
 //! use reth_transaction_pool::TransactionPool;
-//! use reth_primitives::mainnet_nodes;
-//! use reth_network::config::rng_secret_key;
-//! use reth_network::{NetworkConfig, NetworkManager};
 //! async fn launch<Pool: TransactionPool>(pool: Pool) {
 //!     // This block provider implementation is used for testing purposes.
 //!     let client = NoopProvider::default();
@@ -133,6 +129,7 @@ mod message;
 mod metrics;
 mod network;
 pub mod peers;
+pub mod protocol;
 mod session;
 mod state;
 mod swarm;
@@ -144,7 +141,7 @@ pub use discovery::{Discovery, DiscoveryEvent};
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
-pub use network::NetworkHandle;
+pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use peers::PeersConfig;
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
@@ -152,4 +149,4 @@ pub use session::{
     SessionLimits, SessionManager, SessionsConfig,
 };
 
-pub use reth_eth_wire::{DisconnectReason, HelloBuilder, HelloMessage};
+pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};

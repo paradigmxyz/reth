@@ -1,6 +1,6 @@
 use super::{PayloadStatus, PayloadStatusEnum};
 use crate::engine::PayloadId;
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 
 /// invalid forkchoice state error code.
@@ -40,10 +40,10 @@ pub enum ForkchoiceUpdateError {
     /// [PayloadAttributes](crate::engine::PayloadAttributes).
     ///
     /// This is returned as an error because the payload attributes are invalid and the payload is not valid, See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
-    #[error("Invalid payload attributes")]
+    #[error("invalid payload attributes")]
     UpdatedInvalidPayloadAttributes,
     /// The given [ForkchoiceState] is invalid or inconsistent.
-    #[error("Invalid forkchoice state")]
+    #[error("invalid forkchoice state")]
     InvalidState,
     /// Thrown when a forkchoice final block does not exist in the database.
     #[error("final block not available in database")]

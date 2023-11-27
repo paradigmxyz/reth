@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    error::{PoolError, PoolResult},
+    error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{
         listener::PoolEventBroadcast,
@@ -94,7 +94,6 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
-
 mod events;
 pub use events::{FullTransactionEvent, TransactionEvent};
 
@@ -111,6 +110,7 @@ pub use listener::{AllTransactionsEvents, TransactionEvents};
 
 mod best;
 mod blob;
+pub use blob::{blob_tx_priority, fee_delta};
 mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
@@ -392,7 +392,7 @@ where
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
-                let encoded_length = transaction.encoded_length();
+                let _encoded_length = transaction.encoded_length();
 
                 // split the valid transaction and the blob sidecar if it has any
                 let (transaction, maybe_sidecar) = match transaction {
@@ -412,7 +412,6 @@ where
                     propagate,
                     timestamp: Instant::now(),
                     origin,
-                    encoded_length,
                 };
 
                 let added = self.pool.write().add_transaction(tx, balance, state_nonce)?;
@@ -451,12 +450,12 @@ where
             TransactionValidationOutcome::Invalid(tx, err) => {
                 let mut listener = self.event_listener.write();
                 listener.discarded(tx.hash());
-                Err(PoolError::InvalidTransaction(*tx.hash(), err))
+                Err(PoolError::new(*tx.hash(), err))
             }
             TransactionValidationOutcome::Error(tx_hash, err) => {
                 let mut listener = self.event_listener.write();
                 listener.discarded(&tx_hash);
-                Err(PoolError::Other(tx_hash, err))
+                Err(PoolError::other(tx_hash, err))
             }
         }
     }
@@ -500,7 +499,7 @@ where
             .into_iter()
             .map(|res| match res {
                 Ok(ref hash) if discarded.contains(hash) => {
-                    Err(PoolError::DiscardedOnInsert(*hash))
+                    Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }
                 other => other,
             })
@@ -561,18 +560,26 @@ where
         })
     }
 
-    /// Notifies transaction listeners about changes after a block was processed.
+    /// Notifies transaction listeners about changes once a block was processed.
     fn notify_on_new_state(&self, outcome: OnNewCanonicalStateOutcome<T::Transaction>) {
         // notify about promoted pending transactions
         {
-            let mut transaction_listeners = self.pending_transaction_listener.lock();
-            transaction_listeners.retain_mut(|listener| {
+            // emit hashes
+            let mut transaction_hash_listeners = self.pending_transaction_listener.lock();
+            transaction_hash_listeners.retain_mut(|listener| {
                 listener.send_all(outcome.pending_transactions(listener.kind))
             });
+
+            // emit full transactions
+            let mut transaction_full_listeners = self.transaction_listener.lock();
+            transaction_full_listeners.retain_mut(|listener| {
+                listener.send_all(outcome.full_pending_transactions(listener.kind))
+            })
         }
 
         let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash } = outcome;
 
+        // broadcast specific transaction events
         let mut listener = self.event_listener.write();
 
         mined.iter().for_each(|tx| listener.mined(tx, block_hash));
@@ -686,6 +693,14 @@ where
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.get_sender_id(sender);
         self.pool.read().get_transactions_by_sender(sender_id)
+    }
+
+    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    pub(crate) fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pool.read().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
     }
 
     /// Returns all the transactions belonging to the hashes.
@@ -918,6 +933,33 @@ where
     }
 }
 
+/// An iterator over full pending transactions
+pub(crate) struct FullPendingTransactionIter<Iter> {
+    kind: TransactionListenerKind,
+    iter: Iter,
+}
+
+impl<'a, Iter, T> Iterator for FullPendingTransactionIter<Iter>
+where
+    Iter: Iterator<Item = &'a Arc<ValidPoolTransaction<T>>>,
+    T: PoolTransaction + 'a,
+{
+    type Item = NewTransactionEvent<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let next = self.iter.next()?;
+            if self.kind.is_propagate_only() && !next.propagate {
+                continue
+            }
+            return Some(NewTransactionEvent {
+                subpool: SubPool::Pending,
+                transaction: next.clone(),
+            })
+        }
+    }
+}
+
 /// Represents a transaction that was added into the pool and its state
 #[derive(Debug, Clone)]
 pub enum AddedTransaction<T: PoolTransaction> {
@@ -1011,7 +1053,7 @@ pub(crate) struct OnNewCanonicalStateOutcome<T: PoolTransaction> {
     pub(crate) block_hash: B256,
     /// All mined transactions.
     pub(crate) mined: Vec<TxHash>,
-    /// Transactions promoted to the ready queue.
+    /// Transactions promoted to the pending pool.
     pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transaction that were discarded during the update
     pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
@@ -1029,5 +1071,18 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
     ) -> impl Iterator<Item = B256> + '_ {
         let iter = self.promoted.iter();
         PendingTransactionIter { kind, iter }
+    }
+
+    /// Returns all FULL transactions that were promoted to the pending pool and adhere to the given
+    /// [TransactionListenerKind].
+    ///
+    /// If the kind is [TransactionListenerKind::PropagateOnly], then only transactions that
+    /// are allowed to be propagated are returned.
+    pub(crate) fn full_pending_transactions(
+        &self,
+        kind: TransactionListenerKind,
+    ) -> impl Iterator<Item = NewTransactionEvent<T>> + '_ {
+        let iter = self.promoted.iter();
+        FullPendingTransactionIter { kind, iter }
     }
 }

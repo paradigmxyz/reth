@@ -1,9 +1,5 @@
 use crate::{trie_cursor::CursorSubNode, updates::TrieUpdates};
-use reth_primitives::{
-    stage::MerkleCheckpoint,
-    trie::{hash_builder::HashBuilder, Nibbles},
-    B256,
-};
+use reth_primitives::{stage::MerkleCheckpoint, trie::hash_builder::HashBuilder, B256};
 
 /// The progress of the state root computation.
 #[derive(Debug)]
@@ -24,8 +20,6 @@ pub struct IntermediateStateRootState {
     pub walker_stack: Vec<CursorSubNode>,
     /// The last hashed account key processed.
     pub last_account_key: B256,
-    /// The last walker key processed.
-    pub last_walker_key: Nibbles,
 }
 
 impl From<MerkleCheckpoint> for IntermediateStateRootState {
@@ -34,7 +28,6 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
             hash_builder: HashBuilder::from(value.state),
             walker_stack: value.walker_stack.into_iter().map(CursorSubNode::from).collect(),
             last_account_key: value.last_account_key,
-            last_walker_key: Nibbles::from_hex(value.last_walker_key),
         }
     }
 }

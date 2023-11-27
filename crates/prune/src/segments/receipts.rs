@@ -3,25 +3,38 @@ use crate::{
     PrunerError,
 };
 use reth_db::{database::Database, tables};
-use reth_interfaces::RethResult;
-use reth_primitives::{PruneCheckpoint, PruneSegment};
+use reth_interfaces::provider::ProviderResult;
+use reth_primitives::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
 
-#[derive(Default)]
-#[non_exhaustive]
-pub(crate) struct Receipts;
+#[derive(Debug)]
+pub struct Receipts {
+    mode: PruneMode,
+}
 
-impl Segment for Receipts {
-    const SEGMENT: PruneSegment = PruneSegment::Receipts;
+impl Receipts {
+    pub fn new(mode: PruneMode) -> Self {
+        Self { mode }
+    }
+}
+
+impl<DB: Database> Segment<DB> for Receipts {
+    fn segment(&self) -> PruneSegment {
+        PruneSegment::Receipts
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
+    }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune<DB: Database>(
+    fn prune(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let tx_range = match input.get_next_tx_num_range_from_checkpoint(provider, Self::SEGMENT)? {
+        let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No receipts to prune");
@@ -56,14 +69,14 @@ impl Segment for Receipts {
         })
     }
 
-    fn save_checkpoint<DB: Database>(
+    fn save_checkpoint(
         &self,
-        provider: &DatabaseProviderRW<'_, DB>,
+        provider: &DatabaseProviderRW<DB>,
         checkpoint: PruneCheckpoint,
-    ) -> RethResult<()> {
-        provider.save_prune_checkpoint(Self::SEGMENT, checkpoint)?;
+    ) -> ProviderResult<()> {
+        provider.save_prune_checkpoint(PruneSegment::Receipts, checkpoint)?;
 
-        // `PruneSegment::Receipts` overrides `PruneSegmnt::ContractLogs`, so we can preemptively
+        // `PruneSegment::Receipts` overrides `PruneSegment::ContractLogs`, so we can preemptively
         // limit their pruning start point.
         provider.save_prune_checkpoint(PruneSegment::ContractLogs, checkpoint)?;
 
@@ -84,18 +97,18 @@ mod tests {
         generators,
         generators::{random_block_range, random_receipt},
     };
-    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, TxNumber, B256};
+    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
     use reth_provider::PruneCheckpointReader;
-    use reth_stages::test_utils::TestTransaction;
+    use reth_stages::test_utils::TestStageDB;
     use std::ops::Sub;
 
     #[test]
     fn prune() {
-        let tx = TestTransaction::default();
+        let db = TestStageDB::default();
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 1..=10, B256::ZERO, 2..3);
-        tx.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
 
         let mut receipts = Vec::new();
         for block in &blocks {
@@ -104,25 +117,36 @@ mod tests {
                     .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
             }
         }
-        tx.insert_receipts(receipts.clone()).expect("insert receipts");
+        db.insert_receipts(receipts.clone()).expect("insert receipts");
 
         assert_eq!(
-            tx.table::<tables::Transactions>().unwrap().len(),
+            db.table::<tables::Transactions>().unwrap().len(),
             blocks.iter().map(|block| block.body.len()).sum::<usize>()
         );
         assert_eq!(
-            tx.table::<tables::Transactions>().unwrap().len(),
-            tx.table::<tables::Receipts>().unwrap().len()
+            db.table::<tables::Transactions>().unwrap().len(),
+            db.table::<tables::Receipts>().unwrap().len()
         );
 
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
-            let input = PruneInput { to_block, delete_limit: 10 };
-            let segment = Receipts::default();
+            let input = PruneInput {
+                previous_checkpoint: db
+                    .factory
+                    .provider()
+                    .unwrap()
+                    .get_prune_checkpoint(PruneSegment::Receipts)
+                    .unwrap(),
+                to_block,
+                delete_limit: 10,
+            };
+            let segment = Receipts::new(prune_mode);
 
-            let next_tx_number_to_prune = tx
-                .inner()
-                .get_prune_checkpoint(Receipts::SEGMENT)
+            let next_tx_number_to_prune = db
+                .factory
+                .provider()
+                .unwrap()
+                .get_prune_checkpoint(PruneSegment::Receipts)
                 .unwrap()
                 .and_then(|checkpoint| checkpoint.tx_number)
                 .map(|tx_number| tx_number + 1)
@@ -136,21 +160,7 @@ mod tests {
                 .min(next_tx_number_to_prune as usize + input.delete_limit)
                 .sub(1);
 
-            let last_pruned_block_number = blocks
-                .iter()
-                .fold_while((0, 0), |(_, mut tx_count), block| {
-                    tx_count += block.body.len();
-
-                    if tx_count > last_pruned_tx_number {
-                        Done((block.number, tx_count))
-                    } else {
-                        Continue((block.number, tx_count))
-                    }
-                })
-                .into_inner()
-                .0;
-
-            let provider = tx.inner_rw();
+            let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             assert_matches!(
                 result,
@@ -165,15 +175,31 @@ mod tests {
                 .unwrap();
             provider.commit().expect("commit");
 
-            let last_pruned_block_number =
-                last_pruned_block_number.checked_sub(if result.done { 0 } else { 1 });
+            let last_pruned_block_number = blocks
+                .iter()
+                .fold_while((0, 0), |(_, mut tx_count), block| {
+                    tx_count += block.body.len();
+
+                    if tx_count > last_pruned_tx_number {
+                        Done((block.number, tx_count))
+                    } else {
+                        Continue((block.number, tx_count))
+                    }
+                })
+                .into_inner()
+                .0
+                .checked_sub(if result.done { 0 } else { 1 });
 
             assert_eq!(
-                tx.table::<tables::Receipts>().unwrap().len(),
+                db.table::<tables::Receipts>().unwrap().len(),
                 receipts.len() - (last_pruned_tx_number + 1)
             );
             assert_eq!(
-                tx.inner().get_prune_checkpoint(Receipts::SEGMENT).unwrap(),
+                db.factory
+                    .provider()
+                    .unwrap()
+                    .get_prune_checkpoint(PruneSegment::Receipts)
+                    .unwrap(),
                 Some(PruneCheckpoint {
                     block_number: last_pruned_block_number,
                     tx_number: Some(last_pruned_tx_number as TxNumber),

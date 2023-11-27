@@ -22,7 +22,7 @@ proc-macro = true
 [dependencies]
 proc-macro2.workspace = true
 quote.workspace = true
-syn = { version = "2.0", features = ["full", "extra-traits"] }
+syn = { workspace = true, features = ["full", "extra-traits"] }
 convert_case = "0.6.0"
 
 # codecs
@@ -38,4 +38,4 @@ compact = []
 scale = []
 postcard = []
 no_codec = []
-value-256 = []
+optimism = []

@@ -6,14 +6,18 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
-use reth_codecs::{main_codec, Compact, CompactZstd};
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
 };
 
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::strategy::Strategy;
+
 /// Receipt containing result of transaction execution.
-#[main_codec(zstd)]
+#[main_codec(no_arbitrary, zstd)]
+#[add_arbitrary_tests]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Receipt {
     /// Receipt type.
@@ -25,13 +29,10 @@ pub struct Receipt {
     /// Gas used
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20)"
-        )
-    )]
     pub logs: Vec<Log>,
+    /// Deposit nonce for Optimism deposited transactions
+    #[cfg(feature = "optimism")]
+    pub deposit_nonce: Option<u64>,
 }
 
 impl Receipt {
@@ -181,6 +182,60 @@ impl ReceiptWithBloom {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for Receipt {
+    type Parameters = ();
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::{any, prop_compose};
+
+        prop_compose! {
+            fn arbitrary_receipt()(tx_type in any::<TxType>(),
+                        success in any::<bool>(),
+                        cumulative_gas_used in any::<u64>(),
+                        logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
+                        _deposit_nonce in any::<Option<u64>>()) -> Receipt
+            {
+                Receipt { tx_type,
+                    success,
+                    cumulative_gas_used,
+                    logs,
+                    // Only receipts for deposit transactions may contain a deposit nonce
+                    #[cfg(feature = "optimism")]
+                    deposit_nonce: (tx_type == TxType::DEPOSIT).then_some(_deposit_nonce).flatten()
+                }
+            }
+        };
+        arbitrary_receipt().boxed()
+    }
+
+    type Strategy = proptest::strategy::BoxedStrategy<Receipt>;
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Receipt {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let tx_type = TxType::arbitrary(u)?;
+        let success = bool::arbitrary(u)?;
+        let cumulative_gas_used = u64::arbitrary(u)?;
+        let logs = Vec::<Log>::arbitrary(u)?;
+
+        // Only receipts for deposit transactions may contain a deposit nonce
+        #[cfg(feature = "optimism")]
+        let deposit_nonce =
+            if tx_type == TxType::DEPOSIT { Option::<u64>::arbitrary(u)? } else { None };
+
+        Ok(Self {
+            tx_type,
+            success,
+            cumulative_gas_used,
+            logs,
+            #[cfg(feature = "optimism")]
+            deposit_nonce,
+        })
+    }
+}
+
 impl ReceiptWithBloom {
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
@@ -201,7 +256,27 @@ impl ReceiptWithBloom {
         let bloom = Decodable::decode(b)?;
         let logs = alloy_rlp::Decodable::decode(b)?;
 
-        let this = Self { receipt: Receipt { tx_type, success, cumulative_gas_used, logs }, bloom };
+        let receipt = match tx_type {
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => {
+                let consumed = started_len - b.len();
+                let has_nonce = rlp_head.payload_length - consumed > 0;
+                let deposit_nonce =
+                    if has_nonce { Some(alloy_rlp::Decodable::decode(b)?) } else { None };
+
+                Receipt { tx_type, success, cumulative_gas_used, logs, deposit_nonce }
+            }
+            _ => Receipt {
+                tx_type,
+                success,
+                cumulative_gas_used,
+                logs,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
+            },
+        };
+
+        let this = Self { receipt, bloom };
         let consumed = started_len - b.len();
         if consumed != rlp_head.payload_length {
             return Err(alloy_rlp::Error::ListLengthMismatch {
@@ -239,17 +314,25 @@ impl Decodable for ReceiptWithBloom {
                 let receipt_type = *buf.first().ok_or(alloy_rlp::Error::Custom(
                     "typed receipt cannot be decoded from an empty slice",
                 ))?;
-                if receipt_type == 0x01 {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::EIP2930)
-                } else if receipt_type == 0x02 {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::EIP1559)
-                } else if receipt_type == 0x03 {
-                    buf.advance(1);
-                    Self::decode_receipt(buf, TxType::EIP4844)
-                } else {
-                    Err(alloy_rlp::Error::Custom("invalid receipt type"))
+                match receipt_type {
+                    0x01 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::EIP2930)
+                    }
+                    0x02 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::EIP1559)
+                    }
+                    0x03 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::EIP4844)
+                    }
+                    #[cfg(feature = "optimism")]
+                    0x7E => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::DEPOSIT)
+                    }
+                    _ => Err(alloy_rlp::Error::Custom("invalid receipt type")),
                 }
             }
             Ordering::Equal => {
@@ -317,6 +400,13 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         rlp_head.payload_length += self.bloom.length();
         rlp_head.payload_length += self.receipt.logs.length();
 
+        #[cfg(feature = "optimism")]
+        if self.receipt.tx_type == TxType::DEPOSIT {
+            if let Some(deposit_nonce) = self.receipt.deposit_nonce {
+                rlp_head.payload_length += deposit_nonce.length();
+            }
+        }
+
         rlp_head
     }
 
@@ -327,6 +417,12 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         self.receipt.cumulative_gas_used.encode(out);
         self.bloom.encode(out);
         self.receipt.logs.encode(out);
+        #[cfg(feature = "optimism")]
+        if self.receipt.tx_type == TxType::DEPOSIT {
+            if let Some(deposit_nonce) = self.receipt.deposit_nonce {
+                deposit_nonce.encode(out)
+            }
+        }
     }
 
     /// Encode receipt with or without the header data.
@@ -355,6 +451,10 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             TxType::EIP4844 => {
                 out.put_u8(0x03);
             }
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => {
+                out.put_u8(0x7E);
+            }
             _ => unreachable!("legacy handled; qed."),
         }
         out.put_slice(payload.as_ref());
@@ -374,7 +474,7 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
     fn length(&self) -> usize {
         let mut payload_len = self.receipt_length();
         // account for eip-2718 type prefix and set the list
-        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930 | TxType::EIP4844) {
+        if !matches!(self.receipt.tx_type, TxType::Legacy) {
             payload_len += 1;
             // we include a string header for typed receipts, so include the length here
             payload_len += length_of_length(payload_len);
@@ -410,6 +510,8 @@ mod tests {
                     data: bytes!("0100ff"),
                 }],
                 success: false,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
             },
             bloom: [0; 256].into(),
         };
@@ -440,12 +542,39 @@ mod tests {
                     data: bytes!("0100ff"),
                 }],
                 success: false,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
             },
             bloom: [0; 256].into(),
         };
 
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn decode_deposit_receipt_regolith_roundtrip() {
+        let data = hex!("7ef9010c0182b741b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0833d3bbf");
+
+        // Deposit Receipt (post-regolith)
+        let expected = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::DEPOSIT,
+                cumulative_gas_used: 46913,
+                logs: vec![],
+                success: true,
+                deposit_nonce: Some(4012991),
+            },
+            bloom: [0; 256].into(),
+        };
+
+        let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
+        assert_eq!(receipt, expected);
+
+        let mut buf = BytesMut::default();
+        receipt.encode_inner(&mut buf, false);
+        assert_eq!(buf.freeze(), &data[..]);
     }
 
     #[test]
@@ -470,6 +599,8 @@ mod tests {
                     data: Bytes::from(vec![1; 0xffffff]),
                 },
             ],
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
         };
 
         let mut data = vec![];

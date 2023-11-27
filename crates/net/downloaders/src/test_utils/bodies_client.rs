@@ -22,6 +22,7 @@ pub struct TestBodiesClient {
     should_delay: bool,
     max_batch_size: Option<usize>,
     times_requested: AtomicU64,
+    empty_response_mod: Option<u64>,
 }
 
 impl TestBodiesClient {
@@ -35,6 +36,13 @@ impl TestBodiesClient {
         self
     }
 
+    /// Instructs the client to respond with empty responses some portion of the time. Every
+    /// `empty_mod` responses, the client will respond with an empty response.
+    pub(crate) fn with_empty_responses(mut self, empty_mod: u64) -> Self {
+        self.empty_response_mod = Some(empty_mod);
+        self
+    }
+
     pub(crate) fn with_max_batch_size(mut self, max_batch_size: usize) -> Self {
         self.max_batch_size = Some(max_batch_size);
         self
@@ -42,6 +50,18 @@ impl TestBodiesClient {
 
     pub(crate) fn times_requested(&self) -> u64 {
         self.times_requested.load(Ordering::Relaxed)
+    }
+
+    /// Returns whether or not the client should respond with an empty response.
+    ///
+    /// This will only return true if `empty_response_mod` is `Some`, and `times_requested %
+    /// empty_response_mod == 0`.
+    pub(crate) fn should_respond_empty(&self) -> bool {
+        if let Some(empty_response_mod) = self.empty_response_mod {
+            self.times_requested.load(Ordering::Relaxed) % empty_response_mod == 0
+        } else {
+            false
+        }
     }
 }
 
@@ -68,8 +88,13 @@ impl BodiesClient for TestBodiesClient {
         let max_batch_size = self.max_batch_size;
 
         self.times_requested.fetch_add(1, Ordering::Relaxed);
+        let should_respond_empty = self.should_respond_empty();
 
         Box::pin(async move {
+            if should_respond_empty {
+                return Ok((PeerId::default(), vec![]).into())
+            }
+
             if should_delay {
                 tokio::time::sleep(Duration::from_millis((hashes[0][0] % 100) as u64)).await;
             }

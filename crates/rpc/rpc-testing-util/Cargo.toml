@@ -6,15 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Reth RPC testing helpers
-"""
+description = "Reth RPC testing helpers"
 
 [dependencies]
 # reth
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
-reth-rpc-api = { path = "../rpc-api", default-features = false, features = ["client"] }
+reth-rpc-api = { workspace = true, features = ["client"] }
 
 # async
 async-trait.workspace = true
@@ -24,6 +22,10 @@ futures.workspace = true
 jsonrpsee = { workspace = true, features = ["client", "async-client"] }
 serde_json.workspace = true
 
+
+# assertions
+similar-asserts = "1.5.0"
+
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "rt"] }
-

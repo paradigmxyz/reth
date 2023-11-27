@@ -1,6 +1,9 @@
 //! Command for debugging block building.
 use crate::{
-    args::{utils::genesis_value_parser, DatabaseArgs},
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
 };
@@ -22,14 +25,14 @@ use reth_primitives::{
     fs,
     revm_primitives::KzgSettings,
     stage::StageId,
-    Address, BlobTransactionSidecar, Bytes, ChainSpec, SealedBlock, SealedBlockWithSenders,
-    Transaction, TransactionSigned, TxEip4844, B256, U256, U64,
+    Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
+    SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::Factory;
+use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -56,17 +59,11 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
-    /// - holesky
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
@@ -145,17 +142,16 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            Arc::clone(&db),
+            provider_factory.clone(),
             Arc::clone(&consensus),
-            Factory::new(self.chain.clone()),
-            Arc::clone(&self.chain),
+            EvmProcessorFactory::new(self.chain.clone()),
         );
-        let _tree_config = BlockchainTreeConfig::default();
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = ShareableBlockchainTree::new(tree);
 
@@ -163,8 +159,8 @@ impl Command {
         let best_block =
             self.lookup_best_block(Arc::clone(&db)).wrap_err("the head block is missing")?;
 
-        let factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
-        let blockchain_db = BlockchainProvider::new(factory.clone(), blockchain_tree.clone())?;
+        let blockchain_db =
+            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
@@ -195,24 +191,38 @@ impl Command {
                 .into_ecrecovered()
                 .ok_or(eyre::eyre!("failed to recover tx"))?;
 
-            if let Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) =
-                &transaction.transaction
-            {
-                let blobs_bundle = blobs_bundle.as_mut().ok_or(eyre::eyre!(
-                    "encountered a blob tx. `--blobs-bundle-path` must be provided"
-                ))?;
-                let (commitments, proofs, blobs) = blobs_bundle.take(blob_versioned_hashes.len());
-                blob_store.insert(
-                    transaction.hash,
-                    BlobTransactionSidecar { blobs, commitments, proofs },
-                )?;
-            }
+            let encoded_length = match &transaction.transaction {
+                Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
+                    let blobs_bundle = blobs_bundle.as_mut().ok_or(eyre::eyre!(
+                        "encountered a blob tx. `--blobs-bundle-path` must be provided"
+                    ))?;
+
+                    let sidecar: BlobTransactionSidecar =
+                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len()).into();
+
+                    // first construct the tx, calculating the length of the tx with sidecar before
+                    // insertion
+                    let tx = BlobTransaction::try_from_signed(
+                        transaction.as_ref().clone(),
+                        sidecar.clone(),
+                    )
+                    .expect("should not fail to convert blob tx if it is already eip4844");
+                    let pooled = PooledTransactionsElement::BlobTransaction(tx);
+                    let encoded_length = pooled.length_without_header();
+
+                    // insert the blob into the store
+                    blob_store.insert(transaction.hash, sidecar)?;
+
+                    encoded_length
+                }
+                _ => transaction.length_without_header(),
+            };
 
             debug!(target: "reth::cli", ?transaction, "Adding transaction to the pool");
             transaction_pool
                 .add_transaction(
                     TransactionOrigin::External,
-                    EthPooledTransaction::new(transaction),
+                    EthPooledTransaction::new(transaction, encoded_length),
                 )
                 .await?;
         }
@@ -220,16 +230,21 @@ impl Command {
         let payload_attrs = PayloadAttributes {
             parent_beacon_block_root: self.parent_beacon_block_root,
             prev_randao: self.prev_randao,
-            timestamp: U64::from(self.timestamp),
+            timestamp: self.timestamp,
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
+            #[cfg(feature = "optimism")]
+            optimism_payload_attributes: reth_rpc_types::engine::OptimismPayloadAttributes::default(
+            ),
         };
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            PayloadBuilderAttributes::new(best_block.hash, payload_attrs),
+            PayloadBuilderAttributes::try_new(best_block.hash, payload_attrs)?,
             self.chain.clone(),
+            #[cfg(feature = "optimism")]
+            true,
         );
         let args = BuildArguments::new(
             blockchain_db.clone(),
@@ -252,7 +267,7 @@ impl Command {
                 let block_with_senders =
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
-                let executor_factory = Factory::new(self.chain.clone());
+                let executor_factory = EvmProcessorFactory::new(self.chain.clone());
                 let mut executor = executor_factory.with_state(blockchain_db.latest()?);
                 executor.execute_and_verify_receipt(
                     &block_with_senders.block.clone().unseal(),
@@ -263,7 +278,7 @@ impl Command {
                 debug!(target: "reth::cli", ?state, "Executed block");
 
                 // Attempt to insert new block without committing
-                let provider_rw = factory.provider_rw()?;
+                let provider_rw = provider_factory.provider_rw()?;
                 provider_rw.append_blocks_with_bundle_state(
                     Vec::from([block_with_senders]),
                     state,

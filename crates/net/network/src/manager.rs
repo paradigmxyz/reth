@@ -26,6 +26,7 @@ use crate::{
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::{PeersHandle, PeersManager},
+    protocol::IntoRlpxSubProtocol,
     session::SessionManager,
     state::NetworkState,
     swarm::{NetworkConnectionState, Swarm, SwarmEvent},
@@ -41,9 +42,10 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{listener::EventListeners, ForkId, NodeRecord, PeerId, B256};
+use reth_primitives::{ForkId, NodeRecord, PeerId, B256};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_tokio_util::EventListeners;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -141,6 +143,11 @@ impl<C> NetworkManager<C> {
         self.to_eth_request_handler = Some(tx);
     }
 
+    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        self.swarm.add_rlpx_sub_protocol(protocol)
+    }
+
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
     ///
     /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
@@ -181,7 +188,10 @@ where
             status,
             fork_filter,
             dns_discovery_config,
-            ..
+            extra_protocols,
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+                optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -215,6 +225,7 @@ where
             status,
             hello_message,
             fork_filter,
+            extra_protocols,
             bandwidth_meter.clone(),
         );
 
@@ -239,6 +250,9 @@ where
             network_mode,
             bandwidth_meter,
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint,
         );
 
         Ok(Self {
@@ -259,11 +273,10 @@ where
     /// components of the network
     ///
     /// ```
+    /// use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+    /// use reth_primitives::mainnet_nodes;
     /// use reth_provider::test_utils::NoopProvider;
     /// use reth_transaction_pool::TransactionPool;
-    /// use reth_primitives::mainnet_nodes;
-    /// use reth_network::config::rng_secret_key;
-    /// use reth_network::{NetworkConfig, NetworkManager};
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {
     ///     // This block provider implementation is used for testing purposes.
     ///     let client = NoopProvider::default();
@@ -359,7 +372,7 @@ where
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
-        trace!(target : "net", ?peer_id,  "received unexpected message");
+        trace!(target: "net", ?peer_id,  "received unexpected message");
         self.swarm
             .state_mut()
             .peers_mut()
@@ -505,7 +518,7 @@ where
                 unreachable!("Not emitted by session")
             }
             PeerMessage::Other(other) => {
-                debug!(target : "net", message_id=%other.id, "Ignoring unsupported message");
+                debug!(target: "net", message_id=%other.id, "Ignoring unsupported message");
             }
         }
     }
@@ -578,12 +591,20 @@ where
                     self.swarm.state_mut().update_fork_id(transition.current);
                 }
             }
-            NetworkHandleMessage::GetPeerInfo(tx) => {
+            NetworkHandleMessage::GetPeerInfos(tx) => {
                 let _ = tx.send(self.swarm.sessions_mut().get_peer_info());
             }
             NetworkHandleMessage::GetPeerInfoById(peer_id, tx) => {
                 let _ = tx.send(self.swarm.sessions_mut().get_peer_info_by_id(peer_id));
             }
+            NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx) => {
+                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peer_ids));
+            }
+            NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx) => {
+                let peers = self.swarm.state().peers().peers_by_kind(kind);
+                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
+            }
+            NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
         }
     }
 }
@@ -645,20 +666,20 @@ where
                             this.metrics.invalid_messages_received.increment(1);
                         }
                         SwarmEvent::TcpListenerClosed { remote_addr } => {
-                            trace!(target : "net", ?remote_addr, "TCP listener closed.");
+                            trace!(target: "net", ?remote_addr, "TCP listener closed.");
                         }
                         SwarmEvent::TcpListenerError(err) => {
-                            trace!(target : "net", ?err, "TCP connection error.");
+                            trace!(target: "net", ?err, "TCP connection error.");
                         }
                         SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
-                            trace!(target : "net", ?session_id, ?remote_addr, "Incoming connection");
+                            trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
                             this.metrics.total_incoming_connections.increment(1);
                             this.metrics
                                 .incoming_connections
                                 .set(this.swarm.state().peers().num_inbound_connections() as f64);
                         }
                         SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
-                            trace!(target : "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
+                            trace!(target: "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
                             this.metrics.total_outgoing_connections.increment(1);
                             this.metrics
                                 .outgoing_connections
@@ -677,7 +698,7 @@ where
                             let total_active =
                                 this.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                             this.metrics.connected_peers.set(total_active as f64);
-                            debug!(
+                            trace!(
                                 target: "net",
                                 ?remote_addr,
                                 %client_version,
@@ -723,7 +744,7 @@ where
                                 this.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
                             this.metrics.connected_peers.set(total_active as f64);
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?peer_id,
                                 ?total_active,
@@ -767,8 +788,8 @@ where
                                 .notify(NetworkEvent::SessionClosed { peer_id, reason });
                         }
                         SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
-                            debug!(
-                                target : "net",
+                            trace!(
+                                target: "net",
                                 ?remote_addr,
                                 ?error,
                                 "Incoming pending session failed"
@@ -804,7 +825,7 @@ where
                             error,
                         } => {
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?peer_id,
                                 ?error,
@@ -838,7 +859,7 @@ where
                         }
                         SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                             trace!(
-                                target : "net",
+                                target: "net",
                                 ?remote_addr,
                                 ?peer_id,
                                 ?error,
@@ -909,13 +930,13 @@ pub enum NetworkEvent {
         /// The remote addr of the peer to which a session was established.
         remote_addr: SocketAddr,
         /// The client version of the peer to which a session was established.
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         /// Capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// A request channel to the session task.
         messages: PeerRequestSender,
         /// The status of the peer to which a session was established.
-        status: Status,
+        status: Arc<Status>,
         /// negotiated eth version of the session
         version: EthVersion,
     },

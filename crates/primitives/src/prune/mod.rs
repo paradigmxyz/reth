@@ -53,7 +53,7 @@ impl ReceiptsLogPruneConfig {
             // Reminder, that we increment because the [`BlockNumber`] key of the new map should be
             // viewed as `PruneMode::Before(block)`
             let block = (pruned_block + 1).max(
-                mode.prune_target_block(tip, MINIMUM_PRUNING_DISTANCE, PruneSegment::ContractLogs)?
+                mode.prune_target_block(tip, PruneSegment::ContractLogs)?
                     .map(|(block, _)| block)
                     .unwrap_or_default() +
                     1,
@@ -75,11 +75,9 @@ impl ReceiptsLogPruneConfig {
 
         for (_, mode) in self.0.iter() {
             if let PruneMode::Distance(_) = mode {
-                if let Some((block, _)) = mode.prune_target_block(
-                    tip,
-                    MINIMUM_PRUNING_DISTANCE,
-                    PruneSegment::ContractLogs,
-                )? {
+                if let Some((block, _)) =
+                    mode.prune_target_block(tip, PruneSegment::ContractLogs)?
+                {
                     lowest = Some(lowest.unwrap_or(u64::MAX).min(block));
                 }
             }
@@ -109,10 +107,5 @@ impl PruneProgress {
         } else {
             Self::HasMoreData
         }
-    }
-
-    /// Returns `true` if pruning has been finished.
-    pub fn is_finished(&self) -> bool {
-        matches!(self, Self::Finished)
     }
 }

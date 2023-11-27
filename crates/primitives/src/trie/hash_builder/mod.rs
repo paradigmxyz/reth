@@ -2,14 +2,21 @@ use super::{
     nodes::{rlp_hash, BranchNode, ExtensionNode, LeafNode},
     BranchNodeCompact, Nibbles, TrieMask,
 };
-use crate::{keccak256, proofs::EMPTY_ROOT, B256};
-use std::{collections::HashMap, fmt::Debug};
+use crate::{constants::EMPTY_ROOT_HASH, keccak256, Bytes, B256};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+};
+use tracing::trace;
 
 mod state;
 pub use state::HashBuilderState;
 
 mod value;
 pub use value::HashBuilderValue;
+
+mod proof_retainer;
+pub use proof_retainer::ProofRetainer;
 
 /// A component used to construct the root hash of the trie. The primary purpose of a Hash Builder
 /// is to build the Merkle proof that is essential for verifying the integrity and authenticity of
@@ -47,6 +54,7 @@ pub struct HashBuilder {
     stored_in_database: bool,
 
     updated_branch_nodes: Option<HashMap<Nibbles, BranchNodeCompact>>,
+    proof_retainer: Option<ProofRetainer>,
 
     rlp_buf: Vec<u8>,
 }
@@ -62,6 +70,7 @@ impl From<HashBuilderState> for HashBuilder {
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,
             updated_branch_nodes: None,
+            proof_retainer: None,
             rlp_buf: Vec::with_capacity(32),
         }
     }
@@ -90,6 +99,12 @@ impl HashBuilder {
         self
     }
 
+    /// Enable proof retainer for the specified target nibbles.
+    pub fn with_proof_retainer(mut self, targets: Vec<Nibbles>) -> Self {
+        self.proof_retainer = Some(ProofRetainer::new(targets));
+        self
+    }
+
     /// Enables the Hash Builder to store updated branch nodes.
     ///
     /// Call [HashBuilder::split] to get the updates to branch nodes.
@@ -103,6 +118,11 @@ impl HashBuilder {
     pub fn split(mut self) -> (Self, HashMap<Nibbles, BranchNodeCompact>) {
         let updates = self.updated_branch_nodes.take();
         (self, updates.unwrap_or_default())
+    }
+
+    /// Take and return the proofs retained.
+    pub fn take_proofs(&mut self) -> BTreeMap<Nibbles, Bytes> {
+        self.proof_retainer.take().map(ProofRetainer::into_proofs).unwrap_or_default()
     }
 
     /// The number of total updates accrued.
@@ -141,13 +161,6 @@ impl HashBuilder {
         self.stored_in_database = stored_in_database;
     }
 
-    fn set_key_value<T: Into<HashBuilderValue>>(&mut self, key: Nibbles, value: T) {
-        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "old key/value");
-        self.key = key;
-        self.value = value.into();
-        tracing::trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "new key/value");
-    }
-
     /// Returns the current root hash of the trie builder.
     pub fn root(&mut self) -> B256 {
         // Clears the internal state
@@ -159,6 +172,13 @@ impl HashBuilder {
         self.current_root()
     }
 
+    fn set_key_value<T: Into<HashBuilderValue>>(&mut self, key: Nibbles, value: T) {
+        trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "old key/value");
+        self.key = key;
+        self.value = value.into();
+        trace!(target: "trie::hash_builder", key = ?self.key, value = ?self.value, "new key/value");
+    }
+
     fn current_root(&self) -> B256 {
         if let Some(node_ref) = self.stack.last() {
             if node_ref.len() == B256::len_bytes() + 1 {
@@ -167,7 +187,7 @@ impl HashBuilder {
                 keccak256(node_ref)
             }
         } else {
-            EMPTY_ROOT
+            EMPTY_ROOT_HASH
         }
     }
 
@@ -180,7 +200,7 @@ impl HashBuilder {
         // current / self.key is always the latest added element in the trie
         let mut current = self.key.clone();
 
-        tracing::debug!(target: "trie::hash_builder", ?current, ?succeeding, "updating merkle tree");
+        trace!(target: "trie::hash_builder", ?current, ?succeeding, "updating merkle tree");
 
         let mut i = 0;
         loop {
@@ -201,7 +221,7 @@ impl HashBuilder {
             let len = std::cmp::max(preceding_len, common_prefix_len);
             assert!(len < current.len());
 
-            tracing::trace!(
+            trace!(
                 target: "trie::hash_builder",
                 ?len,
                 ?common_prefix_len,
@@ -214,11 +234,11 @@ impl HashBuilder {
             let extra_digit = current[len];
             if self.groups.len() <= len {
                 let new_len = len + 1;
-                tracing::trace!(target: "trie::hash_builder", new_len, old_len = self.groups.len(), "scaling state masks to fit");
+                trace!(target: "trie::hash_builder", new_len, old_len = self.groups.len(), "scaling state masks to fit");
                 self.groups.resize(new_len, TrieMask::default());
             }
             self.groups[len] |= TrieMask::from_nibble(extra_digit);
-            tracing::trace!(
+            trace!(
                 target: "trie::hash_builder",
                 ?extra_digit,
                 groups = self.groups.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(","),
@@ -233,28 +253,29 @@ impl HashBuilder {
             if !succeeding.is_empty() || preceding_exists {
                 len_from += 1;
             }
-            tracing::trace!(target: "trie::hash_builder", "skipping {} nibbles", len_from);
+            trace!(target: "trie::hash_builder", "skipping {} nibbles", len_from);
 
             // The key without the common prefix
             let short_node_key = current.slice_from(len_from);
-            tracing::trace!(target: "trie::hash_builder", ?short_node_key);
+            trace!(target: "trie::hash_builder", ?short_node_key);
 
             // Concatenate the 2 nodes together
             if !build_extensions {
                 match &self.value {
                     HashBuilderValue::Bytes(leaf_value) => {
                         let leaf_node = LeafNode::new(&short_node_key, leaf_value);
-                        tracing::debug!(target: "trie::hash_builder", ?leaf_node, "pushing leaf node");
-                        tracing::trace!(target: "trie::hash_builder", rlp = {
+                        trace!(target: "trie::hash_builder", ?leaf_node, "pushing leaf node");
+                        trace!(target: "trie::hash_builder", rlp = {
                             self.rlp_buf.clear();
                             crate::hex::encode(&leaf_node.rlp(&mut self.rlp_buf))
                         }, "leaf node rlp");
 
                         self.rlp_buf.clear();
                         self.stack.push(leaf_node.rlp(&mut self.rlp_buf));
+                        self.retain_proof_from_buf(&current);
                     }
                     HashBuilderValue::Hash(hash) => {
-                        tracing::debug!(target: "trie::hash_builder", ?hash, "pushing branch node hash");
+                        trace!(target: "trie::hash_builder", ?hash, "pushing branch node hash");
                         self.stack.push(rlp_hash(*hash));
 
                         if self.stored_in_database {
@@ -274,25 +295,26 @@ impl HashBuilder {
                 let stack_last =
                     self.stack.pop().expect("there should be at least one stack item; qed");
                 let extension_node = ExtensionNode::new(&short_node_key, &stack_last);
-                tracing::debug!(target: "trie::hash_builder", ?extension_node, "pushing extension node");
-                tracing::trace!(target: "trie::hash_builder", rlp = {
+                trace!(target: "trie::hash_builder", ?extension_node, "pushing extension node");
+                trace!(target: "trie::hash_builder", rlp = {
                     self.rlp_buf.clear();
                     crate::hex::encode(&extension_node.rlp(&mut self.rlp_buf))
                 }, "extension node rlp");
                 self.rlp_buf.clear();
                 self.stack.push(extension_node.rlp(&mut self.rlp_buf));
+                self.retain_proof_from_buf(&current.slice(0, len_from));
                 self.resize_masks(len_from);
             }
 
             if preceding_len <= common_prefix_len && !succeeding.is_empty() {
-                tracing::trace!(target: "trie::hash_builder", "no common prefix to create branch nodes from, returning");
+                trace!(target: "trie::hash_builder", "no common prefix to create branch nodes from, returning");
                 return
             }
 
             // Insert branch nodes in the stack
             if !succeeding.is_empty() || preceding_exists {
                 // Pushes the corresponding branch node to the stack
-                let children = self.push_branch_node(len);
+                let children = self.push_branch_node(&current, len);
                 // Need to store the branch node in an efficient format
                 // outside of the hash builder
                 self.store_branch_node(&current, len, children);
@@ -302,14 +324,14 @@ impl HashBuilder {
             self.resize_masks(len);
 
             if preceding_len == 0 {
-                tracing::trace!(target: "trie::hash_builder", "0 or 1 state masks means we have no more elements to process");
+                trace!(target: "trie::hash_builder", "0 or 1 state masks means we have no more elements to process");
                 return
             }
 
             current.truncate(preceding_len);
-            tracing::trace!(target: "trie::hash_builder", ?current, "truncated nibbles to {} bytes", preceding_len);
+            trace!(target: "trie::hash_builder", ?current, "truncated nibbles to {} bytes", preceding_len);
 
-            tracing::trace!(target: "trie::hash_builder", groups = ?self.groups, "popping empty state masks");
+            trace!(target: "trie::hash_builder", groups = ?self.groups, "popping empty state masks");
             while self.groups.last() == Some(&TrieMask::default()) {
                 self.groups.pop();
             }
@@ -323,7 +345,7 @@ impl HashBuilder {
     /// Given the size of the longest common prefix, it proceeds to create a branch node
     /// from the state mask and existing stack state, and store its RLP to the top of the stack,
     /// after popping all the relevant elements from the stack.
-    fn push_branch_node(&mut self, len: usize) -> Vec<B256> {
+    fn push_branch_node(&mut self, current: &Nibbles, len: usize) -> Vec<B256> {
         let state_mask = self.groups[len];
         let hash_mask = self.hash_masks[len];
         let branch_node = BranchNode::new(&self.stack);
@@ -331,10 +353,11 @@ impl HashBuilder {
 
         self.rlp_buf.clear();
         let rlp = branch_node.rlp(state_mask, &mut self.rlp_buf);
+        self.retain_proof_from_buf(&current.slice(0, len));
 
         // Clears the stack from the branch node elements
         let first_child_idx = self.stack.len() - state_mask.count_ones() as usize;
-        tracing::debug!(
+        trace!(
             target: "trie::hash_builder",
             new_len = first_child_idx,
             old_len = self.stack.len(),
@@ -342,8 +365,8 @@ impl HashBuilder {
         );
         self.stack.resize(first_child_idx, vec![]);
 
-        tracing::debug!(target: "trie::hash_builder", "pushing branch node with {:?} mask from stack", state_mask);
-        tracing::trace!(target: "trie::hash_builder", rlp = crate::hex::encode(&rlp), "branch node rlp");
+        trace!(target: "trie::hash_builder", "pushing branch node with {:?} mask from stack", state_mask);
+        trace!(target: "trie::hash_builder", rlp = crate::hex::encode(&rlp), "branch node rlp");
         self.stack.push(rlp);
         children
     }
@@ -379,11 +402,17 @@ impl HashBuilder {
 
             // Send it over to the provided channel which will handle it on the
             // other side of the HashBuilder
-            tracing::debug!(target: "trie::hash_builder", node = ?n, "intermediate node");
+            trace!(target: "trie::hash_builder", node = ?n, "intermediate node");
             let common_prefix = current.slice(0, len);
             if let Some(nodes) = self.updated_branch_nodes.as_mut() {
                 nodes.insert(common_prefix, n);
             }
+        }
+    }
+
+    fn retain_proof_from_buf(&mut self, prefix: &Nibbles) {
+        if let Some(proof_retainer) = self.proof_retainer.as_mut() {
+            proof_retainer.retain(prefix, &self.rlp_buf)
         }
     }
 
@@ -400,7 +429,7 @@ impl HashBuilder {
     }
 
     fn resize_masks(&mut self, new_len: usize) {
-        tracing::trace!(
+        trace!(
             target: "trie::hash_builder",
             new_len,
             old_tree_mask_len = self.tree_masks.len(),
@@ -472,7 +501,7 @@ mod tests {
 
     #[test]
     fn empty() {
-        assert_eq!(HashBuilder::default().root(), EMPTY_ROOT);
+        assert_eq!(HashBuilder::default().root(), EMPTY_ROOT_HASH);
     }
 
     #[test]

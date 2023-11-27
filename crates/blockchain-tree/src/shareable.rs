@@ -4,10 +4,9 @@ use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
-        error::InsertBlockError, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
+        error::InsertBlockError, BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer,
+        CanonicalOutcome, InsertPayloadOk,
     },
-    consensus::Consensus,
     RethResult,
 };
 use reth_primitives::{
@@ -26,21 +25,19 @@ use tracing::trace;
 
 /// Shareable blockchain tree that is behind tokio::RwLock
 #[derive(Clone, Debug)]
-pub struct ShareableBlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
+pub struct ShareableBlockchainTree<DB: Database, EF: ExecutorFactory> {
     /// BlockchainTree
-    pub tree: Arc<RwLock<BlockchainTree<DB, C, EF>>>,
+    pub tree: Arc<RwLock<BlockchainTree<DB, EF>>>,
 }
 
-impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB, C, EF> {
+impl<DB: Database, EF: ExecutorFactory> ShareableBlockchainTree<DB, EF> {
     /// Create a new shareable database.
-    pub fn new(tree: BlockchainTree<DB, C, EF>) -> Self {
+    pub fn new(tree: BlockchainTree<DB, EF>) -> Self {
         Self { tree: Arc::new(RwLock::new(tree)) }
     }
 }
 
-impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
-    for ShareableBlockchainTree<DB, C, EF>
-{
+impl<DB: Database, EF: ExecutorFactory> BlockchainTreeEngine for ShareableBlockchainTree<DB, EF> {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         let mut tree = self.tree.write();
         // Blockchain tree metrics shouldn't be updated here, see
@@ -51,10 +48,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
+        validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         trace!(target: "blockchain_tree", hash=?block.hash, number=block.number, parent_hash=?block.parent_hash, "Inserting block");
         let mut tree = self.tree.write();
-        let res = tree.insert_block(block);
+        let res = tree.insert_block(block, validation_kind);
         tree.update_chains_metrics();
         res
     }
@@ -103,9 +101,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
     }
 }
 
-impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
-    for ShareableBlockchainTree<DB, C, EF>
-{
+impl<DB: Database, EF: ExecutorFactory> BlockchainTreeViewer for ShareableBlockchainTree<DB, EF> {
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
         trace!(target: "blockchain_tree", "Returning all blocks in blockchain tree");
         self.tree.read().block_indices().block_number_to_block_hashes().clone()
@@ -119,6 +115,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
         trace!(target: "blockchain_tree", ?block_hash, "Returning block by hash");
         self.tree.read().block_by_hash(block_hash).cloned()
+    }
+
+    fn block_with_senders_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlockWithSenders> {
+        trace!(target: "blockchain_tree", ?block_hash, "Returning block by hash");
+        self.tree.read().block_with_senders_by_hash(block_hash).cloned()
     }
 
     fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
@@ -193,8 +194,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     }
 }
 
-impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingStateProvider
-    for ShareableBlockchainTree<DB, C, EF>
+impl<DB: Database, EF: ExecutorFactory> BlockchainTreePendingStateProvider
+    for ShareableBlockchainTree<DB, EF>
 {
     fn find_pending_state_provider(
         &self,
@@ -206,8 +207,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingState
     }
 }
 
-impl<DB: Database, C: Consensus, EF: ExecutorFactory> CanonStateSubscriptions
-    for ShareableBlockchainTree<DB, C, EF>
+impl<DB: Database, EF: ExecutorFactory> CanonStateSubscriptions
+    for ShareableBlockchainTree<DB, EF>
 {
     fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {
         trace!(target: "blockchain_tree", "Registered subscriber for canonical state");

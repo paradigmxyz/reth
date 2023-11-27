@@ -37,6 +37,15 @@ pub struct PrefixSetMut {
     index: usize,
 }
 
+impl<I> From<I> for PrefixSetMut
+where
+    I: IntoIterator<Item = Nibbles>,
+{
+    fn from(value: I) -> Self {
+        PrefixSetMut { keys: value.into_iter().collect(), ..Default::default() }
+    }
+}
+
 impl PrefixSetMut {
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.

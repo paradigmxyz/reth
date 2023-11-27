@@ -2,26 +2,26 @@ use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
-    transaction::{DbTx, DbTxGAT},
+    transaction::DbTx,
 };
 use reth_primitives::{Account, StorageEntry, B256};
 
-impl<'a, 'tx, TX: DbTx<'tx>> HashedCursorFactory<'a> for TX {
-    type AccountCursor = <TX as DbTxGAT<'a>>::Cursor<tables::HashedAccount> where Self: 'a;
-    type StorageCursor = <TX as DbTxGAT<'a>>::DupCursor<tables::HashedStorage> where Self: 'a;
+impl<'a, TX: DbTx> HashedCursorFactory for &'a TX {
+    type AccountCursor = <TX as DbTx>::Cursor<tables::HashedAccount>;
+    type StorageCursor = <TX as DbTx>::DupCursor<tables::HashedStorage>;
 
-    fn hashed_account_cursor(&'a self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
         self.cursor_read::<tables::HashedAccount>()
     }
 
-    fn hashed_storage_cursor(&'a self) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
+    fn hashed_storage_cursor(&self) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
         self.cursor_dup_read::<tables::HashedStorage>()
     }
 }
 
-impl<'tx, C> HashedAccountCursor for C
+impl<C> HashedAccountCursor for C
 where
-    C: DbCursorRO<'tx, tables::HashedAccount>,
+    C: DbCursorRO<tables::HashedAccount>,
 {
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Account)>, reth_db::DatabaseError> {
         self.seek(key)
@@ -32,9 +32,9 @@ where
     }
 }
 
-impl<'tx, C> HashedStorageCursor for C
+impl<C> HashedStorageCursor for C
 where
-    C: DbCursorRO<'tx, tables::HashedStorage> + DbDupCursorRO<'tx, tables::HashedStorage>,
+    C: DbCursorRO<tables::HashedStorage> + DbDupCursorRO<tables::HashedStorage>,
 {
     fn is_storage_empty(&mut self, key: B256) -> Result<bool, reth_db::DatabaseError> {
         Ok(self.seek_exact(key)?.is_none())

@@ -1,4 +1,5 @@
-# This workflow is borrowed from Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/.github/workflows/release.yml
+# This workflow is modified from Lighthouse:
+# https://github.com/sigp/lighthouse/blob/441fc1691b69f9edc4bbdc6665f3efab16265c9b/.github/workflows/release.yml
 
 name: release
 
@@ -25,80 +26,49 @@ jobs:
 
   build:
     name: build release
+    runs-on: ${{ matrix.os }}
+    needs: extract-version
     strategy:
       matrix:
-        arch:
-          [
-            aarch64-unknown-linux-gnu,
-            x86_64-unknown-linux-gnu,
-            x86_64-apple-darwin,
-            aarch64-apple-darwin,
-            x86_64-pc-windows-gnu,
-          ]
         include:
-          - arch: aarch64-unknown-linux-gnu
-            platform: ubuntu-20.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-20.04
             profile: maxperf
-          - arch: x86_64-unknown-linux-gnu
-            platform: ubuntu-20.04
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-20.04
             profile: maxperf
-          - arch: x86_64-apple-darwin
-            platform: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
             profile: maxperf
-          - arch: aarch64-apple-darwin
-            platform: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
             profile: maxperf
-          - arch: x86_64-pc-windows-gnu
-            platform: ubuntu-20.04
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-20.04
             profile: maxperf
-
-    runs-on: ${{ matrix.platform }}
-    needs: extract-version
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-      - name: Get latest version of stable Rust
-        run: rustup update stable
-      - name: Install target
-        run: rustup target add ${{ matrix.arch }}
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+      - uses: taiki-e/install-action@cross
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
-      # ==============================
-      # Apple M1 SDK setup
-      # ==============================
-
       - name: Apple M1 setup
-        if: ${{ matrix.job.target == 'aarch64-apple-darwin' }}
+        if: matrix.target == 'aarch64-apple-darwin'
         run: |
           echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
-          echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-os-version)" >> $GITHUB_ENV
 
-      # ==============================
-      #       Builds
-      # ==============================
-
-      - name: Build reth for ${{ matrix.arch }}
-        run: |
-          cargo install cross
-          env PROFILE=${{ matrix.profile }} make build-${{ matrix.arch }}
-
-      - name: Move cross-compiled binary
-        if: matrix.arch != 'x86_64-pc-windows-gnu'
+      - name: Build Reth
+        run: make PROFILE=${{ matrix.profile }} build-${{ matrix.target }}
+      - name: Move binary
         run: |
           mkdir artifacts
-          mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth ./artifacts
-
-      - name: Move cross-compiled binary (Windows)
-        if: matrix.arch == 'x86_64-pc-windows-gnu'
-        run: |
-          mkdir artifacts
-          mv target/${{ matrix.arch }}/${{ matrix.profile }}/reth.exe ./artifacts
-
-      # ==============================
-      #       Signing
-      # ==============================
+          [[ "${{ matrix.target }}" == *windows* ]] && ext=".exe"
+          mv "target/${{ matrix.target }}/${{ matrix.profile }}/reth${ext}" ./artifacts
 
       - name: Configure GPG and create artifacts
         env:
@@ -108,26 +78,22 @@ jobs:
           export GPG_TTY=$(tty)
           echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
           cd artifacts
-          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz reth*
-          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
+          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz reth*
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
           mv *tar.gz* ..
         shell: bash
 
-      # =======================================================================
-      # Upload artifacts
-      # This is required to share artifacts between different jobs
-      # =======================================================================
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
-          name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
-          path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz
+          name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
+          path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
 
       - name: Upload signature
         uses: actions/upload-artifact@v3
         with:
-          name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz.asc
-          path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.arch }}.tar.gz.asc
+          name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
+          path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
 
   draft-release:
     name: draft release
@@ -139,35 +105,25 @@ jobs:
       # Required to post the release
       contents: write
     steps:
-      # This is necessary for generating the changelog. It has to come before "Download Artifacts" or else it deletes the artifacts.
-      - name: Checkout sources
-        uses: actions/checkout@v3
+      # This is necessary for generating the changelog.
+      # It has to come before "Download Artifacts" or else it deletes the artifacts.
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # ==============================
-      #       Download artifacts
-      # ==============================
       - name: Download artifacts
         uses: actions/download-artifact@v3
-
-      # ==============================
-      #       Create release draft
-      # ==============================
       - name: Generate full changelog
         id: changelog
         run: |
           echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
           echo "$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 ${{ env.VERSION }}^)..${{ env.VERSION }})" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-
       - name: Create release draft
         env:
           GITHUB_USER: ${{ github.repository_owner }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
         # The formatting here is borrowed from Lighthouse (which is borrowed from OpenEthereum):
-        # https://github.com/openethereum/openethereum/blob/main/.github/workflows/build.yml
+        # https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/.github/workflows/build.yml
         run: |
           body=$(cat <<- "ENDBODY"
           <Release Name>
@@ -229,7 +185,7 @@ jobs:
           )
           assets=()
           for asset in ./reth-*.tar.gz*; do
-              assets+=("-a" "$asset/$asset")
+              assets+=("$asset/$asset")
           done
           tag_name="${{ env.VERSION }}"
-          echo "$body" | hub release create --draft "${assets[@]}" -F "-" "$tag_name"
+          echo "$body" | gh release create --draft -F "-" "$tag_name" "${assets[@]}"

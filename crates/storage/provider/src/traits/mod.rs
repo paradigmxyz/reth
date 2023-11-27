@@ -7,7 +7,10 @@ mod storage;
 pub use storage::StorageReader;
 
 mod block;
-pub use block::{BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter};
+pub use block::{
+    BlockExecutionWriter, BlockReader, BlockReaderIdExt, BlockSource, BlockWriter,
+    TransactionVariant,
+};
 
 mod block_hash;
 pub use block_hash::BlockHashReader;
@@ -24,6 +27,9 @@ pub use chain_info::CanonChainTracker;
 mod header;
 pub use header::HeaderProvider;
 
+mod header_sync_gap;
+pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode};
+
 mod receipts;
 pub use receipts::{ReceiptProvider, ReceiptProviderIdExt};
 
@@ -34,7 +40,7 @@ pub use state::{
 };
 
 mod transactions;
-pub use transactions::TransactionsProvider;
+pub use transactions::{TransactionsProvider, TransactionsProviderExt};
 
 mod withdrawals;
 pub use withdrawals::WithdrawalsProvider;

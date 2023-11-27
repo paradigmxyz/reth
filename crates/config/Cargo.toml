@@ -9,12 +9,11 @@ repository.workspace = true
 
 [dependencies]
 # reth
-reth-network = { path = "../net/network" }
-reth-net-nat = { path = "../net/nat" }
-reth-discv4 = { path = "../net/discv4" }
-reth-downloaders = { path = "../net/downloaders" }
-reth-stages = { path = "../../crates/stages" }
-reth-primitives = { path = "../primitives" }
+reth-network.workspace = true
+reth-net-nat.workspace = true
+reth-discv4.workspace = true
+reth-downloaders.workspace = true
+reth-primitives.workspace = true
 
 # io
 serde.workspace = true
@@ -24,8 +23,8 @@ serde_json.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # misc
-confy.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
+confy.workspace = true
 toml.workspace = true

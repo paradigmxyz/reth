@@ -47,9 +47,19 @@ install: ## Build and install the reth binary under `~/.cargo/bin`.
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
+.PHONY: install-op
+install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
+	cargo install --path bin/reth --bin op-reth --force --locked \
+		--features "optimism,$(FEATURES)" \
+		--profile "$(PROFILE)" \
+		$(CARGO_INSTALL_EXTRA_FLAGS)
+
 # Builds the reth binary natively.
 build-native-%:
 	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+
+op-build-native-%:
+	cargo build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -69,6 +79,10 @@ build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(F
 build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
  		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+
+op-build-%:
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+ 		cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
@@ -105,7 +119,8 @@ build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR dir
 
 ##@ Test
 
-UNIT_TEST_ARGS := --locked --workspace --all-features -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
+UNIT_TEST_ARGS := --locked --workspace --features 'jemalloc-prof' -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
+UNIT_TEST_ARGS_OP := --locked --workspace --features 'jemalloc-prof,optimism' -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 COV_FILE := lcov.info
 
 .PHONY: test-unit
@@ -113,10 +128,20 @@ test-unit: ## Run unit tests.
 	cargo install cargo-nextest --locked
 	cargo nextest run $(UNIT_TEST_ARGS)
 
+.PHONY: test-unit-op
+test-unit-op: ## Run unit tests (with optimism feature flag enabled).
+	cargo install cargo-nextest --locked
+	cargo nextest run $(UNIT_TEST_ARGS_OP)
+
 .PHONY: cov-unit
 cov-unit: ## Run unit tests with coverage.
 	rm -f $(COV_FILE)
 	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS)
+
+.PHONY: cov-unit-op
+cov-unit-op: ## Run unit tests with coverage (with optimism feature flag enabled).
+	rm -f $(COV_FILE)
+	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS_OP)
 
 .PHONY: cov-report-html
 cov-report-html: cov-unit ## Generate a HTML coverage report and open it in the browser.
@@ -203,3 +228,7 @@ update-book-cli: ## Update book cli documentation.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 	@echo "Updating book cli doc..."
 	@./book/cli/update.sh $(BUILD_PATH)
+
+.PHONY: maxperf
+maxperf:
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc

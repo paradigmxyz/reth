@@ -1,9 +1,10 @@
 pub use crate::Withdrawal;
-use reth_primitives::{
+use crate::{
+    eth::transaction::BlobTransactionSidecar,
     kzg::{Blob, Bytes48},
-    Address, BlobTransactionSidecar, Bloom, Bytes, SealedBlock, B256, B64, U256, U64,
 };
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
+use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
 /// The execution payload body response that allows for `null` values.
 pub type ExecutionPayloadBodiesV1 = Vec<Option<ExecutionPayloadBodyV1>>;
@@ -127,44 +128,18 @@ pub struct ExecutionPayloadV1 {
     pub receipts_root: B256,
     pub logs_bloom: Bloom,
     pub prev_randao: B256,
-    pub block_number: U64,
-    pub gas_limit: U64,
-    pub gas_used: U64,
-    pub timestamp: U64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub block_number: u64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub gas_limit: u64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub gas_used: u64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub timestamp: u64,
     pub extra_data: Bytes,
     pub base_fee_per_gas: U256,
     pub block_hash: B256,
     pub transactions: Vec<Bytes>,
-}
-
-impl From<SealedBlock> for ExecutionPayloadV1 {
-    fn from(value: SealedBlock) -> Self {
-        let transactions = value
-            .body
-            .iter()
-            .map(|tx| {
-                let mut encoded = Vec::new();
-                tx.encode_enveloped(&mut encoded);
-                encoded.into()
-            })
-            .collect();
-        ExecutionPayloadV1 {
-            parent_hash: value.parent_hash,
-            fee_recipient: value.beneficiary,
-            state_root: value.state_root,
-            receipts_root: value.receipts_root,
-            logs_bloom: value.logs_bloom,
-            prev_randao: value.mix_hash,
-            block_number: U64::from(value.number),
-            gas_limit: U64::from(value.gas_limit),
-            gas_used: U64::from(value.gas_used),
-            timestamp: U64::from(value.timestamp),
-            extra_data: value.extra_data.clone(),
-            base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-            block_hash: value.hash(),
-            transactions,
-        }
-    }
 }
 
 /// This structure maps on the ExecutionPayloadV2 structure of the beacon chain spec.
@@ -185,7 +160,7 @@ pub struct ExecutionPayloadV2 {
 impl ExecutionPayloadV2 {
     /// Returns the timestamp for the execution payload.
     pub fn timestamp(&self) -> u64 {
-        self.payload_inner.timestamp.to()
+        self.payload_inner.timestamp
     }
 }
 
@@ -199,12 +174,14 @@ pub struct ExecutionPayloadV3 {
     #[serde(flatten)]
     pub payload_inner: ExecutionPayloadV2,
 
-    /// Array of [`U64`] representing blob gas used, enabled with V3
+    /// Array of hex [`u64`] representing blob gas used, enabled with V3
     /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
-    pub blob_gas_used: U64,
-    /// Array of [`U64`] representing excess blob gas, enabled with V3
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub blob_gas_used: u64,
+    /// Array of hex[`u64`] representing excess blob gas, enabled with V3
     /// See <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#ExecutionPayloadV3>
-    pub excess_blob_gas: U64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub excess_blob_gas: u64,
 }
 
 impl ExecutionPayloadV3 {
@@ -215,7 +192,7 @@ impl ExecutionPayloadV3 {
 
     /// Returns the timestamp for the payload.
     pub fn timestamp(&self) -> u64 {
-        self.payload_inner.payload_inner.timestamp.to()
+        self.payload_inner.payload_inner.timestamp
     }
 }
 
@@ -227,8 +204,11 @@ pub struct BlobsBundleV1 {
     pub blobs: Vec<Blob>,
 }
 
-impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
-    fn from(sidecars: Vec<BlobTransactionSidecar>) -> Self {
+impl BlobsBundleV1 {
+    /// Creates a new blob bundle from the given sidecars.
+    ///
+    /// This folds the sidecar fields into single commit, proof, and blob vectors.
+    pub fn new(sidecars: impl IntoIterator<Item = BlobTransactionSidecar>) -> Self {
         let (commitments, proofs, blobs) = sidecars.into_iter().fold(
             (Vec::new(), Vec::new(), Vec::new()),
             |(mut commitments, mut proofs, mut blobs), sidecar| {
@@ -240,9 +220,7 @@ impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
         );
         Self { commitments, proofs, blobs }
     }
-}
 
-impl BlobsBundleV1 {
     /// Take `len` blob data from the bundle.
     ///
     /// # Panics
@@ -255,11 +233,28 @@ impl BlobsBundleV1 {
             self.blobs.drain(0..len).collect(),
         )
     }
+
+    /// Returns the sidecar from the bundle
+    ///
+    /// # Panics
+    ///
+    /// If len is more than the blobs bundle len.
+    pub fn pop_sidecar(&mut self, len: usize) -> BlobTransactionSidecar {
+        let (commitments, proofs, blobs) = self.take(len);
+        BlobTransactionSidecar { commitments, proofs, blobs }
+    }
+}
+
+impl From<Vec<BlobTransactionSidecar>> for BlobsBundleV1 {
+    fn from(sidecars: Vec<BlobTransactionSidecar>) -> Self {
+        Self::new(sidecars)
+    }
 }
 
 /// An execution payload, which can be either [ExecutionPayloadV1], [ExecutionPayloadV2], or
 /// [ExecutionPayloadV3].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
 pub enum ExecutionPayload {
     /// V1 payload
     V1(ExecutionPayloadV1),
@@ -282,7 +277,7 @@ impl ExecutionPayload {
     /// Returns the timestamp for the payload.
     pub fn timestamp(&self) -> u64 {
         match self {
-            ExecutionPayload::V1(payload) => payload.timestamp.to(),
+            ExecutionPayload::V1(payload) => payload.timestamp,
             ExecutionPayload::V2(payload) => payload.timestamp(),
             ExecutionPayload::V3(payload) => payload.timestamp(),
         }
@@ -309,9 +304,9 @@ impl ExecutionPayload {
     /// Returns the block number for this payload.
     pub fn block_number(&self) -> u64 {
         match self {
-            ExecutionPayload::V1(payload) => payload.block_number.to(),
-            ExecutionPayload::V2(payload) => payload.payload_inner.block_number.to(),
-            ExecutionPayload::V3(payload) => payload.payload_inner.payload_inner.block_number.to(),
+            ExecutionPayload::V1(payload) => payload.block_number,
+            ExecutionPayload::V2(payload) => payload.payload_inner.block_number,
+            ExecutionPayload::V3(payload) => payload.payload_inner.payload_inner.block_number,
         }
     }
 }
@@ -334,26 +329,47 @@ impl From<ExecutionPayloadV3> for ExecutionPayload {
     }
 }
 
+// Deserializes untagged ExecutionPayload by trying each variant in falling order
+impl<'de> Deserialize<'de> for ExecutionPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ExecutionPayloadDesc {
+            V3(ExecutionPayloadV3),
+            V2(ExecutionPayloadV2),
+            V1(ExecutionPayloadV1),
+        }
+        match ExecutionPayloadDesc::deserialize(deserializer)? {
+            ExecutionPayloadDesc::V3(payload) => Ok(Self::V3(payload)),
+            ExecutionPayloadDesc::V2(payload) => Ok(Self::V2(payload)),
+            ExecutionPayloadDesc::V1(payload) => Ok(Self::V1(payload)),
+        }
+    }
+}
+
 /// Error that can occur when handling payloads.
 #[derive(thiserror::Error, Debug)]
 pub enum PayloadError {
     /// Invalid payload extra data.
-    #[error("Invalid payload extra data: {0}")]
+    #[error("invalid payload extra data: {0}")]
     ExtraData(Bytes),
     /// Invalid payload base fee.
-    #[error("Invalid payload base fee: {0}")]
+    #[error("invalid payload base fee: {0}")]
     BaseFee(U256),
     /// Invalid payload blob gas used.
-    #[error("Invalid payload blob gas used: {0}")]
+    #[error("invalid payload blob gas used: {0}")]
     BlobGasUsed(U256),
     /// Invalid payload excess blob gas.
-    #[error("Invalid payload excess blob gas: {0}")]
+    #[error("invalid payload excess blob gas: {0}")]
     ExcessBlobGas(U256),
     /// Pre-cancun Payload has blob transactions.
-    #[error("Invalid payload, pre-Cancun payload has blob transactions")]
+    #[error("pre-Cancun payload has blob transactions")]
     PreCancunBlockWithBlobTransactions,
     /// Invalid payload block hash.
-    #[error("blockhash mismatch, want {consensus}, got {execution}")]
+    #[error("block hash mismatch: want {consensus}, got {execution}")]
     BlockHash {
         /// The block hash computed from the payload.
         execution: B256,
@@ -361,7 +377,7 @@ pub enum PayloadError {
         consensus: B256,
     },
     /// Expected blob versioned hashes do not match the given transactions.
-    #[error("Expected blob versioned hashes do not match the given transactions")]
+    #[error("expected blob versioned hashes do not match the given transactions")]
     InvalidVersionedHashes,
     /// Encountered decoding error.
     #[error(transparent)]
@@ -394,7 +410,8 @@ pub struct ExecutionPayloadBodyV1 {
 #[serde(rename_all = "camelCase")]
 pub struct PayloadAttributes {
     /// Value for the `timestamp` field of the new payload
-    pub timestamp: U64,
+    #[serde(with = "crate::serde_helpers::u64_hex")]
+    pub timestamp: u64,
     /// Value for the `prevRandao` field of the new payload
     pub prev_randao: B256,
     /// Suggested value for the `feeRecipient` field of the new payload
@@ -408,6 +425,31 @@ pub struct PayloadAttributes {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#payloadattributesv3>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
+    /// Optimism Payload Attributes
+    #[cfg(feature = "optimism")]
+    #[serde(flatten)]
+    pub optimism_payload_attributes: OptimismPayloadAttributes,
+}
+
+/// Optimism Payload Attributes
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(feature = "optimism")]
+pub struct OptimismPayloadAttributes {
+    /// Transactions is a field for rollups: the transactions list is forced into the block
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transactions: Option<Vec<Bytes>>,
+    /// If true, the no transactions are taken out of the tx-pool, only transactions from the above
+    /// Transactions list will be included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_tx_pool: Option<bool>,
+    /// If set, this sets the exact gas limit the block produced with.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::serde_helpers::u64_hex_opt::deserialize"
+    )]
+    pub gas_limit: Option<u64>,
 }
 
 /// This structure contains the result of processing a payload or fork choice update.
@@ -655,6 +697,9 @@ mod tests {
         let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
         let payload: ExecutionPayloadV1 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+
+        let any_payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(any_payload, payload.into());
     }
 
     #[test]
@@ -663,6 +708,9 @@ mod tests {
         let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000000","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x44bb4b98c59dbb726f96ffceb5ee028dcbe35b9bba4f9ffd56aeebf8d1e4db62","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0x5655011482546f16b2312ef18e9fad03d6a52b1be95401aea884b222477f9e64","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"],"withdrawals":[],"blobGasUsed":"0xb10b","excessBlobGas":"0xb10b"}"#;
         let payload: ExecutionPayloadV3 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+
+        let any_payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(any_payload, payload.into());
     }
 
     #[test]
@@ -671,6 +719,9 @@ mod tests {
         let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"]}"#;
         let payload: ExecutionPayloadV1 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+
+        let any_payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(any_payload, payload.into());
     }
 
     #[test]
@@ -679,6 +730,9 @@ mod tests {
         let s = r#"{"parentHash":"0x67ead97eb79b47a1638659942384143f36ed44275d4182799875ab5a87324055","feeRecipient":"0x0000000000000000000000000000000000000000","stateRoot":"0x76a03cbcb7adce07fd284c61e4fa31e5e786175cefac54a29e46ec8efa28ea41","receiptsRoot":"0x4e3c608a9f2e129fccb91a1dae7472e78013b8e654bccc8d224ce3d63ae17006","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","prevRandao":"0x028111cb7d25918386a69656b3d17b2febe95fd0f11572c1a55c14f99fdfe3df","blockNumber":"0x1","gasLimit":"0x2fefd8","gasUsed":"0xa860","timestamp":"0x1235","extraData":"0x8b726574682f76302e312e30","baseFeePerGas":"0x342770c0","blockHash":"0xa6f40ed042e61e88e76125dede8fff8026751ea14454b68fb534cea99f2b2a77","transactions":["0xf865808506fc23ac00830124f8940000000000000000000000000000000000000316018032a044b25a8b9b247d01586b3d59c71728ff49c9b84928d9e7fa3377ead3b5570b5da03ceac696601ff7ee6f5fe8864e2998db9babdf5eeba1a0cd5b4d44b3fcbd181b"],"withdrawals":[],"blobGasUsed":"0xb10b","excessBlobGas":"0xb10b"}"#;
         let payload: ExecutionPayloadV3 = serde_json::from_str(s).unwrap();
         assert_eq!(serde_json::to_string(&payload).unwrap(), s);
+
+        let any_payload: ExecutionPayload = serde_json::from_str(s).unwrap();
+        assert_eq!(any_payload, payload.into());
     }
 
     #[test]
@@ -860,5 +914,22 @@ mod tests {
         let payload_res: Result<ExecutionPayloadInputV2, serde_json::Error> =
             serde_json::from_str(input);
         assert!(payload_res.is_err());
+    }
+
+    #[test]
+    fn beacon_api_payload_serde() {
+        #[derive(Serialize, Deserialize)]
+        #[serde(transparent)]
+        struct Event {
+            #[serde(with = "crate::beacon::payload::beacon_api_payload_attributes")]
+            payload: PayloadAttributes,
+        }
+
+        let s = r#"{"timestamp":"1697981664","prev_randao":"0x739947d9f0aed15e32ed05a978e53b55cdcfe3db4a26165890fa45a80a06c996","suggested_fee_recipient":"0x0000000000000000000000000000000000000001","withdrawals":[{"index":"2460700","validator_index":"852657","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5268915"},{"index":"2460701","validator_index":"852658","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5253066"},{"index":"2460702","validator_index":"852659","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5266666"},{"index":"2460703","validator_index":"852660","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5239026"},{"index":"2460704","validator_index":"852661","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5273516"},{"index":"2460705","validator_index":"852662","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5260842"},{"index":"2460706","validator_index":"852663","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5238925"},{"index":"2460707","validator_index":"852664","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5253956"},{"index":"2460708","validator_index":"852665","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5284374"},{"index":"2460709","validator_index":"852666","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5276798"},{"index":"2460710","validator_index":"852667","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5239682"},{"index":"2460711","validator_index":"852668","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5261544"},{"index":"2460712","validator_index":"852669","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5247034"},{"index":"2460713","validator_index":"852670","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5256750"},{"index":"2460714","validator_index":"852671","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5261929"},{"index":"2460715","validator_index":"852672","address":"0x778f5f13c4be78a3a4d7141bcb26999702f407cf","amount":"5243188"}]}"#;
+
+        let event: Event = serde_json::from_str(s).unwrap();
+        let input = serde_json::from_str::<serde_json::Value>(s).unwrap();
+        let json = serde_json::to_value(event).unwrap();
+        assert_eq!(input, json);
     }
 }

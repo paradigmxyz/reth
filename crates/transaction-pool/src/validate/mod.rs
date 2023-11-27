@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_primitives::{
-    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock, TransactionKind,
+    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock,
     TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use std::{fmt, time::Instant};
@@ -16,7 +16,7 @@ mod eth;
 mod task;
 
 /// A `TransactionValidator` implementation that validates ethereum transaction.
-pub use eth::{EthTransactionValidator, EthTransactionValidatorBuilder};
+pub use eth::*;
 
 /// A spawnable task that performs transaction validation.
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
@@ -58,6 +58,21 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
             Self::Invalid(transaction, ..) => *transaction.hash(),
             Self::Error(hash, ..) => *hash,
         }
+    }
+
+    /// Returns true if the transaction is valid.
+    pub fn is_valid(&self) -> bool {
+        matches!(self, Self::Valid { .. })
+    }
+
+    /// Returns true if the transaction is invalid.
+    pub fn is_invalid(&self) -> bool {
+        matches!(self, Self::Invalid(_, _))
+    }
+
+    /// Returns true if validation resulted in an error.
+    pub fn is_error(&self) -> bool {
+        matches!(self, Self::Error(_, _))
     }
 }
 
@@ -168,28 +183,25 @@ pub trait TransactionValidator: Send + Sync {
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction>;
 
+    /// Validates a batch of transactions.
+    ///
+    /// Must return all outcomes for the given transactions in the same order.
+    ///
+    /// See also [Self::validate_transaction].
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        futures_util::future::join_all(
+            transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
+        )
+        .await
+    }
+
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {}
-
-    /// Ensure that the code size is not greater than `max_init_code_size`.
-    /// `max_init_code_size` should be configurable so this will take it as an argument.
-    fn ensure_max_init_code_size(
-        &self,
-        transaction: &Self::Transaction,
-        max_init_code_size: usize,
-    ) -> Result<(), InvalidPoolTransactionError> {
-        if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
-        {
-            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
-                transaction.size(),
-                max_init_code_size,
-            ))
-        } else {
-            Ok(())
-        }
-    }
 }
 
 /// A valid transaction in the pool.
@@ -209,8 +221,6 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub timestamp: Instant,
     /// Where this transaction originated from.
     pub origin: TransactionOrigin,
-    /// The length of the rlp encoded transaction (cached)
-    pub encoded_length: usize,
 }
 
 // === impl ValidPoolTransaction ===
@@ -231,6 +241,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.sender()
     }
 
+    /// Returns the recipient of the transaction if it is not a CREATE transaction.
+    pub fn to(&self) -> Option<Address> {
+        self.transaction.to()
+    }
+
     /// Returns the internal identifier for the sender of this transaction
     pub(crate) fn sender_id(&self) -> SenderId {
         self.transaction_id.sender
@@ -239,6 +254,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Returns the internal identifier for this transaction.
     pub(crate) fn id(&self) -> &TransactionId {
         &self.transaction_id
+    }
+
+    /// Returns the length of the rlp encoded transaction
+    #[inline]
+    pub fn encoded_length(&self) -> usize {
+        self.transaction.encoded_length()
     }
 
     /// Returns the nonce set for this transaction.
@@ -252,6 +273,13 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     pub fn cost(&self) -> U256 {
         self.transaction.cost()
+    }
+
+    /// Returns the EIP-4844 max blob fee the caller is willing to pay.
+    ///
+    /// For non-EIP-4844 transactions, this returns [None].
+    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.transaction.max_fee_per_blob_gas()
     }
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
@@ -322,7 +350,6 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
             propagate: self.propagate,
             timestamp: self.timestamp,
             origin: self.origin,
-            encoded_length: self.encoded_length,
         }
     }
 }
@@ -342,6 +369,6 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionValidatorError {
     /// Failed to communicate with the validation service.
-    #[error("Validation service unreachable")]
+    #[error("validation service unreachable")]
     ValidationServiceUnreachable,
 }

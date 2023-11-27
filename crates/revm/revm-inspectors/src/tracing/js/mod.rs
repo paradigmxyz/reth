@@ -3,21 +3,21 @@
 use crate::tracing::{
     js::{
         bindings::{
-            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, StackObj, StepLog,
+            CallFrame, Contract, EvmContext, EvmDbRef, FrameResult, MemoryRef, StackRef, StepLog,
         },
         builtins::{register_builtins, PrecompileList},
     },
     types::CallKind,
     utils::get_create_address,
 };
+use alloy_primitives::{Address, Bytes, B256, U256};
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::{Account, Address, Bytes, B256, U256};
 use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
     },
     precompile::Precompiles,
-    primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo},
+    primitives::{AccountInfo, Env, ExecutionResult, Output, ResultAndState, TransactTo},
     Database, EVMData, Inspector,
 };
 use tokio::sync::mpsc;
@@ -151,7 +151,7 @@ impl JsInspector {
     /// Calls the result function and returns the result.
     pub fn result(&mut self, res: ResultAndState, env: &Env) -> Result<JsValue, JsInspectorError> {
         let ResultAndState { result, state } = res;
-        let db = EvmDb::new(state, self.to_db_service.clone());
+        let (db, _db_guard) = EvmDbRef::new(&state, self.to_db_service.clone());
 
         let gas_used = result.gas_used();
         let mut to = None;
@@ -206,14 +206,14 @@ impl JsInspector {
         )?)
     }
 
-    fn try_fault(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
+    fn try_fault(&mut self, step: StepLog, db: EvmDbRef) -> JsResult<()> {
         let step = step.into_js_object(&mut self.ctx)?;
         let db = db.into_js_object(&mut self.ctx)?;
         self.fault_fn.call(&(self.obj.clone().into()), &[step.into(), db.into()], &mut self.ctx)?;
         Ok(())
     }
 
-    fn try_step(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
+    fn try_step(&mut self, step: StepLog, db: EvmDbRef) -> JsResult<()> {
         if let Some(step_fn) = &self.step_fn {
             let step = step.into_js_object(&mut self.ctx)?;
             let db = db.into_js_object(&mut self.ctx)?;
@@ -274,8 +274,7 @@ impl JsInspector {
         if !self.precompiles_registered {
             return
         }
-        let precompiles =
-            PrecompileList(precompiles.addresses().into_iter().map(Into::into).collect());
+        let precompiles = PrecompileList(precompiles.addresses().into_iter().copied().collect());
 
         let _ = precompiles.register_callable(&mut self.ctx);
 
@@ -287,17 +286,20 @@ impl<DB> Inspector<DB> for JsInspector
 where
     DB: Database,
 {
-    fn step(&mut self, interp: &mut Interpreter, data: &mut EVMData<'_, DB>) -> InstructionResult {
+    fn step(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         if self.step_fn.is_none() {
-            return InstructionResult::Continue
+            return
         }
 
-        let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+        let (db, _db_guard) =
+            EvmDbRef::new(&data.journaled_state.state, self.to_db_service.clone());
 
+        let (stack, _stack_guard) = StackRef::new(&interp.stack);
+        let (memory, _memory_guard) = MemoryRef::new(interp.shared_memory);
         let step = StepLog {
-            stack: StackObj(interp.stack.clone()),
+            stack,
             op: interp.current_opcode().into(),
-            memory: MemoryObj(interp.memory.clone()),
+            memory,
             pc: interp.program_counter() as u64,
             gas_remaining: interp.gas.remaining(),
             cost: interp.gas.spend(),
@@ -308,9 +310,8 @@ where
         };
 
         if self.try_step(step, db).is_err() {
-            return InstructionResult::Revert
+            interp.instruction_result = InstructionResult::Revert;
         }
-        InstructionResult::Continue
     }
 
     fn log(
@@ -322,36 +323,32 @@ where
     ) {
     }
 
-    fn step_end(
-        &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        eval: InstructionResult,
-    ) -> InstructionResult {
+    fn step_end(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         if self.step_fn.is_none() {
-            return InstructionResult::Continue
+            return
         }
 
-        if matches!(eval, return_revert!()) {
-            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+        if matches!(interp.instruction_result, return_revert!()) {
+            let (db, _db_guard) =
+                EvmDbRef::new(&data.journaled_state.state, self.to_db_service.clone());
 
+            let (stack, _stack_guard) = StackRef::new(&interp.stack);
+            let (memory, _memory_guard) = MemoryRef::new(interp.shared_memory);
             let step = StepLog {
-                stack: StackObj(interp.stack.clone()),
+                stack,
                 op: interp.current_opcode().into(),
-                memory: MemoryObj(interp.memory.clone()),
+                memory,
                 pc: interp.program_counter() as u64,
                 gas_remaining: interp.gas.remaining(),
                 cost: interp.gas.spend(),
                 depth: data.journaled_state.depth(),
                 refund: interp.gas.refunded() as u64,
-                error: Some(format!("{:?}", eval)),
+                error: Some(format!("{:?}", interp.instruction_result)),
                 contract: self.active_call().contract.clone(),
             };
 
             let _ = self.try_fault(step, db);
         }
-
-        InstructionResult::Continue
     }
 
     fn call(
@@ -486,7 +483,7 @@ pub enum JsDbRequest {
         /// The address of the account to be loaded
         address: Address,
         /// The response channel
-        resp: std::sync::mpsc::Sender<Result<Option<Account>, String>>,
+        resp: std::sync::mpsc::Sender<Result<Option<AccountInfo>, String>>,
     },
     /// Bindings for [Database::code_by_hash]
     Code {
@@ -519,9 +516,9 @@ struct CallStackItem {
 pub enum JsInspectorError {
     #[error(transparent)]
     JsError(#[from] JsError),
-    #[error("Failed to eval js code: {0}")]
+    #[error("failed to evaluate JS code: {0}")]
     EvalCode(JsError),
-    #[error("The evaluated code is not a JS object")]
+    #[error("the evaluated code is not a JS object")]
     ExpectedJsObject,
     #[error("trace object must expose a function result()")]
     ResultFunctionMissing,
@@ -529,8 +526,8 @@ pub enum JsInspectorError {
     FaultFunctionMissing,
     #[error("setup object must be a function")]
     SetupFunctionNotCallable,
-    #[error("Failed to call setup(): {0}")]
+    #[error("failed to call setup(): {0}")]
     SetupCallFailed(JsError),
-    #[error("Invalid JSON config: {0}")]
+    #[error("invalid JSON config: {0}")]
     InvalidJsonConfig(JsError),
 }

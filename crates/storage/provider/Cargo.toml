@@ -12,10 +12,9 @@ description = "Reth storage provider."
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db.workspace = true
-reth-trie = { path = "../../trie" }
-reth-nippy-jar = { path = "../nippy-jar" }
+reth-trie.workspace = true
+reth-nippy-jar.workspace = true
 
 revm.workspace = true
 
@@ -26,11 +25,16 @@ tokio-stream = { workspace = true, features = ["sync"] }
 # tracing
 tracing.workspace = true
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 # misc
 auto_impl = "1.0"
 itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
+dashmap = { version = "5.5", features = ["inline"] }
 
 # test-utils
 alloy-rlp = { workspace = true, optional = true }
@@ -41,7 +45,7 @@ rayon.workspace = true
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
-reth-trie = { path = "../../trie", features = ["test-utils"] }
+reth-trie = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 
 alloy-rlp.workspace = true
@@ -51,4 +55,8 @@ assert_matches.workspace = true
 rand.workspace = true
 
 [features]
-test-utils = ["alloy-rlp"]
+test-utils = ["alloy-rlp", "reth-db/test-utils"]
+optimism = [
+  "reth-primitives/optimism",
+  "reth-interfaces/optimism"
+]

@@ -2,6 +2,7 @@ use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::{PeerMessage, PeerRequestSender},
     peers::InboundConnectionError,
+    protocol::IntoRlpxSubProtocol,
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
 };
@@ -20,7 +21,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// Contains the connectivity related state of the network.
 ///
@@ -76,10 +77,7 @@ pub(crate) struct Swarm<C> {
 
 // === impl Swarm ===
 
-impl<C> Swarm<C>
-where
-    C: BlockNumReader,
-{
+impl<C> Swarm<C> {
     /// Configures a new swarm instance.
     pub(crate) fn new(
         incoming: ConnectionListener,
@@ -88,6 +86,11 @@ where
         net_connection_state: NetworkConnectionState,
     ) -> Self {
         Self { incoming, sessions, state, net_connection_state }
+    }
+
+    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        self.sessions_mut().add_rlpx_sub_protocol(protocol);
     }
 
     /// Access to the state.
@@ -114,7 +117,12 @@ where
     pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
         &mut self.sessions
     }
+}
 
+impl<C> Swarm<C>
+where
+    C: BlockNumReader,
+{
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -137,7 +145,7 @@ where
                 self.state.on_session_activated(
                     peer_id,
                     capabilities.clone(),
-                    status,
+                    status.clone(),
                     messages.clone(),
                     timeout,
                 );
@@ -226,7 +234,7 @@ where
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
-                        debug!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
+                        trace!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
                         self.state_mut()
                             .peers_mut()
                             .on_incoming_pending_session_rejected_internally();
@@ -394,12 +402,12 @@ pub(crate) enum SwarmEvent {
     SessionEstablished {
         peer_id: PeerId,
         remote_addr: SocketAddr,
-        client_version: Arc<String>,
+        client_version: Arc<str>,
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,
         messages: PeerRequestSender,
-        status: Status,
+        status: Arc<Status>,
         direction: Direction,
     },
     SessionClosed {

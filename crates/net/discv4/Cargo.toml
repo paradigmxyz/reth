@@ -6,15 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Ethereum network discovery
-"""
+description = "Ethereum network discovery"
 
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-net-common = { path = "../common" }
-reth-net-nat = { path = "../nat" }
+reth-net-common.workspace = true
+reth-net-nat.workspace = true
 
 # ethereum
 alloy-rlp = { workspace = true, features = ["derive"] }
@@ -38,7 +36,7 @@ serde = { workspace = true, optional = true }
 [dev-dependencies]
 rand.workspace = true
 tokio = { workspace = true, features = ["macros"] }
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 
 [features]
 default = ["serde"]

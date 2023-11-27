@@ -1,8 +1,18 @@
-use alloy_rlp::RlpEncodable;
-use reth_primitives::{constants::GWEI_TO_WEI, serde_helper::u64_hex, Address, U256};
+//! Withdrawal type and serde helpers.
+
+use crate::serde_helpers::u64_hex;
+use alloy_primitives::{Address, U256};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
+use std::mem;
+
+/// Multiplier for converting gwei to wei.
+pub const GWEI_TO_WEI: u64 = 1_000_000_000;
+
 /// Withdrawal represents a validator withdrawal from the consensus layer.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+)]
 pub struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
     #[serde(with = "u64_hex")]
@@ -21,6 +31,12 @@ impl Withdrawal {
     /// Return the withdrawal amount in wei.
     pub fn amount_wei(&self) -> U256 {
         U256::from(self.amount) * U256::from(GWEI_TO_WEI)
+    }
+
+    /// Calculate a heuristic for the in-memory size of the [Withdrawal].
+    #[inline]
+    pub fn size(&self) -> usize {
+        mem::size_of::<Self>()
     }
 }
 

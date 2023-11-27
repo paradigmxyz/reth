@@ -1,27 +1,36 @@
 use crate::{
-    providers::state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
+    providers::{
+        state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
+        SnapshotProvider,
+    },
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
-use reth_interfaces::{db::LogLevel, RethError, RethResult};
+use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
 use reth_primitives::{
+    snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
-    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedHeader,
-    TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
-    B256, U256,
+    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     ops::{RangeBounds, RangeInclusive},
+    path::PathBuf,
     sync::Arc,
 };
+use tokio::sync::watch;
 use tracing::trace;
 
+mod metrics;
 mod provider;
+
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
 /// A common provider that fetches data from a database.
@@ -33,29 +42,56 @@ pub struct ProviderFactory<DB> {
     db: DB,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
+    /// Snapshot Provider
+    snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
 impl<DB: Database> ProviderFactory<DB> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
-    pub fn provider(&self) -> RethResult<DatabaseProviderRO<'_, DB>> {
-        Ok(DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone()))
+    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
+        let mut provider = DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone());
+
+        if let Some(snapshot_provider) = &self.snapshot_provider {
+            provider = provider.with_snapshot_provider(snapshot_provider.clone());
+        }
+
+        Ok(provider)
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
-    pub fn provider_rw(&self) -> RethResult<DatabaseProviderRW<'_, DB>> {
-        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone())))
+    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
+        let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
+
+        if let Some(snapshot_provider) = &self.snapshot_provider {
+            provider = provider.with_snapshot_provider(snapshot_provider.clone());
+        }
+
+        Ok(DatabaseProviderRW(provider))
     }
 }
 
 impl<DB> ProviderFactory<DB> {
     /// create new database provider
     pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { db, chain_spec }
+        Self { db, chain_spec, snapshot_provider: None }
+    }
+
+    /// database provider comes with a shared snapshot provider
+    pub fn with_snapshots(
+        mut self,
+        snapshots_path: PathBuf,
+        highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
+    ) -> Self {
+        self.snapshot_provider = Some(Arc::new(
+            SnapshotProvider::new(snapshots_path)
+                .with_highest_tracker(Some(highest_snapshot_tracker)),
+        ));
+        self
     }
 }
 
@@ -70,19 +106,24 @@ impl<DB: Database> ProviderFactory<DB> {
         Ok(ProviderFactory::<DatabaseEnv> {
             db: init_db(path, log_level).map_err(|e| RethError::Custom(e.to_string()))?,
             chain_spec,
+            snapshot_provider: None,
         })
     }
 }
 
 impl<DB: Clone> Clone for ProviderFactory<DB> {
     fn clone(&self) -> Self {
-        Self { db: self.db.clone(), chain_spec: Arc::clone(&self.chain_spec) }
+        Self {
+            db: self.db.clone(),
+            chain_spec: Arc::clone(&self.chain_spec),
+            snapshot_provider: self.snapshot_provider.clone(),
+        }
     }
 }
 
 impl<DB: Database> ProviderFactory<DB> {
     /// Storage provider for latest block
-    pub fn latest(&self) -> RethResult<StateProviderBox<'_>> {
+    pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
         Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
     }
@@ -91,7 +132,7 @@ impl<DB: Database> ProviderFactory<DB> {
     fn state_provider_by_block_number(
         &self,
         mut block_number: BlockNumber,
-    ) -> RethResult<StateProviderBox<'_>> {
+    ) -> ProviderResult<StateProviderBox> {
         let provider = self.provider()?;
 
         if block_number == provider.best_block_number().unwrap_or_default() &&
@@ -134,14 +175,14 @@ impl<DB: Database> ProviderFactory<DB> {
     pub fn history_by_block_number(
         &self,
         block_number: BlockNumber,
-    ) -> RethResult<StateProviderBox<'_>> {
+    ) -> ProviderResult<StateProviderBox> {
         let state_provider = self.state_provider_by_block_number(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(state_provider)
     }
 
     /// Storage provider for state at that given block hash
-    pub fn history_by_block_hash(&self, block_hash: BlockHash) -> RethResult<StateProviderBox<'_>> {
+    pub fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         let block_number = self
             .provider()?
             .block_number(block_hash)?
@@ -153,41 +194,59 @@ impl<DB: Database> ProviderFactory<DB> {
     }
 }
 
+impl<DB: Database> HeaderSyncGapProvider for ProviderFactory<DB> {
+    fn sync_gap(
+        &self,
+        mode: HeaderSyncMode,
+        highest_uninterrupted_block: BlockNumber,
+    ) -> RethResult<HeaderSyncGap> {
+        self.provider()?.sync_gap(mode, highest_uninterrupted_block)
+    }
+}
+
 impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
-    fn header(&self, block_hash: &BlockHash) -> RethResult<Option<Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.provider()?.header(block_hash)
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> RethResult<Option<Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
         self.provider()?.header_by_number(num)
     }
 
-    fn header_td(&self, hash: &BlockHash) -> RethResult<Option<U256>> {
+    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
         self.provider()?.header_td(hash)
     }
 
-    fn header_td_by_number(&self, number: BlockNumber) -> RethResult<Option<U256>> {
+    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
         self.provider()?.header_td_by_number(number)
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> RethResult<Vec<Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
         self.provider()?.headers_range(range)
+    }
+
+    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
+        self.provider()?.sealed_header(number)
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<SealedHeader>> {
+    ) -> ProviderResult<Vec<SealedHeader>> {
         self.provider()?.sealed_headers_range(range)
     }
 
-    fn sealed_header(&self, number: BlockNumber) -> RethResult<Option<SealedHeader>> {
-        self.provider()?.sealed_header(number)
+    fn sealed_headers_while(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader>> {
+        self.provider()?.sealed_headers_while(range, predicate)
     }
 }
 
 impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
-    fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
+    fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.provider()?.block_hash(number)
     }
 
@@ -195,137 +254,148 @@ impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
         &self,
         start: BlockNumber,
         end: BlockNumber,
-    ) -> RethResult<Vec<B256>> {
+    ) -> ProviderResult<Vec<B256>> {
         self.provider()?.canonical_hashes_range(start, end)
     }
 }
 
 impl<DB: Database> BlockNumReader for ProviderFactory<DB> {
-    fn chain_info(&self) -> RethResult<ChainInfo> {
+    fn chain_info(&self) -> ProviderResult<ChainInfo> {
         self.provider()?.chain_info()
     }
 
-    fn best_block_number(&self) -> RethResult<BlockNumber> {
+    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
         self.provider()?.best_block_number()
     }
 
-    fn last_block_number(&self) -> RethResult<BlockNumber> {
+    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
         self.provider()?.last_block_number()
     }
 
-    fn block_number(&self, hash: B256) -> RethResult<Option<BlockNumber>> {
+    fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         self.provider()?.block_number(hash)
     }
 }
 
 impl<DB: Database> BlockReader for ProviderFactory<DB> {
-    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> RethResult<Option<Block>> {
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         self.provider()?.find_block_by_hash(hash, source)
     }
 
-    fn block(&self, id: BlockHashOrNumber) -> RethResult<Option<Block>> {
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
         self.provider()?.block(id)
     }
 
-    fn pending_block(&self) -> RethResult<Option<SealedBlock>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
         self.provider()?.pending_block()
     }
 
-    fn pending_block_and_receipts(&self) -> RethResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        self.provider()?.pending_block_with_senders()
+    }
+
+    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
         self.provider()?.pending_block_and_receipts()
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> RethResult<Option<Vec<Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
         self.provider()?.ommers(id)
     }
 
     fn block_body_indices(
         &self,
         number: BlockNumber,
-    ) -> RethResult<Option<StoredBlockBodyIndices>> {
+    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         self.provider()?.block_body_indices(number)
     }
 
-    fn block_with_senders(&self, number: BlockNumber) -> RethResult<Option<BlockWithSenders>> {
-        self.provider()?.block_with_senders(number)
+    fn block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<BlockWithSenders>> {
+        self.provider()?.block_with_senders(id, transaction_kind)
     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> RethResult<Vec<Block>> {
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         self.provider()?.block_range(range)
     }
 }
 
 impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
-    fn transaction_id(&self, tx_hash: TxHash) -> RethResult<Option<TxNumber>> {
+    fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.provider()?.transaction_id(tx_hash)
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> RethResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
         self.provider()?.transaction_by_id(id)
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
-    ) -> RethResult<Option<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.provider()?.transaction_by_id_no_hash(id)
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> RethResult<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         self.provider()?.transaction_by_hash(hash)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> RethResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
         self.provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> RethResult<Option<BlockNumber>> {
+    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         self.provider()?.transaction_block(id)
     }
 
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> RethResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
         self.provider()?.transactions_by_block(id)
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> RethResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
         self.provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> RethResult<Vec<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
         self.provider()?.transactions_by_tx_range(range)
     }
 
-    fn senders_by_tx_range(&self, range: impl RangeBounds<TxNumber>) -> RethResult<Vec<Address>> {
+    fn senders_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
         self.provider()?.senders_by_tx_range(range)
     }
 
-    fn transaction_sender(&self, id: TxNumber) -> RethResult<Option<Address>> {
+    fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
         self.provider()?.transaction_sender(id)
     }
 }
 
 impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
-    fn receipt(&self, id: TxNumber) -> RethResult<Option<Receipt>> {
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.provider()?.receipt(id)
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> RethResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         self.provider()?.receipt_by_hash(hash)
     }
 
-    fn receipts_by_block(&self, block: BlockHashOrNumber) -> RethResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         self.provider()?.receipts_by_block(block)
     }
 }
@@ -335,21 +405,21 @@ impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> RethResult<Option<Vec<Withdrawal>>> {
+    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
         self.provider()?.withdrawals_by_block(id, timestamp)
     }
 
-    fn latest_withdrawal(&self) -> RethResult<Option<Withdrawal>> {
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         self.provider()?.latest_withdrawal()
     }
 }
 
 impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
-    fn get_stage_checkpoint(&self, id: StageId) -> RethResult<Option<StageCheckpoint>> {
+    fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
     }
 
-    fn get_stage_checkpoint_progress(&self, id: StageId) -> RethResult<Option<Vec<u8>>> {
+    fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         self.provider()?.get_stage_checkpoint_progress(id)
     }
 }
@@ -360,7 +430,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         self.provider()?.fill_env_at(cfg, block_env, at)
     }
 
@@ -369,11 +439,15 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         cfg: &mut CfgEnv,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         self.provider()?.fill_env_with_header(cfg, block_env, header)
     }
 
-    fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockHashOrNumber) -> RethResult<()> {
+    fn fill_block_env_at(
+        &self,
+        block_env: &mut BlockEnv,
+        at: BlockHashOrNumber,
+    ) -> ProviderResult<()> {
         self.provider()?.fill_block_env_at(block_env, at)
     }
 
@@ -381,15 +455,15 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         &self,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         self.provider()?.fill_block_env_with_header(block_env, header)
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> RethResult<()> {
+    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> ProviderResult<()> {
         self.provider()?.fill_cfg_env_at(cfg, at)
     }
 
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> RethResult<()> {
+    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> ProviderResult<()> {
         self.provider()?.fill_cfg_env_with_header(cfg, header)
     }
 }
@@ -404,7 +478,10 @@ where
 }
 
 impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
-    fn get_prune_checkpoint(&self, segment: PruneSegment) -> RethResult<Option<PruneCheckpoint>> {
+    fn get_prune_checkpoint(
+        &self,
+        segment: PruneSegment,
+    ) -> ProviderResult<Option<PruneCheckpoint>> {
         self.provider()?.get_prune_checkpoint(segment)
     }
 }
@@ -412,33 +489,37 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 #[cfg(test)]
 mod tests {
     use super::ProviderFactory;
-    use crate::{BlockHashReader, BlockNumReader, BlockWriter, TransactionsProvider};
+    use crate::{
+        test_utils::create_test_provider_factory, BlockHashReader, BlockNumReader, BlockWriter,
+        HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+    };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use reth_db::{
-        tables,
-        test_utils::{create_test_rw_db, ERROR_TEMPDIR},
-        DatabaseEnv,
+    use rand::Rng;
+    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut, DatabaseEnv};
+    use reth_interfaces::{
+        provider::ProviderError,
+        test_utils::{
+            generators,
+            generators::{random_block, random_header},
+        },
+        RethError,
     };
-    use reth_interfaces::test_utils::{generators, generators::random_block};
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
     };
     use std::{ops::RangeInclusive, sync::Arc};
+    use tokio::sync::watch;
 
     #[test]
     fn common_history_provider() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let provider = ProviderFactory::new(db, Arc::new(chain_spec));
-        let _ = provider.latest();
+        let factory = create_test_provider_factory();
+        let _ = factory.latest();
     }
 
     #[test]
     fn default_chain_info() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let factory = create_test_provider_factory();
         let provider = factory.provider().unwrap();
 
         let chain_info = provider.chain_info().expect("should be ok");
@@ -448,9 +529,7 @@ mod tests {
 
     #[test]
     fn provider_flow() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let factory = create_test_provider_factory();
         let provider = factory.provider().unwrap();
         provider.block_hash(0).unwrap();
         let provider_rw = factory.provider_rw().unwrap();
@@ -477,9 +556,7 @@ mod tests {
 
     #[test]
     fn insert_block_with_prune_modes() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let factory = create_test_provider_factory();
 
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
@@ -515,9 +592,7 @@ mod tests {
 
     #[test]
     fn get_take_block_transaction_range_recover_senders() {
-        let chain_spec = ChainSpecBuilder::mainnet().build();
-        let db = create_test_rw_db();
-        let factory = ProviderFactory::new(db, Arc::new(chain_spec));
+        let factory = create_test_provider_factory();
 
         let mut rng = generators::rng();
         let block = random_block(&mut rng, 0, None, Some(3), None);
@@ -552,5 +627,72 @@ mod tests {
                 )])
             )
         }
+    }
+
+    #[test]
+    fn header_sync_gap_lookup() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+
+        let mut rng = generators::rng();
+        let consensus_tip = rng.gen();
+        let (_tip_tx, tip_rx) = watch::channel(consensus_tip);
+        let mode = HeaderSyncMode::Tip(tip_rx);
+
+        // Genesis
+        let checkpoint = 0;
+        let head = random_header(&mut rng, 0, None);
+        let gap_fill = random_header(&mut rng, 1, Some(head.hash()));
+        let gap_tip = random_header(&mut rng, 2, Some(gap_fill.hash()));
+
+        // Empty database
+        assert_matches!(
+            provider.sync_gap(mode.clone(), checkpoint),
+            Err(RethError::Provider(ProviderError::HeaderNotFound(block_number)))
+                if block_number.as_number().unwrap() == checkpoint
+        );
+
+        // Checkpoint and no gap
+        provider
+            .tx_ref()
+            .put::<tables::CanonicalHeaders>(head.number, head.hash())
+            .expect("failed to write canonical");
+        provider
+            .tx_ref()
+            .put::<tables::Headers>(head.number, head.clone().unseal())
+            .expect("failed to write header");
+
+        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
+        assert_eq!(gap.local_head, head);
+        assert_eq!(gap.target.tip(), consensus_tip.into());
+
+        // Checkpoint and gap
+        provider
+            .tx_ref()
+            .put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
+            .expect("failed to write canonical");
+        provider
+            .tx_ref()
+            .put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
+            .expect("failed to write header");
+
+        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
+        assert_eq!(gap.local_head, head);
+        assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
+
+        // Checkpoint and gap closed
+        provider
+            .tx_ref()
+            .put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
+            .expect("failed to write canonical");
+        provider
+            .tx_ref()
+            .put::<tables::Headers>(gap_fill.number, gap_fill.clone().unseal())
+            .expect("failed to write header");
+
+        assert_matches!(
+            provider.sync_gap(mode, checkpoint),
+            Err(RethError::Provider(ProviderError::InconsistentHeaderGap))
+        );
     }
 }

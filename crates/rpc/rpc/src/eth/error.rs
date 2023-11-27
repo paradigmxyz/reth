@@ -7,14 +7,14 @@ use jsonrpsee::{
     types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
 };
 use reth_interfaces::RethError;
-use reth_primitives::{Address, Bytes, U256};
+use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
 use reth_revm::tracing::js::JsInspectorError;
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError, CallInputError};
 use reth_transaction_pool::error::{
-    Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolTransactionError,
+    Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
+    PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
-use revm_primitives::InvalidHeader;
 use std::time::Duration;
 
 /// Result alias
@@ -25,29 +25,29 @@ pub type EthResult<T> = Result<T, EthApiError>;
 #[allow(missing_docs)]
 pub enum EthApiError {
     /// When a raw transaction is empty
-    #[error("Empty transaction data")]
+    #[error("empty transaction data")]
     EmptyRawTransactionData,
-    #[error("Failed to decode signed transaction")]
+    #[error("failed to decode signed transaction")]
     FailedToDecodeSignedTransaction,
-    #[error("Invalid transaction signature")]
+    #[error("invalid transaction signature")]
     InvalidTransactionSignature,
     #[error(transparent)]
     PoolError(RpcPoolError),
-    #[error("Unknown block number")]
+    #[error("unknown block number")]
     UnknownBlockNumber,
     /// Thrown when querying for `finalized` or `safe` block before the merge transition is
     /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
-    #[error("Unknown block")]
+    #[error("unknown block")]
     UnknownSafeOrFinalizedBlock,
-    #[error("Unknown block or tx index")]
+    #[error("unknown block or tx index")]
     UnknownBlockOrTxIndex,
-    #[error("Invalid block range")]
+    #[error("invalid block range")]
     InvalidBlockRange,
     /// An internal error where prevrandao is not set in the evm's environment
-    #[error("Prevrandao not in th EVM's environment after merge")]
+    #[error("prevrandao not in the EVM's environment after merge")]
     PrevrandaoNotSet,
     /// Excess_blob_gas is not set for Cancun and above.
-    #[error("Excess blob gas missing th EVM's environment after Cancun")]
+    #[error("excess blob gas missing the EVM's environment after Cancun")]
     ExcessBlobGasNotSet,
     /// Thrown when a call or transaction request (`eth_call`, `eth_estimateGas`,
     /// `eth_sendTransaction`) contains conflicting fields (legacy, EIP-1559)
@@ -83,12 +83,12 @@ pub enum EthApiError {
     /// Percentile array is invalid
     #[error("invalid reward percentiles")]
     InvalidRewardPercentiles,
-    /// Error thrown when a spawned tracing task failed to deliver an anticipated response.
+    /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
     ///
-    /// This only happens if the tracing task panics and is aborted before it can return a response
-    /// back to the request handler.
-    #[error("internal error while tracing")]
-    InternalTracingError,
+    /// This only happens if the blocking task panics and is aborted before it can return a
+    /// response back to the request handler.
+    #[error("internal blocking task error")]
+    InternalBlockingTaskError,
     /// Error thrown when a spawned blocking task failed to deliver an anticipated response.
     #[error("internal eth error")]
     InternalEthError,
@@ -100,6 +100,22 @@ pub enum EthApiError {
     InternalJsTracerError(String),
     #[error(transparent)]
     CallInputError(#[from] CallInputError),
+    /// Optimism related error
+    #[error(transparent)]
+    #[cfg(feature = "optimism")]
+    Optimism(#[from] OptimismEthApiError),
+}
+
+/// Eth Optimism Api Error
+#[cfg(feature = "optimism")]
+#[derive(Debug, thiserror::Error)]
+pub enum OptimismEthApiError {
+    /// Wrapper around a [hyper::Error].
+    #[error(transparent)]
+    HyperError(#[from] hyper::Error),
+    /// Wrapper around an [http::Error].
+    #[error(transparent)]
+    HttpError(#[from] http::Error),
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -133,9 +149,14 @@ impl From<EthApiError> for ErrorObject<'static> {
             err @ EthApiError::ExecutionTimedOut(_) => {
                 rpc_error_with_code(CALL_EXECUTION_FAILED_CODE, err.to_string())
             }
-            err @ EthApiError::InternalTracingError => internal_rpc_err(err.to_string()),
+            err @ EthApiError::InternalBlockingTaskError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
             err @ EthApiError::CallInputError(_) => invalid_params_rpc_err(err.to_string()),
+            #[cfg(feature = "optimism")]
+            EthApiError::Optimism(err) => match err {
+                OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
+                OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
+            },
         }
     }
 }
@@ -265,38 +286,38 @@ pub enum RpcInvalidTransactionError {
     #[error("sender not an eoa")]
     SenderNoEOA,
     /// Thrown during estimate if caller has insufficient funds to cover the tx.
-    #[error("Out of gas: gas required exceeds allowance: {0:?}")]
+    #[error("out of gas: gas required exceeds allowance: {0:?}")]
     BasicOutOfGas(U256),
     /// As BasicOutOfGas but thrown when gas exhausts during memory expansion.
-    #[error("Out of gas: gas exhausts during memory expansion: {0:?}")]
+    #[error("out of gas: gas exhausts during memory expansion: {0:?}")]
     MemoryOutOfGas(U256),
     /// As BasicOutOfGas but thrown when gas exhausts during precompiled contract execution.
-    #[error("Out of gas: gas exhausts during precompiled contract execution: {0:?}")]
+    #[error("out of gas: gas exhausts during precompiled contract execution: {0:?}")]
     PrecompileOutOfGas(U256),
     /// revm's Type cast error, U256 casts down to a u64 with overflow
-    #[error("Out of gas: revm's Type cast error, U256 casts down to a u64 with overflow {0:?}")]
+    #[error("out of gas: revm's Type cast error, U256 casts down to a u64 with overflow {0:?}")]
     InvalidOperandOutOfGas(U256),
     /// Thrown if executing a transaction failed during estimate/call
     #[error("{0}")]
     Revert(RevertError),
-    /// Unspecific evm halt error
+    /// Unspecific EVM halt error.
     #[error("EVM error {0:?}")]
     EvmHalt(Halt),
     /// Invalid chain id set for the transaction.
-    #[error("Invalid chain id")]
+    #[error("invalid chain ID")]
     InvalidChainId,
     /// The transaction is before Spurious Dragon and has a chain ID
-    #[error("Transactions before Spurious Dragon should not have a chain ID.")]
+    #[error("transactions before Spurious Dragon should not have a chain ID")]
     OldLegacyChainId,
     /// The transitions is before Berlin and has access list
-    #[error("Transactions before Berlin should not have access list")]
+    #[error("transactions before Berlin should not have access list")]
     AccessListNotSupported,
     /// `max_fee_per_blob_gas` is not supported for blocks before the Cancun hardfork.
-    #[error("max_fee_per_blob_gas is not supported for blocks before the Cancun hardfork.")]
+    #[error("max_fee_per_blob_gas is not supported for blocks before the Cancun hardfork")]
     MaxFeePerBlobGasNotSupported,
     /// `blob_hashes`/`blob_versioned_hashes` is not supported for blocks before the Cancun
     /// hardfork.
-    #[error("blob_versioned_hashes is not supported for blocks before the Cancun hardfork.")]
+    #[error("blob_versioned_hashes is not supported for blocks before the Cancun hardfork")]
     BlobVersionedHashesNotSupported,
     /// Block `blob_gas_price` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
     #[error("max fee per blob gas less than block blob gas fee")]
@@ -313,6 +334,22 @@ pub enum RpcInvalidTransactionError {
     /// Blob transaction is a create transaction
     #[error("blob transaction is a create transaction")]
     BlobTransactionIsCreate,
+    /// Optimism related error
+    #[error(transparent)]
+    #[cfg(feature = "optimism")]
+    Optimism(#[from] OptimismInvalidTransactionError),
+}
+
+/// Optimism specific invalid transaction errors
+#[cfg(feature = "optimism")]
+#[derive(thiserror::Error, Debug)]
+pub enum OptimismInvalidTransactionError {
+    /// A deposit transaction was submitted as a system transaction post-regolith.
+    #[error("no system transactions allowed after regolith")]
+    DepositSystemTxPostRegolith,
+    /// A deposit transaction halted post-regolith
+    #[error("deposit transaction halted after regolith")]
+    HaltedDepositPostRegolith,
 }
 
 impl RpcInvalidTransactionError {
@@ -421,6 +458,16 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobCreateTransaction => {
                 RpcInvalidTransactionError::BlobTransactionIsCreate
             }
+            #[cfg(feature = "optimism")]
+            InvalidTransaction::DepositSystemTxPostRegolith => {
+                RpcInvalidTransactionError::Optimism(
+                    OptimismInvalidTransactionError::DepositSystemTxPostRegolith,
+                )
+            }
+            #[cfg(feature = "optimism")]
+            InvalidTransaction::HaltedDepositPostRegolith => RpcInvalidTransactionError::Optimism(
+                OptimismInvalidTransactionError::HaltedDepositPostRegolith,
+            ),
         }
     }
 }
@@ -527,7 +574,7 @@ pub enum RpcPoolError {
     #[error(transparent)]
     Invalid(#[from] RpcInvalidTransactionError),
     /// Custom pool error
-    #[error("{0:?}")]
+    #[error(transparent)]
     PoolTransactionError(Box<dyn PoolTransactionError>),
     /// Eip-4844 related error
     #[error(transparent)]
@@ -553,15 +600,15 @@ impl From<RpcPoolError> for ErrorObject<'static> {
 
 impl From<PoolError> for RpcPoolError {
     fn from(err: PoolError) -> RpcPoolError {
-        match err {
-            PoolError::ReplacementUnderpriced(_) => RpcPoolError::ReplaceUnderpriced,
-            PoolError::FeeCapBelowMinimumProtocolFeeCap(_, _) => RpcPoolError::Underpriced,
-            PoolError::SpammerExceededCapacity(_, _) => RpcPoolError::TxPoolOverflow,
-            PoolError::DiscardedOnInsert(_) => RpcPoolError::TxPoolOverflow,
-            PoolError::InvalidTransaction(_, err) => err.into(),
-            PoolError::Other(_, err) => RpcPoolError::Other(err),
-            PoolError::AlreadyImported(_) => RpcPoolError::AlreadyKnown,
-            PoolError::ExistingConflictingTransactionType(_, _, _) => {
+        match err.kind {
+            PoolErrorKind::ReplacementUnderpriced => RpcPoolError::ReplaceUnderpriced,
+            PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(_) => RpcPoolError::Underpriced,
+            PoolErrorKind::SpammerExceededCapacity(_) => RpcPoolError::TxPoolOverflow,
+            PoolErrorKind::DiscardedOnInsert => RpcPoolError::TxPoolOverflow,
+            PoolErrorKind::InvalidTransaction(err) => err.into(),
+            PoolErrorKind::Other(err) => RpcPoolError::Other(err),
+            PoolErrorKind::AlreadyImported => RpcPoolError::AlreadyKnown,
+            PoolErrorKind::ExistingConflictingTransactionType(_, _) => {
                 RpcPoolError::AddressAlreadyReserved
             }
         }
@@ -600,19 +647,19 @@ impl From<PoolError> for EthApiError {
 #[derive(Debug, thiserror::Error)]
 pub enum SignError {
     /// Error occured while trying to sign data.
-    #[error("Could not sign")]
+    #[error("could not sign")]
     CouldNotSign,
     /// Signer for requested account not found.
-    #[error("Unknown account")]
+    #[error("unknown account")]
     NoAccount,
     /// TypedData has invalid format.
-    #[error("Given typed data is not valid")]
+    #[error("given typed data is not valid")]
     InvalidTypedData,
     /// Invalid transaction request in `sign_transaction`.
-    #[error("Invalid transaction request")]
+    #[error("invalid transaction request")]
     InvalidTransactionRequest,
     /// No chain ID was given.
-    #[error("No chainid")]
+    #[error("no chainid")]
     NoChainId,
 }
 

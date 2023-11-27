@@ -1,6 +1,6 @@
 use crate::{
     database::Database,
-    environment::{Environment, EnvironmentKind, NoWriteMap, TxnManagerMessage, TxnPtr},
+    environment::{Environment, TxnManagerMessage, TxnPtr},
     error::{mdbx_result, Result},
     flags::{DatabaseFlags, WriteFlags},
     Cursor, Error, Stat, TableObject,
@@ -10,8 +10,11 @@ use indexmap::IndexSet;
 use libc::{c_uint, c_void};
 use parking_lot::Mutex;
 use std::{
-    fmt, fmt::Debug, marker::PhantomData, mem::size_of, ptr, rc::Rc, slice,
-    sync::mpsc::sync_channel,
+    fmt,
+    fmt::Debug,
+    mem::size_of,
+    ptr, slice,
+    sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
 };
 
 mod private {
@@ -23,12 +26,15 @@ mod private {
     impl Sealed for RW {}
 }
 
-pub trait TransactionKind: private::Sealed + Debug + 'static {
+pub trait TransactionKind: private::Sealed + Send + Sync + Debug + 'static {
     #[doc(hidden)]
     const ONLY_CLEAN: bool;
 
     #[doc(hidden)]
     const OPEN_FLAGS: MDBX_txn_flags_t;
+
+    #[doc(hidden)]
+    const IS_READ_ONLY: bool;
 }
 
 #[derive(Debug)]
@@ -42,37 +48,33 @@ pub struct RW;
 impl TransactionKind for RO {
     const ONLY_CLEAN: bool = true;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_RDONLY;
+    const IS_READ_ONLY: bool = true;
 }
 impl TransactionKind for RW {
     const ONLY_CLEAN: bool = false;
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_READWRITE;
+    const IS_READ_ONLY: bool = false;
 }
 
 /// An MDBX transaction.
 ///
 /// All database operations require a transaction.
-pub struct Transaction<'env, K, E>
+pub struct Transaction<K>
 where
     K: TransactionKind,
-    E: EnvironmentKind,
 {
-    txn: Rc<Mutex<*mut ffi::MDBX_txn>>,
-    primed_dbis: Mutex<IndexSet<ffi::MDBX_dbi>>,
-    committed: bool,
-    env: &'env Environment<E>,
-    _marker: PhantomData<fn(K)>,
+    inner: Arc<TransactionInner<K>>,
 }
 
-impl<'env, K, E> Transaction<'env, K, E>
+impl<K> Transaction<K>
 where
     K: TransactionKind,
-    E: EnvironmentKind,
 {
-    pub(crate) fn new(env: &'env Environment<E>) -> Result<Self> {
+    pub(crate) fn new(env: Environment) -> Result<Self> {
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
         unsafe {
             mdbx_result(ffi::mdbx_txn_begin_ex(
-                env.env(),
+                env.env_ptr(),
                 ptr::null_mut(),
                 K::OPEN_FLAGS,
                 &mut txn,
@@ -82,36 +84,58 @@ where
         }
     }
 
-    pub(crate) fn new_from_ptr(env: &'env Environment<E>, txn: *mut ffi::MDBX_txn) -> Self {
-        Self {
-            txn: Rc::new(Mutex::new(txn)),
+    pub(crate) fn new_from_ptr(env: Environment, txn: *mut ffi::MDBX_txn) -> Self {
+        let inner = TransactionInner {
+            txn: TransactionPtr::new(txn),
             primed_dbis: Mutex::new(IndexSet::new()),
-            committed: false,
+            committed: AtomicBool::new(false),
             env,
-            _marker: PhantomData,
-        }
+            _marker: Default::default(),
+        };
+        Self { inner: Arc::new(inner) }
     }
 
-    /// Returns a raw pointer to the underlying MDBX transaction.
+    /// Executes the given closure once the lock on the transaction is acquired.
     ///
     /// The caller **must** ensure that the pointer is not used after the
     /// lifetime of the transaction.
-    pub(crate) fn txn_mutex(&self) -> Rc<Mutex<*mut ffi::MDBX_txn>> {
-        self.txn.clone()
+    #[inline]
+    pub(crate) fn txn_execute<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        self.inner.txn_execute(f)
     }
 
+    /// Returns a copy of the raw pointer to the underlying MDBX transaction.
+    #[doc(hidden)]
     pub fn txn(&self) -> *mut ffi::MDBX_txn {
-        *self.txn.lock()
+        self.inner.txn.txn
+    }
+
+    /// Executes the given closure once
+    ///
+    /// This is only intended to be used when accessing mdbx ffi functions directly is required.
+    ///
+    /// The caller **must** ensure that the pointer is only used within the closure.
+    #[inline]
+    #[doc(hidden)]
+    pub fn with_raw_tx_ptr<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        let _lock = self.inner.txn.lock.lock();
+        f(self.inner.txn.txn)
     }
 
     /// Returns a raw pointer to the MDBX environment.
-    pub fn env(&self) -> &Environment<E> {
-        self.env
+    pub fn env(&self) -> &Environment {
+        &self.inner.env
     }
 
     /// Returns the transaction id.
     pub fn id(&self) -> u64 {
-        txn_execute(&self.txn, |txn| unsafe { ffi::mdbx_txn_id(txn) })
+        self.txn_execute(|txn| unsafe { ffi::mdbx_txn_id(txn) })
     }
 
     /// Gets an item from a database.
@@ -122,17 +146,17 @@ where
     /// returned. Retrieval of other items requires the use of
     /// [Cursor]. If the item is not in the database, then
     /// [None] will be returned.
-    pub fn get<'txn, Key>(&'txn self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
+    pub fn get<Key>(&self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
     where
-        Key: TableObject<'txn>,
+        Key: TableObject,
     {
         let key_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
         let mut data_val: ffi::MDBX_val = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
 
-        txn_execute(&self.txn, |txn| unsafe {
+        self.txn_execute(|txn| unsafe {
             match ffi::mdbx_get(txn, dbi, &key_val, &mut data_val) {
-                ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, &data_val).map(Some),
+                ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, data_val).map(Some),
                 ffi::MDBX_NOTFOUND => Ok(None),
                 err_code => Err(Error::from_err_code(err_code)),
             }
@@ -146,30 +170,39 @@ where
         self.commit_and_rebind_open_dbs().map(|v| v.0)
     }
 
-    pub fn prime_for_permaopen(&self, db: Database<'_>) {
-        self.primed_dbis.lock().insert(db.dbi());
+    pub fn prime_for_permaopen(&self, db: Database) {
+        self.inner.primed_dbis.lock().insert(db.dbi());
     }
 
-    /// Commits the transaction and returns table handles permanently open for the lifetime of
-    /// `Environment`.
-    pub fn commit_and_rebind_open_dbs(mut self) -> Result<(bool, Vec<Database<'env>>)> {
-        let txnlck = self.txn.lock();
-        let txn = *txnlck;
-        let result = if K::ONLY_CLEAN {
-            mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, ptr::null_mut()) })
-        } else {
-            let (sender, rx) = sync_channel(0);
-            self.env
-                .txn_manager
-                .as_ref()
-                .unwrap()
-                .send(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender })
-                .unwrap();
-            rx.recv().unwrap()
+    /// Commits the transaction and returns table handles permanently open until dropped.
+    pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, Vec<Database>)> {
+        let result = {
+            let result = self.txn_execute(|txn| {
+                if K::ONLY_CLEAN {
+                    mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, ptr::null_mut()) })
+                } else {
+                    let (sender, rx) = sync_channel(0);
+                    self.env()
+                        .ensure_txn_manager()
+                        .unwrap()
+                        .send(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender })
+                        .unwrap();
+                    rx.recv().unwrap()
+                }
+            });
+            self.inner.set_committed();
+            result
         };
-        self.committed = true;
         result.map(|v| {
-            (v, self.primed_dbis.lock().iter().map(|&dbi| Database::new_from_ptr(dbi)).collect())
+            (
+                v,
+                self.inner
+                    .primed_dbis
+                    .lock()
+                    .iter()
+                    .map(|&dbi| Database::new_from_ptr(dbi, self.env().clone()))
+                    .collect(),
+            )
         })
     }
 
@@ -184,15 +217,15 @@ where
     /// The returned database handle may be shared among any transaction in the environment.
     ///
     /// The database name may not contain the null character.
-    pub fn open_db<'txn>(&'txn self, name: Option<&str>) -> Result<Database<'txn>> {
+    pub fn open_db(&self, name: Option<&str>) -> Result<Database> {
         Database::new(self, name, 0)
     }
 
     /// Gets the option flags for the given database in the transaction.
-    pub fn db_flags<'txn>(&'txn self, db: &Database<'txn>) -> Result<DatabaseFlags> {
+    pub fn db_flags(&self, db: &Database) -> Result<DatabaseFlags> {
         let mut flags: c_uint = 0;
         unsafe {
-            mdbx_result(txn_execute(&self.txn, |txn| {
+            mdbx_result(self.txn_execute(|txn| {
                 ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut())
             }))?;
         }
@@ -203,7 +236,7 @@ where
     }
 
     /// Retrieves database statistics.
-    pub fn db_stat<'txn>(&'txn self, db: &Database<'txn>) -> Result<Stat> {
+    pub fn db_stat(&self, db: &Database) -> Result<Stat> {
         self.db_stat_with_dbi(db.dbi())
     }
 
@@ -211,7 +244,7 @@ where
     pub fn db_stat_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
         unsafe {
             let mut stat = Stat::new();
-            mdbx_result(txn_execute(&self.txn, |txn| {
+            mdbx_result(self.txn_execute(|txn| {
                 ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>())
             }))?;
             Ok(stat)
@@ -219,33 +252,98 @@ where
     }
 
     /// Open a new cursor on the given database.
-    pub fn cursor<'txn>(&'txn self, db: &Database<'txn>) -> Result<Cursor<'txn, K>> {
-        Cursor::new(self, db.dbi())
+    pub fn cursor(&self, db: &Database) -> Result<Cursor<K>> {
+        Cursor::new(self.clone(), db.dbi())
     }
 
     /// Open a new cursor on the given dbi.
-    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<'_, K>> {
-        Cursor::new(self, dbi)
+    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
+        Cursor::new(self.clone(), dbi)
     }
 }
 
-pub(crate) fn txn_execute<F: FnOnce(*mut ffi::MDBX_txn) -> T, T>(
-    txn: &Mutex<*mut ffi::MDBX_txn>,
-    f: F,
-) -> T {
-    let lck = txn.lock();
-    (f)(*lck)
+impl<K> Clone for Transaction<K>
+where
+    K: TransactionKind,
+{
+    fn clone(&self) -> Self {
+        Self { inner: Arc::clone(&self.inner) }
+    }
 }
 
-impl<'env, E> Transaction<'env, RW, E>
+impl<K> fmt::Debug for Transaction<K>
 where
-    E: EnvironmentKind,
+    K: TransactionKind,
 {
-    fn open_db_with_flags<'txn>(
-        &'txn self,
-        name: Option<&str>,
-        flags: DatabaseFlags,
-    ) -> Result<Database<'txn>> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RoTransaction").finish_non_exhaustive()
+    }
+}
+
+/// Internals of a transaction.
+struct TransactionInner<K>
+where
+    K: TransactionKind,
+{
+    /// The transaction pointer itself.
+    txn: TransactionPtr,
+    /// A set of database handles that are primed for permaopen.
+    primed_dbis: Mutex<IndexSet<ffi::MDBX_dbi>>,
+    /// Whether the transaction has committed.
+    committed: AtomicBool,
+    env: Environment,
+    _marker: std::marker::PhantomData<fn(K)>,
+}
+
+impl<K> TransactionInner<K>
+where
+    K: TransactionKind,
+{
+    /// Marks the transaction as committed.
+    fn set_committed(&self) {
+        self.committed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn has_committed(&self) -> bool {
+        self.committed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[inline]
+    fn txn_execute<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        self.txn.txn_execute(f)
+    }
+}
+
+impl<K> Drop for TransactionInner<K>
+where
+    K: TransactionKind,
+{
+    fn drop(&mut self) {
+        self.txn_execute(|txn| {
+            if !self.has_committed() {
+                if K::ONLY_CLEAN {
+                    unsafe {
+                        ffi::mdbx_txn_abort(txn);
+                    }
+                } else {
+                    let (sender, rx) = sync_channel(0);
+                    self.env
+                        .ensure_txn_manager()
+                        .unwrap()
+                        .send(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender })
+                        .unwrap();
+                    rx.recv().unwrap().unwrap();
+                }
+            }
+        })
+    }
+}
+
+impl Transaction<RW> {
+    fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
         Database::new(self, name, flags.bits())
     }
 
@@ -261,11 +359,7 @@ where
     ///
     /// This function will fail with [Error::BadRslot] if called by a thread with an open
     /// transaction.
-    pub fn create_db<'txn>(
-        &'txn self,
-        name: Option<&str>,
-        flags: DatabaseFlags,
-    ) -> Result<Database<'txn>> {
+    pub fn create_db(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
         self.open_db_with_flags(name, flags | DatabaseFlags::CREATE)
     }
 
@@ -288,7 +382,7 @@ where
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
-        mdbx_result(txn_execute(&self.txn, |txn| unsafe {
+        mdbx_result(self.txn_execute(|txn| unsafe {
             ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
         }))?;
 
@@ -298,20 +392,20 @@ where
     /// Returns a buffer which can be used to write a value into the item at the
     /// given key and with the given length. The buffer must be completely
     /// filled by the caller.
-    pub fn reserve<'txn>(
-        &'txn self,
-        db: &Database<'txn>,
+    pub fn reserve(
+        &self,
+        db: &Database,
         key: impl AsRef<[u8]>,
         len: usize,
         flags: WriteFlags,
-    ) -> Result<&'txn mut [u8]> {
+    ) -> Result<&mut [u8]> {
         let key = key.as_ref();
         let key_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: len, iov_base: ptr::null_mut::<c_void>() };
         unsafe {
-            mdbx_result(txn_execute(&self.txn, |txn| {
+            mdbx_result(self.txn_execute(|txn| {
                 ffi::mdbx_put(
                     txn,
                     db.dbi(),
@@ -348,7 +442,7 @@ where
         });
 
         mdbx_result({
-            txn_execute(&self.txn, |txn| {
+            self.txn_execute(|txn| {
                 if let Some(d) = data_val {
                     unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) }
                 } else {
@@ -365,7 +459,7 @@ where
 
     /// Empties the given database. All items will be removed.
     pub fn clear_db(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
-        mdbx_result(txn_execute(&self.txn, |txn| unsafe { ffi::mdbx_drop(txn, dbi, false) }))?;
+        mdbx_result(self.txn_execute(|txn| unsafe { ffi::mdbx_drop(txn, dbi, false) }))?;
 
         Ok(())
     }
@@ -375,37 +469,36 @@ where
     /// # Safety
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn drop_db<'txn>(&'txn self, db: Database<'txn>) -> Result<()> {
-        mdbx_result(txn_execute(&self.txn, |txn| ffi::mdbx_drop(txn, db.dbi(), true)))?;
+    pub unsafe fn drop_db(&self, db: Database) -> Result<()> {
+        mdbx_result(self.txn_execute(|txn| ffi::mdbx_drop(txn, db.dbi(), true)))?;
 
         Ok(())
     }
 }
 
-impl<'env, E> Transaction<'env, RO, E>
-where
-    E: EnvironmentKind,
-{
+impl Transaction<RO> {
     /// Closes the database handle.
     ///
     /// # Safety
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn close_db(&self, db: Database<'_>) -> Result<()> {
-        mdbx_result(ffi::mdbx_dbi_close(self.env.env(), db.dbi()))?;
+    pub unsafe fn close_db(&self, db: Database) -> Result<()> {
+        mdbx_result(ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()))?;
 
         Ok(())
     }
 }
 
-impl<'env> Transaction<'env, RW, NoWriteMap> {
+impl Transaction<RW> {
     /// Begins a new nested transaction inside of this transaction.
-    pub fn begin_nested_txn(&mut self) -> Result<Transaction<'_, RW, NoWriteMap>> {
-        txn_execute(&self.txn, |txn| {
+    pub fn begin_nested_txn(&mut self) -> Result<Transaction<RW>> {
+        if self.inner.env.is_write_map() {
+            return Err(Error::NestedTransactionsUnsupportedWithWriteMap)
+        }
+        self.txn_execute(|txn| {
             let (tx, rx) = sync_channel(0);
-            self.env
-                .txn_manager
-                .as_ref()
+            self.env()
+                .ensure_txn_manager()
                 .unwrap()
                 .send(TxnManagerMessage::Begin {
                     parent: TxnPtr(txn),
@@ -414,58 +507,49 @@ impl<'env> Transaction<'env, RW, NoWriteMap> {
                 })
                 .unwrap();
 
-            rx.recv().unwrap().map(|ptr| Transaction::new_from_ptr(self.env, ptr.0))
+            rx.recv().unwrap().map(|ptr| Transaction::new_from_ptr(self.env().clone(), ptr.0))
         })
     }
 }
 
-impl<'env, K, E> fmt::Debug for Transaction<'env, K, E>
-where
-    K: TransactionKind,
-    E: EnvironmentKind,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RoTransaction").finish()
+/// A shareable pointer to an MDBX transaction.
+#[derive(Clone)]
+pub(crate) struct TransactionPtr {
+    txn: *mut ffi::MDBX_txn,
+    lock: Arc<Mutex<()>>,
+}
+
+impl TransactionPtr {
+    fn new(txn: *mut ffi::MDBX_txn) -> Self {
+        Self { txn, lock: Arc::new(Mutex::new(())) }
+    }
+
+    /// Executes the given closure once the lock on the transaction is acquired.
+    #[inline]
+    pub(crate) fn txn_execute<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        let _lck = self.lock.lock();
+        (f)(self.txn)
     }
 }
 
-impl<'env, K, E> Drop for Transaction<'env, K, E>
-where
-    K: TransactionKind,
-    E: EnvironmentKind,
-{
-    fn drop(&mut self) {
-        txn_execute(&self.txn, |txn| {
-            if !self.committed {
-                if K::ONLY_CLEAN {
-                    unsafe {
-                        ffi::mdbx_txn_abort(txn);
-                    }
-                } else {
-                    let (sender, rx) = sync_channel(0);
-                    self.env
-                        .txn_manager
-                        .as_ref()
-                        .unwrap()
-                        .send(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender })
-                        .unwrap();
-                    rx.recv().unwrap().unwrap();
-                }
-            }
-        })
+// SAFETY: Access to the transaction is synchronized by the lock.
+unsafe impl Send for TransactionPtr {}
+
+// SAFETY: Access to the transaction is synchronized by the lock.
+unsafe impl Sync for TransactionPtr {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    #[allow(dead_code)]
+    fn test_txn_send_sync() {
+        assert_send_sync::<Transaction<RO>>();
+        assert_send_sync::<Transaction<RW>>();
     }
-}
-
-unsafe impl<'env, K, E> Send for Transaction<'env, K, E>
-where
-    K: TransactionKind,
-    E: EnvironmentKind,
-{
-}
-
-unsafe impl<'env, K, E> Sync for Transaction<'env, K, E>
-where
-    K: TransactionKind,
-    E: EnvironmentKind,
-{
 }

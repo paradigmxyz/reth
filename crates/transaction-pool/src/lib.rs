@@ -80,11 +80,11 @@
 //!
 //! ```
 //! use reth_primitives::MAINNET;
-//! use reth_provider::{ChainSpecProvider, StateProviderFactory};
+//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//!  async fn t<C>(client: C)  where C: StateProviderFactory + ChainSpecProvider + Clone + 'static{
+//! async fn t<C>(client: C)  where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static{
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
 //!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
@@ -148,25 +148,22 @@ use crate::pool::PoolInner;
 use aquamarine as _;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
 pub use crate::{
     blobstore::{BlobStore, BlobStoreError},
     config::{
-        PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP, REPLACE_BLOB_PRICE_BUMP,
-        TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
-        TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+        LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
+        REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+        TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
     error::PoolResult,
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
-        state::SubPool, AllTransactionsEvents, FullTransactionEvent, TransactionEvent,
-        TransactionEvents,
+        blob_tx_priority, fee_delta, state::SubPool, AllTransactionsEvents, FullTransactionEvent,
+        TransactionEvent, TransactionEvents,
     },
     traits::*,
     validate::{
@@ -191,6 +188,13 @@ mod traits;
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking a pool
 pub mod test_utils;
+
+/// Type alias for default ethereum transaction pool
+pub type EthTransactionPool<Client, S> = Pool<
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
+    CoinbaseTipOrdering<EthPooledTransaction>,
+    S,
+>;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
@@ -223,19 +227,21 @@ where
     }
 
     /// Returns future that validates all transaction in the given iterator.
+    ///
+    /// This returns the validated transactions in the iterator's order.
     async fn validate_all(
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
-        let outcome = futures_util::future::join_all(
+    ) -> PoolResult<Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)>> {
+        let outcomes = futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate(origin, tx)),
         )
         .await
         .into_iter()
-        .collect::<HashMap<_, _>>();
+        .collect();
 
-        Ok(outcome)
+        Ok(outcomes)
     }
 
     /// Validates the given transaction
@@ -262,14 +268,9 @@ where
     }
 }
 
-impl<Client, S>
-    Pool<
-        TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
-        CoinbaseTipOrdering<EthPooledTransaction>,
-        S,
-    >
+impl<Client, S> EthTransactionPool<Client, S>
 where
-    Client: StateProviderFactory + Clone + 'static,
+    Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
     S: BlobStore,
 {
     /// Returns a new [Pool] that uses the default [TransactionValidationTaskExecutor] when
@@ -278,18 +279,24 @@ where
     /// # Example
     ///
     /// ```
-    /// use reth_provider::StateProviderFactory;
     /// use reth_primitives::MAINNET;
+    /// use reth_provider::{BlockReaderIdExt, StateProviderFactory};
     /// use reth_tasks::TokioTaskExecutor;
-    /// use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
-    /// use reth_transaction_pool::blobstore::InMemoryBlobStore;
-    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static {
-    ///     let blob_store = InMemoryBlobStore::default();
-    ///     let pool = Pool::eth_pool(
-    ///         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
-    ///         blob_store,
-    ///         Default::default(),
-    ///     );
+    /// use reth_transaction_pool::{
+    ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
+    /// };
+    /// # fn t<C>(client: C)  where C: StateProviderFactory + BlockReaderIdExt + Clone + 'static {
+    /// let blob_store = InMemoryBlobStore::default();
+    /// let pool = Pool::eth_pool(
+    ///     TransactionValidationTaskExecutor::eth(
+    ///         client,
+    ///         MAINNET.clone(),
+    ///         blob_store.clone(),
+    ///         TokioTaskExecutor::default(),
+    ///     ),
+    ///     blob_store,
+    ///     Default::default(),
+    /// );
     /// # }
     /// ```
     pub fn eth_pool(
@@ -344,9 +351,13 @@ where
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
+        if transactions.is_empty() {
+            return Ok(Vec::new())
+        }
         let validated = self.validate_all(origin, transactions).await?;
 
-        let transactions = self.pool.add_transactions(origin, validated.into_values());
+        let transactions =
+            self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx));
         Ok(transactions)
     }
 
@@ -460,6 +471,13 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.get_transactions_by_sender(sender)
+    }
+
+    fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_transactions_by_origin(origin)
     }
 
     fn unique_senders(&self) -> HashSet<Address> {

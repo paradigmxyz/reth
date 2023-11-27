@@ -1,5 +1,9 @@
 use crate::stage::{ExecOutput, UnwindInput, UnwindOutput};
-use reth_primitives::stage::{StageCheckpoint, StageId};
+use reth_primitives::{
+    stage::{StageCheckpoint, StageId},
+    BlockNumber,
+};
+use std::fmt::{Display, Formatter};
 
 /// An event emitted by a [Pipeline][crate::Pipeline].
 ///
@@ -11,29 +15,27 @@ use reth_primitives::stage::{StageCheckpoint, StageId};
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PipelineEvent {
     /// Emitted when a stage is about to be run.
-    Running {
-        /// 1-indexed ID of the stage that is about to be run out of total stages in the pipeline.
-        pipeline_position: usize,
-        /// Total number of stages in the pipeline.
-        pipeline_total: usize,
+    Run {
+        /// Pipeline stages progress.
+        pipeline_stages_progress: PipelineStagesProgress,
         /// The stage that is about to be run.
         stage_id: StageId,
         /// The previous checkpoint of the stage.
         checkpoint: Option<StageCheckpoint>,
+        /// The block number up to which the stage is running, if known.
+        target: Option<BlockNumber>,
     },
     /// Emitted when a stage has run a single time.
     Ran {
-        /// 1-indexed ID of the stage that was run out of total stages in the pipeline.
-        pipeline_position: usize,
-        /// Total number of stages in the pipeline.
-        pipeline_total: usize,
+        /// Pipeline stages progress.
+        pipeline_stages_progress: PipelineStagesProgress,
         /// The stage that was run.
         stage_id: StageId,
         /// The result of executing the stage.
         result: ExecOutput,
     },
     /// Emitted when a stage is about to be unwound.
-    Unwinding {
+    Unwind {
         /// The stage that is about to be unwound.
         stage_id: StageId,
         /// The unwind parameters.
@@ -60,4 +62,19 @@ pub enum PipelineEvent {
         /// The stage that was skipped.
         stage_id: StageId,
     },
+}
+
+/// Pipeline stages progress.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct PipelineStagesProgress {
+    /// 1-indexed ID of the stage that is about to be run out of total stages in the pipeline.
+    pub current: usize,
+    /// Total number of stages in the pipeline.
+    pub total: usize,
+}
+
+impl Display for PipelineStagesProgress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.current, self.total)
+    }
 }

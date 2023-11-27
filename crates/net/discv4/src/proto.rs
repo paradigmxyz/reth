@@ -256,26 +256,30 @@ where
     }
 }
 
+fn to_alloy_rlp_error(e: rlp::DecoderError) -> RlpError {
+    match e {
+        rlp::DecoderError::RlpIsTooShort => RlpError::InputTooShort,
+        rlp::DecoderError::RlpInvalidLength => RlpError::Overflow,
+        rlp::DecoderError::RlpExpectedToBeList => RlpError::UnexpectedString,
+        rlp::DecoderError::RlpExpectedToBeData => RlpError::UnexpectedList,
+        rlp::DecoderError::RlpDataLenWithZeroPrefix |
+        rlp::DecoderError::RlpListLenWithZeroPrefix => RlpError::LeadingZero,
+        rlp::DecoderError::RlpInvalidIndirection => RlpError::NonCanonicalSize,
+        rlp::DecoderError::RlpIncorrectListLen => {
+            RlpError::Custom("incorrect list length when decoding rlp")
+        }
+        rlp::DecoderError::RlpIsTooBig => RlpError::Custom("rlp is too big"),
+        rlp::DecoderError::RlpInconsistentLengthAndData => {
+            RlpError::Custom("inconsistent length and data when decoding rlp")
+        }
+        rlp::DecoderError::Custom(s) => RlpError::Custom(s),
+    }
+}
+
 impl<K: EnrKey> Decodable for EnrWrapper<K> {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let enr = <Enr<K> as rlp::Decodable>::decode(&rlp::Rlp::new(buf))
-            .map_err(|e| match e {
-                rlp::DecoderError::RlpIsTooShort => RlpError::InputTooShort,
-                rlp::DecoderError::RlpInvalidLength => RlpError::Overflow,
-                rlp::DecoderError::RlpExpectedToBeList => RlpError::UnexpectedString,
-                rlp::DecoderError::RlpExpectedToBeData => RlpError::UnexpectedList,
-                rlp::DecoderError::RlpDataLenWithZeroPrefix |
-                rlp::DecoderError::RlpListLenWithZeroPrefix => RlpError::LeadingZero,
-                rlp::DecoderError::RlpInvalidIndirection => RlpError::NonCanonicalSize,
-                rlp::DecoderError::RlpIncorrectListLen => {
-                    RlpError::Custom("incorrect list length when decoding rlp")
-                }
-                rlp::DecoderError::RlpIsTooBig => RlpError::Custom("rlp is too big"),
-                rlp::DecoderError::RlpInconsistentLengthAndData => {
-                    RlpError::Custom("inconsistent length and data when decoding rlp")
-                }
-                rlp::DecoderError::Custom(s) => RlpError::Custom(s),
-            })
+            .map_err(to_alloy_rlp_error)
             .map(EnrWrapper::new);
         if enr.is_ok() {
             // Decode was successful, advance buffer
@@ -394,7 +398,11 @@ impl Decodable for Ping {
             return Err(RlpError::UnexpectedString)
         }
         let started_len = b.len();
+
+        // > Implementations should ignore any mismatches in version:
+        // <https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01>
         let _version = u32::decode(b)?;
+
         let mut this = Self {
             from: Decodable::decode(b)?,
             to: Decodable::decode(b)?,

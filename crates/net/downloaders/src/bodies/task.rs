@@ -42,18 +42,17 @@ impl TaskDownloader {
     /// # Example
     ///
     /// ```
+    /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
+    /// use reth_interfaces::{consensus::Consensus, p2p::bodies::client::BodiesClient};
+    /// use reth_provider::HeaderProvider;
     /// use std::sync::Arc;
-    /// use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-    /// use reth_downloaders::bodies::task::TaskDownloader;
-    /// use reth_interfaces::consensus::Consensus;
-    /// use reth_interfaces::p2p::bodies::client::BodiesClient;
-    /// use reth_db::database::Database;
-    /// fn t<B: BodiesClient + 'static, DB: Database + 'static>(client: Arc<B>, consensus:Arc<dyn Consensus>, db: Arc<DB>) {
-    ///     let downloader = BodiesDownloaderBuilder::default().build(
-    ///         client,
-    ///         consensus,
-    ///         db
-    ///     );
+    ///
+    /// fn t<B: BodiesClient + 'static, Provider: HeaderProvider + Unpin + 'static>(
+    ///     client: Arc<B>,
+    ///     consensus: Arc<dyn Consensus>,
+    ///     provider: Provider,
+    /// ) {
+    ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, provider);
     ///     let downloader = TaskDownloader::spawn(downloader);
     /// }
     /// ```
@@ -172,6 +171,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
+    use reth_primitives::MAINNET;
+    use reth_provider::ProviderFactory;
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -181,7 +182,7 @@ mod tests {
         let db = create_test_rw_db();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
-        insert_headers(&db, &headers);
+        insert_headers(db.db(), &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
@@ -189,7 +190,7 @@ mod tests {
         let downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            db,
+            ProviderFactory::new(db, MAINNET.clone()),
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
@@ -211,7 +212,7 @@ mod tests {
         let downloader = BodiesDownloaderBuilder::default().build(
             Arc::new(TestBodiesClient::default()),
             Arc::new(TestConsensus::default()),
-            db,
+            ProviderFactory::new(db, MAINNET.clone()),
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 

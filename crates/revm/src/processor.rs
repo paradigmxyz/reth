@@ -1,8 +1,6 @@
 use crate::{
     database::StateProviderDatabase,
-    env::{fill_cfg_and_block_env, fill_tx_env},
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    into_reth_log,
     stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
@@ -11,20 +9,26 @@ use reth_interfaces::{
     RethError,
 };
 use reth_primitives::{
-    Address, Block, BlockNumber, Bloom, ChainSpec, Hardfork, Header, PruneMode, PruneModes,
-    PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
+    revm::env::{fill_cfg_and_block_env, fill_tx_env},
+    Address, Block, BlockNumber, Bloom, ChainSpec, GotExpected, Hardfork, Header, PruneMode,
+    PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
 };
-use reth_provider::{
-    BlockExecutor, BlockExecutorStats, BundleStateWithReceipts, PrunableBlockExecutor,
-    StateProvider,
-};
+use reth_provider::{BlockExecutor, BlockExecutorStats, PrunableBlockExecutor, StateProvider};
 use revm::{
     db::{states::bundle_state::BundleRetention, StateDBBox},
     primitives::ResultAndState,
-    DatabaseCommit, State, EVM,
+    State, EVM,
 };
 use std::{sync::Arc, time::Instant};
+
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::compat::into_reth_log;
+#[cfg(not(feature = "optimism"))]
+use reth_provider::BundleStateWithReceipts;
+#[cfg(not(feature = "optimism"))]
+use revm::DatabaseCommit;
+#[cfg(not(feature = "optimism"))]
 use tracing::{debug, trace};
 
 /// EVMProcessor is a block executor that uses revm to execute blocks or multiple blocks.
@@ -47,9 +51,9 @@ use tracing::{debug, trace};
 #[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a> {
     /// The configured chain-spec
-    chain_spec: Arc<ChainSpec>,
+    pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
-    evm: EVM<StateDBBox<'a, RethError>>,
+    pub(crate) evm: EVM<StateDBBox<'a, RethError>>,
     /// Hook and inspector stack that we want to invoke on that hook.
     stack: InspectorStack,
     /// The collection of receipts.
@@ -57,10 +61,10 @@ pub struct EVMProcessor<'a> {
     /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
-    receipts: Receipts,
+    pub(crate) receipts: Receipts,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
-    first_block: Option<BlockNumber>,
+    pub(crate) first_block: Option<BlockNumber>,
     /// The maximum known block.
     tip: Option<BlockNumber>,
     /// Pruning configuration.
@@ -70,7 +74,7 @@ pub struct EVMProcessor<'a> {
     /// block. None means there isn't any kind of configuration.
     pruning_address_filter: Option<(u64, Vec<Address>)>,
     /// Execution stats
-    stats: BlockExecutorStats,
+    pub(crate) stats: BlockExecutorStats,
 }
 
 impl<'a> EVMProcessor<'a> {
@@ -133,6 +137,11 @@ impl<'a> EVMProcessor<'a> {
         self.stack = stack;
     }
 
+    /// Configure the executor with the given block.
+    pub fn set_first_block(&mut self, num: BlockNumber) {
+        self.first_block = Some(num);
+    }
+
     /// Returns a reference to the database
     pub fn db_mut(&mut self) -> &mut StateDBBox<'a, RethError> {
         // Option will be removed from EVM in the future.
@@ -141,7 +150,7 @@ impl<'a> EVMProcessor<'a> {
         self.evm.db().expect("Database inside EVM is always set")
     }
 
-    fn recover_senders(
+    pub(crate) fn recover_senders(
         &mut self,
         body: &[TransactionSigned],
         senders: Option<Vec<Address>>,
@@ -162,7 +171,7 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Initializes the config and block env.
-    fn init_env(&mut self, header: &Header, total_difficulty: U256) {
+    pub(crate) fn init_env(&mut self, header: &Header, total_difficulty: U256) {
         // Set state clear flag.
         let state_clear_flag =
             self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(header.number);
@@ -229,7 +238,7 @@ impl<'a> EVMProcessor<'a> {
         }
         // increment balances
         self.db_mut()
-            .increment_balances(balance_increments.into_iter().map(|(k, v)| (k, v)))
+            .increment_balances(balance_increments)
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
         Ok(())
@@ -245,7 +254,15 @@ impl<'a> EVMProcessor<'a> {
         sender: Address,
     ) -> Result<ResultAndState, BlockExecutionError> {
         // Fill revm structure.
+        #[cfg(not(feature = "optimism"))]
         fill_tx_env(&mut self.evm.env.tx, transaction, sender);
+
+        #[cfg(feature = "optimism")]
+        {
+            let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
+            transaction.encode_enveloped(&mut envelope_buf);
+            fill_tx_env(&mut self.evm.env.tx, transaction, sender, envelope_buf.into());
+        }
 
         let hash = transaction.hash();
         let out = if self.stack.should_inspect(&self.evm.env, hash) {
@@ -261,20 +278,164 @@ impl<'a> EVMProcessor<'a> {
             // main execution.
             self.evm.transact()
         };
-        out.map_err(|e| BlockValidationError::EVM { hash, message: format!("{e:?}") }.into())
+        out.map_err(|e| BlockValidationError::EVM { hash, error: e.into() }.into())
     }
 
-    /// Runs the provided transactions and commits their state to the run-time database.
-    ///
-    /// The returned [BundleStateWithReceipts] can be used to persist the changes to disk, and
-    /// contains the changes made by each transaction.
-    ///
-    /// The changes in [BundleStateWithReceipts] have a transition ID associated with them: there is
-    /// one transition ID for each transaction (with the first executed tx having transition ID
-    /// 0, and so on).
-    ///
-    /// The second returned value represents the total gas used by this block of transactions.
-    pub fn execute_transactions(
+    /// Execute the block, verify gas usage and apply post-block state changes.
+    pub(crate) fn execute_inner(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<Vec<Receipt>, BlockExecutionError> {
+        self.init_env(&block.header, total_difficulty);
+        self.apply_beacon_root_contract_call(block)?;
+        let (receipts, cumulative_gas_used) =
+            self.execute_transactions(block, total_difficulty, senders)?;
+
+        // Check if gas used matches the value set in header.
+        if block.gas_used != cumulative_gas_used {
+            let receipts = Receipts::from_block_receipt(receipts);
+            return Err(BlockValidationError::BlockGasUsed {
+                gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
+                gas_spent_by_tx: receipts.gas_spent_by_tx()?,
+            }
+            .into())
+        }
+        let time = Instant::now();
+        self.apply_post_execution_state_change(block, total_difficulty)?;
+        self.stats.apply_post_execution_state_changes_duration += time.elapsed();
+
+        let time = Instant::now();
+        let retention = if self.tip.map_or(true, |tip| {
+            !self
+                .prune_modes
+                .account_history
+                .map_or(false, |mode| mode.should_prune(block.number, tip)) &&
+                !self
+                    .prune_modes
+                    .storage_history
+                    .map_or(false, |mode| mode.should_prune(block.number, tip))
+        }) {
+            BundleRetention::Reverts
+        } else {
+            BundleRetention::PlainState
+        };
+        self.db_mut().merge_transitions(retention);
+        self.stats.merge_transitions_duration += time.elapsed();
+
+        if self.first_block.is_none() {
+            self.first_block = Some(block.number);
+        }
+
+        Ok(receipts)
+    }
+
+    /// Save receipts to the executor.
+    pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
+        let mut receipts = receipts.into_iter().map(Option::Some).collect();
+        // Prune receipts if necessary.
+        self.prune_receipts(&mut receipts)?;
+        // Save receipts.
+        self.receipts.push(receipts);
+        Ok(())
+    }
+
+    /// Prune receipts according to the pruning configuration.
+    fn prune_receipts(
+        &mut self,
+        receipts: &mut Vec<Option<Receipt>>,
+    ) -> Result<(), PruneSegmentError> {
+        let (first_block, tip) = match self.first_block.zip(self.tip) {
+            Some((block, tip)) => (block, tip),
+            _ => return Ok(()),
+        };
+
+        let block_number = first_block + self.receipts.len() as u64;
+
+        // Block receipts should not be retained
+        if self.prune_modes.receipts == Some(PruneMode::Full) ||
+                // [`PruneSegment::Receipts`] takes priority over [`PruneSegment::ContractLogs`]
+            self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
+        {
+            receipts.clear();
+            return Ok(())
+        }
+
+        // All receipts from the last 128 blocks are required for blockchain tree, even with
+        // [`PruneSegment::ContractLogs`].
+        let prunable_receipts =
+            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
+        if !prunable_receipts {
+            return Ok(())
+        }
+
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
+
+        if !contract_log_pruner.is_empty() {
+            let (prev_block, filter) = self.pruning_address_filter.get_or_insert((0, Vec::new()));
+            for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
+                filter.extend(addresses.iter().copied());
+            }
+        }
+
+        for receipt in receipts.iter_mut() {
+            let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
+
+            // If there is an address_filter, and it does not contain any of the
+            // contract addresses, then remove this receipts
+            if let Some((_, filter)) = &self.pruning_address_filter {
+                if !inner_receipt.logs.iter().any(|log| filter.contains(&log.address)) {
+                    receipt.take();
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Default Ethereum implementation of the [BlockExecutor] trait for the [EVMProcessor].
+#[cfg(not(feature = "optimism"))]
+impl<'a> BlockExecutor for EVMProcessor<'a> {
+    fn execute(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(), BlockExecutionError> {
+        let receipts = self.execute_inner(block, total_difficulty, senders)?;
+        self.save_receipts(receipts)
+    }
+
+    fn execute_and_verify_receipt(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<(), BlockExecutionError> {
+        // execute block
+        let receipts = self.execute_inner(block, total_difficulty, senders)?;
+
+        // TODO Before Byzantium, receipts contained state root that would mean that expensive
+        // operation as hashing that is needed for state root got calculated in every
+        // transaction This was replaced with is_success flag.
+        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
+        if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
+            let time = Instant::now();
+            if let Err(error) =
+                verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
+            {
+                debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
+                return Err(error)
+            };
+            self.stats.receipt_root_duration += time.elapsed();
+        }
+
+        self.save_receipts(receipts)
+    }
+
+    fn execute_transactions(
         &mut self,
         block: &Block,
         total_difficulty: U256,
@@ -329,157 +490,12 @@ impl<'a> EVMProcessor<'a> {
                 cumulative_gas_used,
                 // convert to reth log
                 logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
             });
         }
 
         Ok((receipts, cumulative_gas_used))
-    }
-
-    /// Execute the block, verify gas usage and apply post-block state changes.
-    fn execute_inner(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<Vec<Receipt>, BlockExecutionError> {
-        self.init_env(&block.header, total_difficulty);
-        self.apply_beacon_root_contract_call(block)?;
-        let (receipts, cumulative_gas_used) =
-            self.execute_transactions(block, total_difficulty, senders)?;
-
-        // Check if gas used matches the value set in header.
-        if block.gas_used != cumulative_gas_used {
-            let receipts = Receipts::from_block_receipt(receipts);
-            return Err(BlockValidationError::BlockGasUsed {
-                got: cumulative_gas_used,
-                expected: block.gas_used,
-                gas_spent_by_tx: receipts.gas_spent_by_tx()?,
-            }
-            .into())
-        }
-        let time = Instant::now();
-        self.apply_post_execution_state_change(block, total_difficulty)?;
-        self.stats.apply_post_execution_state_changes_duration += time.elapsed();
-
-        let time = Instant::now();
-        let retention = if self.tip.map_or(true, |tip| {
-            !self.prune_modes.should_prune_account_history(block.number, tip) &&
-                !self.prune_modes.should_prune_storage_history(block.number, tip)
-        }) {
-            BundleRetention::Reverts
-        } else {
-            BundleRetention::PlainState
-        };
-        self.db_mut().merge_transitions(retention);
-        self.stats.merge_transitions_duration += time.elapsed();
-
-        if self.first_block.is_none() {
-            self.first_block = Some(block.number);
-        }
-
-        Ok(receipts)
-    }
-
-    /// Save receipts to the executor.
-    pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
-        let mut receipts = receipts.into_iter().map(Option::Some).collect();
-        // Prune receipts if necessary.
-        self.prune_receipts(&mut receipts)?;
-        // Save receipts.
-        self.receipts.push(receipts);
-        Ok(())
-    }
-
-    /// Prune receipts according to the pruning configuration.
-    fn prune_receipts(
-        &mut self,
-        receipts: &mut Vec<Option<Receipt>>,
-    ) -> Result<(), PruneSegmentError> {
-        let (first_block, tip) = match self.first_block.zip(self.tip) {
-            Some((block, tip)) => (block, tip),
-            _ => return Ok(()),
-        };
-
-        let block_number = first_block + self.receipts.len() as u64;
-
-        // Block receipts should not be retained
-        if self.prune_modes.receipts == Some(PruneMode::Full) ||
-                // [`PruneSegment::Receipts`] takes priority over [`PruneSegment::ContractLogs`]
-                self.prune_modes.should_prune_receipts(block_number, tip)
-        {
-            receipts.clear();
-            return Ok(())
-        }
-
-        // All receipts from the last 128 blocks are required for blockchain tree, even with
-        // [`PruneSegment::ContractLogs`].
-        let prunable_receipts =
-            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
-        if !prunable_receipts {
-            return Ok(())
-        }
-
-        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
-
-        if !contract_log_pruner.is_empty() {
-            let (prev_block, filter) = self.pruning_address_filter.get_or_insert((0, Vec::new()));
-            for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
-                filter.extend(addresses.iter().copied());
-            }
-        }
-
-        for receipt in receipts.iter_mut() {
-            let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
-
-            // If there is an address_filter, and it does not contain any of the
-            // contract addresses, then remove this receipts
-            if let Some((_, filter)) = &self.pruning_address_filter {
-                if !inner_receipt.logs.iter().any(|log| filter.contains(&log.address)) {
-                    receipt.take();
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl<'a> BlockExecutor for EVMProcessor<'a> {
-    fn execute(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<(), BlockExecutionError> {
-        let receipts = self.execute_inner(block, total_difficulty, senders)?;
-        self.save_receipts(receipts)
-    }
-
-    fn execute_and_verify_receipt(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<(), BlockExecutionError> {
-        // execute block
-        let receipts = self.execute_inner(block, total_difficulty, senders)?;
-
-        // TODO Before Byzantium, receipts contained state root that would mean that expensive
-        // operation as hashing that is needed for state root got calculated in every
-        // transaction This was replaced with is_success flag.
-        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-        if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
-            let time = Instant::now();
-            if let Err(error) =
-                verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
-            {
-                debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
-                return Err(error)
-            };
-            self.stats.receipt_root_duration += time.elapsed();
-        }
-
-        self.save_receipts(receipts)
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
@@ -520,20 +536,18 @@ pub fn verify_receipt<'a>(
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
     if receipts_root != expected_receipts_root {
-        return Err(BlockValidationError::ReceiptRootDiff {
-            got: receipts_root,
-            expected: expected_receipts_root,
-        }
+        return Err(BlockValidationError::ReceiptRootDiff(
+            GotExpected { got: receipts_root, expected: expected_receipts_root }.into(),
+        )
         .into())
     }
 
     // Create header log bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
-        return Err(BlockValidationError::BloomLogDiff {
-            expected: Box::new(expected_logs_bloom),
-            got: Box::new(logs_bloom),
-        }
+        return Err(BlockValidationError::BloomLogDiff(
+            GotExpected { got: logs_bloom, expected: expected_logs_bloom }.into(),
+        )
         .into())
     }
 
@@ -543,13 +557,18 @@ pub fn verify_receipt<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_interfaces::RethResult;
+    use reth_interfaces::provider::ProviderResult;
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
-        keccak256, Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
+        keccak256,
+        trie::AccountProof,
+        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
     };
-    use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
+    use reth_provider::{
+        AccountReader, BlockHashReader, BundleStateWithReceipts, StateRootProvider,
+    };
+    use reth_trie::updates::TrieUpdates;
     use revm::{Database, TransitionState};
     use std::collections::HashMap;
 
@@ -581,14 +600,13 @@ mod tests {
     }
 
     impl AccountReader for StateProviderTest {
-        fn basic_account(&self, address: Address) -> RethResult<Option<Account>> {
-            let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
-            ret
+        fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+            Ok(self.accounts.get(&address).map(|(_, acc)| *acc))
         }
     }
 
     impl BlockHashReader for StateProviderTest {
-        fn block_hash(&self, number: u64) -> RethResult<Option<B256>> {
+        fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
             Ok(self.block_hash.get(&number).cloned())
         }
 
@@ -596,7 +614,7 @@ mod tests {
             &self,
             start: BlockNumber,
             end: BlockNumber,
-        ) -> RethResult<Vec<B256>> {
+        ) -> ProviderResult<Vec<B256>> {
             let range = start..end;
             Ok(self
                 .block_hash
@@ -607,8 +625,15 @@ mod tests {
     }
 
     impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> RethResult<B256> {
-            todo!()
+        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+            unimplemented!("state root computation is not supported")
+        }
+
+        fn state_root_with_updates(
+            &self,
+            _bundle_state: &BundleStateWithReceipts,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
+            unimplemented!("state root computation is not supported")
         }
     }
 
@@ -617,23 +642,19 @@ mod tests {
             &self,
             account: Address,
             storage_key: StorageKey,
-        ) -> RethResult<Option<reth_primitives::StorageValue>> {
+        ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
             Ok(self
                 .accounts
                 .get(&account)
                 .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
-        fn bytecode_by_hash(&self, code_hash: B256) -> RethResult<Option<Bytecode>> {
+        fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
 
-        fn proof(
-            &self,
-            _address: Address,
-            _keys: &[B256],
-        ) -> RethResult<(Vec<Bytes>, B256, Vec<Vec<Bytes>>)> {
-            todo!()
+        fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+            unimplemented!("proof generation is not supported")
         }
     }
 

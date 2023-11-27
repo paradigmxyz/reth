@@ -1,7 +1,9 @@
 use super::headers::client::HeadersRequest;
-use crate::{consensus, db};
+use crate::{consensus::ConsensusError, db::DatabaseError, provider::ProviderError};
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{BlockHashOrNumber, BlockNumber, Header, WithPeerId, B256};
+use reth_primitives::{
+    BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, WithPeerId, B256,
+};
 use std::ops::RangeInclusive;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -73,15 +75,15 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum RequestError {
-    #[error("Closed channel to the peer.")]
+    #[error("closed channel to the peer")]
     ChannelClosed,
-    #[error("Connection to a peer dropped while handling the request.")]
+    #[error("connection to a peer dropped while handling the request")]
     ConnectionDropped,
-    #[error("Capability Message is not supported by remote peer.")]
+    #[error("capability message is not supported by remote peer")]
     UnsupportedCapability,
-    #[error("Request timed out while awaiting response.")]
+    #[error("request timed out while awaiting response")]
     Timeout,
-    #[error("Received bad response.")]
+    #[error("received bad response")]
     BadResponse,
 }
 
@@ -118,90 +120,72 @@ pub type DownloadResult<T> = Result<T, DownloadError>;
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum DownloadError {
     /* ==================== HEADER ERRORS ==================== */
-    /// Header validation failed
-    #[error("Failed to validate header {hash}. Details: {error}.")]
+    /// Header validation failed.
+    #[error("failed to validate header {hash}: {error}")]
     HeaderValidation {
         /// Hash of header failing validation
         hash: B256,
         /// The details of validation failure
         #[source]
-        error: consensus::ConsensusError,
+        error: Box<ConsensusError>,
     },
-    /// Received an invalid tip
-    #[error("Received invalid tip: {received:?}. Expected {expected:?}.")]
-    InvalidTip {
-        /// The hash of the received tip
-        received: B256,
-        /// The hash of the expected tip
-        expected: B256,
-    },
-    /// Received a tip with an invalid tip number
-    #[error("Received invalid tip number: {received:?}. Expected {expected:?}.")]
-    InvalidTipNumber {
-        /// The block number of the received tip
-        received: u64,
-        /// The block number of the expected tip
-        expected: u64,
-    },
+    /// Received an invalid tip.
+    #[error("received invalid tip: {0}")]
+    InvalidTip(GotExpectedBoxed<B256>),
+    /// Received a tip with an invalid tip number.
+    #[error("received invalid tip number: {0}")]
+    InvalidTipNumber(GotExpected<u64>),
     /// Received a response to a request with unexpected start block
-    #[error("Headers response starts at unexpected block: {received:?}. Expected {expected:?}.")]
-    HeadersResponseStartBlockMismatch {
-        /// The block number of the received tip
-        received: u64,
-        /// The hash of the expected tip
-        expected: u64,
-    },
+    #[error("headers response starts at unexpected block: {0}")]
+    HeadersResponseStartBlockMismatch(GotExpected<u64>),
     /// Received headers with less than expected items.
-    #[error("Received less headers than expected: {received:?}. Expected {expected:?}.")]
-    HeadersResponseTooShort {
-        /// How many headers we received.
-        received: u64,
-        /// How many headers we expected.
-        expected: u64,
-    },
+    #[error("received less headers than expected: {0}")]
+    HeadersResponseTooShort(GotExpected<u64>),
+
     /* ==================== BODIES ERRORS ==================== */
     /// Block validation failed
-    #[error("Failed to validate body for header {hash}. Details: {error}.")]
+    #[error("failed to validate body for header {hash}: {error}")]
     BodyValidation {
         /// Hash of header failing validation
         hash: B256,
         /// The details of validation failure
         #[source]
-        error: consensus::ConsensusError,
+        error: Box<ConsensusError>,
     },
     /// Received more bodies than requested.
-    #[error("Received more bodies than requested. Expected: {expected}. Received: {received}")]
-    TooManyBodies {
-        /// How many bodies we received.
-        received: usize,
-        /// How many bodies we expected.
-        expected: usize,
-    },
+    #[error("received more bodies than requested: {0}")]
+    TooManyBodies(GotExpected<usize>),
     /// Headers missing from the database.
-    #[error("Header missing from the database: {block_number}")]
+    #[error("header missing from the database: {block_number}")]
     MissingHeader {
         /// Missing header block number.
         block_number: BlockNumber,
     },
     /// Body range invalid
-    #[error("Requested body range is invalid: {range:?}.")]
+    #[error("requested body range is invalid: {range:?}")]
     InvalidBodyRange {
         /// Invalid block number range.
         range: RangeInclusive<BlockNumber>,
     },
     /* ==================== COMMON ERRORS ==================== */
     /// Timed out while waiting for request id response.
-    #[error("Timed out while waiting for response.")]
+    #[error("timed out while waiting for response")]
     Timeout,
     /// Received empty response while expecting non empty
-    #[error("Received empty response.")]
+    #[error("received empty response")]
     EmptyResponse,
     /// Error while executing the request.
     #[error(transparent)]
     RequestError(#[from] RequestError),
-    /// Error while reading data from database.
+    /// Provider error.
     #[error(transparent)]
-    DatabaseError(#[from] db::DatabaseError),
+    Provider(#[from] ProviderError),
+}
+
+impl From<DatabaseError> for DownloadError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Provider(ProviderError::Database(error))
+    }
 }
 
 #[cfg(test)]

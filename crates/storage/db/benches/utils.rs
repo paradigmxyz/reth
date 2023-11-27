@@ -72,5 +72,5 @@ where
         tx.inner.commit().unwrap();
     }
 
-    db
+    db.into_inner_db()
 }

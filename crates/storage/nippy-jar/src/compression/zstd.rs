@@ -1,8 +1,10 @@
 use crate::{compression::Compression, NippyJarError};
-use serde::{Deserialize, Serialize};
+use derive_more::Deref;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     fs::File,
     io::{Read, Write},
+    sync::Arc,
 };
 use tracing::*;
 use zstd::bulk::Compressor;
@@ -17,7 +19,8 @@ pub enum ZstdState {
     Ready,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug, Serialize, Deserialize)]
 /// Zstd compression structure. Supports a compression dictionary per column.
 pub struct Zstd {
     /// State. Should be ready before compressing.
@@ -29,7 +32,8 @@ pub struct Zstd {
     /// Max size of a dictionary
     pub(crate) max_dict_size: usize,
     /// List of column dictionaries.
-    pub(crate) raw_dictionaries: Option<Vec<RawDictionary>>,
+    #[serde(with = "dictionaries_serde")]
+    pub(crate) dictionaries: Option<Arc<ZstdDictionaries<'static>>>,
     /// Number of columns to compress.
     columns: usize,
 }
@@ -42,7 +46,7 @@ impl Zstd {
             level: 0,
             use_dict,
             max_dict_size,
-            raw_dictionaries: None,
+            dictionaries: None,
             columns,
         }
     }
@@ -52,31 +56,18 @@ impl Zstd {
         self
     }
 
-    /// If using dictionaries, creates a list of [`DecoderDictionary`].
-    ///
-    /// Consumes `self.raw_dictionaries` in the process.
-    pub fn generate_decompress_dictionaries<'a>(&mut self) -> Option<Vec<DecoderDictionary<'a>>> {
-        self.raw_dictionaries.take().map(|dicts| {
-            // TODO Can we use ::new instead, and avoid consuming?
-            dicts.iter().map(|dict| DecoderDictionary::copy(dict)).collect()
-        })
-    }
+    /// Creates a list of [`Decompressor`] if using dictionaries.
+    pub fn decompressors(&self) -> Result<Vec<Decompressor<'_>>, NippyJarError> {
+        if let Some(dictionaries) = &self.dictionaries {
+            debug_assert!(dictionaries.len() == self.columns);
+            return dictionaries.decompressors()
+        }
 
-    /// Creates a list of [`Decompressor`] using the given dictionaries.
-    pub fn generate_decompressors<'a>(
-        &self,
-        dictionaries: &'a [DecoderDictionary<'a>],
-    ) -> Result<Vec<Decompressor<'a>>, NippyJarError> {
-        debug_assert!(dictionaries.len() == self.columns);
-
-        Ok(dictionaries
-            .iter()
-            .map(Decompressor::with_prepared_dictionary)
-            .collect::<Result<Vec<_>, _>>()?)
+        Ok(vec![])
     }
 
     /// If using dictionaries, creates a list of [`Compressor`].
-    pub fn generate_compressors<'a>(&self) -> Result<Option<Vec<Compressor<'a>>>, NippyJarError> {
+    pub fn compressors(&self) -> Result<Option<Vec<Compressor<'_>>>, NippyJarError> {
         match self.state {
             ZstdState::PendingDictionary => Err(NippyJarError::CompressorNotReady),
             ZstdState::Ready => {
@@ -84,18 +75,11 @@ impl Zstd {
                     return Ok(None)
                 }
 
-                let mut compressors = None;
-                if let Some(dictionaries) = &self.raw_dictionaries {
+                if let Some(dictionaries) = &self.dictionaries {
                     debug!(target: "nippy-jar", count=?dictionaries.len(), "Generating ZSTD compressor dictionaries.");
-
-                    let mut cmp = Vec::with_capacity(dictionaries.len());
-
-                    for dict in dictionaries {
-                        cmp.push(Compressor::with_dictionary(0, dict)?);
-                    }
-                    compressors = Some(cmp)
+                    return Ok(Some(dictionaries.compressors()?))
                 }
-                Ok(compressors)
+                Ok(None)
             }
         }
     }
@@ -243,9 +227,144 @@ impl Compression for Zstd {
 
         debug_assert_eq!(dictionaries.len(), self.columns);
 
-        self.raw_dictionaries = Some(dictionaries);
+        self.dictionaries = Some(Arc::new(ZstdDictionaries::new(dictionaries)));
         self.state = ZstdState::Ready;
 
         Ok(())
+    }
+}
+
+mod dictionaries_serde {
+    use super::*;
+
+    pub fn serialize<S>(
+        dictionaries: &Option<Arc<ZstdDictionaries<'static>>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match dictionaries {
+            Some(dicts) => serializer.serialize_some(dicts.as_ref()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<Arc<ZstdDictionaries<'static>>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let dictionaries: Option<Vec<RawDictionary>> = Option::deserialize(deserializer)?;
+        Ok(dictionaries.map(|dicts| Arc::new(ZstdDictionaries::load(dicts))))
+    }
+}
+
+/// List of [`ZstdDictionary`]
+#[cfg_attr(test, derive(PartialEq))]
+#[derive(Serialize, Deserialize, Deref)]
+pub struct ZstdDictionaries<'a>(Vec<ZstdDictionary<'a>>);
+
+impl<'a> std::fmt::Debug for ZstdDictionaries<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ZstdDictionaries").field("num", &self.len()).finish_non_exhaustive()
+    }
+}
+
+impl<'a> ZstdDictionaries<'a> {
+    /// Creates [`ZstdDictionaries`].
+    pub fn new(raw: Vec<RawDictionary>) -> Self {
+        Self(raw.into_iter().map(ZstdDictionary::Raw).collect())
+    }
+
+    /// Loads a list [`RawDictionary`] into a list of [`ZstdDictionary::Loaded`].
+    pub fn load(raw: Vec<RawDictionary>) -> Self {
+        Self(
+            raw.into_iter()
+                .map(|dict| ZstdDictionary::Loaded(DecoderDictionary::copy(&dict)))
+                .collect(),
+        )
+    }
+
+    /// Creates a list of decompressors from a list of [`ZstdDictionary::Loaded`].
+    pub fn decompressors(&self) -> Result<Vec<Decompressor<'_>>, NippyJarError> {
+        Ok(self
+            .iter()
+            .flat_map(|dict| {
+                dict.loaded()
+                    .ok_or(NippyJarError::DictionaryNotLoaded)
+                    .map(Decompressor::with_prepared_dictionary)
+            })
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Creates a list of compressors from a list of [`ZstdDictionary::Raw`].
+    pub fn compressors(&self) -> Result<Vec<Compressor<'_>>, NippyJarError> {
+        Ok(self
+            .iter()
+            .flat_map(|dict| {
+                dict.raw()
+                    .ok_or(NippyJarError::CompressorNotAllowed)
+                    .map(|dict| Compressor::with_dictionary(0, dict))
+            })
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+}
+
+/// A Zstd dictionary. It's created and serialized with [`ZstdDictionary::Raw`], and deserialized as
+/// [`ZstdDictionary::Loaded`].
+pub enum ZstdDictionary<'a> {
+    Raw(RawDictionary),
+    Loaded(DecoderDictionary<'a>),
+}
+
+impl<'a> ZstdDictionary<'a> {
+    /// Returns a reference to the expected `RawDictionary`
+    pub fn raw(&self) -> Option<&RawDictionary> {
+        match self {
+            ZstdDictionary::Raw(dict) => Some(dict),
+            ZstdDictionary::Loaded(_) => None,
+        }
+    }
+
+    /// Returns a reference to the expected `DecoderDictionary`
+    pub fn loaded(&self) -> Option<&DecoderDictionary<'_>> {
+        match self {
+            ZstdDictionary::Raw(_) => None,
+            ZstdDictionary::Loaded(dict) => Some(dict),
+        }
+    }
+}
+
+impl<'de, 'a> Deserialize<'de> for ZstdDictionary<'a> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let dict = RawDictionary::deserialize(deserializer)?;
+        Ok(Self::Loaded(DecoderDictionary::copy(&dict)))
+    }
+}
+
+impl<'a> Serialize for ZstdDictionary<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            ZstdDictionary::Raw(r) => r.serialize(serializer),
+            ZstdDictionary::Loaded(_) => unreachable!(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl<'a> PartialEq for ZstdDictionary<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        if let (Self::Raw(a), Self::Raw(b)) = (self, &other) {
+            return a == b
+        }
+        unimplemented!("`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value.");
     }
 }

@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Ethereum network support
-"""
+description = "Ethereum network support"
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
@@ -20,16 +18,17 @@ normal = [
 # reth
 reth-interfaces.workspace = true
 reth-primitives.workspace = true
-reth-net-common = { path = "../common" }
+reth-net-common.workspace = true
 reth-network-api.workspace = true
-reth-discv4 = { path = "../discv4" }
-reth-dns-discovery = { path = "../dns" }
-reth-eth-wire = { path = "../eth-wire" }
-reth-ecies = { path = "../ecies" }
+reth-discv4.workspace = true
+reth-dns-discovery.workspace = true
+reth-eth-wire.workspace = true
+reth-ecies.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
+reth-tokio-util.workspace = true
 
 alloy-rlp.workspace = true
 
@@ -67,16 +66,16 @@ tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
-reth-discv4 = { path = "../discv4", features = ["test-utils"] }
+reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 
 # we need to enable the test-utils feature in our own crate to use utils in
 # integration tests
-reth-network = { path = ".", features = ["test-utils"] }
+reth-network = { workspace = true, features = ["test-utils"] }
 
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-tracing = { path = "../../tracing" }
+reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 ethers-core = { workspace = true, default-features = false }
@@ -93,5 +92,12 @@ tempfile.workspace = true
 [features]
 default = ["serde"]
 serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr?/serde", "dep:serde_json"]
-test-utils = ["reth-provider/test-utils", "dep:enr", "dep:tempfile"]
+test-utils = ["reth-provider/test-utils", "dep:enr", "dep:tempfile", "reth-transaction-pool/test-utils"]
 geth-tests = []
+optimism = [
+    "reth-primitives/optimism",
+    "reth-transaction-pool/optimism",
+    "reth-provider/optimism",
+    "reth-network-api/optimism",
+    "reth-rpc-types/optimism",
+]

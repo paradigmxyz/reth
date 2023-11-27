@@ -5,12 +5,12 @@ use criterion::{
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::DatabaseEnv;
 use reth_interfaces::test_utils::TestConsensus;
-use reth_primitives::{stage::StageCheckpoint, PruneModes, MAINNET};
+use reth_primitives::{stage::StageCheckpoint, MAINNET};
 use reth_provider::ProviderFactory;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
-    test_utils::TestTransaction,
-    ExecInput, Stage, UnwindInput,
+    test_utils::TestStageDB,
+    ExecInput, Stage, StageExt, UnwindInput,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -62,7 +62,7 @@ fn transaction_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
     // don't need to run each stage for that many times
     group.sample_size(10);
-    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS, PruneModes::none());
+    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS, None);
 
     measure_stage(
         &mut group,
@@ -123,9 +123,9 @@ fn measure_stage_with_path<F, S>(
     label: String,
 ) where
     S: Clone + Stage<DatabaseEnv>,
-    F: Fn(S, &TestTransaction, StageRange),
+    F: Fn(S, &TestStageDB, StageRange),
 {
-    let tx = TestTransaction::new(&path);
+    let tx = TestStageDB::new(&path);
     let (input, _) = stage_range;
 
     group.bench_function(label, move |b| {
@@ -136,9 +136,13 @@ fn measure_stage_with_path<F, S>(
             },
             |_| async {
                 let mut stage = stage.clone();
-                let factory = ProviderFactory::new(tx.tx.as_ref(), MAINNET.clone());
+                let factory = ProviderFactory::new(tx.factory.db(), MAINNET.clone());
                 let provider = factory.provider_rw().unwrap();
-                stage.execute(&provider, input).await.unwrap();
+                stage
+                    .execute_ready(input)
+                    .await
+                    .and_then(|_| stage.execute(&provider, input))
+                    .unwrap();
                 provider.commit().unwrap();
             },
         )
@@ -153,7 +157,7 @@ fn measure_stage<F, S>(
     label: String,
 ) where
     S: Clone + Stage<DatabaseEnv>,
-    F: Fn(S, &TestTransaction, StageRange),
+    F: Fn(S, &TestStageDB, StageRange),
 {
     let path = setup::txs_testdata(block_interval.end);
 

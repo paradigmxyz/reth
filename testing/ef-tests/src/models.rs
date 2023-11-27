@@ -26,7 +26,9 @@ pub struct BlockchainTest {
     /// Block data.
     pub blocks: Vec<Block>,
     /// The expected post state.
-    pub post_state: Option<RootOrState>,
+    pub post_state: Option<BTreeMap<Address, Account>>,
+    /// The expected post state merkle root.
+    pub post_state_hash: Option<B256>,
     /// The test pre-state.
     pub pre: State,
     /// Hash of the best block.
@@ -35,7 +37,7 @@ pub struct BlockchainTest {
     pub network: ForkSpec,
     #[serde(default)]
     /// Engine spec.
-    pub self_engine: SealEngine,
+    pub seal_engine: SealEngine,
 }
 
 /// A block header in an Ethereum blockchain test.
@@ -148,28 +150,30 @@ pub struct State(BTreeMap<Address, Account>);
 
 impl State {
     /// Write the state to the database.
-    pub fn write_to_db<'a, Tx>(&self, tx: &'a Tx) -> Result<(), Error>
-    where
-        Tx: DbTxMut<'a>,
-    {
+    pub fn write_to_db(&self, tx: &impl DbTxMut) -> Result<(), Error> {
         for (&address, account) in self.0.iter() {
+            let hashed_address = keccak256(address);
             let has_code = !account.code.is_empty();
             let code_hash = has_code.then(|| keccak256(&account.code));
-            tx.put::<tables::PlainAccountState>(
-                address,
-                RethAccount {
-                    balance: account.balance.0,
-                    nonce: account.nonce.0.to::<u64>(),
-                    bytecode_hash: code_hash,
-                },
-            )?;
+            let reth_account = RethAccount {
+                balance: account.balance.0,
+                nonce: account.nonce.0.to::<u64>(),
+                bytecode_hash: code_hash,
+            };
+            tx.put::<tables::PlainAccountState>(address, reth_account)?;
+            tx.put::<tables::HashedAccount>(hashed_address, reth_account)?;
             if let Some(code_hash) = code_hash {
                 tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
             }
-            account.storage.iter().try_for_each(|(k, v)| {
+            account.storage.iter().filter(|(_, v)| v.0 != U256::ZERO).try_for_each(|(k, v)| {
+                let storage_key = B256::from_slice(&k.0.to_be_bytes::<32>());
                 tx.put::<tables::PlainStorageState>(
                     address,
-                    StorageEntry { key: B256::from_slice(&k.0.to_be_bytes::<32>()), value: v.0 },
+                    StorageEntry { key: storage_key, value: v.0 },
+                )?;
+                tx.put::<tables::HashedStorage>(
+                    hashed_address,
+                    StorageEntry { key: keccak256(storage_key), value: v.0 },
                 )
             })?;
         }
@@ -184,16 +188,6 @@ impl Deref for State {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
-}
-
-/// Merkle root hash or storage accounts.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-pub enum RootOrState {
-    /// If state is too big, only state root is present
-    Root(B256),
-    /// State
-    State(BTreeMap<Address, Account>),
 }
 
 /// An account.
@@ -214,10 +208,7 @@ impl Account {
     /// Check that the account matches what is in the database.
     ///
     /// In case of a mismatch, `Err(Error::Assertion)` is returned.
-    pub fn assert_db<'a, Tx>(&self, address: Address, tx: &'a Tx) -> Result<(), Error>
-    where
-        Tx: DbTx<'a>,
-    {
+    pub fn assert_db(&self, address: Address, tx: &impl DbTx) -> Result<(), Error> {
         let account = tx.get::<tables::PlainAccountState>(address)?.ok_or_else(|| {
             Error::Assertion(format!("Expected account ({address:?}) is missing from DB: {self:?}"))
         })?;
@@ -357,7 +348,6 @@ impl From<ForkSpec> for ChainSpec {
 
 /// Possible seal engines.
 #[derive(Debug, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub enum SealEngine {
     /// No consensus checks.
     #[default]

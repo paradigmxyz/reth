@@ -22,15 +22,17 @@ pub mod processor;
 pub mod state_change;
 
 /// revm executor factory.
-pub use factory::Factory;
+pub use factory::EvmProcessorFactory;
 
 /// reexport for convenience
 pub use reth_revm_inspectors::*;
-/// reexport for convenience
-pub use reth_revm_primitives::*;
 
 /// Re-export everything
 pub use revm::{self, *};
 
 /// Ethereum DAO hardfork state change data.
 pub mod eth_dao_fork;
+
+/// Optimism-specific implementation and utilities for the executor
+#[cfg(feature = "optimism")]
+pub mod optimism;

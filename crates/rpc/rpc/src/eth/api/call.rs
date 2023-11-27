@@ -12,17 +12,14 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
-use reth_revm::{
-    access_list::AccessListInspector,
-    database::{StateProviderDatabase, SubState},
-    env::tx_env_with_recovered,
-};
+use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
 use reth_rpc_types::{
-    state::StateOverride, BlockError, Bundle, CallRequest, EthCallResponse, StateContext,
+    state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
+    StateContext,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{
@@ -89,6 +86,7 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+
         let ((cfg, block_env, _), block) =
             futures::try_join!(self.evm_env_at(target_block), self.block_by_id(target_block))?;
 
@@ -109,7 +107,7 @@ where
 
         self.spawn_with_state_at_block(at.into(), move |state| {
             let mut results = Vec::with_capacity(transactions.len());
-            let mut db = SubState::new(StateProviderDatabase::new(state));
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
             if replay_block_txs {
                 // only need to replay the transactions in the block if not all transactions are
@@ -146,11 +144,10 @@ where
 
                 match ensure_success(res.result) {
                     Ok(output) => {
-                        results.push(EthCallResponse { output: Some(output), error: None });
+                        results.push(EthCallResponse { value: Some(output), error: None });
                     }
                     Err(err) => {
-                        results
-                            .push(EthCallResponse { output: None, error: Some(err.to_string()) });
+                        results.push(EthCallResponse { value: None, error: Some(err.to_string()) });
                     }
                 }
 
@@ -168,7 +165,7 @@ where
     /// Estimates the gas usage of the `request` with the state.
     ///
     /// This will execute the [CallRequest] and find the best gas limit via binary search
-    fn estimate_gas_with<S>(
+    pub fn estimate_gas_with<S>(
         &self,
         mut cfg: CfgEnv,
         block: BlockEnv,
@@ -198,7 +195,7 @@ where
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
-        let mut db = SubState::new(StateProviderDatabase::new(state));
+        let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
@@ -208,7 +205,7 @@ where
                     if no_code_callee {
                         // simple transfer, check if caller has sufficient funds
                         let available_funds =
-                            db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
+                            db.basic_ref(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
                         if env.tx.value > available_funds {
                             return Err(
                                 RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
@@ -232,11 +229,11 @@ where
 
         // if the provided gas limit is less than computed cap, use that
         let gas_limit = std::cmp::min(U256::from(env.tx.gas_limit), highest_gas_limit);
-        env.block.gas_limit = gas_limit;
+        env.tx.gas_limit = gas_limit.saturating_to();
 
         trace!(target: "rpc::eth::estimate", ?env, "Starting gas estimation");
 
-        // execute the call without writing to db
+        // transact with the highest __possible__ gas limit
         let ethres = transact(&mut db, env.clone());
 
         // Exceptional case: init used too much gas, we need to increase the gas limit and try
@@ -256,6 +253,8 @@ where
                 // succeeded
             }
             ExecutionResult::Halt { reason, gas_used } => {
+                // here we don't check for invalid opcode because already executed with highest gas
+                // limit
                 return Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
             }
             ExecutionResult::Revert { output, .. } => {
@@ -318,7 +317,11 @@ where
                 }
                 ExecutionResult::Halt { reason, .. } => {
                     match reason {
-                        Halt::OutOfGas(_) => {
+                        Halt::OutOfGas(_) | Halt::InvalidFEOpcode => {
+                            // either out of gas or invalid opcode can be thrown dynamically if
+                            // gasLeft is too low, so we treat this as `out of gas`, we know this
+                            // call succeeds with a higher gaslimit. common usage of invalid opcode in openzeppelin <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
+
                             // increase the lowest gas limit
                             lowest_gas_limit = mid_gas_limit;
                         }
@@ -337,11 +340,23 @@ where
         Ok(U256::from(highest_gas_limit))
     }
 
+    /// Creates the AccessList for the `request` at the [BlockId] or latest.
     pub(crate) async fn create_access_list_at(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+    ) -> EthResult<AccessListWithGasUsed> {
+        self.on_blocking_task(|this| async move {
+            this.create_access_list_with(request, block_number).await
+        })
+        .await
+    }
+
+    async fn create_access_list_with(
         &self,
         mut request: CallRequest,
         at: Option<BlockId>,
-    ) -> EthResult<AccessList> {
+    ) -> EthResult<AccessListWithGasUsed> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
@@ -357,7 +372,7 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         env.cfg.disable_base_fee = true;
 
-        let mut db = SubState::new(StateProviderDatabase::new(state));
+        let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
             // no gas limit was provided in the request, so we need to cap the request's gas limit
@@ -368,7 +383,7 @@ where
         let to = if let Some(to) = request.to {
             to
         } else {
-            let nonce = db.basic(from)?.unwrap_or_default().nonce;
+            let nonce = db.basic_ref(from)?.unwrap_or_default().nonce;
             from.create(nonce)
         };
 
@@ -377,7 +392,7 @@ where
 
         let precompiles = get_precompiles(env.cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
-        let (result, _env) = inspect(&mut db, env, &mut inspector)?;
+        let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
             ExecutionResult::Halt { reason, .. } => Err(match reason {
@@ -389,7 +404,14 @@ where
             }
             ExecutionResult::Success { .. } => Ok(()),
         }?;
-        Ok(inspector.into_access_list())
+
+        let access_list = inspector.into_access_list();
+
+        // calculate the gas used using the access list
+        request.access_list = Some(access_list.clone());
+        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state())?;
+
+        Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 }
 

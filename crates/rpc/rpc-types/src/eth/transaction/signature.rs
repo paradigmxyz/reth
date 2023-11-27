@@ -1,5 +1,5 @@
 //! Signature related RPC values
-use reth_primitives::U256;
+use alloy_primitives::U256;
 use serde::{Deserialize, Serialize};
 
 /// Container type for all signature fields in RPC

@@ -1,39 +1,53 @@
-use crate::utils::DbTool;
-use clap::{clap_derive::ValueEnum, Parser};
-use eyre::WrapErr;
+use clap::{builder::RangedU64ValueParser, Parser};
 use itertools::Itertools;
-use reth_db::{database::Database, open_db_read_only, table::Table, tables, DatabaseEnvRO};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use reth_db::{database::Database, open_db_read_only, DatabaseEnv};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::{
-    compression::{DecoderDictionary, Decompressor},
-    NippyJar,
+use reth_nippy_jar::NippyJar;
+use reth_primitives::{
+    snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
+    BlockNumber, ChainSpec, SnapshotSegment,
 };
-use reth_primitives::ChainSpec;
-use reth_provider::providers::SnapshotProvider;
+use reth_provider::{BlockNumReader, ProviderFactory, TransactionsProviderExt};
+use reth_snapshot::{segments as snap_segments, segments::Segment};
 use std::{
+    ops::RangeInclusive,
     path::{Path, PathBuf},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 mod bench;
 mod headers;
-
-pub(crate) type Rows = Vec<Vec<Vec<u8>>>;
-pub(crate) type JarConfig = (Snapshots, Compression, PerfectHashingFunction);
+mod receipts;
+mod transactions;
 
 #[derive(Parser, Debug)]
 /// Arguments for the `reth db snapshot` command.
 pub struct Command {
-    /// Snapshot categories to generate.
-    modes: Vec<Snapshots>,
+    /// Snapshot segments to generate.
+    segments: Vec<SnapshotSegment>,
 
     /// Starting block for the snapshot.
     #[arg(long, short, default_value = "0")]
-    from: usize,
+    from: BlockNumber,
 
     /// Number of blocks in the snapshot.
     #[arg(long, short, default_value = "500000")]
-    block_interval: usize,
+    block_interval: u64,
+
+    /// Sets the number of snapshots built in parallel. Note: Each parallel build is
+    /// memory-intensive.
+    #[arg(
+        long, short,
+        default_value = "1",
+        value_parser = RangedU64ValueParser::<u64>::new().range(1..)
+    )]
+    parallel: u64,
+
+    /// Flag to skip snapshot creation and print snapshot files stats.
+    #[arg(long, default_value = "false")]
+    only_stats: bool,
 
     /// Flag to enable database-to-snapshot benchmarking.
     #[arg(long, default_value = "false")]
@@ -48,11 +62,11 @@ pub struct Command {
     compression: Vec<Compression>,
 
     /// Flag to enable inclusion list filters and PHFs.
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "false")]
     with_filters: bool,
 
     /// Specifies the perfect hashing function to use.
-    #[arg(long, value_delimiter = ',', default_value_if("with_filters", "true", "mphf"))]
+    #[arg(long, value_delimiter = ',', default_value_if("with_filters", "true", "fmph"))]
     phf: Vec<PerfectHashingFunction>,
 }
 
@@ -65,40 +79,68 @@ impl Command {
         chain: Arc<ChainSpec>,
     ) -> eyre::Result<()> {
         let all_combinations = self
-            .modes
+            .segments
             .iter()
             .cartesian_product(self.compression.iter())
             .cartesian_product(self.phf.iter());
 
         {
             let db = open_db_read_only(db_path, None)?;
-            let tool = DbTool::new(&db, chain.clone())?;
+            let factory = Arc::new(ProviderFactory::new(db, chain.clone()));
 
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
+                    let filters = if self.with_filters {
+                        Filters::WithFilters(InclusionFilter::Cuckoo, *phf)
+                    } else {
+                        Filters::WithoutFilters
+                    };
+
                     match mode {
-                        Snapshots::Headers => {
-                            self.generate_headers_snapshot(&tool, *compression, *phf)?
-                        }
-                        Snapshots::Transactions => todo!(),
-                        Snapshots::Receipts => todo!(),
+                        SnapshotSegment::Headers => self.generate_snapshot::<DatabaseEnv>(
+                            factory.clone(),
+                            snap_segments::Headers::new(*compression, filters),
+                        )?,
+                        SnapshotSegment::Transactions => self.generate_snapshot::<DatabaseEnv>(
+                            factory.clone(),
+                            snap_segments::Transactions::new(*compression, filters),
+                        )?,
+                        SnapshotSegment::Receipts => self.generate_snapshot::<DatabaseEnv>(
+                            factory.clone(),
+                            snap_segments::Receipts::new(*compression, filters),
+                        )?,
                     }
                 }
             }
         }
 
         if self.only_bench || self.bench {
-            for ((mode, compression), phf) in all_combinations {
+            for ((mode, compression), phf) in all_combinations.clone() {
                 match mode {
-                    Snapshots::Headers => self.bench_headers_snapshot(
+                    SnapshotSegment::Headers => self.bench_headers_snapshot(
                         db_path,
                         log_level,
                         chain.clone(),
                         *compression,
+                        InclusionFilter::Cuckoo,
                         *phf,
                     )?,
-                    Snapshots::Transactions => todo!(),
-                    Snapshots::Receipts => todo!(),
+                    SnapshotSegment::Transactions => self.bench_transactions_snapshot(
+                        db_path,
+                        log_level,
+                        chain.clone(),
+                        *compression,
+                        InclusionFilter::Cuckoo,
+                        *phf,
+                    )?,
+                    SnapshotSegment::Receipts => self.bench_receipts_snapshot(
+                        db_path,
+                        log_level,
+                        chain.clone(),
+                        *compression,
+                        InclusionFilter::Cuckoo,
+                        *phf,
+                    )?,
                 }
             }
         }
@@ -106,111 +148,105 @@ impl Command {
         Ok(())
     }
 
-    /// Returns a [`SnapshotProvider`] of the provided [`NippyJar`], alongside a list of
-    /// [`DecoderDictionary`] and [`Decompressor`] if necessary.
-    fn prepare_jar_provider<'a>(
-        &self,
-        jar: &'a mut NippyJar,
-        dictionaries: &'a mut Option<Vec<DecoderDictionary<'_>>>,
-    ) -> eyre::Result<(SnapshotProvider<'a>, Vec<Decompressor<'a>>)> {
-        let mut decompressors: Vec<Decompressor<'_>> = vec![];
-        if let Some(reth_nippy_jar::compression::Compressors::Zstd(zstd)) = jar.compressor_mut() {
-            if zstd.use_dict {
-                *dictionaries = zstd.generate_decompress_dictionaries();
-                decompressors = zstd.generate_decompressors(dictionaries.as_ref().expect("qed"))?;
-            }
+    /// Generates successive inclusive block ranges up to the tip starting at `self.from`.
+    fn block_ranges(&self, tip: BlockNumber) -> Vec<RangeInclusive<BlockNumber>> {
+        let mut from = self.from;
+        let mut ranges = Vec::new();
+
+        while from <= tip {
+            let end_range = std::cmp::min(from + self.block_interval - 1, tip);
+            ranges.push(from..=end_range);
+            from = end_range + 1;
         }
 
-        Ok((SnapshotProvider { jar: &*jar, jar_start_block: self.from as u64 }, decompressors))
+        ranges
     }
 
-    /// Returns a [`NippyJar`] according to the desired configuration.
-    fn prepare_jar<F: Fn() -> eyre::Result<Rows>>(
+    /// Generates snapshots from `self.from` with a `self.block_interval`. Generates them in
+    /// parallel if specified.
+    fn generate_snapshot<DB: Database>(
         &self,
-        num_columns: usize,
-        jar_config: JarConfig,
-        tool: &DbTool<'_, DatabaseEnvRO>,
-        prepare_compression: F,
-    ) -> eyre::Result<NippyJar> {
-        let (mode, compression, phf) = jar_config;
-        let snap_file = self.get_file_path(jar_config);
-        let table_name = match mode {
-            Snapshots::Headers => tables::Headers::NAME,
-            Snapshots::Transactions | Snapshots::Receipts => tables::Transactions::NAME,
-        };
+        factory: Arc<ProviderFactory<DB>>,
+        segment: impl Segment + Send + Sync,
+    ) -> eyre::Result<()> {
+        let dir = PathBuf::default();
+        let ranges = self.block_ranges(factory.last_block_number()?);
 
-        let total_rows = tool.db.view(|tx| {
-            let table_db = tx.inner.open_db(Some(table_name)).wrap_err("Could not open db.")?;
-            let stats = tx
-                .inner
-                .db_stat(&table_db)
-                .wrap_err(format!("Could not find table: {}", table_name))?;
+        let mut created_snapshots = vec![];
 
-            Ok::<usize, eyre::Error>((stats.entries() - self.from).min(self.block_interval))
-        })??;
+        // Filter/PHF is memory intensive, so we have to limit the parallelism.
+        for block_ranges in ranges.chunks(self.parallel as usize) {
+            let created_files = block_ranges
+                .into_par_iter()
+                .map(|block_range| {
+                    let provider = factory.provider()?;
 
-        assert!(
-            total_rows >= self.block_interval,
-            "Not enough rows on database {} < {}.",
-            total_rows,
-            self.block_interval
+                    if !self.only_stats {
+                        segment.snapshot::<DB>(&provider, &dir, block_range.clone())?;
+                    }
+
+                    let tx_range =
+                        provider.transaction_range_by_block_range(block_range.clone())?;
+
+                    Ok(segment.segment().filename(block_range, &tx_range))
+                })
+                .collect::<Result<Vec<_>, eyre::Report>>()?;
+
+            created_snapshots.extend(created_files);
+        }
+
+        self.stats(created_snapshots)
+    }
+
+    /// Prints detailed statistics for each snapshot, including loading time.
+    ///
+    /// This function loads each snapshot from the provided paths and prints
+    /// statistics about various aspects of each snapshot, such as filters size,
+    /// offset index size, offset list size, and loading time.
+    fn stats(&self, snapshots: Vec<impl AsRef<Path>>) -> eyre::Result<()> {
+        let mb = 1024.0 * 1024.0;
+        let mut total_filters_size = 0;
+        let mut total_index_size = 0;
+        let mut total_offsets_size = 0;
+        let mut total_duration = Duration::new(0, 0);
+        let mut total_file_size = 0;
+
+        for snap in &snapshots {
+            let start_time = Instant::now();
+            let jar = NippyJar::<SegmentHeader>::load(snap.as_ref())?;
+            let duration = start_time.elapsed();
+            let file_size = snap.as_ref().metadata()?.len();
+
+            total_filters_size += jar.filter_size();
+            total_index_size += jar.offsets_index_size();
+            total_offsets_size += jar.offsets_size();
+            total_duration += duration;
+            total_file_size += file_size;
+
+            println!("Snapshot: {:?}", snap.as_ref().file_name());
+            println!("  File Size:           {:>7.2} MB", file_size as f64 / mb);
+            println!("  Filters Size:        {:>7.2} MB", jar.filter_size() as f64 / mb);
+            println!("  Offset Index Size:   {:>7.2} MB", jar.offsets_index_size() as f64 / mb);
+            println!("  Offset List Size:    {:>7.2} MB", jar.offsets_size() as f64 / mb);
+            println!(
+                "  Loading Time:        {:>7.2} ms | {:>7.2} µs",
+                duration.as_millis() as f64,
+                duration.as_micros() as f64
+            );
+        }
+
+        let avg_duration = total_duration / snapshots.len() as u32;
+
+        println!("Total Filters Size:     {:>7.2} MB", total_filters_size as f64 / mb);
+        println!("Total Offset Index Size: {:>7.2} MB", total_index_size as f64 / mb);
+        println!("Total Offset List Size:  {:>7.2} MB", total_offsets_size as f64 / mb);
+        println!("Total File Size:         {:>7.2} GB", total_file_size as f64 / (mb * 1024.0));
+        println!(
+            "Average Loading Time:    {:>7.2} ms | {:>7.2} µs",
+            avg_duration.as_millis() as f64,
+            avg_duration.as_micros() as f64
         );
 
-        let mut nippy_jar = NippyJar::new_without_header(num_columns, snap_file.as_path());
-        nippy_jar = match compression {
-            Compression::Lz4 => nippy_jar.with_lz4(),
-            Compression::Zstd => nippy_jar.with_zstd(false, 0),
-            Compression::ZstdWithDictionary => {
-                let dataset = prepare_compression()?;
-
-                nippy_jar = nippy_jar.with_zstd(true, 5_000_000);
-                nippy_jar.prepare_compression(dataset)?;
-                nippy_jar
-            }
-            Compression::Uncompressed => nippy_jar,
-        };
-
-        if self.with_filters {
-            nippy_jar = nippy_jar.with_cuckoo_filter(self.block_interval);
-            nippy_jar = match phf {
-                PerfectHashingFunction::Mphf => nippy_jar.with_mphf(),
-                PerfectHashingFunction::GoMphf => nippy_jar.with_gomphf(),
-            };
-        }
-
-        Ok(nippy_jar)
+        Ok(())
     }
-
-    /// Generates a filename according to the desired configuration.
-    fn get_file_path(&self, jar_config: JarConfig) -> PathBuf {
-        let (mode, compression, phf) = jar_config;
-        format!(
-            "snapshot_{mode:?}_{}_{}_{compression:?}_{phf:?}",
-            self.from,
-            self.from + self.block_interval
-        )
-        .into()
-    }
-}
-
-#[derive(Debug, Copy, Clone, ValueEnum)]
-pub(crate) enum Snapshots {
-    Headers,
-    Transactions,
-    Receipts,
-}
-
-#[derive(Debug, Copy, Clone, ValueEnum, Default)]
-pub(crate) enum Compression {
-    Lz4,
-    Zstd,
-    ZstdWithDictionary,
-    #[default]
-    Uncompressed,
-}
-
-#[derive(Debug, Copy, Clone, ValueEnum)]
-pub(crate) enum PerfectHashingFunction {
-    Mphf,
-    GoMphf,
 }

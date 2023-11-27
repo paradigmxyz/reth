@@ -1,6 +1,6 @@
 use crate::Bytes;
 use alloy_rlp::RlpEncodableWrapper;
-use derive_more::{Deref, DerefMut, From, Index};
+use derive_more::{Deref, From, Index};
 use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -41,10 +41,7 @@ impl Compact for StoredNibblesSubKey {
         64 + 1
     }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let len = buf[64] as usize;
         let inner = Vec::from(&buf[..len]).into();
         (Self(StoredNibbles { inner }), &buf[65..])
@@ -63,18 +60,7 @@ impl Compact for StoredNibblesSubKey {
 /// `hex_data` has its upper 4 bits set to zero and the lower 4 bits
 /// representing the nibble value.
 #[derive(
-    Default,
-    Clone,
-    Eq,
-    PartialEq,
-    RlpEncodableWrapper,
-    PartialOrd,
-    Ord,
-    Hash,
-    Index,
-    From,
-    Deref,
-    DerefMut,
+    Default, Clone, Eq, PartialEq, RlpEncodableWrapper, PartialOrd, Ord, Hash, Index, From, Deref,
 )]
 pub struct Nibbles {
     /// The inner representation of the nibble sequence.
@@ -276,8 +262,6 @@ impl Nibbles {
 
     /// Extend the current nibbles with another nibbles.
     pub fn extend(&mut self, b: impl AsRef<[u8]>) {
-        // self.hex_data.extend_from_slice(b.as_ref());
-
         let mut bytes = self.hex_data.to_vec();
         bytes.extend_from_slice(b.as_ref());
         self.hex_data = bytes.into();

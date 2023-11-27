@@ -6,15 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Merkle trie implementation
-"""
+description = "Merkle trie implementation"
 
 [dependencies]
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-db = { path = "../storage/db" }
+reth-db.workspace = true
 
 alloy-rlp.workspace = true
 
@@ -27,6 +25,7 @@ tracing.workspace = true
 # misc 
 thiserror.workspace = true
 derive_more = "0.99"
+auto_impl = "1"
 
 # test-utils
 triehash = { version = "0.8", optional = true }
@@ -35,7 +34,7 @@ triehash = { version = "0.8", optional = true }
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
-reth-provider.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 
 # trie
 triehash = "0.8"
@@ -44,8 +43,10 @@ triehash = "0.8"
 proptest.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
 tokio-stream.workspace = true
-criterion = "0.5"
+once_cell.workspace = true
+serde_json.workspace = true
 pretty_assertions = "1.3.0"
+criterion.workspace = true
 
 [features]
 test-utils = ["triehash"]

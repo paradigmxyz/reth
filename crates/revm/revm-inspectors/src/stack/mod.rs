@@ -1,4 +1,4 @@
-use reth_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use revm::{
     inspectors::CustomPrintTracer,
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
@@ -23,7 +23,7 @@ pub enum Hook {
     /// Hook on a specific block.
     Block(u64),
     /// Hook on a specific transaction hash.
-    Transaction(TxHash),
+    Transaction(B256),
     /// Hooks on every transaction in a block.
     All,
 }
@@ -62,7 +62,7 @@ impl InspectorStack {
     }
 
     /// Check if the inspector should be used.
-    pub fn should_inspect(&self, env: &Env, tx_hash: TxHash) -> bool {
+    pub fn should_inspect(&self, env: &Env, tx_hash: B256) -> bool {
         match self.hook {
             Hook::None => false,
             Hook::Block(block) => env.block.number.to::<u64>() == block,
@@ -100,38 +100,16 @@ impl<DB> Inspector<DB> for InspectorStack
 where
     DB: Database,
 {
-    fn initialize_interp(
-        &mut self,
-        interpreter: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn initialize_interp(&mut self, interpreter: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.initialize_interp(interpreter, data);
-
-            // Allow inspectors to exit early
-            if status != InstructionResult::Continue {
-                return status
-            }
+            inspector.initialize_interp(interpreter, data);
         });
-
-        InstructionResult::Continue
     }
 
-    fn step(
-        &mut self,
-        interpreter: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-    ) -> InstructionResult {
+    fn step(&mut self, interpreter: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step(interpreter, data);
-
-            // Allow inspectors to exit early
-            if status != InstructionResult::Continue {
-                return status
-            }
+            inspector.step(interpreter, data);
         });
-
-        InstructionResult::Continue
     }
 
     fn log(
@@ -146,22 +124,10 @@ where
         });
     }
 
-    fn step_end(
-        &mut self,
-        interpreter: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        eval: InstructionResult,
-    ) -> InstructionResult {
+    fn step_end(&mut self, interpreter: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            let status = inspector.step_end(interpreter, data, eval);
-
-            // Allow inspectors to exit early
-            if status != InstructionResult::Continue {
-                return status
-            }
+            inspector.step_end(interpreter, data);
         });
-
-        InstructionResult::Continue
     }
 
     fn call(

@@ -56,15 +56,34 @@ body:
     validations:
       required: false
   - type: input
+    id: client-version
     attributes:
       label: What version/commit are you on?
       description: This can be obtained with `reth --version` or `git rev-parse HEAD` if you've built Reth from source
     validations:
       required: false
   - type: textarea
+    id: database-version
     attributes:
       label: What database version are you on?
       description: This can be obtained with `reth db version`
+    validations:
+      required: false
+  - type: dropdown
+    id: node-type
+    attributes:
+      label: What type of node are you running?
+      options:
+        - Archive (default)
+        - Full via --full flag
+        - Pruned with custom reth.toml config
+    validations:
+      required: false
+  - type: textarea
+    id: prune-config
+    attributes:
+      label: What prune config do you use, if any?
+      description: The `[prune]` section in `reth.toml` file
     validations:
       required: false
   - type: input

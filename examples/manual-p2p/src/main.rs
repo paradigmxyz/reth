@@ -16,7 +16,9 @@ use reth_eth_wire::{
     EthMessage, EthStream, HelloMessage, P2PStream, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_network::config::rng_secret_key;
-use reth_primitives::{mainnet_nodes, Chain, Hardfork, Head, NodeRecord, MAINNET, MAINNET_GENESIS};
+use reth_primitives::{
+    mainnet_nodes, Chain, Hardfork, Head, NodeRecord, MAINNET, MAINNET_GENESIS_HASH,
+};
 use secp256k1::{SecretKey, SECP256K1};
 use tokio::net::TcpStream;
 
@@ -99,11 +101,11 @@ async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthSt
 
     let status = Status::builder()
         .chain(Chain::mainnet())
-        .genesis(MAINNET_GENESIS)
+        .genesis(MAINNET_GENESIS_HASH)
         .forkid(Hardfork::Shanghai.fork_id(&MAINNET).unwrap())
         .build();
 
-    let status = Status { version: p2p_stream.shared_capability().version(), ..status };
+    let status = Status { version: p2p_stream.shared_capabilities().eth()?.version(), ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     Ok(eth_unauthed.handshake(status, fork_filter).await?)
 }

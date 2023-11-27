@@ -1,6 +1,6 @@
 //! Contains types related to the Cancun hardfork that will be used by RPC to communicate with the
 //! beacon consensus engine.
-use reth_primitives::B256;
+use alloy_primitives::B256;
 
 /// Fields introduced in `engine_newPayloadV3` that are not present in the `ExecutionPayload` RPC
 /// object.

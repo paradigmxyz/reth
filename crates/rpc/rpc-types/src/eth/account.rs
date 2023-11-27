@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
-use reth_primitives::{serde_helper::JsonStorageKey, Address, Bytes, B256, B512, U256, U64};
+use crate::serde_helpers::storage::JsonStorageKey;
+use alloy_primitives::{Address, Bytes, B256, B512, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// Account information.
@@ -12,7 +13,7 @@ pub struct AccountInfo {
 /// Data structure with proof for one single storage-entry
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StorageProof {
+pub struct EIP1186StorageProof {
     /// Storage key.
     pub key: JsonStorageKey,
     /// Value that the key holds
@@ -31,7 +32,7 @@ pub struct EIP1186AccountProofResponse {
     pub nonce: U64,
     pub storage_hash: B256,
     pub account_proof: Vec<Bytes>,
-    pub storage_proof: Vec<StorageProof>,
+    pub storage_proof: Vec<EIP1186StorageProof>,
 }
 
 /// Extended account information (used by `parity_allAccountInfo`).
