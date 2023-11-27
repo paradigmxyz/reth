@@ -37,40 +37,32 @@ impl Default for FeeHistoryCacheConfig {
 /// Wrapper struct for BTreeMap
 #[derive(Debug, Clone)]
 pub struct FeeHistoryCache {
-    /// Stores the lower bound of the cache
-    lower_bound: Arc<AtomicU64>,
-    upper_bound: Arc<AtomicU64>,
-    /// Config for FeeHistoryCache, consists of resolution for percentile approximation
-    /// and max number of blocks
-    config: FeeHistoryCacheConfig,
-    /// Stores the entries of the cache
-    entries: Arc<tokio::sync::RwLock<BTreeMap<u64, FeeHistoryEntry>>>,
-    #[allow(unused)]
-    eth_cache: EthStateCache,
+    inner: Arc<FeeHistoryCacheInner>,
 }
 
 impl FeeHistoryCache {
     /// Creates new FeeHistoryCache instance, initialize it with the mose recent data, set bounds
     pub fn new(eth_cache: EthStateCache, config: FeeHistoryCacheConfig) -> Self {
-        let init_tree_map = BTreeMap::new();
-
-        let entries = Arc::new(tokio::sync::RwLock::new(init_tree_map));
-
-        let upper_bound = Arc::new(AtomicU64::new(0));
-        let lower_bound = Arc::new(AtomicU64::new(0));
-
-        FeeHistoryCache { config, entries, upper_bound, lower_bound, eth_cache }
+        let inner = FeeHistoryCacheInner {
+            lower_bound: Default::default(),
+            upper_bound: Default::default(),
+            config,
+            entries: Default::default(),
+            eth_cache,
+        };
+        Self { inner: Arc::new(inner) }
     }
 
     /// How the cache is configured.
+    #[inline]
     pub fn config(&self) -> &FeeHistoryCacheConfig {
-        &self.config
+        &self.inner.config
     }
 
     /// Returns the configured resolution for percentile approximation.
     #[inline]
     pub fn resolution(&self) -> u64 {
-        self.config.resolution
+        self.config().resolution
     }
 
     /// Processing of the arriving blocks
@@ -78,7 +70,7 @@ impl FeeHistoryCache {
     where
         I: Iterator<Item = (SealedBlock, Vec<Receipt>)>,
     {
-        let mut entries = self.entries.write().await;
+        let mut entries = self.inner.entries.write().await;
 
         let percentiles = self.predefined_percentiles();
         // Insert all new blocks and calculate approximated rewards
@@ -96,30 +88,30 @@ impl FeeHistoryCache {
         }
 
         // enforce bounds by popping the oldest entries
-        while entries.len() > self.config.max_blocks as usize {
+        while entries.len() > self.inner.config.max_blocks as usize {
             entries.pop_first();
         }
 
         if entries.len() == 0 {
-            self.upper_bound.store(0, SeqCst);
-            self.lower_bound.store(0, SeqCst);
+            self.inner.upper_bound.store(0, SeqCst);
+            self.inner.lower_bound.store(0, SeqCst);
             return
         }
 
         let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
         let lower_bound = *entries.first_entry().expect("Contains at least one entry").key();
-        self.upper_bound.store(upper_bound, SeqCst);
-        self.lower_bound.store(lower_bound, SeqCst);
+        self.inner.upper_bound.store(upper_bound, SeqCst);
+        self.inner.lower_bound.store(lower_bound, SeqCst);
     }
 
     /// Get UpperBound value for FeeHistoryCache
     pub fn upper_bound(&self) -> u64 {
-        self.upper_bound.load(SeqCst)
+        self.inner.upper_bound.load(SeqCst)
     }
 
     /// Get LowerBound value for FeeHistoryCache
     pub fn lower_bound(&self) -> u64 {
-        self.lower_bound.load(SeqCst)
+        self.inner.lower_bound.load(SeqCst)
     }
 
     /// Collect fee history for given range.
@@ -136,7 +128,7 @@ impl FeeHistoryCache {
         let lower_bound = self.lower_bound();
         let upper_bound = self.upper_bound();
         if start_block >= lower_bound && end_block <= upper_bound {
-            let entries = self.entries.read().await;
+            let entries = self.inner.entries.read().await;
             let result = entries
                 .range(start_block..=end_block + 1)
                 .map(|(_, fee_entry)| fee_entry.clone())
@@ -159,6 +151,21 @@ impl FeeHistoryCache {
         let res = self.resolution() as f64;
         (0..=100 * self.resolution()).map(|p| p as f64 / res).collect()
     }
+}
+
+/// Container type for shared state in [FeeHistoryCache]
+#[derive(Debug)]
+struct FeeHistoryCacheInner {
+    /// Stores the lower bound of the cache
+    lower_bound: AtomicU64,
+    upper_bound: AtomicU64,
+    /// Config for FeeHistoryCache, consists of resolution for percentile approximation
+    /// and max number of blocks
+    config: FeeHistoryCacheConfig,
+    /// Stores the entries of the cache
+    entries: tokio::sync::RwLock<BTreeMap<u64, FeeHistoryEntry>>,
+    #[allow(unused)]
+    eth_cache: EthStateCache,
 }
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
