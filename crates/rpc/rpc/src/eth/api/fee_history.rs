@@ -43,7 +43,9 @@ pub struct FeeHistoryCache {
     /// Config for FeeHistoryCache, consists of resolution for percentile approximation
     /// and max number of blocks
     config: FeeHistoryCacheConfig,
+    /// Stores the entries of the cache
     entries: Arc<tokio::sync::RwLock<BTreeMap<u64, FeeHistoryEntry>>>,
+    #[allow(unused)]
     eth_cache: EthStateCache,
 }
 
@@ -74,21 +76,20 @@ impl FeeHistoryCache {
     /// Processing of the arriving blocks
     async fn insert_blocks<I>(&self, blocks: I)
     where
-        I: Iterator<Item = (SealedBlock, Vec<TransactionSigned>, Vec<Receipt>)>,
+        I: Iterator<Item = (SealedBlock, Vec<Receipt>)>,
     {
         let mut entries = self.entries.write().await;
 
         let percentiles = self.predefined_percentiles();
         // Insert all new blocks and calculate approximated rewards
-        for (block, transactions, receipts) in blocks {
+        for (block, receipts) in blocks {
             let mut fee_history_entry = FeeHistoryEntry::new(&block);
-
             fee_history_entry.rewards = calculate_reward_percentiles_for_block(
                 &percentiles,
                 fee_history_entry.gas_used,
                 fee_history_entry.base_fee_per_gas,
-                transactions,
-                receipts,
+                &block.body,
+                &receipts,
             )
             .unwrap_or_default();
             entries.insert(block.number, fee_history_entry);
@@ -122,8 +123,9 @@ impl FeeHistoryCache {
     }
 
     /// Collect fee history for given range.
+    ///
     /// This function retrieves fee history entries from the cache for the specified range.
-    /// If the requested range (star_block to end_block) is within the cache bounds,
+    /// If the requested range (start_block to end_block) is within the cache bounds,
     /// it returns the corresponding entries.
     /// Otherwise it returns None.
     pub async fn get_history(
@@ -164,30 +166,22 @@ impl FeeHistoryCache {
 pub async fn fee_history_cache_new_blocks_task<St, Provider>(
     fee_history_cache: FeeHistoryCache,
     mut events: St,
-    provider: Provider,
+    _provider: Provider,
 ) where
     St: Stream<Item = CanonStateNotification> + Unpin + 'static,
     Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
 {
-    // // Init default state
-    // if fee_history_cache.upper_bound() == 0 {
-    //     let last_block_number = provider.last_block_number().unwrap_or(0);
-    //
-    //     let start_block = if last_block_number > fee_history_cache.config.max_blocks {
-    //         last_block_number - fee_history_cache.config.max_blocks
-    //     } else {
-    //         0
-    //     };
-    //
-    //     // let blocks =
-    // provider.block_range(start_block..=last_block_number).unwrap_or_default();     // let
-    // sealed = blocks.into_iter().map(|block| block.seal_slow()).collect::<Vec<_>>();     //
-    //     // fee_history_cache.on_new_chain(sealed.iter()).await;
-    // }
+    // TODO: keep track of gaps in the chain and fill them from disk
 
     while let Some(event) = events.next().await {
         if let Some(committed) = event.committed() {
-            // fee_history_cache.insert_blocks(committed).await;
+            let (blocks, receipts): (Vec<_>, Vec<_>) = committed
+                .blocks_and_receipts()
+                .map(|(block, receipts)| {
+                    (block.block.clone(), receipts.iter().flatten().cloned().collect::<Vec<_>>())
+                })
+                .unzip();
+            fee_history_cache.insert_blocks(blocks.into_iter().zip(receipts)).await;
         }
     }
 }
@@ -201,11 +195,11 @@ pub(crate) fn calculate_reward_percentiles_for_block(
     percentiles: &[f64],
     gas_used: u64,
     base_fee_per_gas: u64,
-    transactions: Vec<TransactionSigned>,
-    receipts: Vec<Receipt>,
+    transactions: &[TransactionSigned],
+    receipts: &[Receipt],
 ) -> Result<Vec<U256>, EthApiError> {
     let mut transactions = transactions
-        .into_iter()
+        .iter()
         .zip(receipts)
         .scan(0, |previous_gas, (tx, receipt)| {
             // Convert the cumulative gas used in the receipts

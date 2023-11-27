@@ -1154,6 +1154,10 @@ where
     }
 
     /// Creates the [EthHandlers] type the first time this is called.
+    ///
+    /// This will spawn the required service tasks for [EthApi] for:
+    ///   - [EthStateCache]
+    ///   - [FeeHistoryCache]
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events>) -> R,

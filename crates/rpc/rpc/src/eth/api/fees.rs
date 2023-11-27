@@ -1,19 +1,18 @@
 //! Contains RPC handler implementations for fee history.
 
 use crate::{
-    eth::error::{EthApiError, EthResult},
+    eth::{
+        api::fee_history::{calculate_reward_percentiles_for_block, FeeHistoryEntry},
+        error::{EthApiError, EthResult},
+    },
     EthApi,
 };
-
 use reth_network_api::NetworkInfo;
 use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::FeeHistory;
 use reth_transaction_pool::TransactionPool;
-
 use tracing::debug;
-
-use crate::eth::api::fee_history::{calculate_reward_percentiles_for_block, FeeHistoryEntry};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
 where
@@ -105,13 +104,13 @@ where
         // SAFETY: We ensured that block count is capped
         let start_block = end_block_plus - block_count;
 
-        // Check if the requested range is within the cache bounds
-        let fee_entries = self.fee_history_cache().get_history(start_block, end_block).await;
-
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
         let mut base_fee_per_gas: Vec<U256> = Vec::new();
         let mut gas_used_ratio: Vec<f64> = Vec::new();
         let mut rewards: Vec<Vec<U256>> = Vec::new();
+
+        // Check if the requested range is within the cache bounds
+        let fee_entries = self.fee_history_cache().get_history(start_block, end_block).await;
 
         if let Some(fee_entries) = fee_entries {
             if fee_entries.len() != block_count as usize {
@@ -130,7 +129,7 @@ where
                     rewards.push(block_rewards);
                 }
             }
-            let last_entry = fee_entries.last().expect("is present");
+            let last_entry = fee_entries.last().expect("is not empty");
             base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
                 last_entry.gas_used,
                 last_entry.gas_limit,
@@ -160,8 +159,8 @@ where
                             percentiles,
                             header.gas_used,
                             header.base_fee_per_gas.unwrap_or_default(),
-                            transactions,
-                            receipts,
+                            &transactions,
+                            &receipts,
                         )
                         .unwrap_or_default(),
                     );
