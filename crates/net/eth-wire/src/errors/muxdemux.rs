@@ -19,10 +19,10 @@ pub enum MuxDemuxError {
     /// Capability stream type is not shared with peer on underlying p2p connection.
     #[error("stream type is not shared on this p2p connection")]
     CapabilityNotShared,
-    /// Capability stream type has not been configured in [`MuxDemuxer`].
+    /// Capability stream type has not been configured in [`crate::muxdemux::MuxDemuxer`].
     #[error("stream type is not configured")]
     CapabilityNotConfigured,
-    /// Capability stream type has not been configured for [`SharedCapabilities`] type.
+    /// Capability stream type has not been configured for [`crate::capability::SharedCapabilities`] type.
     #[error("stream type is not recognized")]
     CapabilityNotRecognized,
     /// Message ID is out of range.
