@@ -128,6 +128,7 @@ where
         })
         .await
     }
+    /// Estimate gas needed for execution of the `request` at the [BlockId].
     pub async fn estimate_gas_at(&self, request: CallRequest, at: BlockId) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
 
