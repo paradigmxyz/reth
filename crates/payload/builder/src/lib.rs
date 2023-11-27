@@ -36,6 +36,7 @@
 //! pub struct EmptyBlockPayloadJobGenerator;
 //!
 //! impl PayloadJobGenerator for EmptyBlockPayloadJobGenerator {
+//!     type PayloadType = BuiltPayload;
 //!     type Job = EmptyBlockPayloadJob;
 //!
 //! /// This is invoked when the node receives payload attributes from the beacon node via `engine_forkchoiceUpdatedV1`
@@ -50,7 +51,7 @@
 //!   attributes: PayloadBuilderAttributes,
 //! }
 //!
-//! impl PayloadJob for EmptyBlockPayloadJob {
+//! impl PayloadJob<BuiltPayload> for EmptyBlockPayloadJob {
 //!    type ResolvePayloadFuture = futures_util::future::Ready<Result<Arc<BuiltPayload>, PayloadBuilderError>>;
 //!
 //! fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {

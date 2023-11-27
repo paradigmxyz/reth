@@ -264,7 +264,7 @@ where
 
 impl<Gen> Future for PayloadBuilderService<Gen>
 where
-    Gen: PayloadJobGenerator<PayloadType = BuiltPayload> + Unpin,
+    Gen: PayloadJobGenerator<PayloadType = BuiltPayload> + std::marker::Unpin,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
 {
     type Output = ();
