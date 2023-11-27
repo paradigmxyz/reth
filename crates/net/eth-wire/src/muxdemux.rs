@@ -238,8 +238,10 @@ where
     type Item = Result<BytesMut, MuxDemuxError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // poll once for main stream and each stream clone, since stream clones cannot poll
-        // `MuxDemux`
+        // advances the wire and either yields or delegates the message
+        //
+        // poll once for main stream and each stream clone, since stream clones are weak and
+        // cannot poll the `MuxDemuxer` themselves
         for _ in 0..self.demux.len() + 1 {
             let res = ready!(self.inner.poll_next_unpin(cx));
             let mut bytes = match res {
@@ -250,9 +252,13 @@ where
 
             // normalize message id suffix for capability
             let cap = self.unmask_msg_id(&mut bytes[0])?;
+
+            // yield message for main stream
             if cap == (&self.owner).into() {
                 return Poll::Ready(Some(Ok(bytes)))
             }
+
+            // delegate message for stream clone
             let tx = self.demux.get(&cap).ok_or(CapabilityNotConfigured)?;
             tx.send(bytes).map_err(|_| SendIngressBytesFailed)?;
         }
