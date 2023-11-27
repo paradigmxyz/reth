@@ -54,6 +54,11 @@ impl Block {
     }
 
     /// Transform into a [`BlockWithSenders`].
+    ///
+    /// # Panics
+    ///
+    /// If the number of senders does not match the number of transactions in the block.
+    #[track_caller]
     pub fn with_senders(self, senders: Vec<Address>) -> BlockWithSenders {
         assert_eq!(self.body.len(), senders.len(), "Unequal number of senders");
 
