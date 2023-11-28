@@ -18,15 +18,15 @@ pub struct ExecutionDurationRecord {
     time_recorder: Instant,
 
     /// total time of execute inner.
-    pub execute_inner: Duration,
+    pub execute_inner_time: Duration,
     /// total time of get block td and block_with_senders.
-    pub read_block: Duration,
+    pub fetching_block_time: Duration,
     /// total time of revm execute tx(execute_and_verify_receipt).
-    pub execute_tx: Duration,
+    pub execution_time: Duration,
     /// total time of process state(state.extend)
-    pub process_state: Duration,
+    pub process_state_time: Duration,
     /// total time of write to db
-    pub write_to_db: Duration,
+    pub write_to_db_time: Duration,
 }
 
 #[cfg(feature = "enable_execution_duration_record")]
@@ -35,11 +35,11 @@ impl Default for ExecutionDurationRecord {
         Self {
             inner_recorder: Instant::now(),
             time_recorder: Instant::now(),
-            execute_inner: Duration::default(),
-            read_block: Duration::default(),
-            execute_tx: Duration::default(),
-            process_state: Duration::default(),
-            write_to_db: Duration::default(),
+            execute_inner_time: Duration::default(),
+            fetching_block_time: Duration::default(),
+            execution_time: Duration::default(),
+            process_state_time: Duration::default(),
+            write_to_db_time: Duration::default(),
         }
     }
 }
@@ -58,84 +58,84 @@ impl ExecutionDurationRecord {
     }
     /// add time of execute_inner
     pub(crate) fn add_execute_inner_duration(&mut self) {
-        self.execute_inner =
-            self.execute_inner.checked_add(self.inner_recorder.elapsed()).expect("overflow");
+        self.execute_inner_time =
+            self.execute_inner_time.checked_add(self.inner_recorder.elapsed()).expect("overflow");
     }
     /// add time of get block td and block_with_senders
     pub(crate) fn add_read_block_duration(&mut self) {
-        self.read_block =
-            self.read_block.checked_add(self.time_recorder.elapsed()).expect("overflow");
+        self.fetching_block_time =
+            self.fetching_block_time.checked_add(self.time_recorder.elapsed()).expect("overflow");
     }
     /// add time of revm execute tx
     pub(crate) fn add_execute_tx_duration(&mut self) {
-        self.execute_tx =
-            self.execute_tx.checked_add(self.time_recorder.elapsed()).expect("overflow");
+        self.execution_time =
+            self.execution_time.checked_add(self.time_recorder.elapsed()).expect("overflow");
     }
     /// add time of process state
     pub(crate) fn add_process_state_duration(&mut self) {
-        self.process_state =
-            self.process_state.checked_add(self.time_recorder.elapsed()).expect("overflow");
+        self.process_state_time =
+            self.process_state_time.checked_add(self.time_recorder.elapsed()).expect("overflow");
     }
     /// add time of write to db
     pub(crate) fn add_write_to_db_duration(&mut self) {
-        self.write_to_db =
-            self.write_to_db.checked_add(self.time_recorder.elapsed()).expect("overflow");
+        self.write_to_db_time =
+            self.write_to_db_time.checked_add(self.time_recorder.elapsed()).expect("overflow");
     }
     /// add
     pub fn add(&mut self, other: ExecutionDurationRecord) {
-        self.execute_inner = self.execute_inner.checked_add(other.execute_inner).expect("overflow");
-        self.read_block = self.read_block.checked_add(other.read_block).expect("overflow");
-        self.execute_tx = self.execute_tx.checked_add(other.execute_tx).expect("overflow");
-        self.process_state = self.process_state.checked_add(other.process_state).expect("overflow");
-        self.write_to_db = self.write_to_db.checked_add(other.write_to_db).expect("overflow");
+        self.execute_inner_time = self.execute_inner_time.checked_add(other.execute_inner_time).expect("overflow");
+        self.fetching_block_time = self.fetching_block_time.checked_add(other.fetching_block_time).expect("overflow");
+        self.execution_time = self.execution_time.checked_add(other.execution_time).expect("overflow");
+        self.process_state_time = self.process_state_time.checked_add(other.process_state_time).expect("overflow");
+        self.write_to_db_time = self.write_to_db_time.checked_add(other.write_to_db_time).expect("overflow");
     }
 
     fn execute_inner_time(&self) -> f64 {
-        self.execute_inner.as_secs_f64() / Self::SECONDS_ONE_HOUR
+        self.execute_inner_time.as_secs_f64() / Self::SECONDS_ONE_HOUR
     }
 
     fn fetching_block_time(&self) -> f64 {
-        self.execute_tx.as_secs_f64() / Self::SECONDS_ONE_HOUR
+        self.fetching_block_time.as_secs_f64() / Self::SECONDS_ONE_HOUR
     }
 
     fn fetching_block_time_percent(&self) -> f64 {
-        self.fetching_block_time() / self.execute_inner_time()
+        self.fetching_block_time() * 100.0 / self.execute_inner_time()
     }
 
-    fn execute_tx_time(&self) -> f64 {
-        self.execute_tx.as_secs_f64() / Self::SECONDS_ONE_HOUR
+    fn execution_time(&self) -> f64 {
+        self.execution_time.as_secs_f64() / Self::SECONDS_ONE_HOUR
     }
 
-    fn execute_tx_time_percent(&self) -> f64 {
-        self.execute_tx_time() / self.execute_inner_time()
+    fn execution_time_percent(&self) -> f64 {
+        self.execution_time() * 100.0 / self.execute_inner_time()
     }
 
     fn process_state_time(&self) -> f64 {
-        self.process_state.as_secs_f64() / Self::SECONDS_ONE_HOUR
+        self.process_state_time.as_secs_f64() / Self::SECONDS_ONE_HOUR
     }
 
     fn process_state_time_percent(&self) -> f64 {
-        self.process_state_time() / self.execute_inner_time()
+        self.process_state_time() * 100.0 / self.execute_inner_time()
     }
 
     fn write_to_db_time(&self) -> f64 {
-        self.write_to_db.as_secs_f64() / Self::SECONDS_ONE_HOUR
+        self.write_to_db_time.as_secs_f64() / Self::SECONDS_ONE_HOUR
     }
 
     fn write_to_db_time_percent(&self) -> f64 {
-        self.write_to_db_time() / self.execute_inner_time()
+        self.write_to_db_time() * 100.0 / self.execute_inner_time()
     }
 
     fn misc_time(&self) -> f64 {
         self.execute_inner_time() -
             self.fetching_block_time() -
-            self.execute_tx_time() -
+            self.execution_time() -
             self.process_state_time() -
             self.write_to_db_time()
     }
 
     fn misc_time_percent(&self) -> f64 {
-        self.misc_time() / self.execute_inner_time()
+        self.misc_time() * 100.0 / self.execute_inner_time()
     }
 
     fn print_line(&self, cat: &str, time: f64, time_percent: f64) {
@@ -161,7 +161,7 @@ impl ExecutionDurationRecord {
             self.fetching_block_time(),
             self.fetching_block_time_percent(),
         );
-        self.print_line("execution", self.execute_tx_time(), self.execute_tx_time_percent());
+        self.print_line("execution", self.execution_time(), self.execution_time_percent());
         self.print_line(
             "process_state",
             self.process_state_time(),
