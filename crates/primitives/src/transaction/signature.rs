@@ -135,7 +135,12 @@ impl Signature {
         })
     }
 
-    /// Recover signer from message hash, _without ensuring that the signature has a low S value_.
+    /// Recover signer from message hash, _without ensuring that the signature has a low `s`
+    /// value_.
+    ///
+    /// Using this for signature validation will succeed, even if the signature is malleable or not
+    /// compliant with EIP-2. This is provided for compatibility with old signatures which have
+    /// large `s` values.
     pub fn recover_signer_unchecked(&self, hash: B256) -> Option<Address> {
         let mut sig: [u8; 65] = [0; 65];
 
