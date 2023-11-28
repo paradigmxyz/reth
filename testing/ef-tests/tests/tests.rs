@@ -10,7 +10,7 @@ macro_rules! general_state_test {
             // <https://github.com/paradigmxyz/reth/issues/5582>
             std::thread::Builder::new()
                 .stack_size(
-                    1024 * 1024 * 4, // 4MB
+                    1024 * 1024 * 8, // 8MB
                 )
                 .spawn(move || {
                     BlockchainTests::new(format!("GeneralStateTests/{}", stringify!($dir))).run();
