@@ -51,7 +51,7 @@ pub trait EthApi {
     #[method(name = "getBlockByHash")]
     async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<RichBlock>>;
 
-    /// Returns information about a block by number.
+    /// Returns information about a block by number
     #[method(name = "getBlockByNumber")]
     async fn block_by_number(
         &self,
