@@ -11,7 +11,7 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
-use reth_interfaces::RethResult;
+
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
