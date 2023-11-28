@@ -916,7 +916,7 @@ mod tests {
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
         for (slot, value) in post_state_storage.iter() {
-            if *value == U256::ZERO {
+            if value.is_zero() {
                 hashed_storage.insert_zero_valued_slot(*slot);
             } else {
                 hashed_storage.insert_non_zero_valued_storage(*slot, *value);
@@ -1030,7 +1030,7 @@ mod tests {
             for (address, (wiped, storage)) in &post_state_storages {
                 let mut hashed_storage = HashedStorage::new(*wiped);
                 for (slot, value) in storage {
-                    if *value == U256::ZERO {
+                    if value.is_zero() {
                         hashed_storage.insert_zero_valued_slot(*slot);
                     } else {
                         hashed_storage.insert_non_zero_valued_storage(*slot, *value);

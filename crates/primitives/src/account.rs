@@ -34,7 +34,7 @@ impl Account {
             Some(hash) => hash == KECCAK_EMPTY,
         };
 
-        self.nonce == 0 && self.balance == U256::ZERO && is_bytecode_empty
+        self.nonce == 0 && self.balance.is_zero() && is_bytecode_empty
     }
 
     /// Returns an account bytecode's hash.

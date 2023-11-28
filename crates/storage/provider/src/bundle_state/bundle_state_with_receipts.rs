@@ -143,7 +143,7 @@ impl BundleStateWithReceipts {
 
             for (key, value) in account.storage.iter() {
                 let hashed_key = keccak256(B256::new(key.to_be_bytes()));
-                if value.present_value == U256::ZERO {
+                if value.present_value.is_zero() {
                     hashed_storage.insert_zero_valued_slot(hashed_key);
                 } else {
                     hashed_storage.insert_non_zero_valued_storage(hashed_key, value.present_value);
