@@ -90,7 +90,7 @@ fn payload_validation() {
     assert_matches!(
 
         try_into_sealed_block(block_with_zero_base_fee,None),
-        Err(PayloadError::BaseFee(val)) if val == U256::ZERO
+        Err(PayloadError::BaseFee(val)) if val.is_zero()
     );
 
     // Invalid encoded transactions

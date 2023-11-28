@@ -72,7 +72,7 @@ impl Signature {
     #[inline]
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
         #[cfg(feature = "optimism")]
-        if self.r == U256::ZERO && self.s == U256::ZERO {
+        if self.r.is_zero() && self.s.is_zero() {
             return 0
         }
 

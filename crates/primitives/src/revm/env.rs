@@ -93,26 +93,44 @@ pub fn fill_block_env_with_coinbase(
 /// Return the coinbase address for the given header and chain spec.
 pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool) -> Address {
     if chain_spec.chain == Chain::goerli() && !after_merge {
-        recover_header_signer(header).expect("failed to recover signer")
+        recover_header_signer(header).unwrap_or_else(|err| {
+            panic!(
+                "Failed to recover goerli Clique Consensus signer from header ({}, {}) using extradata {}: {:?}",
+                header.number, header.hash_slow(), header.extra_data, err
+            )
+        })
     } else {
         header.beneficiary
     }
 }
 
+/// Error type for recovering Clique signer from a header.
+#[derive(Debug, thiserror::Error)]
+pub enum CliqueSignerRecoveryError {
+    /// Header extradata is too short.
+    #[error("Invalid extra data length")]
+    InvalidExtraData,
+    /// Recovery failed.
+    #[error("Invalid signature: {0}")]
+    InvalidSignature(#[from] secp256k1::Error),
+}
+
 /// Recover the account from signed header per clique consensus rules.
-pub fn recover_header_signer(header: &Header) -> Option<Address> {
+pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRecoveryError> {
     let extra_data_len = header.extra_data.len();
     // Fixed number of extra-data suffix bytes reserved for signer signature.
     // 65 bytes fixed as signatures are based on the standard secp256k1 curve.
     // Filled with zeros on genesis block.
     let signature_start_byte = extra_data_len - 65;
-    let signature: [u8; 65] = header.extra_data[signature_start_byte..].try_into().ok()?;
+    let signature: [u8; 65] = header.extra_data[signature_start_byte..]
+        .try_into()
+        .map_err(|_| CliqueSignerRecoveryError::InvalidExtraData)?;
     let seal_hash = {
         let mut header_to_seal = header.clone();
         header_to_seal.extra_data = Bytes::from(header.extra_data[..signature_start_byte].to_vec());
         header_to_seal.hash_slow()
     };
-    recover_signer(&signature, &seal_hash.0).ok()
+    recover_signer(&signature, &seal_hash.0).map_err(CliqueSignerRecoveryError::InvalidSignature)
 }
 
 /// Returns a new [TxEnv] filled with the transaction's data.
