@@ -41,15 +41,6 @@ use crate::{
 
 use MuxDemuxError::*;
 
-/// The stream type is be used to identify the channel on which the [`MuxDemuxer`] should send
-/// demuxed p2p outputs. Each reth capability stream type is identified by the message type it
-/// handles. For example [`EthMessage`] maps to [`crate::EthStream`].
-#[derive(Eq, PartialEq, Hash, Debug)]
-pub enum CapStreamType {
-    /// Key for [`crate::EthStream`] type.
-    Eth,
-}
-
 /// Stream MUX/DEMUX acts like a regular stream and sink for the owning stream, and handles bytes
 /// belonging to other streams over their respective channels.
 #[derive(Debug)]
