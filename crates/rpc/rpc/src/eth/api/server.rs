@@ -266,12 +266,14 @@ where
         &self,
         request: CallRequest,
         block_number: Option<BlockId>,
+        state_override: Option<StateOverride>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
         Ok(self
             .estimate_gas_at(
                 request,
                 block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+                EvmOverrides { state: state_override, block: None },
             )
             .await?)
     }

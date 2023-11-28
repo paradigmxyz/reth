@@ -41,14 +41,32 @@ where
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [BlockId].
-    pub async fn estimate_gas_at(&self, request: CallRequest, at: BlockId) -> EthResult<U256> {
+    pub async fn estimate_gas_at(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        overrides: EvmOverrides,
+    ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
+        let this = self.clone();
+        self.inner
+            .blocking_task_pool
+            .spawn(move || {
+                let state = this.state_at(at)?;
+                let mut db = CacheDB::new(StateProviderDatabase::new(&state));
 
-        self.on_blocking_task(|this| async move {
-            let state = this.state_at(at)?;
-            this.estimate_gas_with(cfg, block_env, request, state)
-        })
-        .await
+                let env = prepare_call_env(
+                    cfg,
+                    block_env,
+                    request.clone(),
+                    this.call_gas_limit(),
+                    &mut db,
+                    overrides,
+                )?;
+                this.estimate_gas_with(env.cfg, env.block, request, state)
+            })
+            .await
+            .map_err(|_| EthApiError::InternalBlockingTaskError)?
     }
 
     /// Executes the call request (`eth_call`) and returns the output
