@@ -43,8 +43,6 @@ pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
     ) -> Option<Self::ConnectionHandler>;
 }
 
-trait InformConnHandler: fmt::Debug + Sized {}
-
 /// Stream messages to and from app <> capability stream.
 pub trait StreamInAppMessages:
     Stream<Item = dyn fmt::Debug> // e.g. stream ActiveSessionMessage
