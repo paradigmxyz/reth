@@ -201,14 +201,16 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     ///
     /// # Arguments
     /// * `segment` - The segment of the snapshot to query.
-    /// * `range` - The range of data to fetch.
+    /// * `block_range` - The range of data to fetch.
     /// * `fetch_from_snapshot` - A function to fetch data from the snapshot.
     /// * `fetch_from_database` - A function to fetch data from the database.
-    /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is terminated when this function returns false, thereby filtering the data based on the provided condition.
+    /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is
+    ///   terminated when this function returns false, thereby filtering the data based on the
+    ///   provided condition.
     fn get_range_with_snapshot<T, P>(
         &self,
         segment: SnapshotSegment,
-        range: Range<u64>,
+        block_range: Range<u64>,
         fetch_from_snapshot: impl Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
         fetch_from_database: impl Fn(Range<u64>, P) -> ProviderResult<Vec<T>>,
         mut predicate: P,
@@ -216,7 +218,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     where
         P: FnMut(&T) -> bool,
     {
-        let mut adjusted_range = to_range(range);
+        let mut adjusted_range = to_range(block_range);
         let mut data = Vec::new();
 
         if let Some(snapshot_provider) = &self.snapshot_provider {
@@ -237,6 +239,33 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         }
 
         Ok(data)
+    }
+
+    /// Retrieves data from the database or snapshot, wherever it's available.
+    ///
+    /// # Arguments
+    /// * `segment` - The segment of the snapshot to check against.
+    /// * `block_number` - Requested block number
+    /// * `fetch_from_snapshot` - A closure that defines how to fetch the data from the snapshot
+    ///   provider.
+    /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
+    ///   when the snapshot doesn't contain the required data or is not available.
+    fn get_with_snapshot<T>(
+        &self,
+        segment: SnapshotSegment,
+        block_number: u64,
+        fetch_from_snapshot: impl Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
+        fetch_from_database: impl Fn() -> ProviderResult<Option<T>>,
+    ) -> ProviderResult<Option<T>> {
+        if let Some(provider) = &self.snapshot_provider {
+            if provider
+                .get_highest_snapshot(segment)
+                .map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= block_number)
+            {
+                return fetch_from_snapshot(provider);
+            }
+        }
+        fetch_from_database()
     }
 }
 
@@ -974,16 +1003,12 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        if let Some(provider) = &self.snapshot_provider {
-            if provider
-                .get_highest_snapshot(SnapshotSegment::Headers)
-                .map_or(false, |block| block > num)
-            {
-                return provider.header_by_number(num);
-            }
-        }
-
-        Ok(self.tx.get::<tables::Headers>(num)?)
+        self.get_with_snapshot(
+            SnapshotSegment::Headers,
+            num,
+            |snapshot| snapshot.header_by_number(num),
+            || Ok(self.tx.get::<tables::Headers>(num)?),
+        )
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
@@ -1001,16 +1026,12 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
             return Ok(Some(td))
         }
 
-        if let Some(provider) = &self.snapshot_provider {
-            if provider
-                .get_highest_snapshot(SnapshotSegment::Headers)
-                .map_or(false, |block| block >= number)
-            {
-                return provider.header_td_by_number(number);
-            }
-        }
-
-        Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
+        self.get_with_snapshot(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.header_td_by_number(number),
+            || Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0)),
+        )
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
@@ -1030,23 +1051,21 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        if let Some(provider) = &self.snapshot_provider {
-            if provider
-                .get_highest_snapshot(SnapshotSegment::Headers)
-                .map_or(false, |block| block >= number)
-            {
-                return provider.sealed_header(number);
-            }
-        }
-
-        if let Some(header) = self.header_by_number(number)? {
-            let hash = self
-                .block_hash(number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-            Ok(Some(header.seal(hash)))
-        } else {
-            Ok(None)
-        }
+        self.get_with_snapshot(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.sealed_header(number),
+            || {
+                if let Some(header) = self.header_by_number(number)? {
+                    let hash = self
+                        .block_hash(number)?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+                    Ok(Some(header.seal(hash)))
+                } else {
+                    Ok(None)
+                }
+            },
+        )
     }
 
     fn sealed_headers_while(
@@ -1080,16 +1099,12 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        if let Some(provider) = &self.snapshot_provider {
-            if provider
-                .get_highest_snapshot(SnapshotSegment::Headers)
-                .map_or(false, |block| block >= number)
-            {
-                return provider.block_hash(number);
-            }
-        }
-
-        Ok(self.tx.get::<tables::CanonicalHeaders>(number)?)
+        self.get_with_snapshot(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.block_hash(number),
+            || Ok(self.tx.get::<tables::CanonicalHeaders>(number)?),
+        )
     }
 
     fn canonical_hashes_range(
@@ -1097,30 +1112,19 @@ impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let mut range = start..end;
-        let mut hashes = Vec::with_capacity((range.end - range.start) as usize);
-
-        if let Some(provider) = &self.snapshot_provider {
-            if let Some(highest) = provider.get_highest_snapshot(SnapshotSegment::Headers) {
-                if range.start <= highest {
-                    hashes.extend(
-                        provider.canonical_hashes_range(range.start, range.end.min(highest + 1))?,
-                    );
-                }
-                range.start = range.start.max(highest + 1);
-            }
-        }
-
-        if range.end > range.start {
-            hashes.extend(
+        self.get_range_with_snapshot(
+            SnapshotSegment::Headers,
+            start..end,
+            |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
+            |range, _| {
                 self.tx
                     .cursor_read::<tables::CanonicalHeaders>()?
                     .walk_range(range)?
                     .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-                    .collect::<ProviderResult<Vec<_>>>()?,
-            )
-        }
-        Ok(hashes)
+                    .collect::<ProviderResult<Vec<_>>>()
+            },
+            |_| true,
+        )
     }
 }
 
