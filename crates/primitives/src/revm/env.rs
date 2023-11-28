@@ -129,6 +129,8 @@ pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRec
         header_to_seal.extra_data = Bytes::from(header.extra_data[..signature_start_byte].to_vec());
         header_to_seal.hash_slow()
     };
+
+    // TODO: does this need to be checked w.r.t EIP-2?
     recover_signer(&signature, &seal_hash.0).map_err(CliqueSignerRecoveryError::InvalidSignature)
 }
 
