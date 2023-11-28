@@ -445,8 +445,9 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let mut transactions = Vec::with_capacity(stored_transactions.len());
         for (id, stored) in stored_transactions {
+            let is_data_excluded = stored.is_transaction_data_excluded();
             let transaction = self.transaction_data_store.stored_tx_into_signed(stored)?;
-            if TAKE {
+            if TAKE && is_data_excluded {
                 self.transaction_data_store.remove(transaction.hash)?;
             }
             transactions.push((id, transaction));

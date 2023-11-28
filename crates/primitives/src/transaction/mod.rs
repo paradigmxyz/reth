@@ -919,6 +919,11 @@ impl StoredTransaction {
         )
     }
 
+    /// Returns `true` if transaction data is stored elsewhere.
+    pub fn is_transaction_data_excluded(&self) -> bool {
+        self.stored_transaction_data.is_excluded()
+    }
+
     /// Returns the hash of this transaction.
     /// Either it is stored or re-calculated.
     pub fn hash(&self) -> TxHash {
