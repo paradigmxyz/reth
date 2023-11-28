@@ -30,8 +30,8 @@ use reth_revm::{
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
-    BlockError, CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt,
-    TransactionRequest, TypedTransactionRequest,
+    CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -779,10 +779,10 @@ where
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) =
-            futures::try_join!(self.evm_env_at(block_id), self.block_by_id(block_id),)?;
+            futures::try_join!(self.evm_env_at(block_id), self.block_with_senders(block_id),)?;
 
-        let block = match block {
-            Some(block) => block,
+        let (block, senders) = match block {
+            Some(block) => block.into_components(),
             None => return Ok(None),
         };
 
@@ -805,7 +805,8 @@ where
                 .take(max_transactions)
                 .enumerate()
                 .map(|(idx, tx)| -> EthResult<_> {
-                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                    let tx =
+                        TransactionSignedEcRecovered::from_signed_transaction(tx, senders[idx]);
                     let tx_info = TransactionInfo {
                         hash: Some(tx.hash()),
                         index: Some(idx as u64),
