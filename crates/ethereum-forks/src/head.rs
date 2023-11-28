@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// The head block is the highest fully synced block.
 ///
-/// Note: This is a slimmed down version of [Header], primarily for communicating the highest block
+/// Note: This is a slimmed down version of Header, primarily for communicating the highest block
 /// with the P2P network and the RPC.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
