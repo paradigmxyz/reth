@@ -262,7 +262,7 @@ impl SnapshotProvider {
 
         'outer: for number in range {
             'inner: loop {
-                match get_fn(&mut cursor, number.into())? {
+                match get_fn(&mut cursor, number)? {
                     Some(res) => {
                         if !predicate(&res) {
                             break 'outer
@@ -323,7 +323,7 @@ impl HeaderProvider for SnapshotProvider {
         self.fetch_range(
             SnapshotSegment::Headers,
             to_range(range),
-            |cursor, number| Ok(cursor.get_one::<HeaderMask<Header>>(number.into())?),
+            |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
             |_| true,
         )
     }
@@ -364,7 +364,7 @@ impl BlockHashReader for SnapshotProvider {
         self.fetch_range(
             SnapshotSegment::Headers,
             start..end,
-            |cursor, number| Ok(cursor.get_one::<HeaderMask<BlockHash>>(number.into())?),
+            |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
             |_| true,
         )
     }
