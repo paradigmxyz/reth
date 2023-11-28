@@ -14,17 +14,18 @@ use reth_rpc_types::{
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 #[async_trait]
 pub trait EthApi {
-    /// Executes   complex RPC calls to Ethereum nodes
+    /// Returns the protocol version encoded as a string.
+    #[method(name = "protocolVersion")]
+    async fn protocol_version(&self) -> RpcResult<U64>;
+
+    /// Executes complex RPC calls to Ethereum nodes
     #[method(name = "ethMulticallV1")]
     async fn eth_multicall_v1(
         &self,
         multicall: MulticallBundle,
         state_context: Option<StateContext>,
-        mut state_override: Option<StateOverride>,
-    ) -> EthResult<EthCallResponse>;
-    /// Returns the protocol version encoded as a string.
-    #[method(name = "protocolVersion")]
-    async fn protocol_version(&self) -> RpcResult<U64>;
+        state_override: Option<StateOverride>,
+    ) -> RpcResult<EthCallResponse>;
 
     /// Returns an object with data about the sync status or false.
     #[method(name = "syncing")]
