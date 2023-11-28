@@ -181,7 +181,7 @@ pub enum PendingSessionEvent {
         /// The remote node's user agent, usually containing the client name and version
         client_id: String,
         /// Extra rlpx sub protocol connections.
-        _extra_conns: Vec<Pin<Box<dyn StreamInAppMessages>>>,
+        extra_conns: Vec<Pin<Box<dyn StreamInAppMessages>>>,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {

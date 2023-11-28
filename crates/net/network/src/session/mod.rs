@@ -3,6 +3,7 @@ use crate::{
     message::PeerMessage,
     metrics::SessionManagerMetrics,
     session::{active::ActiveSession, config::SessionCounter},
+    StreamInAppMessages,
 };
 use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
@@ -25,6 +26,7 @@ use std::{
     collections::HashMap,
     future::Future,
     net::SocketAddr,
+    pin::Pin,
     sync::{atomic::AtomicU64, Arc},
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -105,6 +107,8 @@ pub struct SessionManager {
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Additional RLPx sub-protocols to be used by the session manager.
     extra_protocols: RlpxSubProtocols,
+    /// All active extra protocol sessions that are ready to exchange messages.
+    _active_extra_protocol_sessions: HashMap<PeerId, Vec<Pin<Box<dyn StreamInAppMessages>>>>,
     /// Used to measure inbound & outbound bandwidth across all managed streams
     bandwidth_meter: BandwidthMeter,
     /// Metrics for the session manager.
@@ -149,6 +153,7 @@ impl SessionManager {
             active_session_rx: ReceiverStream::new(active_session_rx),
             bandwidth_meter,
             extra_protocols,
+            _active_extra_protocol_sessions: Default::default(),
             metrics: Default::default(),
         }
     }
@@ -418,7 +423,7 @@ impl SessionManager {
                 status,
                 direction,
                 client_id,
-                _extra_conns,
+                extra_conns,
             } => {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
@@ -501,6 +506,8 @@ impl SessionManager {
 
                 self.active_sessions.insert(peer_id, handle);
                 self.counter.inc_active(&direction);
+
+                self._active_extra_protocol_sessions.insert(peer_id, extra_conns);
 
                 if direction.is_outgoing() {
                     self.metrics.total_dial_successes.increment(1);
@@ -997,7 +1004,7 @@ async fn authenticate_stream(
     };
 
     // more than one protocol is shared, init conns for these protocols
-    let _extra_conns = if eth_stream.inner().shared_capabilities().len() > 1 {
+    let extra_conns = if eth_stream.inner().shared_capabilities().len() > 1 {
         let mut extra_conns =
             Vec::with_capacity(eth_stream.inner().shared_capabilities().len() - 1);
 
@@ -1055,6 +1062,6 @@ async fn authenticate_stream(
         conn: Box::new(eth_stream),
         direction,
         client_id: their_hello.client_version,
-        _extra_conns,
+        extra_conns,
     }
 }
