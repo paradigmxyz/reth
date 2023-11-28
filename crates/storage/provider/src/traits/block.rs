@@ -10,6 +10,7 @@ use reth_primitives::{
     ChainSpec, Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
     B256,
 };
+use reth_trie::{hashed_cursor::HashedPostState, updates::TrieUpdates};
 use std::ops::RangeInclusive;
 
 /// Enum to control transaction hash inclusion.
@@ -291,10 +292,12 @@ pub trait BlockWriter: Send + Sync {
     /// # Returns
     ///
     /// Returns `Ok(())` on success, or an error if any operation fails.
-    fn append_blocks_with_bundle_state(
+    fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         state: BundleStateWithReceipts,
+        hashed_state: HashedPostState,
+        trie_updates: TrieUpdates,
         prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<()>;
 }

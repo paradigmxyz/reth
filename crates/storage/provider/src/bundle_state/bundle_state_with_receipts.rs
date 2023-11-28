@@ -128,7 +128,6 @@ impl BundleStateWithReceipts {
     ///
     /// The hashed post state.
     pub fn hash_state_slow(&self) -> HashedPostState {
-        //let mut storages = BTreeMap::default();
         let mut hashed_state = HashedPostState::default();
 
         for (address, account) in self.bundle.state() {
@@ -136,7 +135,7 @@ impl BundleStateWithReceipts {
             if let Some(account) = &account.info {
                 hashed_state.insert_account(hashed_address, into_reth_acc(account.clone()))
             } else {
-                hashed_state.insert_cleared_account(hashed_address);
+                hashed_state.insert_destroyed_account(hashed_address);
             }
 
             // insert storage.
@@ -155,8 +154,8 @@ impl BundleStateWithReceipts {
         hashed_state.sorted()
     }
 
-    /// Returns [StateRoot] calculator.
-    fn state_root_calculator<'a, 'b, TX: DbTx>(
+    /// Returns [StateRoot] calculator based on database and in-memory state.
+    pub fn state_root_calculator<'a, 'b, TX: DbTx>(
         &self,
         tx: &'a TX,
         hashed_post_state: &'b HashedPostState,
@@ -167,6 +166,7 @@ impl BundleStateWithReceipts {
             .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefix_set)
             .with_changed_storage_prefixes(storage_prefix_set)
+            .with_destroyed_accounts(hashed_post_state.destroyed_accounts())
     }
 
     /// Calculate the state root for this [BundleState].
