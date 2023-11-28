@@ -41,9 +41,10 @@ use discv5::{
 use enr::{Enr, EnrBuilder};
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
+use reth_ethereum_forks::ForkId;
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    hex, ForkId, PeerId, B256,
+    hex, PeerId, B256,
 };
 use secp256k1::SecretKey;
 use std::{

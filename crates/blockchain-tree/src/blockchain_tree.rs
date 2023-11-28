@@ -7,6 +7,7 @@ use crate::{
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
 use reth_db::database::Database;
+use reth_ethereum_forks::Hardfork;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -17,7 +18,7 @@ use reth_interfaces::{
     RethResult,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, PruneModes, Receipt, SealedBlock,
+    BlockHash, BlockNumHash, BlockNumber, ForkBlock, PruneModes, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{

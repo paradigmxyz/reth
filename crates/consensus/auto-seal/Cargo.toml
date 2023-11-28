@@ -10,6 +10,7 @@ description = "A consensus impl for local testing purposes"
 
 [dependencies]
 # reth
+reth-ethereum-forks.workspace = true
 reth-beacon-consensus.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true

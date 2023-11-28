@@ -10,6 +10,7 @@ description = "reth specific revm utilities"
 
 [dependencies]
 # reth
+reth-ethereum-forks.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true

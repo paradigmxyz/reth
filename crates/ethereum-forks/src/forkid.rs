@@ -72,10 +72,12 @@ where
     }
 }
 
-// TODO: Move
+/// TODO: Move
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ForkFilterKey {
+    /// TODO
     Block(BlockNumber),
+    /// TODO
     Time(u64),
 }
 

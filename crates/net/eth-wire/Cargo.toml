@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 # reth
 reth-codecs.workspace = true
+reth-ethereum-forks.workspace = true
 reth-primitives.workspace = true
 reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }

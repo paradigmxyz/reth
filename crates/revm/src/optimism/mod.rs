@@ -1,9 +1,10 @@
+use reth_ethereum_forks::Hardfork;
 use reth_interfaces::{
     executor::{self as reth_executor, BlockExecutionError},
     RethError,
 };
 use reth_primitives::{
-    address, b256, hex, Address, Block, Bytes, ChainSpec, Hardfork, TransactionKind, B256, U256,
+    address, b256, hex, Address, Block, Bytes, ChainSpec, TransactionKind, B256, U256,
 };
 use revm::{
     primitives::{BedrockSpec, Bytecode, HashMap, RegolithSpec},

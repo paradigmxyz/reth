@@ -10,6 +10,7 @@ description = "A basic payload builder for reth that uses the txpool API to buil
 
 [dependencies]
 # reth
+reth-ethereum-forks.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
 reth-transaction-pool.workspace = true

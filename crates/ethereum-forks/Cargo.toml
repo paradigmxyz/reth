@@ -1,5 +1,5 @@
 [package]
-name = "reth-primitives"
+name = "reth-ethereum-forks"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,6 @@ description = "Commonly used types in reth."
 [dependencies]
 # reth
 reth-codecs.workspace = true
-reth-ethereum-forks.workspace = true
 reth-rpc-types.workspace = true
 revm-primitives.workspace = true
 revm.workspace = true
@@ -91,12 +90,3 @@ c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg"]
 clap = ["dep:clap"]
 optimism = ["reth-codecs/optimism", "revm-primitives/optimism", "revm/optimism"]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
-
-[[bench]]
-name = "recover_ecdsa_crit"
-harness = false
-
-[[bench]]
-name = "trie_root"
-required-features = ["arbitrary", "test-utils"]
-harness = false

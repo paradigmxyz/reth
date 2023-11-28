@@ -7,9 +7,10 @@ use alloy_rlp::{
     length_of_length, Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable,
 };
 use enr::{Enr, EnrKey};
+use reth_ethereum_forks::ForkId;
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256, ForkId, NodeRecord, B256,
+    keccak256, NodeRecord, B256,
 };
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},

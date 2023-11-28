@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 reth-codecs.workspace = true
+reth-ethereum-forks.workspace = true
 reth-nippy-jar.workspace = true
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true

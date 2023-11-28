@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 # reth
+reth-ethereum-forks.workspace = true
 reth-consensus-common.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
