@@ -119,7 +119,11 @@ impl DatabaseEnv {
         //
         // The default value of this parameter is set depending on the DB size. The bigger the
         // database, the larger is `rp augment limit`.
-        // https://github.com/paradigmxyz/reth/blob/2a4c78759178f66e30c8976ec5d243b53102fc9a/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L10018-L10024
+        // https://github.com/paradigmxyz/reth/blob/2a4c78759178f66e30c8976ec5d243b53102fc9a/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L10018-L10024.
+        //
+        // Previously, MDBX set this value as `256 * 1024` constant. Let's fallback to this,
+        // because we want to prioritize freelist lookup speed over database growth.
+        // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
         inner_env.set_rp_augment_limit(256 * 1024);
 
         if let Some(log_level) = log_level {
