@@ -566,7 +566,7 @@ mod tests {
 
         {
             let provider = factory.provider_rw().unwrap();
-            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+            assert_matches!(provider.append_block(block.clone(), None, None), Ok(_));
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
                 if sender == block.body[0].recover_signer().unwrap()
@@ -577,7 +577,7 @@ mod tests {
         {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(
-                provider.insert_block(
+                provider.append_block(
                     block.clone(),
                     None,
                     Some(&PruneModes {
@@ -604,7 +604,7 @@ mod tests {
         for range in tx_ranges {
             let provider = factory.provider_rw().unwrap();
 
-            assert_matches!(provider.insert_block(block.clone(), None, None), Ok(_));
+            assert_matches!(provider.append_block(block.clone(), None, None), Ok(_));
 
             let senders = provider.get_or_take::<tables::TxSenders, true>(range.clone());
             assert_eq!(

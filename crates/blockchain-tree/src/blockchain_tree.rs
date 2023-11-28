@@ -1343,7 +1343,7 @@ mod tests {
         genesis.header.header.state_root = EMPTY_ROOT_HASH;
         let provider = factory.provider_rw().unwrap();
 
-        provider.insert_block(genesis, None, None).unwrap();
+        provider.append_block(genesis, None, None).unwrap();
 
         // insert first 10 blocks
         for i in 0..10 {

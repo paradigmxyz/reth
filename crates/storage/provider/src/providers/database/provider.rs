@@ -2148,7 +2148,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
-    fn insert_block(
+    fn append_block(
         &self,
         block: SealedBlock,
         senders: Option<Vec<Address>>,
@@ -2158,11 +2158,13 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
-        self.tx.put::<tables::CanonicalHeaders>(block_number, block.hash())?;
+        self.tx.cursor_write::<tables::CanonicalHeaders>()?.append(block_number, block.hash())?;
         durations_recorder.record_relative(metrics::Action::InsertCanonicalHeaders);
 
         // Put header with canonical hashes.
-        self.tx.put::<tables::Headers>(block_number, block.header.as_ref().clone())?;
+        self.tx
+            .cursor_write::<tables::Headers>()?
+            .append(block_number, block.header.as_ref().clone())?;
         durations_recorder.record_relative(metrics::Action::InsertHeaders);
 
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
@@ -2178,24 +2180,21 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
             parent_ttd + block.difficulty
         };
 
-        self.tx.put::<tables::HeaderTD>(block_number, ttd.into())?;
+        self.tx.cursor_write::<tables::HeaderTD>()?.append(block_number, ttd.into())?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderTD);
 
         // insert body ommers data
         if !block.ommers.is_empty() {
-            self.tx.put::<tables::BlockOmmers>(
-                block_number,
-                StoredBlockOmmers { ommers: block.ommers },
-            )?;
+            self.tx
+                .cursor_write::<tables::BlockOmmers>()?
+                .append(block_number, StoredBlockOmmers { ommers: block.ommers })?;
             durations_recorder.record_relative(metrics::Action::InsertBlockOmmers);
         }
 
-        let mut next_tx_num = self
-            .tx
-            .cursor_read::<tables::Transactions>()?
-            .last()?
-            .map(|(n, _)| n + 1)
-            .unwrap_or_default();
+        let mut transaction_cursor = self.tx.cursor_write::<tables::Transactions>()?;
+        let mut senders_cursor = self.tx.cursor_write::<tables::TxSenders>()?;
+
+        let mut next_tx_num = transaction_cursor.last()?.map(|(n, _)| n + 1).unwrap_or_default();
         durations_recorder.record_relative(metrics::Action::GetNextTxNum);
         let first_tx_num = next_tx_num;
 
@@ -2230,12 +2229,12 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
                 .is_none()
             {
                 let start = Instant::now();
-                self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+                senders_cursor.append(next_tx_num, sender)?;
                 tx_senders_elapsed += start.elapsed();
             }
 
             let start = Instant::now();
-            self.tx.put::<tables::Transactions>(next_tx_num, transaction.into())?;
+            transaction_cursor.append(next_tx_num, transaction.into())?;
             let elapsed = start.elapsed();
             if elapsed > Duration::from_secs(1) {
                 warn!(
@@ -2268,16 +2267,17 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         if let Some(withdrawals) = block.withdrawals {
             if !withdrawals.is_empty() {
-                self.tx.put::<tables::BlockWithdrawals>(
-                    block_number,
-                    StoredBlockWithdrawals { withdrawals },
-                )?;
+                self.tx
+                    .cursor_write::<tables::BlockWithdrawals>()?
+                    .append(block_number, StoredBlockWithdrawals { withdrawals })?;
                 durations_recorder.record_relative(metrics::Action::InsertBlockWithdrawals);
             }
         }
 
         let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
-        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())?;
+        self.tx
+            .cursor_write::<tables::BlockBodyIndices>()?
+            .append(block_number, block_indices.clone())?;
         durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
 
         if !block_indices.is_empty() {
@@ -2319,7 +2319,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // Insert the blocks
         for block in blocks {
             let (block, senders) = block.into_components();
-            self.insert_block(block, Some(senders), prune_modes)?;
+            self.append_block(block, Some(senders), prune_modes)?;
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 

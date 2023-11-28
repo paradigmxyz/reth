@@ -79,7 +79,7 @@ impl Case for BlockchainTestCase {
 
             // Insert test state
             provider
-                .insert_block(
+                .append_block(
                     SealedBlock::new(
                         case.genesis_block_header.clone().into(),
                         BlockBody::default(),
@@ -94,7 +94,7 @@ impl Case for BlockchainTestCase {
             for block in case.blocks.iter() {
                 let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                 provider
-                    .insert_block(decoded.clone(), None, None)
+                    .append_block(decoded.clone(), None, None)
                     .map_err(|err| Error::RethError(err.into()))?;
                 last_block = Some(decoded);
             }

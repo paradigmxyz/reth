@@ -95,7 +95,7 @@ impl AccountHashingStage {
         let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
 
         for block in blocks {
-            provider.insert_block(block, None, None).unwrap();
+            provider.append_block(block, None, None).unwrap();
         }
         let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
         {

@@ -286,12 +286,15 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
 /// Block Writer
 #[auto_impl(&, Arc, Box)]
 pub trait BlockWriter: Send + Sync {
-    /// Insert full block and make it canonical. Parent tx num and transition id is taken from
+    /// Appends full block and make it canonical. Parent tx num and transition id is taken from
     /// parent block in database.
     ///
-    /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
-    /// transition in the block.
-    fn insert_block(
+    /// Returns [StoredBlockBodyIndices] that contains indices of the first and last transactions
+    /// and transition in the block.
+    ///
+    /// Returns a database error if any key of the block data (e.g. block number, tx number etc) is
+    /// bigger than the highest available block in the database.
+    fn append_block(
         &self,
         block: SealedBlock,
         senders: Option<Vec<Address>>,
