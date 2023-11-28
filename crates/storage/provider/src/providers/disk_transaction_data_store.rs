@@ -42,7 +42,7 @@ impl TransactionDataStore for DiskFileTransactionDataStore {
         let filepath = self.filepath(hash);
         let compressed =
             TRANSACTION_COMPRESSOR.with(|compressor| compressor.borrow_mut().compress(&data))?;
-        tracing::trace!(
+        tracing::debug!(
             target: "provider::txdata",
             %hash,
             ?filepath,
@@ -89,7 +89,7 @@ impl TransactionDataStore for DiskFileTransactionDataStore {
     fn remove(&self, hash: TxHash) -> Result<(), TransactionDataStoreError> {
         let filepath = self.filepath(hash);
         let exists = filepath.try_exists()?;
-        tracing::trace!(target: "provider::txdata", %hash, ?filepath, exists, "Removing transaction data from disk");
+        tracing::debug!(target: "provider::txdata", %hash, ?filepath, exists, "Removing transaction data from disk");
         if exists {
             fs::remove_file(filepath)?;
         }
