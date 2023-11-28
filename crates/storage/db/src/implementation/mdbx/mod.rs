@@ -107,14 +107,19 @@ impl DatabaseEnv {
         //    sequence inside the DB file).
         // 1. Get some pages from the freelist, put them into the reclaimed list.
         // 2. Search through the reclaimed list for the sequence of size N.
-        // 3. a. If found, return the sequence
-        // 3. b. If not found, repeat steps 1-3. If the reclaimed list size is larger than the "rp
-        //    augment limit", stop the search and allocate new pages at the end of the file.
+        // 3. a. If found, return the sequence.
+        // 3. b. If not found, repeat steps 1-3. If the reclaimed list size is larger than
+        //    the `rp augment limit`, stop the search and allocate new pages at the end of the file:
+        //    https://github.com/paradigmxyz/reth/blob/2a4c78759178f66e30c8976ec5d243b53102fc9a/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L11479-L11480.
         //
         // Basically, this parameter controls for how long do we search through the freelist before
         // trying to allocate new pages. Smaller value will make MDBX to fallback to
         // allocation faster, higher value will force MDBX to search through the freelist
         // longer until the sequence of pages is found.
+        //
+        // The default value of this parameter is set depending on the DB size. The bigger the
+        // database, the larger is `rp augment limit`.
+        // https://github.com/paradigmxyz/reth/blob/2a4c78759178f66e30c8976ec5d243b53102fc9a/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L10018-L10024
         inner_env.set_rp_augment_limit(256 * 1024);
 
         if let Some(log_level) = log_level {
