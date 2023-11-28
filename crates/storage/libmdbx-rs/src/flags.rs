@@ -128,10 +128,10 @@ impl From<Mode> for EnvironmentFlags {
 pub struct EnvironmentFlags {
     pub no_sub_dir: bool,
     pub exclusive: bool,
-    /// Flag is intend to open a existing sub-database which  was created with unknown flags
+    /// Flag is intended to open an existing sub-database which was created with unknown flags
     /// In such cases, instead of returning the `MDBX_INCOMPATIBLE` error, the sub-database will be
     /// opened with flags which it was created, and then an application could determine the actual
-    /// flags..
+    /// flags.
     pub accede: bool,
     pub mode: Mode,
     pub no_rdahead: bool,
