@@ -407,8 +407,6 @@ impl Ord for BlobOrd {
         let ord = other.priority.cmp(&self.priority);
 
         // use submission_id to break ties
-        // TODO: should earlier or later transactions be evicted first in case of a tie?
-        // right now, later transactions are evicted first
         if ord == Ordering::Equal {
             self.submission_id.cmp(&other.submission_id)
         } else {
