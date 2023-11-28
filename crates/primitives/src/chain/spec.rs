@@ -3,14 +3,12 @@ use crate::{
         EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
     },
-    forkid::ForkFilterKey,
-    header::Head,
     proofs::genesis_state_root,
     revm_primitives::{address, b256},
-    Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
-    SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Address, BlockNumber, Chain, Genesis, Header, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use once_cell::sync::Lazy;
+use reth_ethereum_forks::{ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -681,6 +679,14 @@ impl ChainSpec {
         })
     }
 
+    /// Get the fork filter for the given hardfork
+    pub fn hardfork_fork_filter(&self, fork: Hardfork) -> Option<ForkFilter> {
+        match self.fork(fork) {
+            ForkCondition::Never => None,
+            _ => Some(self.fork_filter(self.satisfy(self.fork(fork)))),
+        }
+    }
+
     /// Returns the forks in this specification and their activation conditions.
     pub fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
         &self.hardforks
@@ -688,12 +694,18 @@ impl ChainSpec {
 
     /// Get the fork id for the given hardfork.
     pub fn hardfork_fork_id(&self, fork: Hardfork) -> Option<ForkId> {
-        fork.fork_id(self)
+        match self.fork(fork) {
+            ForkCondition::Never => None,
+            _ => Some(self.fork_id(&self.satisfy(self.fork(fork)))),
+        }
     }
 
     /// Convenience method to get the fork id for [Hardfork::Shanghai] from a given chainspec.
     pub fn shanghai_fork_id(&self) -> Option<ForkId> {
-        Hardfork::Shanghai.fork_id(self)
+        match self.fork(Hardfork::Shanghai) {
+            ForkCondition::Never => None,
+            _ => Some(self.fork_id(&self.satisfy(self.fork(Hardfork::Shanghai)))),
+        }
     }
 
     /// Get the fork condition for the given fork.
@@ -2748,5 +2760,35 @@ Post-merge hard forks (timestamp based):
         let deserialized_chain_spec: AllGenesisFormats =
             serde_json::from_str(&serialized_chain_spec).unwrap();
         assert!(matches!(deserialized_chain_spec, AllGenesisFormats::Reth(_)))
+    }
+
+    #[test]
+    fn check_fork_id_chainspec_with_fork_condition_never() {
+        let spec = ChainSpec {
+            chain: Chain::mainnet(),
+            genesis: Genesis::default(),
+            genesis_hash: None,
+            hardforks: BTreeMap::from([(Hardfork::Frontier, ForkCondition::Never)]),
+            paris_block_and_final_difficulty: None,
+            deposit_contract: None,
+            ..Default::default()
+        };
+
+        assert_eq!(spec.hardfork_fork_id(Hardfork::Frontier), None);
+    }
+
+    #[test]
+    fn check_fork_filter_chainspec_with_fork_condition_never() {
+        let spec = ChainSpec {
+            chain: Chain::mainnet(),
+            genesis: Genesis::default(),
+            genesis_hash: None,
+            hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Never)]),
+            paris_block_and_final_difficulty: None,
+            deposit_contract: None,
+            ..Default::default()
+        };
+
+        assert_eq!(spec.hardfork_fork_filter(Hardfork::Shanghai), None);
     }
 }

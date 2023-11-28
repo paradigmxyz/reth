@@ -10,6 +10,7 @@ description = "Ethereum network discovery"
 
 [dependencies]
 # reth
+reth-ethereum-forks.workspace = true
 reth-primitives.workspace = true
 reth-net-common.workspace = true
 reth-net-nat.workspace = true

@@ -24,6 +24,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
+use reth_ethereum_forks::{Hardfork, Head};
 use reth_interfaces::{
     p2p::headers::downloader::SyncTarget,
     provider::{ProviderResult, RootMismatch},
@@ -38,10 +39,10 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    ChainInfo, ChainSpec, GotExpected, Header, PruneCheckpoint, PruneModes, PruneSegment, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, B256, U256,
 };
 use reth_trie::{
     hashed_cursor::HashedPostState, prefix_set::PrefixSetMut, updates::TrieUpdates, StateRoot,

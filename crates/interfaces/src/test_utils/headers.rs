@@ -14,8 +14,9 @@ use crate::{
 };
 use futures::{future, Future, FutureExt, Stream, StreamExt};
 use reth_eth_wire::BlockHeaders;
+use reth_ethereum_forks::Head;
 use reth_primitives::{
-    BlockHash, BlockNumber, Head, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader,
+    BlockHash, BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader,
     WithPeerId, B256, U256,
 };
 use reth_rpc_types::engine::ForkchoiceState;

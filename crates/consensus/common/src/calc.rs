@@ -1,4 +1,5 @@
-use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, Chain, ChainSpec, Hardfork, U256};
+use reth_ethereum_forks::Hardfork;
+use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, Chain, ChainSpec, U256};
 
 /// Calculates the base block reward.
 ///

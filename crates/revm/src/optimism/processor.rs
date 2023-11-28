@@ -1,8 +1,8 @@
 use crate::processor::{verify_receipt, EVMProcessor};
+use reth_ethereum_forks::Hardfork;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    revm::compat::into_reth_log, revm_primitives::ResultAndState, Address, Block, Hardfork,
-    Receipt, U256,
+    revm::compat::into_reth_log, revm_primitives::ResultAndState, Address, Block, Receipt, U256,
 };
 use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
 use revm::DatabaseCommit;
