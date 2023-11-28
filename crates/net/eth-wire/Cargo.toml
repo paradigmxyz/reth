@@ -21,6 +21,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 bytes.workspace = true
+derive_more = "0.99.17"
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["full"] }

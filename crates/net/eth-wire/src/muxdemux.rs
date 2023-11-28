@@ -22,22 +22,21 @@
 //! when [`MuxDemuxStream`] is polled.
 
 use std::{
-    any::TypeId,
     collections::HashMap,
-    ops::{Deref, DerefMut},
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
+use derive_more::{Deref, DerefMut};
 use futures::{Sink, SinkExt, StreamExt};
 use reth_primitives::bytes::{Bytes, BytesMut};
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 
 use crate::{
-    capability::{SharedCapabilities, SharedCapability},
+    capability::{Capability, SharedCapabilities, SharedCapability},
     errors::MuxDemuxError,
-    CanDisconnect, DisconnectP2P, DisconnectReason, EthMessage,
+    CanDisconnect, DisconnectP2P, DisconnectReason,
 };
 
 use MuxDemuxError::*;
@@ -71,30 +70,17 @@ pub struct MuxDemuxer<S> {
 
 /// The main stream on top of the p2p stream. Wraps [`MuxDemuxer`] and enforces it can't be dropped
 /// before all secondary streams are dropped (stream clones).
-#[derive(Debug)]
+#[derive(Debug, Deref, DerefMut)]
 pub struct MuxDemuxStream<S>(MuxDemuxer<S>);
-
-impl<S> Deref for MuxDemuxStream<S> {
-    type Target = MuxDemuxer<S>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<S> DerefMut for MuxDemuxStream<S> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
 
 impl<S> MuxDemuxStream<S> {
     /// Creates a new [`MuxDemuxer`].
-    pub fn try_new<M: 'static>(
+    pub fn try_new(
         inner: S,
+        cap: Capability,
         shared_capabilities: SharedCapabilities,
     ) -> Result<Self, MuxDemuxError> {
-        let owner = Self::shared_cap::<M>(&shared_capabilities)?.clone();
+        let owner = Self::shared_cap(&cap, &shared_capabilities)?.clone();
 
         let demux = HashMap::new();
         let (mux_tx, mux) = mpsc::unbounded_channel();
@@ -104,8 +90,8 @@ impl<S> MuxDemuxStream<S> {
 
     /// Clones the stream if the given capability stream type is shared on the underlying p2p
     /// connection.
-    pub fn try_clone_stream<M: 'static>(&mut self) -> Result<StreamClone, MuxDemuxError> {
-        let cap = Self::shared_cap::<M>(&self.shared_capabilities)?.clone();
+    pub fn try_clone_stream(&mut self, cap: &Capability) -> Result<StreamClone, MuxDemuxError> {
+        let cap = Self::shared_cap(cap, &self.shared_capabilities)?.clone();
         let ingress = self.reg_new_ingress_buffer(&cap)?;
         let mux_tx = self.mux_tx.clone();
 
@@ -132,14 +118,19 @@ impl<S> MuxDemuxStream<S> {
         self.inner.is_disconnecting()
     }
 
-    fn shared_cap<M: 'static>(
-        shared_capabilities: &SharedCapabilities,
-    ) -> Result<&SharedCapability, MuxDemuxError> {
+    /// Shared capabilities of underlying p2p connection as negotiated by peers at connection
+    /// open.
+    pub fn shared_capabilities(&self) -> &SharedCapabilities {
+        &self.shared_capabilities
+    }
+
+    fn shared_cap<'a>(
+        cap: &Capability,
+        shared_capabilities: &'a SharedCapabilities,
+    ) -> Result<&'a SharedCapability, MuxDemuxError> {
         for shared_cap in shared_capabilities.iter_caps() {
             match shared_cap {
-                SharedCapability::Eth { .. } if TypeId::of::<M>() == TypeId::of::<EthMessage>() => {
-                    return Ok(shared_cap)
-                }
+                SharedCapability::Eth { .. } if cap.is_eth() => return Ok(shared_cap),
                 _ => continue,
                 // more caps to come ..
             }
@@ -348,7 +339,7 @@ mod test {
         capability::{Capability, SharedCapabilities},
         muxdemux::MuxDemuxStream,
         protocol::Protocol,
-        EthMessage, EthVersion,
+        EthVersion,
     };
 
     fn shared_caps_eth68() -> SharedCapabilities {
@@ -362,7 +353,9 @@ mod test {
         let mut msg = BytesMut::with_capacity(1);
         msg.put_u8(0x07); // eth msg id
 
-        let mxdmx_stream = MuxDemuxStream::try_new::<EthMessage>((), shared_caps_eth68()).unwrap();
+        let mxdmx_stream =
+            MuxDemuxStream::try_new((), Capability::eth(EthVersion::Eth67), shared_caps_eth68())
+                .unwrap();
         _ = mxdmx_stream.unmask_msg_id(&mut msg[0]).unwrap();
 
         assert_eq!(msg.as_ref(), &[0x07]);
@@ -374,7 +367,9 @@ mod test {
         msg.put_u8(0x10); // eth msg id
         msg.put_u8(0x20); // some msg data
 
-        let mxdmx_stream = MuxDemuxStream::try_new::<EthMessage>((), shared_caps_eth68()).unwrap();
+        let mxdmx_stream =
+            MuxDemuxStream::try_new((), Capability::eth(EthVersion::Eth66), shared_caps_eth68())
+                .unwrap();
         let egress_bytes = mxdmx_stream.mask_msg_id(msg.freeze());
 
         assert_eq!(egress_bytes.as_ref(), &[0x10, 0x20]);
@@ -385,7 +380,9 @@ mod test {
         let mut msg = BytesMut::with_capacity(1);
         msg.put_u8(0x11);
 
-        let mxdmx_stream = MuxDemuxStream::try_new::<EthMessage>((), shared_caps_eth68()).unwrap();
+        let mxdmx_stream =
+            MuxDemuxStream::try_new((), Capability::eth(EthVersion::Eth68), shared_caps_eth68())
+                .unwrap();
 
         assert!(mxdmx_stream.unmask_msg_id(&mut msg[0]).is_err());
     }

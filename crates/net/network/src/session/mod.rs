@@ -10,7 +10,7 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    CanDisconnect, DisconnectReason, EthMessage, EthVersion, HelloMessageWithProtocols,
+    CanDisconnect, Capability, DisconnectReason, EthVersion, HelloMessageWithProtocols,
     MuxDemuxStream, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -42,6 +42,7 @@ mod active;
 mod config;
 mod handle;
 pub use crate::message::PeerRequestSender;
+pub use active::PeerConnection;
 pub use config::{SessionLimits, SessionsConfig};
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
@@ -228,6 +229,7 @@ impl SessionManager {
         let hello_message = self.hello_message.clone();
         let status = self.status;
         let fork_filter = self.fork_filter.clone();
+        let extra_protocols = self.extra_protocols.clone();
         self.spawn(start_pending_incoming_session(
             disconnect_rx,
             session_id,
@@ -238,6 +240,7 @@ impl SessionManager {
             hello_message,
             status,
             fork_filter,
+            extra_protocols,
         ));
 
         let handle = PendingSessionHandle {
@@ -261,6 +264,7 @@ impl SessionManager {
             let fork_filter = self.fork_filter.clone();
             let status = self.status;
             let band_with_meter = self.bandwidth_meter.clone();
+            let extra_protocols = self.extra_protocols.clone();
             self.spawn(start_pending_outbound_session(
                 disconnect_rx,
                 pending_events,
@@ -272,6 +276,7 @@ impl SessionManager {
                 status,
                 fork_filter,
                 band_with_meter,
+                extra_protocols,
             ));
 
             let handle = PendingSessionHandle {
@@ -413,6 +418,7 @@ impl SessionManager {
                 status,
                 direction,
                 client_id,
+                _extra_conns,
             } => {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
@@ -757,6 +763,7 @@ pub(crate) async fn start_pending_incoming_session(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
+    extra_protocols: RlpxSubProtocols,
 ) {
     authenticate(
         disconnect_rx,
@@ -769,6 +776,7 @@ pub(crate) async fn start_pending_incoming_session(
         hello,
         status,
         fork_filter,
+        extra_protocols,
     )
     .await
 }
@@ -787,6 +795,7 @@ async fn start_pending_outbound_session(
     status: Status,
     fork_filter: ForkFilter,
     bandwidth_meter: BandwidthMeter,
+    extra_protocols: RlpxSubProtocols,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
@@ -818,6 +827,7 @@ async fn start_pending_outbound_session(
         hello,
         status,
         fork_filter,
+        extra_protocols,
     )
     .await
 }
@@ -835,6 +845,7 @@ async fn authenticate(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
+    extra_protocols: RlpxSubProtocols,
 ) {
     let local_addr = stream.inner().local_addr().ok();
     let stream = match get_eciess_stream(stream, secret_key, direction).await {
@@ -863,6 +874,7 @@ async fn authenticate(
         hello,
         status,
         fork_filter,
+        extra_protocols,
     )
     .boxed();
 
@@ -911,6 +923,7 @@ async fn authenticate_stream(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
+    extra_protocols: RlpxSubProtocols,
 ) -> PendingSessionEvent {
     // conduct the p2p handshake and return the authenticated stream
     let (p2p_stream, their_hello) = match stream.handshake(hello).await {
@@ -938,13 +951,22 @@ async fn authenticate_stream(
         }
     };
 
-    // if the hello handshake was successful we can try status handshake
-    //
-    // Before trying status handshake, set up the version to shared_capability
-    let status = Status { version, ..status };
+    // main capability on p2p connection
+    let main_cap = match EthVersion::try_from(version) {
+        Ok(v) => Capability::eth(v),
+        Err(e) => {
+            return PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction,
+                error: Some(e.into()),
+            }
+        }
+    };
     let shared_capabilities = p2p_stream.shared_capabilities().clone();
-    let mxdmx_stream = match MuxDemuxStream::try_new::<EthMessage>(p2p_stream, shared_capabilities)
-    {
+
+    // de-/mux p2p connection
+    let mxdmx_stream = match MuxDemuxStream::try_new(p2p_stream, main_cap, shared_capabilities) {
         Ok(stream_res) => stream_res,
         Err(err) => {
             return PendingSessionEvent::Disconnected {
@@ -955,8 +977,14 @@ async fn authenticate_stream(
             }
         }
     };
+
+    // if the hello handshake was successful we can try status handshake
+    //
+    // Before trying status handshake, set up the version to shared_capability
+    let status = Status { version, ..status };
+
     let eth_unauthed = UnauthedEthStream::new(mxdmx_stream);
-    let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
+    let (mut eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,
         Err(err) => {
             return PendingSessionEvent::Disconnected {
@@ -967,6 +995,56 @@ async fn authenticate_stream(
             }
         }
     };
+
+    // more than one protocol is shared, init conns for these protocols
+    let _extra_conns = if eth_stream.inner().shared_capabilities().len() > 1 {
+        let mut extra_conns =
+            Vec::with_capacity(eth_stream.inner().shared_capabilities().len() - 1);
+
+        for protocol in extra_protocols.iter() {
+            let cap = protocol.protocol().cap;
+
+            if eth_stream.inner().shared_capabilities().find(&cap).is_some() {
+                let p2p_clone = match eth_stream.inner_mut().try_clone_stream(&cap) {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        return PendingSessionEvent::Disconnected {
+                            remote_addr,
+                            session_id,
+                            direction,
+                            error: Some(e.into()),
+                        }
+                    }
+                };
+
+                let remote_peer_id = their_hello.id;
+
+                match direction {
+                    Direction::Incoming => {
+                        if let Some(conn_handler) = protocol.on_incoming(remote_addr) {
+                            let conn =
+                                conn_handler.into_connection(direction, remote_peer_id, p2p_clone);
+                            extra_conns.push(conn);
+                        }
+                    }
+                    Direction::Outgoing(_) => {
+                        if let Some(conn_handler) =
+                            protocol.on_outgoing(remote_addr, remote_peer_id)
+                        {
+                            let conn =
+                                conn_handler.into_connection(direction, remote_peer_id, p2p_clone);
+                            extra_conns.push(conn);
+                        }
+                    }
+                }
+            }
+        }
+
+        extra_conns
+    } else {
+        Vec::new()
+    };
+
     PendingSessionEvent::Established {
         session_id,
         remote_addr,
@@ -977,5 +1055,6 @@ async fn authenticate_stream(
         conn: Box::new(eth_stream),
         direction,
         client_id: their_hello.client_version,
+        _extra_conns,
     }
 }

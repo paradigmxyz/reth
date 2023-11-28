@@ -764,15 +764,18 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{
-        config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
-        handle::PendingSessionEvent,
-        start_pending_incoming_session,
+    use crate::{
+        session::{
+            config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
+            handle::PendingSessionEvent,
+            start_pending_incoming_session,
+        },
+        RlpxSubProtocols,
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        CanDisconnect, GetBlockBodies, HelloMessageWithProtocols, Status, StatusBuilder,
-        UnauthedEthStream, UnauthedP2PStream,
+        CanDisconnect, Capability, EthVersion, GetBlockBodies, HelloMessageWithProtocols, Status,
+        StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
@@ -797,6 +800,7 @@ mod tests {
         fork_filter: ForkFilter,
         next_id: usize,
         bandwidth_meter: BandwidthMeter,
+        extra_protocols: RlpxSubProtocols,
     }
 
     impl SessionBuilder {
@@ -828,12 +832,26 @@ mod tests {
                 let outgoing = TcpStream::connect(local_addr).await.unwrap();
                 let sink = ECIESStream::connect(outgoing, key, local_peer_id).await.unwrap();
 
+                // p2p connection, negotiate identification of shared protocols
                 let (p2p_stream, _) = UnauthedP2PStream::new(sink).handshake(hello).await.unwrap();
 
+                // extract eth capability and other shared protocols from established p2p
+                // connection
+                let eth_v = EthVersion::try_from(
+                    p2p_stream
+                        .shared_capabilities()
+                        .eth_version()
+                        .expect("eth should be shared cap on p2p conn"),
+                )
+                .expect("should recognize eth version");
+                let main_cap = Capability::eth(eth_v);
                 let shared_caps = p2p_stream.shared_capabilities().clone();
-                let mxdmx_stream = MuxDemuxStream::try_new::<EthMessage>(p2p_stream, shared_caps)
-                    .expect("eth should be shared cap on p2p conn");
 
+                // wrap p2p connection in de-/muxer and set main stream as eth protocol
+                let mxdmx_stream = MuxDemuxStream::try_new(p2p_stream, main_cap, shared_caps)
+                    .expect("de-/mux should wrap p2p connection");
+
+                // wrap de-/muxed p2p connection in eth stream
                 let (client_stream, _) = UnauthedEthStream::new(mxdmx_stream)
                     .handshake(status, fork_filter)
                     .await
@@ -850,6 +868,7 @@ mod tests {
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
             let metered_stream =
                 MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
+            let extra_protocols = self.extra_protocols.clone();
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,
@@ -861,6 +880,7 @@ mod tests {
                 self.hello.clone(),
                 self.status,
                 self.fork_filter.clone(),
+                extra_protocols,
             ));
 
             let mut stream = ReceiverStream::new(pending_sessions_rx);
@@ -935,6 +955,7 @@ mod tests {
                     .hardfork_fork_filter(Hardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),
                 bandwidth_meter: BandwidthMeter::default(),
+                extra_protocols: Default::default(),
             }
         }
     }

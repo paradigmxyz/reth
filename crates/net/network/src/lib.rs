@@ -143,10 +143,11 @@ pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use peers::PeersConfig;
+pub use protocol::{RlpxSubProtocols, StreamBytes};
 pub use session::{
-    ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
-    PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
-    SessionLimits, SessionManager, SessionsConfig,
+    ActiveSessionHandle, ActiveSessionMessage, Direction, PeerConnection, PeerInfo,
+    PendingSessionEvent, PendingSessionHandle, PendingSessionHandshakeError, SessionCommand,
+    SessionEvent, SessionId, SessionLimits, SessionManager, SessionsConfig,
 };
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};

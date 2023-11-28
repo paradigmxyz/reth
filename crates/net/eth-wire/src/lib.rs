@@ -37,6 +37,7 @@ pub use tokio_util::codec::{
 };
 
 pub use crate::{
+    capability::Capability,
     disconnect::{CanDisconnect, DisconnectReason},
     ethstream::{EthStream, UnauthedEthStream, MAX_MESSAGE_SIZE},
     hello::{HelloMessage, HelloMessageBuilder, HelloMessageWithProtocols},
@@ -45,4 +46,5 @@ pub use crate::{
         DisconnectP2P, P2PMessage, P2PMessageID, P2PStream, ProtocolVersion, UnauthedP2PStream,
         MAX_RESERVED_MESSAGE_ID,
     },
+    types::EthVersion,
 };

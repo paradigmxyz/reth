@@ -8,6 +8,7 @@ use crate::{
     EthMessage, EthMessageID, EthVersion,
 };
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use derive_more::{Deref, DerefMut};
 use reth_codecs::add_arbitrary_tests;
 use reth_primitives::bytes::{BufMut, Bytes};
 #[cfg(feature = "serde")]
@@ -335,7 +336,7 @@ impl SharedCapability {
 /// Non-empty,ordered list of recognized shared capabilities.
 ///
 /// Shared capabilities are ordered alphabetically by case sensitive name.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deref, DerefMut)]
 pub struct SharedCapabilities(Vec<SharedCapability>);
 
 impl SharedCapabilities {
