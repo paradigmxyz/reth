@@ -25,7 +25,7 @@ pub trait EthApi {
         multicall: MulticallBundle,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
-    ) -> RpcResult<EthCallResponse>;
+    ) -> RpcResult<Vec<EthCallResponse>>;
 
     /// Returns an object with data about the sync status or false.
     #[method(name = "syncing")]
