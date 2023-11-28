@@ -99,6 +99,23 @@ impl DatabaseEnv {
         });
         // configure more readers
         inner_env.set_max_readers(DEFAULT_MAX_READERS);
+        // This parameter sets the maximum size of the "reclaimed list", and the unit of measurement
+        // is "pages". Reclaimed list is the list of freed pages that's populated during the
+        // lifetime of DB transaction, and through which MDBX searches when it needs to insert new
+        // record with overflow pages. The flow is roughly the following:
+        // 0. We need to insert a record that requires N number of overflow pages (in consecutive
+        //    sequence inside the DB file).
+        // 1. Get some pages from the freelist, put them into the reclaimed list.
+        // 2. Search through the reclaimed list for the sequence of size N.
+        // 3. a. If found, return the sequence
+        // 3. b. If not found, repeat steps 1-3. If the reclaimed list size is larger than the "rp
+        //    augment limit", stop the search and allocate new pages at the end of the file.
+        //
+        // Basically, this parameter controls for how long do we search through the freelist before
+        // trying to allocate new pages. Smaller value will make MDBX to fallback to
+        // allocation faster, higher value will force MDBX to search through the freelist
+        // longer until the sequence of pages is found.
+        inner_env.set_rp_augment_limit(256 * 1024);
 
         if let Some(log_level) = log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
