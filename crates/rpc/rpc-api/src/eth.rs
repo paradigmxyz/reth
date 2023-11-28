@@ -5,8 +5,8 @@ use reth_primitives::{
 };
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
-    SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, MulticallBundle, RichBlock,
+    StateContext, SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -14,6 +14,14 @@ use reth_rpc_types::{
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 #[async_trait]
 pub trait EthApi {
+    /// Executes   complex RPC calls to Ethereum nodes
+    #[method(name = "ethMulticallV1")]
+    async fn eth_multicall_v1(
+        &self,
+        multicall: MulticallBundle,
+        state_context: Option<StateContext>,
+        mut state_override: Option<StateOverride>,
+    ) -> EthResult<EthCallResponse>;
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
