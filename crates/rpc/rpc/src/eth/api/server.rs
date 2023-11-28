@@ -11,7 +11,6 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
-
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
@@ -24,8 +23,8 @@ use reth_provider::{
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, MulticallBundle, RichBlock,
-    StateContext, SyncStatus, TransactionReceipt, TransactionRequest, Work,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
+    SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -52,6 +51,17 @@ where
         EthApiSpec::protocol_version(self).await.to_rpc_result()
     }
 
+    /// Handler for ! `eth_MultiCallV1`
+    async fn eth_multicall_v1(
+        &self,
+        multi_call: MulticallBundle,
+        state_context: Option<StateContext>,
+        state_override: Option<StateOverride>,
+    ) -> Result<Vec<EthCallResponse>> {
+        trace!(target: "rpc::eth", "Serving eth_multicall_v1 request");
+        Ok(EthApi::eth_multicall_v1(self, multi_call, state_context, state_override).await?)
+    }
+
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
         trace!(target: "rpc::eth", "Serving eth_syncing");
@@ -76,16 +86,7 @@ where
             EthApiSpec::chain_info(self).with_message("failed to read chain info")?.best_number,
         ))
     }
-    /// Handler for ! `eth_MultiCallV1`
-    async fn eth_multicall_v1(
-        &self,
-        multi_call: MulticallBundle,
-        state_context: Option<StateContext>,
-        state_override: Option<StateOverride>,
-    ) -> Result<Vec<EthCallResponse>> {
-        trace!(target: "rpc::eth", "Serving eth_multicall_v1 request");
-        Ok(EthApi::eth_multicall_v1(self, multi_call, state_context, state_override).await?)
-    }
+
     /// Handler for: `eth_chainId`
     async fn chain_id(&self) -> Result<Option<U64>> {
         trace!(target: "rpc::eth", "Serving eth_chainId");
@@ -401,7 +402,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        eth::{
+            cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
+            FeeHistoryCacheConfig,
+        },
         BlockingTaskPool, EthApi,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
@@ -432,14 +436,19 @@ mod tests {
         provider: P,
     ) -> EthApi<P, TestPool, NoopNetwork> {
         let cache = EthStateCache::spawn(provider.clone(), Default::default());
+
+        let fee_history_cache =
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
+
         EthApi::new(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
             cache.clone(),
-            GasPriceOracle::new(provider, Default::default(), cache),
+            GasPriceOracle::new(provider.clone(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
+            fee_history_cache,
         )
     }
 
@@ -456,6 +465,7 @@ mod tests {
         let mut gas_used_ratios = Vec::new();
         let mut base_fees_per_gas = Vec::new();
         let mut last_header = None;
+        let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
             let hash = rng.gen();
@@ -469,9 +479,11 @@ mod tests {
                 gas_limit,
                 gas_used,
                 base_fee_per_gas,
+                parent_hash,
                 ..Default::default()
             };
             last_header = Some(header.clone());
+            parent_hash = hash;
 
             let mut transactions = vec![];
             for _ in 0..100 {
