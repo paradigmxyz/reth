@@ -196,6 +196,48 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             .walk(Some(T::Key::default()))?
             .collect::<Result<Vec<_>, DatabaseError>>()
     }
+
+    /// Gets data within a specified range, potentially spanning different snapshots and database.
+    ///
+    /// # Arguments
+    /// * `segment` - The segment of the snapshot to query.
+    /// * `range` - The range of data to fetch.
+    /// * `fetch_from_snapshot` - A function to fetch data from the snapshot.
+    /// * `fetch_from_database` - A function to fetch data from the database.
+    /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is terminated when this function returns false, thereby filtering the data based on the provided condition.
+    fn get_range_with_snapshot<T, P>(
+        &self,
+        segment: SnapshotSegment,
+        range: Range<u64>,
+        fetch_from_snapshot: impl Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        fetch_from_database: impl Fn(Range<u64>, P) -> ProviderResult<Vec<T>>,
+        mut predicate: P,
+    ) -> ProviderResult<Vec<T>>
+    where
+        P: FnMut(&T) -> bool,
+    {
+        let mut adjusted_range = to_range(range);
+        let mut data = Vec::new();
+
+        if let Some(snapshot_provider) = &self.snapshot_provider {
+            if let Some(snapshot_upper_bound) = snapshot_provider.get_highest_snapshot(segment) {
+                if adjusted_range.start <= snapshot_upper_bound {
+                    data.extend(fetch_from_snapshot(
+                        snapshot_provider,
+                        adjusted_range.start..adjusted_range.end.min(snapshot_upper_bound + 1),
+                        &mut predicate,
+                    )?);
+                }
+                adjusted_range.start = adjusted_range.start.max(snapshot_upper_bound + 1);
+            }
+        }
+
+        if adjusted_range.end > adjusted_range.start {
+            data.extend(fetch_from_database(adjusted_range, predicate)?)
+        }
+
+        Ok(data)
+    }
 }
 
 impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
@@ -972,29 +1014,19 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        let mut range = to_range(range);
-        let mut headers = Vec::with_capacity((range.end - range.start) as usize);
-
-        if let Some(provider) = &self.snapshot_provider {
-            if let Some(highest) = provider.get_highest_snapshot(SnapshotSegment::Headers) {
-                if range.start <= highest {
-                    headers
-                        .extend(provider.headers_range(range.start..range.end.min(highest + 1))?);
-                }
-                range.start = range.start.max(highest + 1);
-            }
-        }
-
-        if range.end > range.start {
-            headers.extend(
+        self.get_range_with_snapshot(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |snapshot, range, _| snapshot.headers_range(range),
+            |range, _| {
                 self.tx
                     .cursor_read::<tables::Headers>()?
                     .walk_range(range)?
                     .map(|result| result.map(|(_, header)| header).map_err(Into::into))
-                    .collect::<ProviderResult<Vec<_>>>()?,
-            )
-        }
-        Ok(headers)
+                    .collect::<ProviderResult<Vec<_>>>()
+            },
+            |_| true,
+        )
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
@@ -1020,37 +1052,29 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        mut predicate: impl FnMut(&SealedHeader) -> bool,
+        predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        let mut range = to_range(range);
-        let mut headers = vec![];
-
-        if let Some(provider) = &self.snapshot_provider {
-            if let Some(highest) = provider.get_highest_snapshot(SnapshotSegment::Headers) {
-                if range.start <= highest {
-                    headers.extend(provider.sealed_headers_while(
-                        range.start..range.end.min(highest + 1),
-                        &mut predicate,
-                    )?);
+        self.get_range_with_snapshot(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |snapshot, range, predicate| snapshot.sealed_headers_while(range, predicate),
+            |range, mut predicate| {
+                let mut headers = vec![];
+                for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
+                    let (number, header) = entry?;
+                    let hash = self
+                        .block_hash(number)?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+                    let sealed = header.seal(hash);
+                    if !predicate(&sealed) {
+                        break
+                    }
+                    headers.push(sealed);
                 }
-                range.start = range.start.max(highest + 1);
-            }
-        }
-
-        if range.end > range.start {
-            for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
-                let (number, header) = entry?;
-                let hash = self
-                    .block_hash(number)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-                let sealed = header.seal(hash);
-                if !predicate(&sealed) {
-                    break
-                }
-                headers.push(sealed);
-            }
-        }
-        Ok(headers)
+                Ok(headers)
+            },
+            predicate,
+        )
     }
 }
 
