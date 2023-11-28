@@ -2201,21 +2201,27 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         let tx_count = block.body.len() as u64;
 
-        let senders_len = senders.as_ref().map(|s| s.len());
-        let tx_iter = if Some(block.body.len()) == senders_len {
-            block.body.into_iter().zip(senders.unwrap()).collect::<Vec<(_, _)>>()
-        } else {
-            let senders = TransactionSigned::recover_signers(&block.body, block.body.len())
-                .ok_or(ProviderError::SenderRecoveryError)?;
-            durations_recorder.record_relative(metrics::Action::RecoverSigners);
-            debug_assert_eq!(senders.len(), block.body.len(), "missing one or more senders");
-            block.body.into_iter().zip(senders).collect()
+        // Ensures we have all the senders for the block's transactions.
+        let senders = match senders {
+            Some(senders) if block.body.len() == senders.len() => {
+                // senders have the correct length as transactions in the block
+                senders
+            }
+            _ => {
+                // recover senders from transactions
+                let senders = TransactionSigned::recover_signers(&block.body, block.body.len())
+                    .ok_or(ProviderError::SenderRecoveryError)?;
+                durations_recorder.record_relative(metrics::Action::RecoverSigners);
+                debug_assert_eq!(senders.len(), block.body.len(), "missing one or more senders");
+                senders
+            }
         };
 
         let mut tx_senders_elapsed = Duration::default();
         let mut transactions_elapsed = Duration::default();
         let mut tx_hash_numbers_elapsed = Duration::default();
-        for (transaction, sender) in tx_iter {
+
+        for (transaction, sender) in block.body.into_iter().zip(senders) {
             let hash = transaction.hash();
 
             if prune_modes
