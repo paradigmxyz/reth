@@ -19,8 +19,8 @@ use reth_interfaces::{
     RethError, RethResult,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, PruneModes, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, U256
+    BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, PruneModes, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
     chain::{ChainSplit, ChainSplitTarget},
