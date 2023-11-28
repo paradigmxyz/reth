@@ -143,7 +143,7 @@ pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use peers::PeersConfig;
-pub use protocol::{RlpxSubProtocols, StreamBytes};
+pub use protocol::{RlpxSubProtocols, StreamInAppMessages};
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerConnection, PeerInfo,
     PendingSessionEvent, PendingSessionHandle, PendingSessionHandshakeError, SessionCommand,

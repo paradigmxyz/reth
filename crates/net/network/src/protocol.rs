@@ -4,13 +4,14 @@
 
 use derive_more::{Deref, DerefMut};
 use futures::{Sink, Stream};
-use reth_eth_wire::{
-    capability::SharedCapabilities, protocol::Protocol, CanDisconnect, StreamClone,
-};
+use reth_eth_wire::{capability::SharedCapabilities, protocol::Protocol, StreamClone};
 use reth_network_api::Direction;
-use reth_primitives::{Bytes, BytesMut};
 use reth_rpc_types::PeerId;
 use std::{error::Error, fmt, net::SocketAddr, pin::Pin, sync::Arc};
+
+/// A connection to the p2p connection, that doesn't own the p2p connection. Dependent on
+/// [`crate::PeerConnection`] to make progress.
+pub type WeakPeerConnection = StreamClone;
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
@@ -18,9 +19,11 @@ pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
     /// The type responsible for negotiating the protocol with the remote.
     type ConnectionHandler: ConnectionHandler;
 
-    /// Returns the protocol to announce when the RLPx connection will be established.
+    /// Returns the protocol to announce via [`crate::HelloMessageWithProtocols`] when the P2P  
+    /// connection will be established.
     ///
-    /// This will be negotiated with the remote peer.
+    /// Then it is negotiated with the remote peer wether this RLPx sub-protocol connection wil be
+    /// opened or not.
     fn protocol(&self) -> Protocol;
 
     /// Invoked when a new incoming connection from the remote is requested
@@ -40,27 +43,25 @@ pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
     ) -> Option<Self::ConnectionHandler>;
 }
 
-/// Stream bytes to and from a capability stream.
-pub trait StreamBytes:
-    Stream<Item = BytesMut>
-    + Sink<Bytes, Error = dyn Error>
-    + CanDisconnect<Bytes, Error = dyn Error>
+trait InformConnHandler: fmt::Debug + Sized {}
+
+/// Stream messages to and from app <> capability stream.
+pub trait StreamInAppMessages:
+    Stream<Item = dyn fmt::Debug> // e.g. stream ActiveSessionMessage
+    + Sink<Arc<dyn fmt::Debug>, Error = dyn Error> // e.g. SessionCommand
     + Send
     + fmt::Debug
     + 'static
 {
 }
 
-/// A connection to the p2p connection, that doesn't own the p2p connection. Dependent on
-/// [`crate::PeerConnection`] to make progress.
-pub type WeakPeerConnection = Pin<Box<StreamClone>>;
-
 /// A trait that allows to authenticate a protocol after the RLPx connection was established.
 pub trait ConnectionHandler: Send + Sync + fmt::Debug + 'static {
-    /// The connection that yields messages to send to the remote.
+    /// The connection that yields messages to send to the remote and processes messages from the
+    /// remote.
     ///
     /// The connection will be closed when this stream resolves.
-    type Connection: StreamBytes;
+    type Connection: StreamInAppMessages;
 
     /// Invoked when the RLPx connection has been established by the peer does not share the
     /// protocol.
@@ -78,7 +79,7 @@ pub trait ConnectionHandler: Send + Sync + fmt::Debug + 'static {
         self: Box<Self>,
         direction: Direction,
         peer_id: PeerId,
-        conn: StreamClone,
+        p2p_conn: WeakPeerConnection,
     ) -> Self::Connection;
 }
 
@@ -185,8 +186,8 @@ pub trait DynConnectionHandler: Send + Sync + fmt::Debug + 'static {
         self: Box<Self>,
         direction: Direction,
         peer_id: PeerId,
-        conn: StreamClone,
-    ) -> Pin<Box<dyn StreamBytes>>;
+        p2p_conn: WeakPeerConnection,
+    ) -> Pin<Box<dyn StreamInAppMessages>>;
 }
 
 impl<T> DynConnectionHandler for T
@@ -206,8 +207,8 @@ where
         self: Box<Self>,
         direction: Direction,
         peer_id: PeerId,
-        conn: StreamClone,
-    ) -> Pin<Box<dyn StreamBytes>> {
-        Box::pin(T::into_connection(self, direction, peer_id, conn))
+        p2p_conn: WeakPeerConnection,
+    ) -> Pin<Box<dyn StreamInAppMessages>> {
+        Box::pin(T::into_connection(self, direction, peer_id, p2p_conn))
     }
 }
