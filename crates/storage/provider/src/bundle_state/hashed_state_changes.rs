@@ -67,3 +67,62 @@ impl HashedStateChanges {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_provider_factory;
+    use reth_primitives::{keccak256, Address};
+    use reth_trie::hashed_cursor::HashedStorage;
+
+    #[test]
+    fn wiped_entries_are_removed() {
+        let provider_factory = create_test_provider_factory();
+
+        let addresses = (0..10).map(|_| Address::random()).collect::<Vec<_>>();
+        let destroyed_address = *addresses.first().unwrap();
+        let destroyed_address_hashed = keccak256(destroyed_address);
+        let slot = B256::with_last_byte(1);
+        let hashed_slot = keccak256(slot);
+        {
+            let provider_rw = provider_factory.provider_rw().unwrap();
+            let mut accounts_cursor =
+                provider_rw.tx_ref().cursor_write::<tables::HashedAccount>().unwrap();
+            let mut storage_cursor =
+                provider_rw.tx_ref().cursor_write::<tables::HashedStorage>().unwrap();
+
+            for address in addresses {
+                let hashed_address = keccak256(address);
+                accounts_cursor
+                    .insert(hashed_address, Account { nonce: 1, ..Default::default() })
+                    .unwrap();
+                storage_cursor
+                    .insert(hashed_address, StorageEntry { key: hashed_slot, value: U256::from(1) })
+                    .unwrap();
+            }
+            provider_rw.commit().unwrap();
+        }
+
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.insert_destroyed_account(destroyed_address_hashed);
+        hashed_state.insert_hashed_storage(destroyed_address_hashed, HashedStorage::new(true));
+
+        let provider_rw = provider_factory.provider_rw().unwrap();
+        assert_eq!(HashedStateChanges(hashed_state).write_to_db(provider_rw.tx_ref()), Ok(()));
+        provider_rw.commit().unwrap();
+
+        let provider = provider_factory.provider().unwrap();
+        assert_eq!(
+            provider.tx_ref().get::<tables::HashedAccount>(destroyed_address_hashed),
+            Ok(None)
+        );
+        assert_eq!(
+            provider
+                .tx_ref()
+                .cursor_read::<tables::HashedStorage>()
+                .unwrap()
+                .seek_by_key_subkey(destroyed_address_hashed, hashed_slot),
+            Ok(None)
+        );
+    }
+}
