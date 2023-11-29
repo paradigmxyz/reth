@@ -91,12 +91,12 @@ where
                 }
             }
 
-            let b_l = multicall_bundle.block_override.map(Box::new);
+            let block_override = multicall_bundle.block_override.map(Box::new);
             let mut transactions = multicall_bundle.transactions.into_iter().peekable();
             while let Some(tx) = transactions.next() {
                 // apply state overrides only once, before the first transaction
                 let state_overrides = state_override.take();
-                let overrides = EvmOverrides::new(state_overrides, b_l.clone());
+                let overrides = EvmOverrides::new(state_overrides, block_override.clone());
 
                 let env = prepare_call_env(
                     cfg.clone(),
