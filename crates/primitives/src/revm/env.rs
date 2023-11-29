@@ -1,6 +1,6 @@
 use crate::{
     constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
-    recover_signer,
+    recover_signer_unchecked,
     revm::config::revm_spec,
     revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
     Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
@@ -131,7 +131,8 @@ pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRec
     };
 
     // TODO: this is currently unchecked recovery, does this need to be checked w.r.t EIP-2?
-    recover_signer(&signature, &seal_hash.0).map_err(CliqueSignerRecoveryError::InvalidSignature)
+    recover_signer_unchecked(&signature, &seal_hash.0)
+        .map_err(CliqueSignerRecoveryError::InvalidSignature)
 }
 
 /// Returns a new [TxEnv] filled with the transaction's data.
