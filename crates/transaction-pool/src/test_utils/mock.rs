@@ -898,8 +898,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
-        any::<(Transaction, Address, B256, BlobTransactionSidecar)>()
-            .prop_map(|(tx, sender, tx_hash, sidecar)| match &tx {
+        any::<(Transaction, Address, B256)>()
+            .prop_map(|(tx, sender, tx_hash)| match &tx {
                 Transaction::Legacy(TxLegacy {
                     nonce,
                     gas_price,
@@ -972,7 +972,9 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     value: (*value).into(),
                     input: (*input).clone(),
                     accesslist: (*access_list).clone(),
-                    sidecar,
+                    // only generate a sidecar if it is a 4844 tx - also for the sake of
+                    // performance just use a default sidecar
+                    sidecar: BlobTransactionSidecar::default(),
                 },
                 _ => unimplemented!(),
             })
