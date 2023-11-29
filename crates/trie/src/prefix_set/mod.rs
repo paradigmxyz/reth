@@ -25,10 +25,10 @@ pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 /// use reth_trie::prefix_set::PrefixSetMut;
 ///
 /// let mut prefix_set = PrefixSetMut::default();
-/// prefix_set.insert(b"key1");
-/// prefix_set.insert(b"key2");
-///
-/// assert_eq!(prefix_set.contains(b"key"), true);
+/// prefix_set.insert(Nibbles::new_unchecked(&[0xa, 0xb]));
+/// prefix_set.insert(Nibbles::new_unchecked(&[0xa, 0xb, 0xc]));
+/// assert!(prefix_set.contains(&[0xa, 0xb]));
+/// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
 /// ```
 #[derive(Debug, Default, Clone)]
 pub struct PrefixSetMut {
