@@ -76,8 +76,7 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ChainSpecBuilder, MAINNET, U256};
-    use reth_primitives::Head;
+    use crate::{ChainSpecBuilder, Head, MAINNET, U256};
 
     #[test]
     fn test_to_revm_spec() {
