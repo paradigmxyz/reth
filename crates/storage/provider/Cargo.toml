@@ -10,7 +10,6 @@ description = "Reth storage provider."
 
 [dependencies]
 # reth
-reth-ethereum-forks.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true

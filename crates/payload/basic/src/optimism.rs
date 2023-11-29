@@ -1,8 +1,8 @@
 //! Optimism's [PayloadBuilder] implementation.
 
 use super::*;
-use reth_ethereum_forks::Hardfork;
 use reth_payload_builder::error::OptimismPayloadBuilderError;
+use reth_primitives::Hardfork;
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in

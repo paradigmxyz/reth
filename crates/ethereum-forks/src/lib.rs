@@ -52,6 +52,3 @@ pub type H512 = B512;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;
-
-#[cfg(feature = "c-kzg")]
-pub use c_kzg as kzg;

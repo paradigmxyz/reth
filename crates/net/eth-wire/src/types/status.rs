@@ -1,8 +1,9 @@
 use crate::{EthVersion, StatusBuilder};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
-use reth_ethereum_forks::{ForkId, Hardfork, Head};
-use reth_primitives::{hex, Chain, ChainSpec, Genesis, NamedChain, B256, MAINNET, U256};
+use reth_primitives::{
+    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, NamedChain, B256, MAINNET, U256,
+};
 use std::fmt::{Debug, Display};
 
 #[cfg(feature = "serde")]
@@ -148,8 +149,10 @@ mod tests {
     use crate::types::{EthVersion, Status};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
-    use reth_ethereum_forks::{ForkHash, ForkId, Hardfork, Head};
-    use reth_primitives::{hex, Chain, ChainSpec, ForkCondition, Genesis, NamedChain, B256, U256};
+    use reth_primitives::{
+        hex, Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head,
+        NamedChain, B256, U256,
+    };
     use std::str::FromStr;
 
     #[test]

@@ -3,10 +3,9 @@ use crate::{
     recover_signer,
     revm::config::revm_spec,
     revm_primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionKind,
+    Address, Bytes, Chain, ChainSpec, Head, Header, Transaction, TransactionKind,
     TransactionSignedEcRecovered, B256, U256,
 };
-use reth_ethereum_forks::Head;
 
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;

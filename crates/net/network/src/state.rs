@@ -15,9 +15,8 @@ use crate::{
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
-use reth_ethereum_forks::ForkId;
 use reth_network_api::PeerKind;
-use reth_primitives::{PeerId, B256};
+use reth_primitives::{ForkId, PeerId, B256};
 use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
