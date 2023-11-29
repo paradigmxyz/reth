@@ -19,7 +19,7 @@ use reth_provider::{
 use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
-    MulticallBundle, StateContext,
+    StateContext,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{
@@ -44,7 +44,7 @@ where
 
     pub async fn eth_multicall_v1(
         &self,
-        multicall_bundle: MulticallBundle,
+        multicall_bundle: Bundle,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
     ) -> EthResult<Vec<EthCallResponse>> {
