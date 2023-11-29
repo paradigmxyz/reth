@@ -12,14 +12,16 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{
+    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes,
+    TransactionSignedEcRecovered, U256,
+};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, BlockError, Bundle, CallRequest, EthCallResponse,
-    StateContext,
+    state::StateOverride, AccessListWithGasUsed, Bundle, CallRequest, EthCallResponse, StateContext,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{
@@ -87,10 +89,13 @@ where
 
         let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
 
-        let ((cfg, block_env, _), block) =
-            futures::try_join!(self.evm_env_at(target_block), self.block_by_id(target_block))?;
+        let ((cfg, block_env, _), block) = futures::try_join!(
+            self.evm_env_at(target_block),
+            self.block_with_senders(target_block)
+        )?;
 
-        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let (block, senders) =
+            block.ok_or_else(|| EthApiError::UnknownBlockNumber)?.into_components();
         let gas_limit = self.inner.gas_cap;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -115,8 +120,9 @@ where
                 let transactions = block.body.into_iter().take(num_txs);
 
                 // Execute all transactions until index
-                for tx in transactions {
-                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                for (idx, tx) in transactions.enumerate() {
+                    let tx =
+                        TransactionSignedEcRecovered::from_signed_transaction(tx, senders[idx]);
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (res, _) = transact(&mut db, env)?;
