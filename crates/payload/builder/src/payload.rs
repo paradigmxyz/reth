@@ -128,7 +128,9 @@ pub struct PayloadBuilderAttributes {
     pub id: PayloadId,
     /// Parent block to build the payload on top
     pub parent: B256,
-    /// Timestamp for the generated payload
+    /// Unix timestamp for the generated payload
+    ///
+    /// Number of seconds since the Unix epoch.
     pub timestamp: u64,
     /// Address of the recipient for collecting transaction fee
     pub suggested_fee_recipient: Address,

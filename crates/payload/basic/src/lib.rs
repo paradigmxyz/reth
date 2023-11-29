@@ -47,7 +47,7 @@ use std::{
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
     task::{Context, Poll},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     sync::{oneshot, Semaphore},
@@ -130,6 +130,30 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             builder,
         }
     }
+
+    /// Returns the maximum duration a job should be allowed to run.
+    ///
+    /// This adheres to the following specification:
+    // > Client software SHOULD stop the updating process when either a call to engine_getPayload
+    // > with the build process's payloadId is made or SECONDS_PER_SLOT (12s in the Mainnet
+    // > configuration) have passed since the point in time identified by the timestamp parameter.
+    // See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
+    #[inline]
+    fn max_job_duration(&self, unix_timestamp: u64) -> Duration {
+        let duration_until_timestamp = duration_until(unix_timestamp);
+
+        // safety in case clocks are bad
+        let duration_until_timestamp = duration_until_timestamp.min(self.config.deadline * 3);
+
+        self.config.deadline + duration_until_timestamp
+    }
+
+    /// Returns the [Instant](tokio::time::Instant) at which the job should be terminated because it
+    /// is considered timed out.
+    #[inline]
+    fn job_deadline(&self, unix_timestamp: u64) -> tokio::time::Instant {
+        tokio::time::Instant::now() + self.max_job_duration(unix_timestamp)
+    }
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -173,7 +197,7 @@ where
             self.config.compute_pending_block,
         );
 
-        let until = tokio::time::Instant::now() + self.config.deadline;
+        let until = self.job_deadline(config.attributes.timestamp);
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
         Ok(BasicPayloadJob {
@@ -215,6 +239,8 @@ pub struct BasicPayloadJobGeneratorConfig {
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
+    ///
+    /// By default this is [SLOT_DURATION]: 12s
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
@@ -1214,4 +1240,13 @@ fn is_better_payload(best_payload: Option<&BuiltPayload>, new_fees: U256) -> boo
     } else {
         true
     }
+}
+
+/// Returns the duration until the given unix timestamp in seconds.
+///
+/// Returns `Duration::ZERO` if the given timestamp is in the past.
+fn duration_until(unix_timestamp_secs: u64) -> Duration {
+    let unix_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let timestamp = Duration::from_secs(unix_timestamp_secs);
+    timestamp.saturating_sub(unix_now)
 }
