@@ -1,5 +1,5 @@
 use super::{
-    nodes::{rlp_hash, BranchNode, ExtensionNode, LeafNode},
+    nodes::{word_rlp, BranchNode, ExtensionNode, LeafNode},
     BranchNodeCompact, Nibbles, TrieMask,
 };
 use crate::{constants::EMPTY_ROOT_HASH, keccak256, Bytes, B256};
@@ -156,7 +156,7 @@ impl HashBuilder {
         if !self.key.is_empty() {
             self.update(&key);
         } else if key.is_empty() {
-            self.stack.push(rlp_hash(value));
+            self.stack.push(word_rlp(&value));
         }
         self.set_key_value(key, value);
         self.stored_in_database = stored_in_database;
@@ -277,7 +277,7 @@ impl HashBuilder {
                     }
                     HashBuilderValue::Hash(hash) => {
                         trace!(target: "trie::hash_builder", ?hash, "pushing branch node hash");
-                        self.stack.push(rlp_hash(*hash));
+                        self.stack.push(word_rlp(hash));
 
                         if self.stored_in_database {
                             self.tree_masks[current.len() - 1] |=
