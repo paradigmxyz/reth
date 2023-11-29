@@ -229,15 +229,24 @@ where
         &self,
         id: PayloadId,
     ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
-        self.payload_jobs
+        let attributes = self
+            .payload_jobs
             .iter()
             .find(|(_, job_id)| *job_id == id)
-            .map(|(j, _)| j.payload_attributes())
+            .map(|(j, _)| j.payload_attributes());
+
+        if attributes.is_none() {
+            trace!(%id, "no matching payload job found to get attributes for");
+        }
+
+        attributes
     }
 
     /// Returns the best payload for the given identifier that has been built so far and terminates
     /// the job if requested.
     fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture> {
+        trace!(%id, "resolving payload job");
+
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve();
 
