@@ -3,17 +3,17 @@ use alloy_rlp::RlpEncodableWrapper;
 use derive_more::{Deref, From, Index};
 use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
-use std::ops::RangeBounds;
+use std::{borrow::Borrow, ops::RangeBounds};
 
 /// The nibbles are the keys for the AccountsTrie and the subkeys for the StorageTrie.
 #[main_codec]
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deref)]
 pub struct StoredNibbles(pub Bytes);
 
-impl<T: Into<Nibbles>> From<T> for StoredNibbles {
+impl<T: Into<Bytes>> From<T> for StoredNibbles {
     #[inline]
     fn from(value: T) -> Self {
-        Self(value.into().into_bytes())
+        Self(value.into())
     }
 }
 
@@ -75,38 +75,73 @@ impl Compact for StoredNibblesSubKey {
 )]
 pub struct Nibbles(Bytes);
 
-impl From<&[u8]> for Nibbles {
+impl From<StoredNibbles> for Nibbles {
     #[inline]
-    fn from(value: &[u8]) -> Self {
-        Self::from_nibbles(value.to_vec())
+    fn from(value: StoredNibbles) -> Self {
+        Self(value.0)
     }
 }
 
-impl<const N: usize> From<[u8; N]> for Nibbles {
+impl From<StoredNibblesSubKey> for Nibbles {
     #[inline]
-    fn from(value: [u8; N]) -> Self {
-        Self::from_nibbles(value.to_vec())
+    fn from(value: StoredNibblesSubKey) -> Self {
+        Self(value.0 .0)
     }
 }
 
-impl<const N: usize> From<&[u8; N]> for Nibbles {
+impl From<Nibbles> for Vec<u8> {
     #[inline]
-    fn from(value: &[u8; N]) -> Self {
-        Self::from_nibbles(value.to_vec())
+    fn from(value: Nibbles) -> Self {
+        value.0.into()
     }
 }
 
-impl From<Vec<u8>> for Nibbles {
+impl From<Nibbles> for Bytes {
     #[inline]
-    fn from(value: Vec<u8>) -> Self {
-        Self::from_nibbles(value)
+    fn from(value: Nibbles) -> Self {
+        value.into_bytes()
+    }
+}
+
+impl PartialEq<[u8]> for Nibbles {
+    #[inline]
+    fn eq(&self, other: &[u8]) -> bool {
+        self.as_slice() == other
+    }
+}
+
+impl PartialEq<Nibbles> for [u8] {
+    #[inline]
+    fn eq(&self, other: &Nibbles) -> bool {
+        self == other.as_slice()
+    }
+}
+
+impl PartialOrd<[u8]> for Nibbles {
+    #[inline]
+    fn partial_cmp(&self, other: &[u8]) -> Option<std::cmp::Ordering> {
+        self.as_slice().partial_cmp(other)
+    }
+}
+
+impl PartialOrd<Nibbles> for [u8] {
+    #[inline]
+    fn partial_cmp(&self, other: &Nibbles) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(other.as_slice())
+    }
+}
+
+impl Borrow<[u8]> for Nibbles {
+    #[inline]
+    fn borrow(&self) -> &[u8] {
+        self.as_slice()
     }
 }
 
 impl Nibbles {
-    /// Creates a new [`Nibbles`] instance from a nibble slice.
+    /// Creates a new [`Nibbles`] instance from nibble bytes, without checking their validity.
     #[inline]
-    pub fn from_nibbles<T: Into<Bytes>>(nibbles: T) -> Self {
+    pub fn new_unchecked<T: Into<Bytes>>(nibbles: T) -> Self {
         Self(nibbles.into())
     }
 
@@ -167,19 +202,19 @@ impl Nibbles {
     /// # use reth_primitives::trie::Nibbles;
     ///
     /// // Extension node with an even path length:
-    /// let nibbles = Nibbles::from_nibbles(&[0x0A, 0x0B, 0x0C, 0x0D]);
+    /// let nibbles = Nibbles::new_unchecked(&[0x0A, 0x0B, 0x0C, 0x0D]);
     /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x00, 0xAB, 0xCD]);
     ///
     /// // Extension node with an odd path length:
-    /// let nibbles = Nibbles::from_nibbles(&[0x0A, 0x0B, 0x0C]);
+    /// let nibbles = Nibbles::new_unchecked(&[0x0A, 0x0B, 0x0C]);
     /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x1A, 0xBC]);
     ///
     /// // Leaf node with an even path length:
-    /// let nibbles = Nibbles::from_nibbles(&[0x0A, 0x0B, 0x0C, 0x0D]);
+    /// let nibbles = Nibbles::new_unchecked(&[0x0A, 0x0B, 0x0C, 0x0D]);
     /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x20, 0xAB, 0xCD]);
     ///
     /// // Leaf node with an odd path length:
-    /// let nibbles = Nibbles::from_nibbles(&[0x0A, 0x0B, 0x0C]);
+    /// let nibbles = Nibbles::new_unchecked(&[0x0A, 0x0B, 0x0C]);
     /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x3A, 0xBC]);
     /// ```
     pub fn encode_path_leaf(&self, is_leaf: bool) -> Vec<u8> {
@@ -211,7 +246,7 @@ impl Nibbles {
             debug_assert!(*nibble < 0x10);
             if *nibble < 0xf {
                 *nibble += 1;
-                return Some(Self::from_nibbles(incremented))
+                return Some(Self::new_unchecked(incremented))
             } else {
                 *nibble = 0;
             }
@@ -229,7 +264,7 @@ impl Nibbles {
 
     /// Returns `true` if the current nibble sequence starts with the given prefix.
     #[inline]
-    pub fn has_prefix(&self, other: &Self) -> bool {
+    pub fn has_prefix(&self, other: &[u8]) -> bool {
         self.starts_with(other)
     }
 
@@ -252,7 +287,7 @@ impl Nibbles {
 
     /// Returns the length of the common prefix between the current nibble sequence and the given.
     #[inline]
-    pub fn common_prefix_length(&self, other: &Self) -> usize {
+    pub fn common_prefix_length(&self, other: &[u8]) -> usize {
         let len = std::cmp::min(self.len(), other.len());
         for i in 0..len {
             if self[i] != other[i] {
@@ -292,7 +327,7 @@ impl Nibbles {
         let mut hex_data = Vec::with_capacity(self.len() + b.len());
         hex_data.extend_from_slice(self);
         hex_data.extend_from_slice(b);
-        Self::from_nibbles(hex_data)
+        Self::new_unchecked(hex_data)
     }
 
     /// Pushes a nibble to the end of the current nibbles.
@@ -334,7 +369,7 @@ mod tests {
 
     #[test]
     fn hashed_regression() {
-        let nibbles = Nibbles::from_nibbles(hex!("05010406040a040203030f010805020b050c04070003070e0909070f010b0a0805020301070c0a0902040b0f000f0006040a04050f020b090701000a0a040b"));
+        let nibbles = Nibbles::new_unchecked(hex!("05010406040a040203030f010805020b050c04070003070e0909070f010b0a0805020301070c0a0902040b0f000f0006040a04050f020b090701000a0a040b"));
         let path = nibbles.encode_path_leaf(true);
         let expected = hex!("351464a4233f1852b5c47037e997f1ba852317ca924bf0f064a45f2b9710aa4b");
         assert_eq!(path, expected);
@@ -350,7 +385,7 @@ mod tests {
             (vec![0xa, 0xb, 0x2, 0x0], vec![0xab, 0x20]),
             (vec![0xa, 0xb, 0x2, 0x7], vec![0xab, 0x27]),
         ] {
-            let nibbles = Nibbles::from_nibbles(input);
+            let nibbles = Nibbles::new_unchecked(input);
             let encoded = nibbles.pack();
             assert_eq!(encoded, expected);
         }

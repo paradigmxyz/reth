@@ -1143,7 +1143,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles[..].into(), node.clone()))
+                    Some((nibbles.clone().into(), node.clone()))
                 }
                 _ => None,
             })
@@ -1170,7 +1170,7 @@ mod tests {
         let mut account_updates = HashMap::new();
         for item in walker {
             let (key, node) = item.unwrap();
-            account_updates.insert(key[..].into(), node);
+            account_updates.insert(key.into(), node);
         }
 
         assert_trie_updates(&account_updates);
@@ -1231,7 +1231,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::StorageNode(_, nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles[..].into(), node.clone()))
+                    Some((nibbles.clone().into(), node.clone()))
                 }
                 _ => None,
             })
@@ -1296,11 +1296,11 @@ mod tests {
     fn assert_trie_updates(account_updates: &HashMap<Nibbles, BranchNodeCompact>) {
         assert_eq!(account_updates.len(), 2);
 
-        let node = account_updates.get(&vec![0x3].as_slice().into()).unwrap();
+        let node = account_updates.get(&[0x3][..]).unwrap();
         let expected = BranchNodeCompact::new(0b0011, 0b0001, 0b0000, vec![], None);
         assert_eq!(node, &expected);
 
-        let node = account_updates.get(&vec![0x3, 0x0, 0xA, 0xF].as_slice().into()).unwrap();
+        let node = account_updates.get(&[0x3, 0x0, 0xA, 0xF][..]).unwrap();
         assert_eq!(node.state_mask, TrieMask::new(0b101100000));
         assert_eq!(node.tree_mask, TrieMask::new(0b000000000));
         assert_eq!(node.hash_mask, TrieMask::new(0b001000000));
