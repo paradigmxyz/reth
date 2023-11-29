@@ -5,8 +5,8 @@ use reth_primitives::{
 };
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, MulticallBundle, RichBlock,
-    StateContext, SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
+    SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -22,7 +22,7 @@ pub trait EthApi {
     #[method(name = "ethMulticallV1")]
     async fn eth_multicall_v1(
         &self,
-        multicall: MulticallBundle,
+        multicall: Bundle,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<EthCallResponse>>;
