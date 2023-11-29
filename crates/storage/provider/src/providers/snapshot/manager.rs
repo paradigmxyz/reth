@@ -166,6 +166,10 @@ impl SnapshotProvider {
         let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
 
         while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
+            if block > *block_end {
+                // request block is higher than highest snapshot block
+                return None
+            }
             // `unwrap_or(0) is safe here as it sets block_start to 0 if the iterator is empty,
             // indicating the lowest height snapshot has been reached.
             let block_start =
@@ -192,6 +196,10 @@ impl SnapshotProvider {
         let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
 
         while let Some((tx_end, block_range)) = snapshots_rev_iter.next() {
+            if tx > *tx_end {
+                // request tx is higher than highest snapshot tx
+                return None
+            }
             let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
                 return Some((block_range.clone(), tx_start..=*tx_end))
@@ -200,11 +208,18 @@ impl SnapshotProvider {
         None
     }
 
-    /// Gets the highest snapshot if it exists for a snapshot segment.
-    pub fn get_highest_snapshot(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
+    /// Gets the highest snapshot block if it exists for a snapshot segment.
+    pub fn get_highest_snapshot_block(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
         self.highest_tracker
             .as_ref()
             .and_then(|tracker| tracker.borrow().and_then(|highest| highest.highest(segment)))
+    }
+
+    /// Gets the highest snapshotted transaction.
+    pub fn get_highest_snapshot_tx(&self, segment: SnapshotSegment) -> Option<TxNumber> {
+        let snapshots = self.snapshots_tx_index.read();
+        let segment_snapshots: &BTreeMap<u64, RangeInclusive<u64>> = snapshots.get(&segment)?;
+        segment_snapshots.last_key_value().map(|(k, _)| *k)
     }
 
     /// Iterates through segment snapshots in reverse order, executing a function until it returns
@@ -260,7 +275,9 @@ impl SnapshotProvider {
         let mut provider = get_provider(range.start)?;
         let mut cursor = provider.cursor()?;
 
+        // advances number in range
         'outer: for number in range {
+            // advances snapshot files if `get_fn` returns None
             'inner: loop {
                 match get_fn(&mut cursor, number)? {
                     Some(res) => {
@@ -271,9 +288,6 @@ impl SnapshotProvider {
                         break 'inner;
                     }
                     None => {
-                        if number > self.get_highest_snapshot(segment).unwrap_or_default() {
-                            return Ok(result);
-                        }
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
                     }
@@ -461,9 +475,16 @@ impl TransactionsProvider for SnapshotProvider {
 
     fn transactions_by_tx_range(
         &self,
-        _range: impl RangeBounds<TxNumber>,
+        range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
-        todo!()
+        self.fetch_range(
+            SnapshotSegment::Transactions,
+            to_range(range),
+            |cursor, number| {
+                cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())
+            },
+            |_| true,
+        )
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {

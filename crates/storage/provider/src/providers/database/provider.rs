@@ -222,7 +222,11 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let mut data = Vec::new();
 
         if let Some(snapshot_provider) = &self.snapshot_provider {
-            if let Some(snapshot_upper_bound) = snapshot_provider.get_highest_snapshot(segment) {
+            // If there is, check the maximum block or transaction number of the segment.
+            if let Some(snapshot_upper_bound) = match segment {
+                SnapshotSegment::Headers => snapshot_provider.get_highest_snapshot_block(segment),
+                _ => snapshot_provider.get_highest_snapshot_tx(segment),
+            } {
                 if adjusted_range.start <= snapshot_upper_bound {
                     data.extend(fetch_from_snapshot(
                         snapshot_provider,
@@ -245,7 +249,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     ///
     /// # Arguments
     /// * `segment` - The segment of the snapshot to check against.
-    /// * `block_number` - Requested block number
+    /// * `number` - Requested block or tx number
     /// * `fetch_from_snapshot` - A closure that defines how to fetch the data from the snapshot
     ///   provider.
     /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
@@ -253,14 +257,19 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     fn get_with_snapshot<T>(
         &self,
         segment: SnapshotSegment,
-        block_number: u64,
+        number: u64,
         fetch_from_snapshot: impl Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
         fetch_from_database: impl Fn() -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
         if let Some(provider) = &self.snapshot_provider {
-            if provider
-                .get_highest_snapshot(segment)
-                .map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= block_number)
+            // If there is, check the maximum block or transaction number of the segment.
+            let snapshot_upper_bound = match segment {
+                SnapshotSegment::Headers => provider.get_highest_snapshot_block(segment),
+                _ => provider.get_highest_snapshot_tx(segment),
+            };
+
+            if snapshot_upper_bound
+                .map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
             {
                 return fetch_from_snapshot(provider);
             }
@@ -1285,6 +1294,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
 
+        // TODO(joshie): handle headers/txes in snaps
         for num in range {
             if let Some((_, header)) = headers_cursor.seek_exact(num)? {
                 // If the body indices are not found, this means that the transactions either do
@@ -1395,14 +1405,24 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into))
+        self.get_with_snapshot(
+            SnapshotSegment::Transactions,
+            id,
+            |snapshot| snapshot.transaction_by_id(id),
+            || Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into)),
+        )
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        Ok(self.tx.get::<tables::Transactions>(id)?)
+        self.get_with_snapshot(
+            SnapshotSegment::Transactions,
+            id,
+            |snapshot| snapshot.transaction_by_id_no_hash(id),
+            || Ok(self.tx.get::<tables::Transactions>(id)?),
+        )
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -1477,6 +1497,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
+                    //todo joshie
                     let transactions = tx_cursor
                         .walk_range(tx_range)?
                         .map(|result| result.map(|(_, tx)| tx.into()))
