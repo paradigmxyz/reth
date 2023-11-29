@@ -793,18 +793,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .$limit
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
-                        // pops the worst transaction from the sub-pool
-                        if let Some(tx) = $this.$pool.pop_worst() {
-                            let id = tx.transaction_id;
-
-                            // now that the tx is removed from the sub-pool, we need to remove it also from the total set
-                            $this.all_transactions.remove_transaction(&id);
-
-                            // record the removed transaction
-                            removed.push(tx);
-
-                            // this might have introduced a nonce gap, so we also discard any descendants
-                            $this.remove_descendants(&id, &mut $removed);
+                        removed = $this.$pool.truncate_pool($this.config.$limit.clone());
+                        for tx in removed.clone().iter() {
+                            $this.remove_descendants(tx.id(), &mut $removed);
                         }
                     }
 
