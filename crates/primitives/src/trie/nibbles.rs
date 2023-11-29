@@ -167,19 +167,19 @@ impl Nibbles {
     /// # use reth_primitives::trie::Nibbles;
     ///
     /// // Extension node with an even path length:
-    /// let nibbles = Nibbles::from_nibbles([0x0A, 0x0B, 0x0C, 0x0D]);
+    /// let nibbles = Nibbles::from_nibbles(&[0x0A, 0x0B, 0x0C, 0x0D]);
     /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x00, 0xAB, 0xCD]);
     ///
     /// // Extension node with an odd path length:
-    /// let nibbles = Nibbles::from_nibbles([0x0A, 0x0B, 0x0C]);
+    /// let nibbles = Nibbles::from_nibbles(&[0x0A, 0x0B, 0x0C]);
     /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x1A, 0xBC]);
     ///
     /// // Leaf node with an even path length:
-    /// let nibbles = Nibbles::from_nibbles([0x0A, 0x0B, 0x0C, 0x0D]);
+    /// let nibbles = Nibbles::from_nibbles(&[0x0A, 0x0B, 0x0C, 0x0D]);
     /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x20, 0xAB, 0xCD]);
     ///
     /// // Leaf node with an odd path length:
-    /// let nibbles = Nibbles::from_nibbles([0x0A, 0x0B, 0x0C]);
+    /// let nibbles = Nibbles::from_nibbles(&[0x0A, 0x0B, 0x0C]);
     /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x3A, 0xBC]);
     /// ```
     pub fn encode_path_leaf(&self, is_leaf: bool) -> Vec<u8> {

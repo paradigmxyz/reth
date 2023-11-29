@@ -634,7 +634,7 @@ mod tests {
 
         let mut hb2 = HashBuilder::default();
         // Insert the branch with the `0x6` shared prefix.
-        hb2.add_branch(Nibbles::from_nibbles(vec![0x6]), branch_node_hash, false);
+        hb2.add_branch(Nibbles::from_nibbles(&[0x6]), branch_node_hash, false);
 
         let expected = trie_root(raw_input.clone());
         assert_eq!(hb.root(), expected);
