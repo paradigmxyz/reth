@@ -36,7 +36,7 @@ where
         ..
     } = config;
 
-    debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
+    debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let block_gas_limit: u64 = attributes
         .optimism_payload_attributes
