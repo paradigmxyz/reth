@@ -94,14 +94,12 @@ impl Nibbles {
     /// Take a byte array (slice or vector) as input and convert it into a [Nibbles] struct
     /// containing the nibbles (half-bytes or 4 bits) that make up the input byte data.
     pub fn unpack<T: AsRef<[u8]>>(data: T) -> Self {
-        Nibbles {
-            hex_data: Bytes::from(
-                data.as_ref()
-                    .iter()
-                    .flat_map(|item| vec![item / 16, item % 16])
-                    .collect::<Vec<u8>>(),
-            ),
+        let mut vec = Vec::with_capacity(data.as_ref().len() * 2);
+        for byte in data.as_ref() {
+            vec.push(byte / 16);
+            vec.push(byte % 16);
         }
+        Nibbles { hex_data: Bytes::from(vec) }
     }
 
     /// Packs the nibbles stored in the struct into a byte vector.
