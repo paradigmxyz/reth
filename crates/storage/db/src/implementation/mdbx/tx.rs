@@ -183,7 +183,9 @@ impl<K: TransactionKind> MetricsHandler<K> {
     /// NOTE: Backtrace is recorded using [Backtrace::force_capture], so `RUST_BACKTRACE` env var is
     /// not needed.
     fn log_backtrace_on_long_transaction(&self) {
-        if self.backtrace_recorded.load(Ordering::Relaxed) {
+        if self.backtrace_recorded.load(Ordering::Relaxed) ||
+            self.transaction_mode() != TransactionMode::ReadOnly
+        {
             return
         }
 
@@ -196,7 +198,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
                 target: "storage::db::mdbx",
                 ?open_duration,
                 ?backtrace,
-                "The database transaction has been open for too long"
+                "The database read transaction has been open for too long"
             );
         }
     }
