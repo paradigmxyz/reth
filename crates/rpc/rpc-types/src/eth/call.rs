@@ -8,10 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub struct Bundle {
     /// All transactions to execute
     pub transactions: Vec<CallRequest>,
-    /// Block overrides to apply
+    /// Block overrides to applyR
     pub block_override: Option<BlockOverrides>,
 }
-
 
 /// State context for callMany
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
