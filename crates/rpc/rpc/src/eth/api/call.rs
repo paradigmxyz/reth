@@ -4,8 +4,9 @@ use crate::{
     eth::{
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
-            build_call_evm_env, caller_gas_allowance, cap_tx_gas_limit_with_caller_allowance,
-            get_precompiles, inspect, prepare_call_env, transact, EvmOverrides,
+            apply_state_overrides, build_call_evm_env, caller_gas_allowance,
+            cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect, prepare_call_env,
+            transact, EvmOverrides,
         },
         EthTransactions,
     },
@@ -41,12 +42,17 @@ where
     Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [BlockId].
-    pub async fn estimate_gas_at(&self, request: CallRequest, at: BlockId) -> EthResult<U256> {
+    pub async fn estimate_gas_at(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+    ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
 
         self.on_blocking_task(|this| async move {
             let state = this.state_at(at)?;
-            this.estimate_gas_with(cfg, block_env, request, state)
+            this.estimate_gas_with(cfg, block_env, request, state, state_overrides)
         })
         .await
     }
@@ -171,6 +177,7 @@ where
         block: BlockEnv,
         request: CallRequest,
         state: S,
+        state_overrides: Option<StateOverride>,
     ) -> EthResult<U256>
     where
         S: StateProvider,
@@ -196,6 +203,10 @@ where
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+        if let Some(some_state_overrides) = state_overrides {
+            apply_state_overrides(some_state_overrides, &mut db)?;
+        }
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
@@ -409,7 +420,7 @@ where
 
         // calculate the gas used using the access list
         request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state())?;
+        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state(), None)?;
 
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }

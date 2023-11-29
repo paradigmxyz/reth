@@ -530,6 +530,7 @@ where
                     max_fee_per_blob_gas: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
+                None,
             )
             .await?;
         let gas_limit = estimated_gas;

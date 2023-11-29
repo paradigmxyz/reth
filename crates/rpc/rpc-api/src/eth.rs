@@ -190,6 +190,7 @@ pub trait EthApi {
         &self,
         request: CallRequest,
         block_number: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
     ) -> RpcResult<U256>;
 
     /// Returns the current price per gas in wei.
