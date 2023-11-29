@@ -54,6 +54,17 @@ where
     let is_regolith =
         chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, attributes.timestamp);
 
+    // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
+    // blocks will always have at least a single transaction in them (the L1 info transaction),
+    // so we can safely assume that this will always be triggered upon the transition and that
+    // the above check for empty blocks will never be hit on OP chains.
+    reth_revm::optimism::ensure_create2_deployer(chain_spec.clone(), attributes.timestamp, &mut db)
+        .map_err(|_| {
+            PayloadBuilderError::Internal(RethError::Custom(
+                "Failed to force create2deployer account code".to_string(),
+            ))
+        })?;
+
     let mut receipts = Vec::new();
     for sequencer_tx in attributes.optimism_payload_attributes.transactions {
         // Check if the job was cancelled, if so we can exit early.
@@ -128,6 +139,13 @@ where
             logs: result.logs().into_iter().map(into_reth_log).collect(),
             #[cfg(feature = "optimism")]
             deposit_nonce: depositor.map(|account| account.nonce),
+            // The deposit receipt version was introduced in Canyon to indicate an update to how
+            // receipt hashes should be computed when set. The state transition process
+            // ensures this is only set for post-Canyon deposit transactions.
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: chain_spec
+                .is_fork_active_at_timestamp(Hardfork::Canyon, attributes.timestamp)
+                .then_some(1),
         }));
 
         // append transaction to the list of executed transactions
@@ -204,6 +222,8 @@ where
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
             }));
 
             // update add to total fees
@@ -235,7 +255,9 @@ where
         Receipts::from_vec(vec![receipts]),
         block_number,
     );
-    let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
+    let receipts_root = bundle
+        .receipts_root_slow(block_number, chain_spec.as_ref(), attributes.timestamp)
+        .expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root

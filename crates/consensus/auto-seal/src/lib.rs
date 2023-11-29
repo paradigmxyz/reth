@@ -254,11 +254,13 @@ impl StorageInner {
         transactions: &Vec<TransactionSigned>,
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+
         // check previous block for base fee
         let base_fee_per_gas = self
             .headers
             .get(&self.best_block)
-            .and_then(|parent| parent.next_block_base_fee(chain_spec.base_fee_params));
+            .and_then(|parent| parent.next_block_base_fee(chain_spec.base_fee_params(timestamp)));
 
         let mut header = Header {
             parent_hash: self.best_hash,
@@ -273,7 +275,7 @@ impl StorageInner {
             number: self.best_block + 1,
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             gas_used: 0,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+            timestamp,
             mix_hash: Default::default(),
             nonce: 0,
             base_fee_per_gas,
@@ -333,6 +335,7 @@ impl StorageInner {
         bundle_state: &BundleStateWithReceipts,
         client: &S,
         gas_used: u64,
+        #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
     ) -> Result<Header, BlockExecutionError> {
         let receipts = bundle_state.receipts_by_block(header.number);
         header.receipts_root = if receipts.is_empty() {
@@ -344,7 +347,13 @@ impl StorageInner {
                 .collect::<Vec<ReceiptWithBloom>>();
             header.logs_bloom =
                 receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-            proofs::calculate_receipt_root(&receipts_with_bloom)
+            proofs::calculate_receipt_root(
+                &receipts_with_bloom,
+                #[cfg(feature = "optimism")]
+                chain_spec,
+                #[cfg(feature = "optimism")]
+                header.timestamp,
+            )
         };
 
         header.gas_used = gas_used;
@@ -382,7 +391,7 @@ impl StorageInner {
             .with_database_boxed(Box::new(StateProviderDatabase::new(client.latest().unwrap())))
             .with_bundle_update()
             .build();
-        let mut executor = EVMProcessor::new_with_state(chain_spec, db);
+        let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db);
 
         let (bundle_state, gas_used) = self.execute(&block, &mut executor, senders)?;
 
@@ -392,7 +401,14 @@ impl StorageInner {
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 
         // fill in the rest of the fields
-        let header = self.complete_header(header, &bundle_state, client, gas_used)?;
+        let header = self.complete_header(
+            header,
+            &bundle_state,
+            client,
+            gas_used,
+            #[cfg(feature = "optimism")]
+            chain_spec.as_ref(),
+        )?;
 
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 

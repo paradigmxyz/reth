@@ -37,13 +37,13 @@ pub struct MaintainPoolConfig {
     pub max_update_depth: u64,
     /// Maximum number of accounts to reload from state at once when updating the transaction pool.
     ///
-    /// Default: 250
+    /// Default: 100
     pub max_reload_accounts: usize,
 }
 
 impl Default for MaintainPoolConfig {
     fn default() -> Self {
-        Self { max_update_depth: 64, max_reload_accounts: 250 }
+        Self { max_update_depth: 64, max_reload_accounts: 100 }
     }
 }
 
@@ -92,7 +92,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             last_seen_block_hash: latest.hash,
             last_seen_block_number: latest.number,
             pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params)
+                .next_block_base_fee(chain_spec.base_fee_params(latest.timestamp + 12))
                 .unwrap_or_default(),
             pending_blob_fee: latest.next_block_blob_fee(),
         };
@@ -127,8 +127,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         // dirty accounts and correct if the pool drifted from current state, for example after
         // restart or a pipeline run
         if maintained_state.is_drifted() {
+            metrics.inc_drift();
             // assuming all senders are dirty
             dirty_addresses = pool.unique_senders();
+            // make sure we toggle the state back to in sync
             maintained_state = MaintainedPoolState::InSync;
         }
 
@@ -170,6 +172,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             match blob_store_tracker.on_finalized_block(finalized) {
                 BlobStoreUpdates::None => {}
                 BlobStoreUpdates::Finalized(blobs) => {
+                    metrics.inc_deleted_tracked_blobs(blobs.len());
                     // remove all finalized blobs from the blob store
                     pool.delete_blobs(blobs);
                 }
@@ -238,8 +241,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `new_tip+1`
-                let pending_block_base_fee =
-                    new_tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
+                let pending_block_base_fee = new_tip
+                    .next_block_base_fee(chain_spec.base_fee_params(new_tip.timestamp + 12))
+                    .unwrap_or_default();
                 let pending_block_blob_fee = new_tip.next_block_blob_fee();
 
                 // we know all changed account in the new chain
@@ -342,8 +346,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `tip+1`
-                let pending_block_base_fee =
-                    tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
+                let pending_block_base_fee = tip
+                    .next_block_base_fee(chain_spec.base_fee_params(tip.timestamp + 12))
+                    .unwrap_or_default();
                 let pending_block_blob_fee = tip.next_block_blob_fee();
 
                 let first_block = blocks.first();
@@ -440,7 +445,7 @@ impl FinalizedBlockTracker {
 
 /// Keeps track of the pool's state, whether the accounts in the pool are in sync with the actual
 /// state.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 enum MaintainedPoolState {
     /// Pool is assumed to be in sync with the current state
     InSync,
@@ -450,6 +455,7 @@ enum MaintainedPoolState {
 
 impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
+    #[inline]
     fn is_drifted(&self) -> bool {
         matches!(self, MaintainedPoolState::Drifted)
     }

@@ -6,7 +6,7 @@ use crate::{
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
-use reth_db::database::Database;
+use reth_db::{database::Database, DatabaseError};
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -14,17 +14,18 @@ use reth_interfaces::{
     },
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
-    RethResult,
+    provider::RootMismatch,
+    RethError, RethResult,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Hardfork, PruneModes, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, U256,
+    BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, PruneModes, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
     chain::{ChainSplit, ChainSplitTarget},
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
-    ChainSpecProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider,
+    ChainSpecProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider, ProviderError,
 };
 use reth_stages::{MetricEvent, MetricEventsSender};
 use std::{collections::BTreeMap, sync::Arc};
@@ -1104,14 +1105,35 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
     /// Write the given chain to the database as canonical.
     fn commit_canonical_to_database(&self, chain: Chain) -> RethResult<()> {
-        let provider_rw = self.externals.provider_factory.provider_rw()?;
+        // Compute state root before opening write transaction.
+        let hashed_state = chain.state().hash_state_slow();
+        let (state_root, trie_updates) = chain
+            .state()
+            .state_root_calculator(
+                self.externals.provider_factory.provider()?.tx_ref(),
+                &hashed_state,
+            )
+            .root_with_updates()
+            .map_err(Into::<DatabaseError>::into)?;
+        let tip = chain.tip();
+        if state_root != tip.state_root {
+            return Err(RethError::Provider(ProviderError::StateRootMismatch(Box::new(
+                RootMismatch {
+                    root: GotExpected { got: state_root, expected: tip.state_root },
+                    block_number: tip.number,
+                    block_hash: tip.hash,
+                },
+            ))))
+        }
 
         let (blocks, state) = chain.into_inner();
-
+        let provider_rw = self.externals.provider_factory.provider_rw()?;
         provider_rw
-            .append_blocks_with_bundle_state(
+            .append_blocks_with_state(
                 blocks.into_blocks().collect(),
                 state,
+                hashed_state,
+                trie_updates,
                 self.prune_modes.as_ref(),
             )
             .map_err(|e| BlockExecutionError::CanonicalCommit { inner: e.to_string() })?;

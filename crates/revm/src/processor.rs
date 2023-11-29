@@ -531,10 +531,18 @@ pub fn verify_receipt<'a>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
+    #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
+    #[cfg(feature = "optimism")] timestamp: u64,
 ) -> Result<(), BlockExecutionError> {
     // Check receipts root.
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
+    let receipts_root = reth_primitives::proofs::calculate_receipt_root(
+        &receipts_with_bloom,
+        #[cfg(feature = "optimism")]
+        chain_spec,
+        #[cfg(feature = "optimism")]
+        timestamp,
+    );
     if receipts_root != expected_receipts_root {
         return Err(BlockValidationError::ReceiptRootDiff(
             GotExpected { got: receipts_root, expected: expected_receipts_root }.into(),

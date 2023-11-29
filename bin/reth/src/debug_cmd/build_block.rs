@@ -277,11 +277,26 @@ impl Command {
                 let state = executor.take_output_state();
                 debug!(target: "reth::cli", ?state, "Executed block");
 
+                let hashed_state = state.hash_state_slow();
+                let (state_root, trie_updates) = state
+                    .state_root_calculator(provider_factory.provider()?.tx_ref(), &hashed_state)
+                    .root_with_updates()?;
+
+                if state_root != block_with_senders.state_root {
+                    eyre::bail!(
+                        "state root mismatch. expected: {}. got: {}",
+                        block_with_senders.state_root,
+                        state_root
+                    );
+                }
+
                 // Attempt to insert new block without committing
                 let provider_rw = provider_factory.provider_rw()?;
-                provider_rw.append_blocks_with_bundle_state(
+                provider_rw.append_blocks_with_state(
                     Vec::from([block_with_senders]),
                     state,
+                    hashed_state,
+                    trie_updates,
                     None,
                 )?;
                 info!(target: "reth::cli", "Successfully appended built block");

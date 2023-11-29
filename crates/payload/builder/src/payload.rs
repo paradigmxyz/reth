@@ -279,7 +279,9 @@ impl PayloadBuilderAttributes {
             gas_limit: U256::from(parent.gas_limit),
             // calculate basefee based on parent block's gas usage
             basefee: U256::from(
-                parent.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default(),
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params(self.timestamp))
+                    .unwrap_or_default(),
             ),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
