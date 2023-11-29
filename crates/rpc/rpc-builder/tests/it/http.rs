@@ -28,8 +28,8 @@ use std::collections::HashSet;
 fn is_unimplemented(err: Error) -> bool {
     match err {
         Error::Call(error_obj) => {
-            error_obj.code() == ErrorCode::InternalError.code() &&
-                error_obj.message() == "unimplemented"
+            error_obj.code() == ErrorCode::InternalError.code()
+                && error_obj.message() == "unimplemented"
         }
         _ => false,
     }
@@ -160,7 +160,7 @@ where
     EthApiClient::create_access_list(client, call_request.clone(), Some(block_number.into()))
         .await
         .unwrap();
-    EthApiClient::estimate_gas(client, call_request.clone(), Some(block_number.into()))
+    EthApiClient::estimate_gas(client, call_request.clone(), Some(block_number.into()), None)
         .await
         .unwrap();
     EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None, None)
