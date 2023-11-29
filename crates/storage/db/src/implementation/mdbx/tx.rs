@@ -176,28 +176,28 @@ impl<K: TransactionKind> MetricsHandler<K> {
         }
     }
 
-    /// Logs the backtrace of current call if the duration that the transaction has been open is
-    /// more than [LONG_TRANSACTION_DURATION].
+    /// Logs the backtrace of current call if the duration that the read transaction has been open
+    /// is more than [LONG_TRANSACTION_DURATION].
     /// The backtrace is recorded and logged just once, guaranteed by `backtrace_recorded` atomic.
     ///
     /// NOTE: Backtrace is recorded using [Backtrace::force_capture], so `RUST_BACKTRACE` env var is
     /// not needed.
     fn log_backtrace_on_long_transaction(&self) {
-        if self.backtrace_recorded.load(Ordering::Relaxed) {
-            return
-        }
+        if !self.backtrace_recorded.load(Ordering::Relaxed) &&
+            self.transaction_mode().is_read_only()
+        {
+            let open_duration = self.start.elapsed();
+            if open_duration > LONG_TRANSACTION_DURATION {
+                self.backtrace_recorded.store(true, Ordering::Relaxed);
 
-        let open_duration = self.start.elapsed();
-        if open_duration > LONG_TRANSACTION_DURATION {
-            self.backtrace_recorded.store(true, Ordering::Relaxed);
-
-            let backtrace = Backtrace::force_capture();
-            debug!(
-                target: "storage::db::mdbx",
-                ?open_duration,
-                ?backtrace,
-                "The database transaction has been open for too long"
-            );
+                let backtrace = Backtrace::force_capture();
+                debug!(
+                    target: "storage::db::mdbx",
+                    ?open_duration,
+                    ?backtrace,
+                    "The database read transaction has been open for too long"
+                );
+            }
         }
     }
 }
