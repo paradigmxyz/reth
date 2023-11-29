@@ -1039,12 +1039,14 @@ where
     ) -> EthResult<Option<Transaction>> {
         let block_id = block_id.into();
 
-        if let Some(block) = self.block(block_id).await? {
+        if let Some(block_with_senders) = self.block_with_senders(block_id).await? {
+            let (block, senders) = block_with_senders.into_components();
             let block_hash = block.hash;
             let block = block.unseal();
             if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
+                let idx: usize = index.into();
                 let tx =
-                    tx_signed.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+                    TransactionSignedEcRecovered::from_signed_transaction(tx_signed, senders[idx]);
                 return Ok(Some(from_recovered_with_block_context(
                     tx,
                     block_hash,
