@@ -95,7 +95,7 @@ pub use transaction::{
 };
 
 pub use transaction::{
-    util::secp256k1::{public_key_to_address, recover_signer, sign_message},
+    util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction,
     InvalidTransactionError, Signature, Transaction, TransactionKind, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
