@@ -6,12 +6,12 @@ use crate::cli::{
 };
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_payload_builder::{BuiltPayload, PayloadBuilderHandle, PayloadBuilderService};
-
-use reth_tasks::TaskSpawner;
-use std::{fmt, marker::PhantomData};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService, PayloadInfo};
 
 use crate::cli::{components::RethRpcServerHandles, config::RethNetworkConfig};
+use reth_rpc_types::ExecutionPayload;
+use reth_tasks::TaskSpawner;
+use std::{fmt, marker::PhantomData};
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
@@ -127,14 +127,15 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// By default this spawns a [BasicPayloadJobGenerator] with the default configuration
     /// [BasicPayloadJobGeneratorConfig].
-    fn spawn_payload_builder_service<Conf, Reth>(
+    fn spawn_payload_builder_service<Conf, Reth, Payload>(
         &mut self,
         conf: &Conf,
         components: &Reth,
-    ) -> eyre::Result<PayloadBuilderHandle<BuiltPayload>>
+    ) -> eyre::Result<PayloadBuilderHandle<Payload>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
+        Payload: Into<ExecutionPayload> + PayloadInfo + Send + Sync + Clone + 'static,
     {
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
@@ -313,14 +314,15 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         }
     }
 
-    fn spawn_payload_builder_service<Conf, Reth>(
+    fn spawn_payload_builder_service<Conf, Reth, Payload>(
         &mut self,
         conf: &Conf,
         components: &Reth,
-    ) -> eyre::Result<PayloadBuilderHandle<BuiltPayload>>
+    ) -> eyre::Result<PayloadBuilderHandle<Payload>>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
+        Payload: Into<ExecutionPayload> + PayloadInfo + Send + Sync + Clone + 'static,
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?

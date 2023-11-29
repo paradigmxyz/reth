@@ -16,7 +16,7 @@ use futures_util::FutureExt;
 use reth_interfaces::{RethError, RethResult};
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
-    PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator,
+    PayloadBuilderAttributes, PayloadInfo, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
     bytes::BytesMut,
@@ -131,7 +131,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
         }
     }
 }
-
+use reth_rpc_types::ExecutionPayload;
 // === impl BasicPayloadJobGenerator ===
 
 impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
@@ -140,7 +140,7 @@ where
     Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+    Builder: PayloadBuilder<Pool, Client, PayloadType = BuiltPayload> + Unpin + 'static,
 {
     type PayloadType = BuiltPayload;
     type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
@@ -311,7 +311,7 @@ pub struct BasicPayloadJob<Client, Pool, Tasks, Builder> {
     /// The best payload so far.
     best_payload: Option<Arc<BuiltPayload>>,
     /// Receiver for the block that is currently being built.
-    pending_block: Option<PendingPayload>,
+    pending_block: Option<PendingPayload<BuiltPayload>>,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
     /// Caches all disk reads for the state the new payloads builds on
@@ -332,7 +332,7 @@ where
     Client: StateProviderFactory + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+    Builder: PayloadBuilder<Pool, Client, PayloadType = BuiltPayload> + Unpin + 'static,
 {
     type Output = Result<(), PayloadBuilderError>;
 
@@ -422,9 +422,9 @@ where
     Client: StateProviderFactory + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
+    Builder: PayloadBuilder<Pool, Client, PayloadType = BuiltPayload> + Unpin + 'static,
 {
-    type ResolvePayloadFuture = ResolveBestPayload;
+    type ResolvePayloadFuture = ResolveBestPayload<BuiltPayload>;
 
     fn best_payload(&self) -> Result<Arc<BuiltPayload>, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
@@ -513,17 +513,23 @@ where
 /// If no payload has been built so far, it will either return an empty payload or the result of the
 /// in progress build job, whatever finishes first.
 #[derive(Debug)]
-pub struct ResolveBestPayload {
+pub struct ResolveBestPayload<P>
+where
+    P: Into<ExecutionPayload> + PayloadInfo + Send + Sync + 'static,
+{
     /// Best payload so far.
-    best_payload: Option<Arc<BuiltPayload>>,
+    best_payload: Option<Arc<P>>,
     /// Regular payload job that's currently running that might produce a better payload.
-    maybe_better: Option<PendingPayload>,
+    maybe_better: Option<PendingPayload<P>>,
     /// The empty payload building job in progress.
-    empty_payload: Option<oneshot::Receiver<Result<BuiltPayload, PayloadBuilderError>>>,
+    empty_payload: Option<oneshot::Receiver<Result<P, PayloadBuilderError>>>,
 }
 
-impl Future for ResolveBestPayload {
-    type Output = Result<Arc<BuiltPayload>, PayloadBuilderError>;
+impl<P> Future for ResolveBestPayload<P>
+where
+    P: Into<ExecutionPayload> + PayloadInfo + Send + Sync,
+{
+    type Output = Result<Arc<P>, PayloadBuilderError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -556,15 +562,21 @@ impl Future for ResolveBestPayload {
 
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
-struct PendingPayload {
+struct PendingPayload<P>
+where
+    P: Into<ExecutionPayload> + PayloadInfo + Send + Sync + 'static,
+{
     /// The marker to cancel the job on drop
     _cancel: Cancelled,
     /// The channel to send the result to.
-    payload: oneshot::Receiver<Result<BuildOutcome, PayloadBuilderError>>,
+    payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
 }
 
-impl Future for PendingPayload {
-    type Output = Result<BuildOutcome, PayloadBuilderError>;
+impl<P> Future for PendingPayload<P>
+where
+    P: Into<ExecutionPayload> + PayloadInfo + Send + Sync,
+{
+    type Output = Result<BuildOutcome<P>, PayloadBuilderError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let res = ready!(self.payload.poll_unpin(cx));
@@ -654,11 +666,14 @@ impl PayloadConfig {
 
 /// The possible outcomes of a payload building attempt.
 #[derive(Debug)]
-pub enum BuildOutcome {
+pub enum BuildOutcome<P>
+where
+    P: Into<ExecutionPayload> + PayloadInfo + Send + Sync,
+{
     /// Successfully built a better block.
     Better {
         /// The new payload that was built.
-        payload: BuiltPayload,
+        payload: P,
         /// The cached reads that were used to build the payload.
         cached_reads: CachedReads,
     },
@@ -679,16 +694,22 @@ pub enum BuildOutcome {
 /// building process. It holds references to the Ethereum client, transaction pool, cached reads,
 /// payload configuration, cancellation status, and the best payload achieved so far.
 #[derive(Debug)]
-pub struct BuildArguments<Pool, Client> {
+pub struct BuildArguments<Pool, Client, P>
+where
+    P: Into<ExecutionPayload> + PayloadInfo + Send + Sync,
+{
     client: Client,
     pool: Pool,
     cached_reads: CachedReads,
     config: PayloadConfig,
     cancel: Cancelled,
-    best_payload: Option<Arc<BuiltPayload>>,
+    best_payload: Option<Arc<P>>,
 }
 
-impl<Pool, Client> BuildArguments<Pool, Client> {
+impl<Pool, Client, P> BuildArguments<Pool, Client, P>
+where
+    P: Into<ExecutionPayload> + PayloadInfo + Send + Sync,
+{
     /// Create new build arguments.
     pub fn new(
         client: Client,
@@ -696,7 +717,7 @@ impl<Pool, Client> BuildArguments<Pool, Client> {
         cached_reads: CachedReads,
         config: PayloadConfig,
         cancel: Cancelled,
-        best_payload: Option<Arc<BuiltPayload>>,
+        best_payload: Option<Arc<P>>,
     ) -> Self {
         Self { client, pool, cached_reads, config, cancel, best_payload }
     }
@@ -711,6 +732,8 @@ impl<Pool, Client> BuildArguments<Pool, Client> {
 /// Generic parameters `Pool` and `Client` represent the transaction pool and
 /// Ethereum client types.
 pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
+    /// The Payload type that this builder builds.
+    type PayloadType: Into<ExecutionPayload> + PayloadInfo + Send + Sync + Clone + 'static;
     /// Tries to build a transaction payload using provided arguments.
     ///
     /// Constructs a transaction payload based on the given arguments,
@@ -725,8 +748,8 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// A `Result` indicating the build outcome or an error.
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client>,
-    ) -> Result<BuildOutcome, PayloadBuilderError>;
+        args: BuildArguments<Pool, Client, Self::PayloadType>,
+    ) -> Result<BuildOutcome<Self::PayloadType>, PayloadBuilderError>;
 }
 
 // Default implementation of [PayloadBuilder] for unit type
@@ -735,10 +758,12 @@ where
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
+    type PayloadType = BuiltPayload;
+
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client>,
-    ) -> Result<BuildOutcome, PayloadBuilderError> {
+        args: BuildArguments<Pool, Client, Self::PayloadType>,
+    ) -> Result<BuildOutcome<Self::PayloadType>, PayloadBuilderError> {
         default_payload_builder(args)
     }
 }
@@ -750,8 +775,8 @@ where
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
 pub fn default_payload_builder<Pool, Client>(
-    args: BuildArguments<Pool, Client>,
-) -> Result<BuildOutcome, PayloadBuilderError>
+    args: BuildArguments<Pool, Client, BuiltPayload>,
+) -> Result<BuildOutcome<BuiltPayload>, PayloadBuilderError>
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,

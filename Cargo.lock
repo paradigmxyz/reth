@@ -5722,6 +5722,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-rpc-types",
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
