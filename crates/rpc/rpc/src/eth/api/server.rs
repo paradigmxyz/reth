@@ -23,8 +23,8 @@ use reth_provider::{
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, MulticallBundle, RichBlock,
-    StateContext, SyncStatus, TransactionReceipt, TransactionRequest, Work,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
+    SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -54,7 +54,7 @@ where
     /// Handler for ! `eth_MultiCallV1`
     async fn eth_multicall_v1(
         &self,
-        multi_call: MulticallBundle,
+        multi_call: Bundle,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> Result<Vec<EthCallResponse>> {
