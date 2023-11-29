@@ -16,10 +16,9 @@ pub trait PrefixSetAbstraction: Default {
     fn contains(&mut self, key: Nibbles) -> bool;
 }
 
-/// Abstractions used for benching
 impl PrefixSetAbstraction for PrefixSetMut {
     fn insert(&mut self, key: Nibbles) {
-        self.insert(key)
+        PrefixSetMut::insert(self, key)
     }
 
     fn contains(&mut self, key: Nibbles) -> bool {

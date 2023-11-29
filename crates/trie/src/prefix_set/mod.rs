@@ -68,7 +68,7 @@ impl PrefixSetMut {
                 return true
             }
 
-            if key > &prefix {
+            if *key > prefix {
                 self.index += idx;
                 return false
             }

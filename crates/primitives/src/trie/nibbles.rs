@@ -34,9 +34,12 @@ impl Compact for StoredNibblesSubKey {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         assert!(self.0.len() <= 64);
-        let mut padded = vec![0; 64];
-        padded[..self.0.len()].copy_from_slice(&self.0[..]);
-        buf.put_slice(&padded);
+
+        // right-pad with zeros
+        buf.put_slice(&self.0[..]);
+        static ZERO: &[u8; 64] = &[0; 64];
+        buf.put_slice(&ZERO[self.0.len()..]);
+
         buf.put_u8(self.0.len() as u8);
         64 + 1
     }
@@ -57,15 +60,15 @@ impl Compact for StoredNibblesSubKey {
 /// per byte. This means that each byte has its upper 4 bits set to zero and the lower 4 bits
 /// representing the nibble value.
 #[derive(
-    Default,
-    Debug,
     Clone,
-    Eq,
+    Debug,
+    Default,
     PartialEq,
-    RlpEncodableWrapper,
+    Eq,
     PartialOrd,
     Ord,
     Hash,
+    RlpEncodableWrapper,
     Index,
     From,
     Deref,
@@ -104,9 +107,7 @@ impl Nibbles {
     /// Creates a new [`Nibbles`] instance from a nibble slice.
     #[inline]
     pub fn from_nibbles<T: Into<Bytes>>(nibbles: T) -> Self {
-        let nibbles = nibbles.into();
-        debug_assert!(nibbles.iter().all(|nibble| *nibble <= 0x0f));
-        Self(nibbles)
+        Self(nibbles.into())
     }
 
     /// Converts a byte slice into a [`Nibbles`] instance containing the nibbles (half-bytes or 4
