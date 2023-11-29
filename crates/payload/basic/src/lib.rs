@@ -16,7 +16,7 @@ use futures_util::FutureExt;
 use reth_interfaces::{RethError, RethResult};
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
-    PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator,
+    PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
     bytes::BytesMut,
@@ -53,7 +53,7 @@ use tokio::{
     sync::{oneshot, Semaphore},
     time::{Interval, Sleep},
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 mod metrics;
 
@@ -387,7 +387,7 @@ where
                     match outcome {
                         BuildOutcome::Better { payload, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
-                            trace!(target: "payload_builder", value = %payload.fees(), "built better payload");
+                            debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
                             let payload = Arc::new(payload);
                             this.best_payload = Some(payload);
                         }
@@ -402,7 +402,7 @@ where
                 }
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
-                    trace!(target: "payload_builder", ?error, "payload build attempt failed");
+                    debug!(target: "payload_builder", ?error, "payload build attempt failed");
                     this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
@@ -448,6 +448,8 @@ where
         let mut empty_payload = None;
 
         if best_payload.is_none() {
+            debug!(target: "payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
+
             // if no payload has been built yet
             self.metrics.inc_requested_empty_payload();
             // no payload built yet, so we need to return an empty payload
@@ -464,31 +466,33 @@ where
             // upfront with the list of transactions sent in the attributes without caring about
             // the results of the polling job, if a best payload has not already been built.
             #[cfg(feature = "optimism")]
-            if self.config.chain_spec.is_optimism() &&
-                self.config.attributes.optimism_payload_attributes.no_tx_pool
             {
-                let args = BuildArguments {
-                    client: self.client.clone(),
-                    pool: self.pool.clone(),
-                    cached_reads: self.cached_reads.take().unwrap_or_default(),
-                    config: self.config.clone(),
-                    cancel: Cancelled::default(),
-                    best_payload: None,
-                };
-                if let Ok(BuildOutcome::Better { payload, cached_reads }) =
-                    self.builder.try_build(args)
+                if self.config.chain_spec.is_optimism() &&
+                    self.config.attributes.optimism_payload_attributes.no_tx_pool
                 {
-                    self.cached_reads = Some(cached_reads);
-                    trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
-                    let payload = Arc::new(payload);
-                    return (
-                        ResolveBestPayload {
-                            best_payload: Some(payload),
-                            maybe_better,
-                            empty_payload,
-                        },
-                        KeepPayloadJobAlive::Yes,
-                    )
+                    let args = BuildArguments {
+                        client: self.client.clone(),
+                        pool: self.pool.clone(),
+                        cached_reads: self.cached_reads.take().unwrap_or_default(),
+                        config: self.config.clone(),
+                        cancel: Cancelled::default(),
+                        best_payload: None,
+                    };
+                    if let Ok(BuildOutcome::Better { payload, cached_reads }) =
+                        self.builder.try_build(args)
+                    {
+                        self.cached_reads = Some(cached_reads);
+                        trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
+                        let payload = Arc::new(payload);
+                        return (
+                            ResolveBestPayload {
+                                best_payload: Some(payload),
+                                maybe_better,
+                                empty_payload,
+                            },
+                            KeepPayloadJobAlive::Yes,
+                        )
+                    }
                 }
             }
 
@@ -531,18 +535,27 @@ impl Future for ResolveBestPayload {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
+                    debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(Arc::new(payload)))
                 }
             }
         }
 
         if let Some(best) = this.best_payload.take() {
+            debug!(target: "payload_builder", "resolving best payload");
             return Poll::Ready(Ok(best))
         }
 
         let mut empty_payload = this.empty_payload.take().expect("polled after completion");
         match empty_payload.poll_unpin(cx) {
-            Poll::Ready(Ok(res)) => Poll::Ready(res.map(Arc::new)),
+            Poll::Ready(Ok(res)) => {
+                if let Err(err) = &res {
+                    warn!(target: "payload_builder", ?err, "failed to resolve empty payload");
+                } else {
+                    debug!(target: "payload_builder", "resolving empty payload");
+                }
+                Poll::Ready(res.map(Arc::new))
+            }
             Poll::Ready(Err(err)) => Poll::Ready(Err(err.into())),
             Poll::Pending => {
                 this.empty_payload = Some(empty_payload);
@@ -621,6 +634,10 @@ impl PayloadConfig {
             return Default::default()
         }
         self.extra_data.clone()
+    }
+
+    pub(crate) fn payload_id(&self) -> PayloadId {
+        self.attributes.id
     }
 }
 
@@ -770,7 +787,7 @@ where
         ..
     } = config;
 
-    debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
+    debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
     let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
@@ -1019,7 +1036,10 @@ where
 
     debug!(target: "payload_builder", parent_hash = ?parent_block.hash, parent_number = parent_block.number, "building empty payload");
 
-    let state = client.state_by_block_hash(parent_block.hash)?;
+    let state = client.state_by_block_hash(parent_block.hash).map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to get state for empty payload");
+        err
+    })?;
     let mut db = State::builder()
         .with_database_boxed(Box::new(StateProviderDatabase::new(&state)))
         .with_bundle_update()
@@ -1037,10 +1057,16 @@ where
         &initialized_cfg,
         &initialized_block_env,
         &attributes,
-    )?;
+    ).map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to apply beacon root contract call for empty payload");
+        err
+    })?;
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
-        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
+        commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals).map_err(|err| {
+            warn!(target: "payload_builder", parent_hash=%parent_block.hash,?err,  "failed to commit withdrawals for empty payload");
+            err
+        })?;
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes and
     // 4788 contract call
@@ -1049,7 +1075,10 @@ where
     // calculate the state root
     let bundle_state =
         BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
-    let state_root = state.state_root(&bundle_state)?;
+    let state_root = state.state_root(&bundle_state).map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash, ?err,  "failed to calculate state root for empty payload");
+        err
+    })?;
 
     let header = Header {
         parent_hash: parent_block.hash,
