@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub struct Bundle {
     /// All transactions to execute
     pub transactions: Vec<CallRequest>,
-    /// Block overrides to applyR
+    /// Block overrides to apply
     pub block_override: Option<BlockOverrides>,
 }
 
