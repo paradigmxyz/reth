@@ -99,3 +99,7 @@ harness = false
 name = "trie_root"
 required-features = ["arbitrary", "test-utils"]
 harness = false
+
+[[bench]]
+name = "nibbles"
+harness = false
