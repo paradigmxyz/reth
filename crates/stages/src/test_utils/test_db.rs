@@ -26,19 +26,35 @@ use std::{
 /// Test database that is used for testing stage implementations.
 #[derive(Debug)]
 pub struct TestStageDB {
+    pub path: PathBuf,
     pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
 }
 
 impl Default for TestStageDB {
     /// Create a new instance of [TestStageDB]
     fn default() -> Self {
-        Self { factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone()) }
+        let db = create_test_rw_db();
+        let path = db.path().to_path_buf();
+        Self { path, factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone()) }
     }
 }
 
 impl TestStageDB {
     pub fn new(path: &Path) -> Self {
-        Self { factory: ProviderFactory::new(create_test_rw_db_with_path(path), MAINNET.clone()) }
+        Self { path: path.to_path_buf() ,factory: ProviderFactory::new(create_test_rw_db_with_path(path), MAINNET.clone()) }
+    }
+
+    /// Returns the path to the database
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>>> {
+        self.factory.provider_rw()
+    }
+
+    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<Arc<TempDatabase<DatabaseEnv>>>> {
+        self.factory.provider()
     }
 
     /// Invoke a callback with transaction committing it afterwards

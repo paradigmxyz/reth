@@ -191,6 +191,11 @@ pub mod test_utils {
         pub fn into_inner_db(mut self) -> DB {
             self.db.take().unwrap() // take out db to avoid clean path in drop fn
         }
+
+        /// returns the path of the db
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
     }
 
     impl<DB: Database> Database for TempDatabase<DB> {

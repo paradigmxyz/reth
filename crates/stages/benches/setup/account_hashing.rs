@@ -32,7 +32,7 @@ pub fn prepare_account_hashing(num_blocks: u64) -> (PathBuf, AccountHashingStage
 fn find_stage_range(db: &Path) -> StageRange {
     let mut stage_range = None;
     TestStageDB::new(db)
-        .factory
+        .provider_rw().unwrap()
         .view(|tx| {
             let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let from = cursor.first()?.unwrap().0;
@@ -63,7 +63,7 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         std::fs::create_dir_all(&path).unwrap();
         println!("Account Hashing testdata not found, generating to {:?}", path.display());
         let tx = TestStageDB::new(&path);
-        let provider = tx.provider_rw();
+        let provider = tx.factory.provider_rw().unwrap();
         let _accounts = AccountHashingStage::seed(&provider, opts);
         provider.commit().expect("failed to commit");
     }

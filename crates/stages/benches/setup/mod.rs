@@ -1,10 +1,5 @@
 use itertools::concat;
-use reth_db::{
-    cursor::DbCursorRO,
-    tables,
-    transaction::{DbTx, DbTxMut},
-    DatabaseEnv,
-};
+use reth_db::{cursor::DbCursorRO, DatabaseEnv, tables, transaction::{DbTx, DbTxMut}};
 use reth_interfaces::test_utils::{
     generators,
     generators::{
@@ -24,49 +19,51 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
 };
+use std::sync::Arc;
 
 mod constants;
 
 mod account_hashing;
 pub use account_hashing::*;
+use reth_db::database::Database;
+use reth_db::test_utils::TempDatabase;
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
-pub(crate) fn stage_unwind<S: Clone + Stage<DatabaseEnv>>(
-    stage: S,
+pub(crate) fn stage_unwind<S>(
+    mut stage: S,
     db: &TestStageDB,
     range: StageRange,
-) {
+)
+where S: Stage<Arc<TempDatabase<DatabaseEnv>>>,
+{
     let (_, unwind) = range;
 
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let mut stage = stage.clone();
-        let factory = ProviderFactory::new(db.factory.db(), MAINNET.clone());
-        let provider = factory.provider_rw().unwrap();
+    let provider = db.provider_rw().unwrap();
 
-        // Clear previous run
-        stage
-            .unwind(&provider, unwind)
-            .map_err(|e| {
-                format!(
-                    "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
-                    db.path.as_ref().unwrap().display()
-                )
-            })
-            .unwrap();
+    // Clear previous run
+    stage
+        .unwind(&provider, unwind)
+        .map_err(|e| {
+            format!(
+                "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
+                db.path().display()
+            )
+        })
+        .unwrap();
 
-        provider.commit().unwrap();
-    });
+    provider.commit().unwrap();
 }
 
-pub(crate) fn unwind_hashes<S: Clone + Stage<DatabaseEnv>>(
-    stage: S,
+pub(crate) fn unwind_hashes<S>(
+    mut stage: S,
     db: &TestStageDB,
     range: StageRange,
-) {
+)
+    where S: Stage<Arc<TempDatabase<DatabaseEnv>>>,
+{
     let (input, unwind) = range;
 
-    let mut stage = stage.clone();
     let factory = ProviderFactory::new(db.factory.db(), MAINNET.clone());
     let provider = factory.provider_rw().unwrap();
 
