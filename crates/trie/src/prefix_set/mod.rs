@@ -22,6 +22,7 @@ pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 /// # Examples
 ///
 /// ```
+/// use reth_primitives::trie::Nibbles;
 /// use reth_trie::prefix_set::PrefixSetMut;
 ///
 /// let mut prefix_set = PrefixSetMut::default();
