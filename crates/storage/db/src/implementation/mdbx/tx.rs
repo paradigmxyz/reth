@@ -184,7 +184,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
     /// not needed.
     fn log_backtrace_on_long_transaction(&self) {
         if !self.backtrace_recorded.load(Ordering::Relaxed) &&
-            self.transaction_mode() == TransactionMode::ReadOnly
+            self.transaction_mode().is_read_only()
         {
             let open_duration = self.start.elapsed();
             if open_duration > LONG_TRANSACTION_DURATION {
