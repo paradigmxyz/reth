@@ -78,9 +78,11 @@ impl TrieUpdates {
 
     /// Extend the updates with account trie updates.
     pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
-        self.extend(updates.into_iter().map(|(nibbles, node)| {
-            (TrieKey::AccountNode(nibbles.hex_data.to_vec().into()), TrieOp::Update(node))
-        }));
+        self.extend(
+            updates.into_iter().map(|(nibbles, node)| {
+                (TrieKey::AccountNode(nibbles.into()), TrieOp::Update(node))
+            }),
+        );
     }
 
     /// Extend the updates with storage trie updates.
@@ -90,10 +92,7 @@ impl TrieUpdates {
         updates: HashMap<Nibbles, BranchNodeCompact>,
     ) {
         self.extend(updates.into_iter().map(|(nibbles, node)| {
-            (
-                TrieKey::StorageNode(hashed_address, nibbles.hex_data.to_vec().into()),
-                TrieOp::Update(node),
-            )
+            (TrieKey::StorageNode(hashed_address, nibbles.into()), TrieOp::Update(node))
         }));
     }
 
@@ -122,7 +121,7 @@ impl TrieUpdates {
                         }
                     }
                     TrieOp::Update(node) => {
-                        if !nibbles.inner.is_empty() {
+                        if !nibbles.is_empty() {
                             account_trie_cursor.upsert(nibbles, node)?;
                         }
                     }
@@ -136,7 +135,7 @@ impl TrieUpdates {
                     TrieOp::Update(..) => unreachable!("Cannot update full storage trie."),
                 },
                 TrieKey::StorageNode(hashed_address, nibbles) => {
-                    if !nibbles.inner.is_empty() {
+                    if !nibbles.is_empty() {
                         // Delete the old entry if it exists.
                         if storage_trie_cursor
                             .seek_by_key_subkey(hashed_address, nibbles.clone())?

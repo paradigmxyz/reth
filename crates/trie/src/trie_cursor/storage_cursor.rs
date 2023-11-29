@@ -38,7 +38,7 @@ where
             .cursor
             .seek_by_key_subkey(self.hashed_address, key.clone())?
             .filter(|e| e.nibbles == key)
-            .map(|value| (value.nibbles.inner.to_vec(), value.node)))
+            .map(|value| (value.nibbles.to_vec(), value.node)))
     }
 
     fn seek(
@@ -48,7 +48,7 @@ where
         Ok(self
             .cursor
             .seek_by_key_subkey(self.hashed_address, key)?
-            .map(|value| (value.nibbles.inner.to_vec(), value.node)))
+            .map(|value| (value.nibbles.to_vec(), value.node)))
     }
 
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {

@@ -3,28 +3,28 @@ use alloy_rlp::RlpEncodableWrapper;
 use derive_more::{Deref, From, Index};
 use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
+use std::ops::RangeBounds;
 
 /// The nibbles are the keys for the AccountsTrie and the subkeys for the StorageTrie.
 #[main_codec]
-#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StoredNibbles {
-    /// The inner nibble bytes
-    pub inner: Bytes,
-}
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deref)]
+pub struct StoredNibbles(pub Bytes);
 
-impl From<Vec<u8>> for StoredNibbles {
-    fn from(inner: Vec<u8>) -> Self {
-        Self { inner: inner.into() }
+impl<T: Into<Nibbles>> From<T> for StoredNibbles {
+    #[inline]
+    fn from(value: T) -> Self {
+        Self(value.into().into_bytes())
     }
 }
 
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Hash, Deref)]
-pub struct StoredNibblesSubKey(StoredNibbles);
+pub struct StoredNibblesSubKey(pub StoredNibbles);
 
-impl From<Vec<u8>> for StoredNibblesSubKey {
-    fn from(inner: Vec<u8>) -> Self {
-        Self(StoredNibbles { inner: inner.into() })
+impl<T: Into<StoredNibbles>> From<T> for StoredNibblesSubKey {
+    #[inline]
+    fn from(value: T) -> Self {
+        Self(value.into())
     }
 }
 
@@ -33,73 +33,91 @@ impl Compact for StoredNibblesSubKey {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        assert!(self.inner.len() <= 64);
+        assert!(self.0.len() <= 64);
         let mut padded = vec![0; 64];
-        padded[..self.inner.len()].copy_from_slice(&self.inner[..]);
+        padded[..self.0.len()].copy_from_slice(&self.0[..]);
         buf.put_slice(&padded);
-        buf.put_u8(self.inner.len() as u8);
+        buf.put_u8(self.0.len() as u8);
         64 + 1
     }
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let len = buf[64] as usize;
-        let inner = Vec::from(&buf[..len]).into();
-        (Self(StoredNibbles { inner }), &buf[65..])
+        (Self(buf[..len].to_vec().into()), &buf[65..])
     }
 }
 
 /// Structure representing a sequence of nibbles.
 ///
-/// A nibble is a 4-bit value, and this structure is used to store
-/// the nibble sequence representing the keys in a Merkle Patricia Trie (MPT).
-/// Using nibbles simplifies trie operations and enables consistent key
-/// representation in the MPT.
+/// A nibble is a 4-bit value, and this structure is used to store the nibble sequence representing
+/// the keys in a Merkle Patricia Trie (MPT).
+/// Using nibbles simplifies trie operations and enables consistent key representation in the MPT.
 ///
-/// The `hex_data` field is a `Vec<u8>` that stores the nibbles, with each
-/// `u8` value containing a single nibble. This means that each byte in
-/// `hex_data` has its upper 4 bits set to zero and the lower 4 bits
+/// The internal representation is a shared heap-allocated vector ([`Bytes`]) that stores one nibble
+/// per byte. This means that each byte has its upper 4 bits set to zero and the lower 4 bits
 /// representing the nibble value.
 #[derive(
-    Default, Clone, Eq, PartialEq, RlpEncodableWrapper, PartialOrd, Ord, Hash, Index, From, Deref,
+    Default,
+    Debug,
+    Clone,
+    Eq,
+    PartialEq,
+    RlpEncodableWrapper,
+    PartialOrd,
+    Ord,
+    Hash,
+    Index,
+    From,
+    Deref,
 )]
-pub struct Nibbles {
-    /// The inner representation of the nibble sequence.
-    pub hex_data: Bytes,
-}
+pub struct Nibbles(Bytes);
 
 impl From<&[u8]> for Nibbles {
-    fn from(slice: &[u8]) -> Self {
-        Nibbles::from_hex(slice.to_vec())
+    #[inline]
+    fn from(value: &[u8]) -> Self {
+        Self::from_nibbles(value.to_vec())
+    }
+}
+
+impl<const N: usize> From<[u8; N]> for Nibbles {
+    #[inline]
+    fn from(value: [u8; N]) -> Self {
+        Self::from_nibbles(value.to_vec())
     }
 }
 
 impl<const N: usize> From<&[u8; N]> for Nibbles {
-    fn from(arr: &[u8; N]) -> Self {
-        Nibbles::from_hex(arr.to_vec())
+    #[inline]
+    fn from(value: &[u8; N]) -> Self {
+        Self::from_nibbles(value.to_vec())
     }
 }
 
-impl std::fmt::Debug for Nibbles {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Nibbles").field("hex_data", &crate::hex::encode(&self.hex_data)).finish()
+impl From<Vec<u8>> for Nibbles {
+    #[inline]
+    fn from(value: Vec<u8>) -> Self {
+        Self::from_nibbles(value)
     }
 }
 
 impl Nibbles {
-    /// Creates a new [Nibbles] instance from bytes.
-    pub fn from_hex<T: Into<Bytes>>(hex: T) -> Self {
-        Nibbles { hex_data: hex.into() }
+    /// Creates a new [`Nibbles`] instance from a nibble slice.
+    #[inline]
+    pub fn from_nibbles<T: Into<Bytes>>(nibbles: T) -> Self {
+        let nibbles = nibbles.into();
+        debug_assert!(nibbles.iter().all(|nibble| *nibble <= 0x0f));
+        Self(nibbles)
     }
 
-    /// Take a byte array (slice or vector) as input and convert it into a [Nibbles] struct
-    /// containing the nibbles (half-bytes or 4 bits) that make up the input byte data.
+    /// Converts a byte slice into a [`Nibbles`] instance containing the nibbles (half-bytes or 4
+    /// bits) that make up the input byte data.
     pub fn unpack<T: AsRef<[u8]>>(data: T) -> Self {
-        let mut vec = Vec::with_capacity(data.as_ref().len() * 2);
+        let mut nibbles = Vec::with_capacity(data.as_ref().len() * 2);
         for byte in data.as_ref() {
-            vec.push(byte / 16);
-            vec.push(byte % 16);
+            nibbles.push(byte >> 4);
+            nibbles.push(byte & 0xf0);
         }
-        Nibbles { hex_data: Bytes::from(vec) }
+        Self(nibbles.into())
     }
 
     /// Packs the nibbles stored in the struct into a byte vector.
@@ -109,22 +127,14 @@ impl Nibbles {
     /// If the number of nibbles is odd, the last nibble is shifted left by 4 bits and
     /// added to the packed byte vector.
     pub fn pack(&self) -> Vec<u8> {
-        let length = (self.len() + 1) / 2;
-        if length == 0 {
-            Vec::new()
-        } else {
-            self.iter()
-                .enumerate()
-                .filter_map(|(index, nibble)| {
-                    if index % 2 == 0 {
-                        let next_nibble = self.get(index + 1).unwrap_or(&0);
-                        Some((*nibble << 4) + *next_nibble)
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+        let packed_len = (self.len() + 1) / 2;
+        let mut v = Vec::with_capacity(packed_len);
+        for i in 0..packed_len {
+            let hi = *unsafe { self.get_unchecked(i * 2) };
+            let lo = self.get(i * 2 + 1).copied().unwrap_or(0);
+            v.push((hi << 4) | lo);
         }
+        v
     }
 
     /// Encodes a given path leaf as a compact array of bytes, where each byte represents two
@@ -155,19 +165,19 @@ impl Nibbles {
     /// # use reth_primitives::trie::Nibbles;
     ///
     /// // Extension node with an even path length:
-    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
+    /// let nibbles = Nibbles::from_nibbles([0x0A, 0x0B, 0x0C, 0x0D]);
     /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x00, 0xAB, 0xCD]);
     ///
     /// // Extension node with an odd path length:
-    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C]);
+    /// let nibbles = Nibbles::from_nibbles([0x0A, 0x0B, 0x0C]);
     /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x1A, 0xBC]);
     ///
     /// // Leaf node with an even path length:
-    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
+    /// let nibbles = Nibbles::from_nibbles([0x0A, 0x0B, 0x0C, 0x0D]);
     /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x20, 0xAB, 0xCD]);
     ///
     /// // Leaf node with an odd path length:
-    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C]);
+    /// let nibbles = Nibbles::from_nibbles([0x0A, 0x0B, 0x0C]);
     /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x3A, 0xBC]);
     /// ```
     pub fn encode_path_leaf(&self, is_leaf: bool) -> Vec<u8> {
@@ -192,14 +202,14 @@ impl Nibbles {
     }
 
     /// Increments the nibble sequence by one.
-    pub fn increment(&self) -> Option<Nibbles> {
-        let mut incremented = self.hex_data.to_vec();
+    pub fn increment(&self) -> Option<Self> {
+        let mut incremented = self.0.to_vec();
 
         for nibble in incremented.iter_mut().rev() {
-            assert!(*nibble < 0x10);
+            debug_assert!(*nibble < 0x10);
             if *nibble < 0xf {
                 *nibble += 1;
-                return Some(Nibbles::from_hex(incremented))
+                return Some(Self::from_nibbles(incremented))
             } else {
                 *nibble = 0;
             }
@@ -210,27 +220,37 @@ impl Nibbles {
 
     /// The last element of the hex vector is used to determine whether the nibble sequence
     /// represents a leaf or an extension node. If the last element is 0x10 (16), then it's a leaf.
+    #[inline]
     pub fn is_leaf(&self) -> bool {
-        self.hex_data[self.hex_data.len() - 1] == 16
+        self.last() == Some(16)
     }
 
     /// Returns `true` if the current nibble sequence starts with the given prefix.
+    #[inline]
     pub fn has_prefix(&self, other: &Self) -> bool {
         self.starts_with(other)
     }
 
     /// Returns the nibble at the given index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    #[inline]
+    #[track_caller]
     pub fn at(&self, i: usize) -> usize {
-        self.hex_data[i] as usize
+        self.0[i] as usize
     }
 
     /// Returns the last nibble of the current nibble sequence.
+    #[inline]
     pub fn last(&self) -> Option<u8> {
-        self.hex_data.last().copied()
+        self.0.last().copied()
     }
 
     /// Returns the length of the common prefix between the current nibble sequence and the given.
-    pub fn common_prefix_length(&self, other: &Nibbles) -> usize {
+    #[inline]
+    pub fn common_prefix_length(&self, other: &Self) -> usize {
         let len = std::cmp::min(self.len(), other.len());
         for i in 0..len {
             if self[i] != other[i] {
@@ -240,34 +260,67 @@ impl Nibbles {
         len
     }
 
-    /// Slice the current nibbles from the given start index to the end.
-    pub fn slice_from(&self, index: usize) -> Nibbles {
-        self.slice(index, self.hex_data.len())
+    /// Returns a reference to the underlying [`Bytes`].
+    #[inline]
+    pub fn as_bytes(&self) -> &Bytes {
+        &self.0
+    }
+
+    /// Returns the nibbles as a byte slice.
+    #[inline]
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+
+    /// Returns the underlying [`Bytes`].
+    #[inline]
+    pub fn into_bytes(self) -> Bytes {
+        self.0
     }
 
     /// Slice the current nibbles within the provided index range.
-    pub fn slice(&self, start: usize, end: usize) -> Nibbles {
-        Nibbles::from_hex(self.hex_data[start..end].to_vec())
+    #[inline]
+    pub fn slice(&self, range: impl RangeBounds<usize>) -> Self {
+        Self(self.0.slice(range))
     }
 
     /// Join two nibbles together.
-    pub fn join(&self, b: &Nibbles) -> Nibbles {
+    #[inline]
+    pub fn join(&self, b: &Self) -> Self {
         let mut hex_data = Vec::with_capacity(self.len() + b.len());
         hex_data.extend_from_slice(self);
         hex_data.extend_from_slice(b);
-        Nibbles::from_hex(hex_data)
+        Self::from_nibbles(hex_data)
+    }
+
+    /// Pushes a nibble to the end of the current nibbles.
+    ///
+    /// **Note**: This method re-allocates on each call.
+    #[inline]
+    pub fn push(&mut self, nibble: u8) {
+        self.extend([nibble]);
     }
 
     /// Extend the current nibbles with another nibbles.
+    ///
+    /// **Note**: This method re-allocates on each call.
+    #[inline]
     pub fn extend(&mut self, b: impl AsRef<[u8]>) {
-        let mut bytes = self.hex_data.to_vec();
+        let mut bytes = self.0.to_vec();
         bytes.extend_from_slice(b.as_ref());
-        self.hex_data = bytes.into();
+        self.0 = bytes.into();
     }
 
-    /// Truncate the current nibbles to the given length.
+    /// Truncates the current nibbles to the given length.
+    #[inline]
     pub fn truncate(&mut self, len: usize) {
-        self.hex_data.0.truncate(len)
+        self.0.truncate(len);
+    }
+
+    /// Clears the current nibbles.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.0.clear();
     }
 }
 
@@ -279,7 +332,7 @@ mod tests {
 
     #[test]
     fn hashed_regression() {
-        let nibbles = Nibbles::from_hex(hex!("05010406040a040203030f010805020b050c04070003070e0909070f010b0a0805020301070c0a0902040b0f000f0006040a04050f020b090701000a0a040b"));
+        let nibbles = Nibbles::from_nibbles(hex!("05010406040a040203030f010805020b050c04070003070e0909070f010b0a0805020301070c0a0902040b0f000f0006040a04050f020b090701000a0a040b"));
         let path = nibbles.encode_path_leaf(true);
         let expected = hex!("351464a4233f1852b5c47037e997f1ba852317ca924bf0f064a45f2b9710aa4b");
         assert_eq!(path, expected);
@@ -295,7 +348,7 @@ mod tests {
             (vec![0xa, 0xb, 0x2, 0x0], vec![0xab, 0x20]),
             (vec![0xa, 0xb, 0x2, 0x7], vec![0xab, 0x27]),
         ] {
-            let nibbles = Nibbles::from_hex(input);
+            let nibbles = Nibbles::from_nibbles(input);
             let encoded = nibbles.pack();
             assert_eq!(encoded, expected);
         }

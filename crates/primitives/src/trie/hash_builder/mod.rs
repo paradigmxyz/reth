@@ -3,6 +3,7 @@ use super::{
     BranchNodeCompact, Nibbles, TrieMask,
 };
 use crate::{constants::EMPTY_ROOT_HASH, keccak256, Bytes, B256};
+use itertools::Itertools;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
@@ -62,7 +63,7 @@ pub struct HashBuilder {
 impl From<HashBuilderState> for HashBuilder {
     fn from(state: HashBuilderState) -> Self {
         Self {
-            key: Nibbles::from_hex(state.key),
+            key: Nibbles::from_nibbles(state.key),
             stack: state.stack,
             value: state.value,
             groups: state.groups,
@@ -79,7 +80,7 @@ impl From<HashBuilderState> for HashBuilder {
 impl From<HashBuilder> for HashBuilderState {
     fn from(state: HashBuilder) -> Self {
         Self {
-            key: state.key.hex_data.to_vec(),
+            key: state.key.to_vec(),
             stack: state.stack,
             value: state.value,
             groups: state.groups,
@@ -166,7 +167,7 @@ impl HashBuilder {
         // Clears the internal state
         if !self.key.is_empty() {
             self.update(&Nibbles::default());
-            self.key.hex_data.0.clear();
+            self.key.clear();
             self.value = HashBuilderValue::Bytes(vec![]);
         }
         self.current_root()
@@ -209,7 +210,7 @@ impl HashBuilder {
                 tracing::Level::TRACE,
                 "loop",
                 i,
-                current = crate::hex::encode(&current.hex_data),
+                ?current,
                 ?build_extensions
             );
             let _enter = span.enter();
@@ -241,7 +242,7 @@ impl HashBuilder {
             trace!(
                 target: "trie::hash_builder",
                 ?extra_digit,
-                groups = self.groups.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(","),
+                groups = ?self.groups.iter().format(", "),
             );
 
             // Adjust the tree masks for exporting to the DB
@@ -256,7 +257,7 @@ impl HashBuilder {
             trace!(target: "trie::hash_builder", "skipping {} nibbles", len_from);
 
             // The key without the common prefix
-            let short_node_key = current.slice_from(len_from);
+            let short_node_key = current.slice(len_from..);
             trace!(target: "trie::hash_builder", ?short_node_key);
 
             // Concatenate the 2 nodes together
@@ -302,7 +303,7 @@ impl HashBuilder {
                 }, "extension node rlp");
                 self.rlp_buf.clear();
                 self.stack.push(extension_node.rlp(&mut self.rlp_buf));
-                self.retain_proof_from_buf(&current.slice(0, len_from));
+                self.retain_proof_from_buf(&current.slice(..len_from));
                 self.resize_masks(len_from);
             }
 
@@ -353,7 +354,7 @@ impl HashBuilder {
 
         self.rlp_buf.clear();
         let rlp = branch_node.rlp(state_mask, &mut self.rlp_buf);
-        self.retain_proof_from_buf(&current.slice(0, len));
+        self.retain_proof_from_buf(&current.slice(..len));
 
         // Clears the stack from the branch node elements
         let first_child_idx = self.stack.len() - state_mask.count_ones() as usize;
@@ -403,7 +404,7 @@ impl HashBuilder {
             // Send it over to the provided channel which will handle it on the
             // other side of the HashBuilder
             trace!(target: "trie::hash_builder", node = ?n, "intermediate node");
-            let common_prefix = current.slice(0, len);
+            let common_prefix = current.slice(..len);
             if let Some(nodes) = self.updated_branch_nodes.as_mut() {
                 nodes.insert(common_prefix, n);
             }
@@ -563,7 +564,7 @@ mod tests {
 
         let (_, updates) = hb.split();
 
-        let update = updates.get(&Nibbles::from(hex!("01").as_slice())).unwrap();
+        let update = updates.get(&Nibbles::from_nibbles(&hex!("01"))).unwrap();
         assert_eq!(update.state_mask, TrieMask::new(0b1111)); // 1st nibble: 0, 1, 2, 3
         assert_eq!(update.tree_mask, TrieMask::new(0));
         assert_eq!(update.hash_mask, TrieMask::new(6)); // in the 1st nibble, the ones with 1 and 2 are branches with `hashes`
@@ -633,7 +634,7 @@ mod tests {
 
         let mut hb2 = HashBuilder::default();
         // Insert the branch with the `0x6` shared prefix.
-        hb2.add_branch(Nibbles::from_hex(vec![0x6]), branch_node_hash, false);
+        hb2.add_branch(Nibbles::from_nibbles(vec![0x6]), branch_node_hash, false);
 
         let expected = trie_root(raw_input.clone());
         assert_eq!(hb.root(), expected);

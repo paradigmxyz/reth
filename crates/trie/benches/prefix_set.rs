@@ -95,12 +95,12 @@ fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
     let mut preload = vec(vec(any::<u8>(), 32), size).new_tree(&mut runner).unwrap().current();
     preload.dedup();
     preload.sort();
-    let preload = preload.into_iter().map(|hash| Nibbles::from(&hash[..])).collect::<Vec<_>>();
+    let preload = preload.into_iter().map(|hash| Nibbles::from(hash)).collect::<Vec<_>>();
 
     let mut input = vec(vec(any::<u8>(), 0..=32), size).new_tree(&mut runner).unwrap().current();
     input.dedup();
     input.sort();
-    let input = input.into_iter().map(|bytes| Nibbles::from(&bytes[..])).collect::<Vec<_>>();
+    let input = input.into_iter().map(|bytes| Nibbles::from(bytes)).collect::<Vec<_>>();
 
     let expected = input
         .iter()
