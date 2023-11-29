@@ -112,10 +112,11 @@ impl Nibbles {
     /// Converts a byte slice into a [`Nibbles`] instance containing the nibbles (half-bytes or 4
     /// bits) that make up the input byte data.
     pub fn unpack<T: AsRef<[u8]>>(data: T) -> Self {
-        let mut nibbles = Vec::with_capacity(data.as_ref().len() * 2);
-        for byte in data.as_ref() {
+        let data = data.as_ref();
+        let mut nibbles = Vec::with_capacity(data.len() * 2);
+        for &byte in data {
             nibbles.push(byte >> 4);
-            nibbles.push(byte & 0xf0);
+            nibbles.push(byte & 0x0f);
         }
         Self(nibbles.into())
     }
