@@ -4,15 +4,14 @@ use crate::{
     stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
-use reth_ethereum_forks::Hardfork;
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
     RethError,
 };
 use reth_primitives::{
     revm::env::{fill_cfg_and_block_env, fill_tx_env},
-    Address, Block, BlockNumber, Bloom, ChainSpec, GotExpected, Header, PruneMode, PruneModes,
-    PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
+    Address, Block, BlockNumber, Bloom, ChainSpec, GotExpected, Hardfork, Header, PruneMode,
+    PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
 };
 use reth_provider::{BlockExecutor, BlockExecutorStats, PrunableBlockExecutor, StateProvider};

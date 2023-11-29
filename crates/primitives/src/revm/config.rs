@@ -1,5 +1,4 @@
-use crate::{revm_primitives, ChainSpec};
-use reth_ethereum_forks::{Hardfork, Head};
+use crate::{revm_primitives, ChainSpec, Hardfork, Head};
 
 /// Returns the spec id at the given timestamp.
 ///
@@ -78,7 +77,7 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
 mod tests {
     use super::*;
     use crate::{ChainSpecBuilder, MAINNET, U256};
-    use reth_ethereum_forks::Head;
+    use reth_primitives::Head;
 
     #[test]
     fn test_to_revm_spec() {

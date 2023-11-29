@@ -7,10 +7,9 @@ use crate::{
 use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_ethereum_forks::ForkFilter;
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    GotExpected,
+    ForkFilter, GotExpected,
 };
 use std::{
     pin::Pin,
@@ -333,8 +332,7 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::{stream::ECIESStream, util::pk2id};
-    use reth_ethereum_forks::{ForkFilter, Head};
-    use reth_primitives::{NamedChain, B256, U256};
+    use reth_primitives::{ForkFilter, Head, NamedChain, B256, U256};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;

@@ -8,8 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-# reth 
-reth-ethereum-forks.workspace = true
+# reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true

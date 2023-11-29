@@ -776,9 +776,8 @@ mod tests {
         GetBlockBodies, HelloMessageWithProtocols, Status, StatusBuilder, UnauthedEthStream,
         UnauthedP2PStream,
     };
-    use reth_ethereum_forks::{ForkFilter, Hardfork};
     use reth_net_common::bandwidth_meter::BandwidthMeter;
-    use reth_primitives::MAINNET;
+    use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::{net::TcpListener, sync::mpsc};

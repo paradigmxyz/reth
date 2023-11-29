@@ -40,7 +40,6 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_ethereum_forks::Head;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -56,7 +55,7 @@ use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
     stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, SealedHeader, B256,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,

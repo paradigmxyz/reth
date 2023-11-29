@@ -23,8 +23,7 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use reth_ethereum_forks::ForkId;
-use reth_primitives::{NodeRecord, PeerId};
+use reth_primitives::{ForkId, NodeRecord, PeerId};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -414,8 +413,7 @@ mod tests {
     use crate::tree::TreeRootEntry;
     use alloy_rlp::Encodable;
     use enr::{EnrBuilder, EnrKey};
-    use reth_ethereum_forks::Hardfork;
-    use reth_primitives::{Chain, MAINNET};
+    use reth_primitives::{Chain, Hardfork, MAINNET};
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
     use tokio_stream::StreamExt;

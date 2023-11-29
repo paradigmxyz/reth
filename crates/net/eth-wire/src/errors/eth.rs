@@ -2,8 +2,7 @@
 use crate::{
     errors::P2PStreamError, version::ParseVersionError, DisconnectReason, EthMessageID, EthVersion,
 };
-use reth_ethereum_forks::ValidationError;
-use reth_primitives::{Chain, GotExpected, GotExpectedBoxed, B256};
+use reth_primitives::{Chain, GotExpected, GotExpectedBoxed, ValidationError, B256};
 use std::io;
 
 /// Errors when sending/receiving messages

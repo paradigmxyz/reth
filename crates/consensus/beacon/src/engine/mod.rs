@@ -9,7 +9,6 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use reth_db::database::Database;
-use reth_ethereum_forks::Head;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -23,7 +22,7 @@ use reth_interfaces::{
 };
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{
-    constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, ChainSpec, Header,
+    constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, ChainSpec, Head, Header,
     SealedBlock, SealedHeader, B256, U256,
 };
 use reth_provider::{
@@ -2408,12 +2407,11 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_ethereum_forks::Hardfork;
         use reth_interfaces::test_utils::{
             generators,
             generators::{generate_keys, random_block},
         };
-        use reth_primitives::{public_key_to_address, Genesis, GenesisAccount, U256};
+        use reth_primitives::{public_key_to_address, Genesis, GenesisAccount, Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]

@@ -9,8 +9,7 @@ repository.workspace = true
 description = "Implementation of Engine API"
 
 [dependencies]
-# reth 
-reth-ethereum-forks.workspace = true
+# reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true

@@ -5,10 +5,10 @@ use crate::{
     },
     proofs::genesis_state_root,
     revm_primitives::{address, b256},
-    Address, BlockNumber, Chain, Genesis, Header, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Address, BlockNumber, Chain, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
+    Head, Header, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use once_cell::sync::Lazy;
-use reth_ethereum_forks::{ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
