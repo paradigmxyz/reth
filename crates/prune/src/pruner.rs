@@ -92,7 +92,7 @@ impl<DB: Database> Pruner<DB> {
         // TODO(alexey): prune snapshotted segments of data (headers, transactions)
         let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
-        // Multiply `self.delete_limit` (number of row to delete per block) by number of blocks
+        // Multiply `self.delete_limit` (number of rows to delete per block) by number of blocks
         // since last pruner run. `self.previous_tip_block_number` is close to
         // `tip_block_number`, usually within `self.block_interval` blocks, so
         // `delete_limit` will not be too high. If it's too high, we additionally limit it by
