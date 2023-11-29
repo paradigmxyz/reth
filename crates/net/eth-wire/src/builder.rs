@@ -28,7 +28,7 @@ use reth_primitives::{Chain, ForkId, B256, U256};
 ///         total_difficulty: U256::from(100),
 ///         blockhash: B256::from(MAINNET_GENESIS_HASH),
 ///         genesis: B256::from(MAINNET_GENESIS_HASH),
-///         forkid: Hardfork::Paris.fork_id(&MAINNET).unwrap(),
+///         forkid: MAINNET.hardfork_fork_id(Hardfork::Paris).unwrap(),
 ///     }
 /// );
 /// ```
