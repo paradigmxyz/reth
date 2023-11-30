@@ -530,51 +530,56 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
 
-        let a = address!("000000000000000000000000000000000000000a");
-        let b = address!("000000000000000000000000000000000000000b");
-        let c = address!("000000000000000000000000000000000000000c");
-        let d = address!("000000000000000000000000000000000000000d");
+        let a_sender = address!("000000000000000000000000000000000000000a");
+        let b_sender = address!("000000000000000000000000000000000000000b");
+        let c_sender = address!("000000000000000000000000000000000000000c");
+        let d_sender = address!("000000000000000000000000000000000000000d");
 
-        // TODO: make creating these mock tx chains easier
         // create a chain of transactions by sender A, B, C
-        let a1 = MockTransaction::eip1559().with_sender(a);
-        let a2 = a1.next();
-        let a3 = a2.next();
-        let a4 = a3.next();
+        let mut tx_set =
+            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::EIP1559);
+        let a_set = tx_set.clone().into_vec();
 
-        let b1 = MockTransaction::eip1559().with_sender(b);
-        let b2 = b1.next();
-        let b3 = b2.next();
+        let b_set = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
+            .clone()
+            .into_vec();
+        tx_set.extend(b_set.clone());
 
         // C has the same number of txs as B
-        let c1 = MockTransaction::eip1559().with_sender(c);
-        let c2 = c1.next();
-        let c3 = c2.next();
+        let c_set = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
+            .clone()
+            .into_vec();
+        tx_set.extend(c_set.clone());
 
-        let d1 = MockTransaction::eip1559().with_sender(d);
+        let d_set = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
+            .clone()
+            .into_vec();
+        tx_set.extend(d_set.clone());
+
+        let all_txs = tx_set.into_vec();
 
         // just construct a list of all txs to add
-        let expected_parked = vec![c1.clone(), c2.clone(), c3.clone(), d1.clone()]
-            .into_iter()
-            .map(|tx| (tx.sender(), tx.nonce()))
-            .collect::<HashSet<_>>();
+        let expected_parked =
+            vec![c_set[0].clone(), c_set[1].clone(), c_set[2].clone(), d_set[0].clone()]
+                .into_iter()
+                .map(|tx| (tx.sender(), tx.nonce()))
+                .collect::<HashSet<_>>();
 
         // we expect the truncate operation to go through the senders with the most txs, removing
         // txs based on when they were submitted, removing the oldest txs first, until the pool is
         // not over the limit
         let expected_removed = vec![
-            a1.clone(),
-            a2.clone(),
-            a3.clone(),
-            a4.clone(),
-            b1.clone(),
-            b2.clone(),
-            b3.clone(),
+            a_set[0].clone(),
+            a_set[1].clone(),
+            a_set[2].clone(),
+            a_set[3].clone(),
+            b_set[0].clone(),
+            b_set[1].clone(),
+            b_set[2].clone(),
         ]
         .into_iter()
         .map(|tx| (tx.sender(), tx.nonce()))
         .collect::<HashSet<_>>();
-        let all_txs = vec![a1, a2, a3, a4, b1, b2, b3, c1, c2, c3, d1];
 
         // add all the transactions to the pool
         for tx in all_txs {
