@@ -4,6 +4,7 @@ use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerResponse, PeerResponseResult},
     session::{
         config::INITIAL_REQUEST_TIMEOUT,
+        conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,
     },
@@ -70,7 +71,7 @@ pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.
-    pub(crate) conn: PeerConnection,
+    pub(crate) conn: EthRlpxConnection,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -765,12 +766,11 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::session::{
-        config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
-        handle::PendingSessionEvent,
-        start_pending_incoming_session,
-    };
+    use std::time::Duration;
+
+    use secp256k1::{SecretKey, SECP256K1};
+    use tokio::{net::TcpListener, sync::mpsc};
+
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
         GetBlockBodies, HelloMessageWithProtocols, Status, StatusBuilder, UnauthedEthStream,
@@ -778,9 +778,14 @@ mod tests {
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
-    use secp256k1::{SecretKey, SECP256K1};
-    use std::time::Duration;
-    use tokio::{net::TcpListener, sync::mpsc};
+
+    use crate::session::{
+        config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
+        handle::PendingSessionEvent,
+        start_pending_incoming_session,
+    };
+
+    use super::*;
 
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {

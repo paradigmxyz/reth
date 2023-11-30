@@ -16,17 +16,16 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-use bytes::{Bytes, BytesMut};
-use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
-use reth_primitives::ForkFilter;
-use tokio::sync::{mpsc, mpsc::UnboundedSender};
-use tokio_stream::wrappers::UnboundedReceiverStream;
-
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
     CanDisconnect, DisconnectReason, EthStream, EthVersion, P2PStream, Status, UnauthedEthStream,
 };
+use bytes::{Bytes, BytesMut};
+use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
+use reth_primitives::ForkFilter;
+use tokio::sync::{mpsc, mpsc::UnboundedSender};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A Stream and Sink type that wraps a raw rlpx stream [P2PStream] and handles message ID
 /// multiplexing.
@@ -241,9 +240,13 @@ impl<St> MultiplexInner<St> {
 /// Represents a protocol in the multiplexer that is used as the primary protocol.
 #[derive(Debug)]
 struct PrimaryProtocol<Primary> {
+    /// Channel to send messages to the primary protocol.
     to_primary: UnboundedSender<BytesMut>,
+    /// Receiver for messages from the primary protocol.
     from_primary: UnboundedReceiverStream<Bytes>,
+    /// Shared capability of the primary protocol.
     shared_cap: SharedCapability,
+    /// The primary stream.
     st: Primary,
 }
 
@@ -374,6 +377,36 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
     {
         self.inner.install_protocol(cap, f)
     }
+
+    /// Returns the primary protocol.
+    #[inline]
+    pub fn primary(&self) -> &Primary {
+        &self.primary.st
+    }
+
+    /// Returns mutable access to the primary protocol.
+    #[inline]
+    pub fn primary_mut(&mut self) -> &mut Primary {
+        &mut self.primary.st
+    }
+
+    /// Returns the underlying [P2PStream].
+    #[inline]
+    pub fn inner(&self) -> &P2PStream<St> {
+        &self.inner.conn
+    }
+
+    /// Returns mutable access to the underlying [P2PStream].
+    #[inline]
+    pub fn inner_mut(&mut self) -> &mut P2PStream<St> {
+        &mut self.inner.conn
+    }
+
+    /// Consumes this type and returns the wrapped [P2PStream].
+    #[inline]
+    pub fn into_inner(self) -> P2PStream<St> {
+        self.inner.conn
+    }
 }
 
 impl<St, Primary, PrimaryErr> Stream for RlpxSatelliteStream<St, Primary>
@@ -492,7 +525,7 @@ where
 impl<St, Primary, T> Sink<T> for RlpxSatelliteStream<St, Primary>
 where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
-    Primary: Sink<T, Error = io::Error> + Unpin,
+    Primary: Sink<T> + Unpin,
     P2PStreamError: Into<<Primary as Sink<T>>::Error>,
 {
     type Error = <Primary as Sink<T>>::Error;

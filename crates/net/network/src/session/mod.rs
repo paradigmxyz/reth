@@ -40,15 +40,15 @@ use tracing::{instrument, trace};
 
 mod active;
 mod config;
+mod conn;
 mod handle;
 pub use crate::message::PeerRequestSender;
+use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
 pub use config::{SessionLimits, SessionsConfig};
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
 };
-
-use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
 pub use reth_network_api::{Direction, PeerInfo};
 
 /// Internal identifier for active sessions.
@@ -961,7 +961,7 @@ async fn authenticate_stream(
         peer_id: their_hello.id,
         capabilities: Arc::new(Capabilities::from(their_hello.capabilities)),
         status: Arc::new(their_status),
-        conn: Box::new(eth_stream),
+        conn: eth_stream.into(),
         direction,
         client_id: their_hello.client_version,
     }
