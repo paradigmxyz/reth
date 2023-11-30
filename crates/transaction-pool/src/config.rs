@@ -26,6 +26,8 @@ pub struct PoolConfig {
     pub basefee_limit: SubPoolLimit,
     /// Max number of transaction in the queued sub-pool
     pub queued_limit: SubPoolLimit,
+    /// Max number of transactions in the blob sub-pool
+    pub blob_limit: SubPoolLimit,
     /// Max number of executable transaction slots guaranteed per account
     pub max_account_slots: usize,
     /// Price bump (in %) for the transaction pool underpriced check.
@@ -41,6 +43,7 @@ impl Default for PoolConfig {
             pending_limit: Default::default(),
             basefee_limit: Default::default(),
             queued_limit: Default::default(),
+            blob_limit: Default::default(),
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             local_transactions_config: Default::default(),
