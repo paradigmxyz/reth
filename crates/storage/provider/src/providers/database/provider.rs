@@ -1600,7 +1600,12 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        Ok(self.tx.get::<tables::Receipts>(id)?)
+        self.get_with_snapshot(
+            SnapshotSegment::Receipts,
+            id,
+            |snapshot| snapshot.receipt(id),
+            || Ok(self.tx.get::<tables::Receipts>(id)?),
+        )
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {

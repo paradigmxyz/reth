@@ -395,16 +395,20 @@ impl BlockHashReader for SnapshotProvider {
 }
 
 impl ReceiptProvider for SnapshotProvider {
-    fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        todo!()
+    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
+        self.get_segment_provider_from_transaction(SnapshotSegment::Receipts, num, None)?
+            .receipt(num)
     }
 
-    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Receipt>> {
-        todo!()
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+        if let Some(num) = self.transaction_id(hash)? {
+            return self.receipt(num)
+        }
+        Ok(None)
     }
 
     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
-        todo!()
+        unreachable!()
     }
 }
 
