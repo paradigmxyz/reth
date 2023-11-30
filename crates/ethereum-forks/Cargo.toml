@@ -12,37 +12,18 @@ description = "Ethereum fork types used in reth."
 # reth
 reth-codecs.workspace = true
 revm-primitives.workspace = true
-revm.workspace = true
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 
-# crypto
-secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
-
 # used for forkid
 crc = "3"
 
-# tracing
-tracing.workspace = true
-
 # misc
-bytes.workspace = true
-byteorder = "1"
 clap = { workspace = true, features = ["derive"], optional = true }
 serde.workspace = true
-serde_json.workspace = true
-serde_with = "3.3.0"
 thiserror.workspace = true
-sucds = "~0.6"
-modular-bitfield = "0.11.2"
-derive_more = "0.99"
-url = "2.3"
-once_cell.workspace = true
-tempfile.workspace = true
-itertools = "0.11"
-num_enum = "0.7"
 
 # `test-utils` feature
 plain_hasher = { version = "0.2", optional = true }
@@ -55,28 +36,17 @@ proptest-derive = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-serde_json.workspace = true
-test-fuzz = "4"
 rand.workspace = true
 revm-primitives = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
-assert_matches.workspace = true
-toml.workspace = true
-triehash = "0.8"
 
 plain_hasher = "0.2"
 hash-db = "~0.15"
 
-# necessary so we don't hit a "undeclared 'std'":
-# https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
-secp256k1.workspace = true
-criterion.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
-
 [features]
 arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 clap = ["dep:clap"]
-optimism = ["reth-codecs/optimism", "revm-primitives/optimism", "revm/optimism"]
+optimism = ["reth-codecs/optimism", "revm-primitives/optimism"]
 test-utils = ["dep:plain_hasher", "dep:hash-db"]

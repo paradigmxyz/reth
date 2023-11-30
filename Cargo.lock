@@ -140,9 +140,9 @@ checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
 
 [[package]]
 name = "alloy-dyn-abi"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9fe14fb6dded4be3f44d053e59402a405bb231561e36a88bc2283a9829d81fe"
+checksum = "2a80060a7b7cbcb40c78fe763130078f6e8b49d7d9a5b0d0f9c508d28b094b60"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives",
@@ -158,9 +158,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-json-abi"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85cbbc8fcae58f39dbfbdc94ead48de0779910528889aebc074aed75959bffe7"
+checksum = "ef4dff5c682e16e398783e8da63956bdf22ce48841e6ca367f8a8a6b1f2ed989"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-type-parser",
@@ -170,9 +170,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5def4b5e1bb8fe7ea37eeac1063246d4ef26f56cbdccf864a5a6bdcb80e91f4"
+checksum = "3a3877a2fa7474d9367d01ab43e33a4a4eeedf9bf7ec481533520686e956703b"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -218,9 +218,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-macro"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0acd5b8d2699b095a57a0ecea6a6a2045b8e5ed6f2607bfa3382961d2889e82"
+checksum = "123b602fbffdfb514183bcca2e5e7428b41ed5d59580ae70bf8eca937d165427"
 dependencies = [
  "const-hex",
  "dunce",
@@ -236,18 +236,18 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-type-parser"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc77699fb68c8a2cf18efb2c51df43e09b42b53886c6eb552951b19c41ebfc84"
+checksum = "e4648000cc0f043d0cdded1650bf4a1c075da0367cd9c80deda48db870985cbd"
 dependencies = [
  "winnow",
 ]
 
 [[package]]
 name = "alloy-sol-types"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97d483e9c6db659cdb24fc736684ef68b743705fbdb0677c6404815361871b92"
+checksum = "8c4c333ed7d5a4d87e3b8ad2ce230d4f9347b9e43faf98ad16ba58bf318cd023"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-macro",
@@ -1450,9 +1450,9 @@ dependencies = [
 
 [[package]]
 name = "core-foundation"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "194a7a9e6de53fa55116934067c844d9d749312f75c6f6d0980e8c252f8c2146"
+checksum = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f"
 dependencies = [
  "core-foundation-sys",
  "libc",
@@ -1460,9 +1460,9 @@ dependencies = [
 
 [[package]]
 name = "core-foundation-sys"
-version = "0.8.4"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e496a50fda8aacccc86d7529e2c1e0892dbd0f898a6b5645b5561b89c3210efa"
+checksum = "06ea2b9bc92be3c2baa9334a323ebca2d6f074ff852cd1d7b11064035cd3868f"
 
 [[package]]
 name = "cpp_demangle"
@@ -5929,39 +5929,18 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
- "assert_matches",
- "byteorder",
- "bytes",
  "clap",
  "crc",
- "criterion",
- "derive_more",
  "hash-db",
- "itertools 0.11.0",
- "modular-bitfield",
- "num_enum 0.7.1",
- "once_cell",
  "plain_hasher",
- "pprof",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
- "revm",
  "revm-primitives",
- "secp256k1 0.27.0",
  "serde",
- "serde_json",
- "serde_with",
  "strum",
- "sucds 0.6.0",
- "tempfile",
- "test-fuzz",
  "thiserror",
- "toml 0.8.8",
- "tracing",
- "triehash",
- "url",
 ]
 
 [[package]]
@@ -7697,9 +7676,9 @@ dependencies = [
 
 [[package]]
 name = "syn-solidity"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e349ed2ca56eff703d7c3ea013771bcbab9ad2ad39dddf863fc51d820329dc41"
+checksum = "cf07302c875aa7e1ee4fb811fdf2a0436bb04640639539003dcab2e049a9d1fe"
 dependencies = [
  "paste",
  "proc-macro2",
@@ -9139,18 +9118,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.7.26"
+version = "0.7.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e97e415490559a91254a2979b4829267a57d2fcd741a98eee8b722fb57289aa0"
+checksum = "f43de342578a3a14a9314a2dab1942cbfcbe5686e1f91acdc513058063eafe18"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.7.26"
+version = "0.7.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd7e48ccf166952882ca8bd778a43502c64f33bf94c12ebe2a7f08e5a0f6689f"
+checksum = "e1012d89e3acb79fad7a799ce96866cfb8098b74638465ea1b1533d35900ca90"
 dependencies = [
  "proc-macro2",
  "quote",
