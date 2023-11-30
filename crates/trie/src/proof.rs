@@ -2,7 +2,7 @@ use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
     prefix_set::PrefixSetMut,
-    trie_cursor::{AccountTrieCursor, StorageTrieCursor},
+    trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     walker::TrieWalker,
     StateRootError, StorageRootError,
 };
@@ -51,7 +51,8 @@ where
         let mut account_proof = AccountProof::new(address);
 
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
-        let trie_cursor = AccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
+        let trie_cursor =
+            DatabaseAccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
         // Create the walker.
         let mut prefix_set = PrefixSetMut::default();
@@ -119,7 +120,7 @@ where
 
         let target_nibbles = proofs.iter().map(|p| p.nibbles.clone()).collect::<Vec<_>>();
         let prefix_set = PrefixSetMut::from(target_nibbles.clone()).freeze();
-        let trie_cursor = StorageTrieCursor::new(
+        let trie_cursor = DatabaseStorageTrieCursor::new(
             self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         );
@@ -221,7 +222,7 @@ mod tests {
         });
         provider.insert_storage_for_hashing(alloc_storage)?;
 
-        let (_, updates) = StateRoot::new(provider.tx_ref())
+        let (_, updates) = StateRoot::from_tx(provider.tx_ref())
             .root_with_updates()
             .map_err(Into::<reth_db::DatabaseError>::into)?;
         updates.flush(provider.tx_mut())?;
