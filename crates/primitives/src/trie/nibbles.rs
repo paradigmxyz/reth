@@ -142,14 +142,14 @@ impl From<Vec<u8>> for Nibbles {
 impl From<Nibbles> for Vec<u8> {
     #[inline]
     fn from(value: Nibbles) -> Self {
-        value.to_vec()
+        value.0.into_vec()
     }
 }
 
 impl From<Nibbles> for Bytes {
     #[inline]
     fn from(value: Nibbles) -> Self {
-        value.to_vec().into()
+        value.0.into_vec().into()
     }
 }
 
