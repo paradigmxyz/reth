@@ -113,15 +113,13 @@ where
             if replay_block_txs {
                 // only need to replay the transactions in the block if not all transactions are
                 // to be replayed
-                let _transactions =
-                    block.into_transactions_ecrecovered().take(num_txs).enumerate().map(
-                        |(_idx, tx)| {
-                            let tx = tx_env_with_recovered(&tx);
-                            let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                            let (res, _) = transact(&mut db, env).unwrap();
-                            db.commit(res.state);
-                        },
-                    );
+                let transactions = block.into_transactions_ecrecovered().take(num_txs);
+                for tx in transactions {
+                    let tx = tx_env_with_recovered(&tx);
+                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                    let (res, _) = transact(&mut db, env)?;
+                    db.commit(res.state);
+                }
             }
 
             let block_overrides = block_override.map(Box::new);
