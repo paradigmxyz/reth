@@ -360,7 +360,7 @@ impl Nibbles {
             Bound::Excluded(&n) => n,
             Bound::Unbounded => self.len(),
         };
-        Self::new_unchecked(&self[start..=end])
+        Self::new_unchecked(&self[start..end])
     }
 
     /// Join two nibbles together.
