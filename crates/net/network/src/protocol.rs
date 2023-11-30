@@ -2,6 +2,7 @@
 //!
 //! See also <https://github.com/ethereum/devp2p/blob/master/README.md>
 
+use derive_more::Deref;
 use futures::Stream;
 use reth_eth_wire::{
     capability::{SharedCapabilities, SharedCapability},
@@ -11,7 +12,7 @@ use reth_eth_wire::{
 use reth_network_api::Direction;
 use reth_primitives::BytesMut;
 use reth_rpc_types::PeerId;
-use std::{fmt, net::SocketAddr, pin::Pin};
+use std::{fmt, net::SocketAddr, pin::Pin, sync::Arc};
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
@@ -65,7 +66,7 @@ pub trait ConnectionHandler: Send + Sync + 'static {
         direction: Direction,
         peer_id: PeerId,
         conn: ProtocolConnection,
-    ) -> Self::Connection;
+    ) -> Option<Self::Connection>;
 }
 
 /// Read metadata about the connection that is useful for processing its messages.
@@ -86,15 +87,8 @@ pub enum OnNotSupported {
 }
 
 /// A wrapper type for a RLPx sub-protocol.
-#[derive(Debug)]
-pub struct RlpxSubProtocol(Box<dyn DynProtocolHandler>);
-
-impl RlpxSubProtocol {
-    /// The handled protocol.
-    pub fn protocol(&self) -> Protocol {
-        self.0.protocol()
-    }
-}
+#[derive(Debug, Clone, Deref)]
+pub struct RlpxSubProtocol(Arc<dyn DynProtocolHandler>);
 
 /// A helper trait to convert a [ProtocolHandler] into a dynamic type
 pub trait IntoRlpxSubProtocol {
@@ -107,7 +101,7 @@ where
     T: ProtocolHandler + Send + Sync + 'static,
 {
     fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol {
-        RlpxSubProtocol(Box::new(self))
+        RlpxSubProtocol(Arc::new(self))
     }
 }
 
@@ -118,24 +112,33 @@ impl IntoRlpxSubProtocol for RlpxSubProtocol {
 }
 
 /// Additional RLPx-based sub-protocols.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Deref)]
 pub struct RlpxSubProtocols {
     /// All extra protocols
     protocols: Vec<RlpxSubProtocol>,
 }
 
 impl RlpxSubProtocols {
+    /// Creates a new list for extra protocols.
+    pub fn new() -> Self {
+        RlpxSubProtocols { protocols: Vec::new() }
+    }
+
     /// Adds a new protocol.
     pub fn push(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.protocols.push(protocol.into_rlpx_sub_protocol());
     }
 }
 
-pub(crate) trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
+/// Wrapper trait for ease of use of [`ProtocolHandler`] as trait object.
+pub trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
+    /// Returns the handled protocol.
     fn protocol(&self) -> Protocol;
 
+    /// See [`ProtocolHandler`].
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>>;
 
+    /// See [`ProtocolHandler`].
     fn on_outgoing(
         &self,
         socket_addr: SocketAddr,
@@ -166,10 +169,12 @@ where
     }
 }
 
-/// Wrapper trait for internal ease of use.
-pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
+/// Wrapper trait for ease of use of [`ConnectionHandler`] as trait object.
+pub trait DynConnectionHandler: Send + Sync + 'static {
+    /// See [`ConnectionHandler`].
     fn protocol(&self) -> Protocol;
 
+    /// See [`ConnectionHandler`].
     fn on_unsupported_by_peer(
         self,
         supported: &SharedCapabilities,
@@ -177,12 +182,13 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
         peer_id: PeerId,
     ) -> OnNotSupported;
 
+    /// See [`ConnectionHandler`].
     fn into_connection(
         self,
         direction: Direction,
         peer_id: PeerId,
         conn: ProtocolConnection,
-    ) -> Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>>;
+    ) -> Option<Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>>>;
 }
 
 impl<T> DynConnectionHandler for T
@@ -207,7 +213,8 @@ where
         direction: Direction,
         peer_id: PeerId,
         conn: ProtocolConnection,
-    ) -> Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>> {
-        Box::pin(T::into_connection(self, direction, peer_id, conn))
+    ) -> Option<Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>>> {
+        T::into_connection(self, direction, peer_id, conn)
+            .map(|conn| Box::pin(conn) as Pin<Box<dyn Stream<Item = BytesMut> + Send>>)
     }
 }

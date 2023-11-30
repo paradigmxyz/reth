@@ -766,10 +766,13 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{
-        config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
-        handle::PendingSessionEvent,
-        start_pending_incoming_session,
+    use crate::{
+        protocol::RlpxSubProtocols,
+        session::{
+            config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
+            handle::PendingSessionEvent,
+            start_pending_incoming_session,
+        },
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
@@ -799,6 +802,7 @@ mod tests {
         fork_filter: ForkFilter,
         next_id: usize,
         bandwidth_meter: BandwidthMeter,
+        extra_protocols: RlpxSubProtocols,
     }
 
     impl SessionBuilder {
@@ -856,6 +860,7 @@ mod tests {
                 self.hello.clone(),
                 self.status,
                 self.fork_filter.clone(),
+                self.extra_protocols.clone(),
             ));
 
             let mut stream = ReceiverStream::new(pending_sessions_rx);
@@ -930,6 +935,7 @@ mod tests {
                     .hardfork_fork_filter(Hardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),
                 bandwidth_meter: BandwidthMeter::default(),
+                extra_protocols: RlpxSubProtocols::new(),
             }
         }
     }

@@ -10,7 +10,7 @@ use crate::{
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
-use reth_eth_wire::{HelloMessage, HelloMessageBuilder, HelloMessageWithProtocols, Status};
+use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
     mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
 };
@@ -386,21 +386,7 @@ impl NetworkConfigBuilder {
 
     /// Adds a new additional protocol to the RLPx sub-protocol list.
     pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
-        let hello_message = std::mem::take(&mut self.hello_message);
-
-        let protocol = protocol.into_rlpx_sub_protocol();
-
-        self.hello_message = Some(
-            match hello_message {
-                Some(hello_message) => HelloMessageBuilder::new_from(hello_message),
-                None => HelloMessageBuilder::new(self.get_peer_id()),
-            }
-            .protocol(protocol.protocol())
-            .build(),
-        );
-
         self.extra_protocols.push(protocol);
-
         self
     }
 
