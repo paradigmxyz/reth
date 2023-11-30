@@ -51,7 +51,6 @@ metrics.workspace = true
 # misc
 auto_impl = "1"
 aquamarine.workspace = true
-derive_more = "0.99.17"
 tracing.workspace = true
 fnv = "1.0"
 thiserror.workspace = true

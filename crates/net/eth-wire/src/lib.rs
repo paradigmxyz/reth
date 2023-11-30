@@ -20,6 +20,7 @@ mod disconnect;
 pub mod errors;
 mod ethstream;
 mod hello;
+pub mod multiplex;
 pub mod muxdemux;
 mod p2pstream;
 mod pinger;

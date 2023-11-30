@@ -2,29 +2,20 @@
 //!
 //! See also <https://github.com/ethereum/devp2p/blob/master/README.md>
 
-use derive_more::{Deref, DerefMut};
-use futures::{Sink, Stream};
-use reth_eth_wire::{capability::SharedCapabilities, protocol::Protocol, StreamClone};
+use futures::Stream;
+use reth_eth_wire::{
+    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
+};
 use reth_network_api::Direction;
+use reth_primitives::BytesMut;
 use reth_rpc_types::PeerId;
-use std::{error::Error, fmt, net::SocketAddr, pin::Pin, sync::Arc};
-
-/// A connection to the p2p connection, that doesn't own the p2p connection. Dependent on
-/// [`crate::PeerConnection`] to make progress.
-pub type WeakPeerConnection = StreamClone;
+use std::{fmt, net::SocketAddr, pin::Pin};
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
 pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
     /// The type responsible for negotiating the protocol with the remote.
     type ConnectionHandler: ConnectionHandler;
-
-    /// Returns the protocol to announce via [`crate::HelloMessageWithProtocols`] when the P2P  
-    /// connection will be established.
-    ///
-    /// Then it is negotiated with the remote peer wether this RLPx sub-protocol connection wil be
-    /// opened or not.
-    fn protocol(&self) -> Protocol;
 
     /// Invoked when a new incoming connection from the remote is requested
     ///
@@ -43,28 +34,22 @@ pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
     ) -> Option<Self::ConnectionHandler>;
 }
 
-/// Stream messages to and from app <> capability stream.
-pub trait StreamInAppMessages:
-    Stream<Item = dyn fmt::Debug> // e.g. stream ActiveSessionMessage
-    + Sink<Arc<dyn fmt::Debug>, Error = dyn Error> // e.g. SessionCommand
-    + Send
-    + fmt::Debug
-    + 'static
-{
-}
-
 /// A trait that allows to authenticate a protocol after the RLPx connection was established.
-pub trait ConnectionHandler: Send + Sync + fmt::Debug + 'static {
-    /// The connection that yields messages to send to the remote and processes messages from the
-    /// remote.
+pub trait ConnectionHandler: Send + Sync + 'static {
+    /// The connection that yields messages to send to the remote.
     ///
     /// The connection will be closed when this stream resolves.
-    type Connection: StreamInAppMessages;
+    type Connection: Stream<Item = BytesMut> + Send + 'static;
+
+    /// Returns the protocol to announce when the RLPx connection will be established.
+    ///
+    /// This will be negotiated with the remote peer.
+    fn protocol(&self) -> Protocol;
 
     /// Invoked when the RLPx connection has been established by the peer does not share the
     /// protocol.
     fn on_unsupported_by_peer(
-        self: Box<Self>,
+        self,
         supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
@@ -74,10 +59,10 @@ pub trait ConnectionHandler: Send + Sync + fmt::Debug + 'static {
     ///
     /// The returned future should resolve when the connection should disconnect.
     fn into_connection(
-        self: Box<Self>,
+        self,
         direction: Direction,
         peer_id: PeerId,
-        p2p_conn: WeakPeerConnection,
+        conn: ProtocolConnection,
     ) -> Self::Connection;
 }
 
@@ -92,7 +77,7 @@ pub enum OnNotSupported {
 }
 
 /// A wrapper type for a RLPx sub-protocol.
-#[derive(Debug, Deref, DerefMut)]
+#[derive(Debug)]
 pub struct RlpxSubProtocol(Box<dyn DynProtocolHandler>);
 
 /// A helper trait to convert a [ProtocolHandler] into a dynamic type
@@ -117,28 +102,22 @@ impl IntoRlpxSubProtocol for RlpxSubProtocol {
 }
 
 /// Additional RLPx-based sub-protocols.
-#[derive(Debug, Default, Deref, Clone)]
+#[derive(Debug, Default)]
 pub struct RlpxSubProtocols {
     /// All extra protocols
-    protocols: Vec<Arc<RlpxSubProtocol>>,
+    protocols: Vec<RlpxSubProtocol>,
 }
 
 impl RlpxSubProtocols {
     /// Adds a new protocol.
     pub fn push(&mut self, protocol: impl IntoRlpxSubProtocol) {
-        self.protocols.push(Arc::new(protocol.into_rlpx_sub_protocol()));
+        self.protocols.push(protocol.into_rlpx_sub_protocol());
     }
 }
 
-/// Wrapper around [`ProtocolHandler`] that casts its return types as trait objects.
-pub trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
-    /// Same as method for [`ProtocolHandler`].
-    fn protocol(&self) -> Protocol;
-
-    /// Returns a trait object that implements [`ConnectionHandler`].
+pub(crate) trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>>;
 
-    /// Returns a trait object that implements [`ConnectionHandler`].
     fn on_outgoing(
         &self,
         socket_addr: SocketAddr,
@@ -150,10 +129,6 @@ impl<T> DynProtocolHandler for T
 where
     T: ProtocolHandler,
 {
-    fn protocol(&self) -> Protocol {
-        T::protocol(self)
-    }
-
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>> {
         T::on_incoming(self, socket_addr)
             .map(|handler| Box::new(handler) as Box<dyn DynConnectionHandler>)
@@ -170,30 +145,34 @@ where
 }
 
 /// Wrapper trait for internal ease of use.
-pub trait DynConnectionHandler: Send + Sync + fmt::Debug + 'static {
-    /// See [`ConnectionHandler`].
+pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
+    fn protocol(&self) -> Protocol;
+
     fn on_unsupported_by_peer(
-        self: Box<Self>,
+        self,
         supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
     ) -> OnNotSupported;
 
-    /// Returns a trait object that implements
     fn into_connection(
-        self: Box<Self>,
+        self,
         direction: Direction,
         peer_id: PeerId,
-        p2p_conn: WeakPeerConnection,
-    ) -> Pin<Box<dyn StreamInAppMessages>>;
+        conn: ProtocolConnection,
+    ) -> Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>>;
 }
 
 impl<T> DynConnectionHandler for T
 where
     T: ConnectionHandler,
 {
+    fn protocol(&self) -> Protocol {
+        T::protocol(self)
+    }
+
     fn on_unsupported_by_peer(
-        self: Box<Self>,
+        self,
         supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
@@ -202,11 +181,11 @@ where
     }
 
     fn into_connection(
-        self: Box<Self>,
+        self,
         direction: Direction,
         peer_id: PeerId,
-        p2p_conn: WeakPeerConnection,
-    ) -> Pin<Box<dyn StreamInAppMessages>> {
-        Box::pin(T::into_connection(self, direction, peer_id, p2p_conn))
+        conn: ProtocolConnection,
+    ) -> Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>> {
+        Box::pin(T::into_connection(self, direction, peer_id, conn))
     }
 }

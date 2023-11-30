@@ -4,7 +4,6 @@ use super::active::PeerConnection;
 use crate::{
     message::PeerMessage,
     session::{Direction, SessionId},
-    StreamInAppMessages,
 };
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
@@ -14,7 +13,7 @@ use reth_eth_wire::{
 };
 use reth_network_api::PeerInfo;
 use reth_primitives::PeerId;
-use std::{io, net::SocketAddr, pin::Pin, sync::Arc, time::Instant};
+use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
@@ -180,8 +179,6 @@ pub enum PendingSessionEvent {
         direction: Direction,
         /// The remote node's user agent, usually containing the client name and version
         client_id: String,
-        /// Extra rlpx sub protocol connections.
-        extra_conns: Vec<Pin<Box<dyn StreamInAppMessages>>>,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
