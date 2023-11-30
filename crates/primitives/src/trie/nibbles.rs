@@ -5,26 +5,21 @@ use reth_codecs::{main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, ops::RangeBounds};
 
-/// The nibbles are the keys for the AccountsTrie and the subkeys for the StorageTrie.
-#[main_codec]
-#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deref)]
-pub struct StoredNibbles(pub Bytes);
+/// The representation of nibbles of the merkle trie stored in the database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Hash, Deref)]
+pub struct StoredNibblesSubKey(pub Nibbles);
 
-impl<T: Into<Bytes>> From<T> for StoredNibbles {
+impl From<Nibbles> for StoredNibblesSubKey {
     #[inline]
-    fn from(value: T) -> Self {
-        Self(value.into())
+    fn from(value: Nibbles) -> Self {
+        Self(value)
     }
 }
 
-/// The representation of nibbles of the merkle trie stored in the database.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Hash, Deref)]
-pub struct StoredNibblesSubKey(pub StoredNibbles);
-
-impl<T: Into<StoredNibbles>> From<T> for StoredNibblesSubKey {
+impl From<Vec<u8>> for StoredNibblesSubKey {
     #[inline]
-    fn from(value: T) -> Self {
-        Self(value.into())
+    fn from(value: Vec<u8>) -> Self {
+        Self(Nibbles::new_unchecked(value))
     }
 }
 
@@ -46,7 +41,7 @@ impl Compact for StoredNibblesSubKey {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let len = buf[64] as usize;
-        (Self(buf[..len].to_vec().into()), &buf[65..])
+        (Self(Nibbles::new_unchecked(buf[..len].to_vec())), &buf[65..])
     }
 }
 
@@ -59,6 +54,7 @@ impl Compact for StoredNibblesSubKey {
 /// The internal representation is a shared heap-allocated vector ([`Bytes`]) that stores one nibble
 /// per byte. This means that each byte has its upper 4 bits set to zero and the lower 4 bits
 /// representing the nibble value.
+#[main_codec]
 #[derive(
     Clone,
     Debug,
@@ -75,17 +71,10 @@ impl Compact for StoredNibblesSubKey {
 )]
 pub struct Nibbles(Bytes);
 
-impl From<StoredNibbles> for Nibbles {
+impl From<Vec<u8>> for Nibbles {
     #[inline]
-    fn from(value: StoredNibbles) -> Self {
-        Self(value.0)
-    }
-}
-
-impl From<StoredNibblesSubKey> for Nibbles {
-    #[inline]
-    fn from(value: StoredNibblesSubKey) -> Self {
-        Self(value.0 .0)
+    fn from(value: Vec<u8>) -> Self {
+        Self::new_unchecked(value)
     }
 }
 

@@ -5,7 +5,7 @@ use crate::{
 };
 use reth_codecs::Compact;
 use reth_primitives::{
-    trie::{StoredNibbles, StoredNibblesSubKey},
+    trie::{Nibbles, StoredNibblesSubKey},
     Address, PruneSegment, B256,
 };
 
@@ -102,7 +102,7 @@ impl Decode for String {
     }
 }
 
-impl Encode for StoredNibbles {
+impl Encode for Nibbles {
     type Encoded = Vec<u8>;
 
     // Delegate to the Compact implementation
@@ -113,7 +113,7 @@ impl Encode for StoredNibbles {
     }
 }
 
-impl Decode for StoredNibbles {
+impl Decode for Nibbles {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let buf = value.as_ref();
         Ok(Self::from_compact(buf, buf.len()).0)

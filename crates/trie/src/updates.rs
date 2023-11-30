@@ -5,7 +5,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
+    trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibblesSubKey},
     B256,
 };
 use std::collections::{hash_map::IntoIter, HashMap};
@@ -14,7 +14,7 @@ use std::collections::{hash_map::IntoIter, HashMap};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TrieKey {
     /// A node in the account trie.
-    AccountNode(StoredNibbles),
+    AccountNode(Nibbles),
     /// A node in the storage trie.
     StorageNode(B256, StoredNibblesSubKey),
     /// Storage trie of an account.
