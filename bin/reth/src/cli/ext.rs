@@ -27,10 +27,19 @@ pub trait RethCliExt {
     type CustomComponents: RethCustomComponents;
 }
 
+/// A helper type for [RethCliExt] extension that don't require any custom components
+#[derive(Debug, Clone, Copy)]
+pub struct NoCustomComponents;
+
+impl RethCustomComponents for NoCustomComponents {
+    type Pool = ();
+    type Payload = ();
+}
+
 /// The default CLI extension.
 impl RethCliExt for () {
     type Node = DefaultRethNodeCommandConfig;
-    type CustomComponents = ();
+    type CustomComponents = NoCustomComponents;
 }
 
 /// A trait that allows for extending and customizing parts of the node command
@@ -204,14 +213,15 @@ impl<C> RethNodeCommandConfig<C> for () where C: RethCustomComponents {}
 
 /// A helper type for [RethCliExt] extension that don't require any additional clap Arguments.
 #[derive(Debug, Clone, Copy)]
-pub struct NoArgsCliExt<Conf>(PhantomData<Conf>);
+pub struct NoArgsCliExt<Conf, Comp>(PhantomData<(Conf, Comp)>);
 
-impl<Conf> RethCliExt for NoArgsCliExt<Conf>
+impl<Conf, Comp> RethCliExt for NoArgsCliExt<Conf, Comp>
 where
-    Conf: for<'a> RethNodeCommandConfig<&'a ()>,
+    Conf: RethNodeCommandConfig<Comp>,
+    Comp: RethCustomComponents,
 {
     type Node = NoArgs<Conf>;
-    type CustomComponents = ();
+    type CustomComponents = Comp;
 }
 
 /// A helper struct that allows for wrapping a [RethNodeCommandConfig] value without providing
