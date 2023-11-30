@@ -116,15 +116,11 @@ where
     fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (length, mut buf) = decode_varuint(buf);
         let mut list = Vec::with_capacity(length);
-        #[allow(unused_assignments)]
-        let mut len = 0;
         for _ in 0..length {
-            #[allow(unused_assignments)]
-            let mut element = T::default();
-
+            let len;
             (len, buf) = decode_varuint(buf);
 
-            (element, _) = T::from_compact(&buf[..len], len);
+            let (element, _) = T::from_compact(&buf[..len], len);
             buf.advance(len);
 
             list.push(element);
@@ -152,8 +148,7 @@ where
         let mut list = Vec::with_capacity(length);
 
         for _ in 0..length {
-            #[allow(unused_assignments)]
-            let mut element = T::default();
+            let element;
 
             (element, buf) = T::from_compact(buf, len);
 
