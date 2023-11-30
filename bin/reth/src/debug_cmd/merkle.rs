@@ -311,7 +311,7 @@ impl Command {
                                 "Nibbles don't match"
                             );
                             if incremental.1 != clean.1 &&
-                                clean.0.inner.len() > self.skip_node_depth.unwrap_or_default()
+                                clean.0.len() > self.skip_node_depth.unwrap_or_default()
                             {
                                 incremental_account_mismatched.push(incremental);
                                 clean_account_mismatched.push(clean);
@@ -340,8 +340,7 @@ impl Command {
                     match (incremental_storage_trie_iter.next(), clean_storage_trie_iter.next()) {
                         (Some(incremental), Some(clean)) => {
                             if incremental != clean &&
-                                clean.1.nibbles.inner.len() >
-                                    self.skip_node_depth.unwrap_or_default()
+                                clean.1.nibbles.len() > self.skip_node_depth.unwrap_or_default()
                             {
                                 first_mismatched_storage = Some((incremental, clean));
                                 break
