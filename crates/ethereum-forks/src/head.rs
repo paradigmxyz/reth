@@ -1,6 +1,4 @@
-#![deny(missing_docs)]
-
-use crate::{BlockNumber, B256, U256};
+use alloy_primitives::{BlockNumber, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// Describes the current head block.

@@ -4,7 +4,8 @@
 
 #![deny(missing_docs)]
 
-use crate::{hex, BlockNumber, Head, B256};
+use crate::Head;
+use alloy_primitives::{hex, BlockNumber, B256};
 use alloy_rlp::*;
 use crc::*;
 use reth_codecs::derive_arbitrary;
