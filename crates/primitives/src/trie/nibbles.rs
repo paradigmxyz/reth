@@ -1,9 +1,15 @@
 use crate::Bytes;
 use alloy_rlp::RlpEncodableWrapper;
+use arrayvec::ArrayVec;
+use bytes::Buf;
 use derive_more::{Deref, From, Index};
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, ops::RangeBounds};
+use std::{
+    borrow::Borrow,
+    fmt,
+    ops::{Bound, RangeBounds},
+};
 
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Hash, Deref)]
@@ -54,17 +60,16 @@ impl Compact for StoredNibblesSubKey {
 
 /// Structure representing a sequence of nibbles.
 ///
-/// A nibble is a 4-bit value, and this structure is used to store the nibble sequence representing
-/// the keys in a Merkle Patricia Trie (MPT).
-/// Using nibbles simplifies trie operations and enables consistent key representation in the MPT.
+/// A nibble is a 4-bit value, and this structure is used to store the nibble sequence
+/// representing the keys in a Merkle Patricia Trie (MPT).
+/// Using nibbles simplifies trie operations and enables consistent key representation in the
+/// MPT.
 ///
-/// The internal representation is a shared heap-allocated vector ([`Bytes`]) that stores one nibble
-/// per byte. This means that each byte has its upper 4 bits set to zero and the lower 4 bits
-/// representing the nibble value.
-#[main_codec]
+/// The internal representation is a shared heap-allocated vector ([`Bytes`]) that stores one
+/// nibble per byte. This means that each byte has its upper 4 bits set to zero and the lower 4
+/// bits representing the nibble value.
 #[derive(
     Clone,
-    Debug,
     Default,
     PartialEq,
     Eq,
@@ -75,8 +80,46 @@ impl Compact for StoredNibblesSubKey {
     Index,
     From,
     Deref,
+    serde::Serialize,
+    serde::Deserialize,
 )]
-pub struct Nibbles(Bytes);
+pub struct Nibbles(ArrayVec<u8, 64>);
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for Nibbles {
+    type Parameters = ();
+    type Strategy = proptest::strategy::Map<
+        proptest::collection::VecStrategy<std::ops::RangeInclusive<u8>>,
+        fn(Vec<u8>) -> Self,
+    >;
+
+    #[inline]
+    fn arbitrary_with((): ()) -> Self::Strategy {
+        use proptest::prelude::*;
+        proptest::collection::vec(0x0..=0xf, 0..64).prop_map(|v| Self::new_unchecked(v))
+    }
+}
+
+impl Compact for Nibbles {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        self.to_vec().to_compact(buf)
+    }
+
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let nibbles = &buf[..len];
+        buf.advance(len);
+        (Nibbles::new_unchecked(nibbles), buf)
+    }
+}
+
+impl fmt::Debug for Nibbles {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Nibbles").field(&crate::hex::encode(self.as_slice())).finish()
+    }
+}
 
 impl From<Vec<u8>> for Nibbles {
     #[inline]
@@ -88,14 +131,14 @@ impl From<Vec<u8>> for Nibbles {
 impl From<Nibbles> for Vec<u8> {
     #[inline]
     fn from(value: Nibbles) -> Self {
-        value.0.into()
+        value.to_vec()
     }
 }
 
 impl From<Nibbles> for Bytes {
     #[inline]
     fn from(value: Nibbles) -> Self {
-        value.into_bytes()
+        value.to_vec().into()
     }
 }
 
@@ -137,8 +180,8 @@ impl Borrow<[u8]> for Nibbles {
 impl Nibbles {
     /// Creates a new [`Nibbles`] instance from nibble bytes, without checking their validity.
     #[inline]
-    pub fn new_unchecked<T: Into<Bytes>>(nibbles: T) -> Self {
-        Self(nibbles.into())
+    pub fn new_unchecked<T: AsRef<[u8]>>(nibbles: T) -> Self {
+        Self(ArrayVec::from_iter(nibbles.as_ref().iter().copied()))
     }
 
     /// Converts a byte slice into a [`Nibbles`] instance containing the nibbles (half-bytes or 4
@@ -150,7 +193,7 @@ impl Nibbles {
             nibbles.push(byte >> 4);
             nibbles.push(byte & 0x0f);
         }
-        Self(nibbles.into())
+        Self::new_unchecked(nibbles)
     }
 
     /// Packs the nibbles stored in the struct into a byte vector.
@@ -293,28 +336,31 @@ impl Nibbles {
         len
     }
 
-    /// Returns a reference to the underlying [`Bytes`].
-    #[inline]
-    pub fn as_bytes(&self) -> &Bytes {
-        &self.0
-    }
-
     /// Returns the nibbles as a byte slice.
     #[inline]
     pub fn as_slice(&self) -> &[u8] {
         &self.0
     }
 
-    /// Returns the underlying [`Bytes`].
-    #[inline]
-    pub fn into_bytes(self) -> Bytes {
-        self.0
-    }
-
     /// Slice the current nibbles within the provided index range.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the range is out of bounds.
     #[inline]
+    #[track_caller]
     pub fn slice(&self, range: impl RangeBounds<usize>) -> Self {
-        Self(self.0.slice(range))
+        let start = match range.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n.checked_add(1).expect("out of range"),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&n) => n.checked_add(1).expect("out of range"),
+            Bound::Excluded(&n) => n,
+            Bound::Unbounded => self.len(),
+        };
+        Self::new_unchecked(&self[start..=end])
     }
 
     /// Join two nibbles together.
@@ -327,27 +373,21 @@ impl Nibbles {
     }
 
     /// Pushes a nibble to the end of the current nibbles.
-    ///
-    /// **Note**: This method re-allocates on each call.
     #[inline]
     pub fn push(&mut self, nibble: u8) {
-        self.extend([nibble]);
+        self.0.push(nibble);
     }
 
     /// Extend the current nibbles with another nibbles.
-    ///
-    /// **Note**: This method re-allocates on each call.
     #[inline]
     pub fn extend(&mut self, b: impl AsRef<[u8]>) {
-        let mut bytes = self.0.to_vec();
-        bytes.extend_from_slice(b.as_ref());
-        self.0 = bytes.into();
+        self.0.try_extend_from_slice(b.as_ref()).unwrap();
     }
 
     /// Truncates the current nibbles to the given length.
     #[inline]
-    pub fn truncate(&mut self, len: usize) {
-        self.0.truncate(len);
+    pub fn truncate(&mut self, new_len: usize) {
+        self.0.truncate(new_len);
     }
 
     /// Clears the current nibbles.

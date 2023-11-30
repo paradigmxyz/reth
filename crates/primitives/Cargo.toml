@@ -33,6 +33,7 @@ crc = "3"
 tracing.workspace = true
 
 # misc
+arrayvec = { version = "0.7", features = ["serde"] }
 bytes.workspace = true
 byteorder = "1"
 clap = { workspace = true, features = ["derive"], optional = true }
@@ -85,7 +86,13 @@ pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterio
 
 [features]
 default = ["c-kzg"]
-arbitrary = ["revm-primitives/arbitrary", "reth-rpc-types/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+arbitrary = [
+    "revm-primitives/arbitrary",
+    "reth-rpc-types/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-derive",
+]
 c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg"]
 clap = ["dep:clap"]
 optimism = ["reth-codecs/optimism", "revm-primitives/optimism", "revm/optimism"]
