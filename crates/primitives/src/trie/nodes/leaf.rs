@@ -54,25 +54,22 @@ impl std::fmt::Debug for LeafNode<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hex_literal::hex;
+    use crate::hex;
 
     // From manual regression test
     #[test]
     fn encode_leaf_node_nibble() {
-        let nibble = Nibbles { hex_data: hex!("0604060f").into() };
+        let nibble = Nibbles::new_unchecked(hex!("0604060f"));
         let encoded = nibble.encode_path_leaf(true);
-        let expected = hex!("20646f").to_vec();
-        assert_eq!(encoded, expected);
+        assert_eq!(encoded, hex!("20646f"));
     }
 
     #[test]
     fn rlp_leaf_node_roundtrip() {
-        let nibble = Nibbles { hex_data: hex!("0604060f").into() };
-        let val = hex!("76657262").to_vec();
+        let nibble = Nibbles::new_unchecked(hex!("0604060f"));
+        let val = hex!("76657262");
         let leaf = LeafNode::new(&nibble, &val);
         let rlp = leaf.rlp(&mut vec![]);
-
-        let expected = hex!("c98320646f8476657262").to_vec();
-        assert_eq!(rlp, expected);
+        assert_eq!(rlp, hex!("c98320646f8476657262"));
     }
 }
