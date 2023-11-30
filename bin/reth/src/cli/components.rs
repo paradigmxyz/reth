@@ -2,6 +2,7 @@
 
 use reth_network::{NetworkEvents, NetworkProtocols};
 use reth_network_api::{NetworkInfo, Peers};
+use reth_payload_builder::PayloadInfo;
 use reth_primitives::ChainSpec;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
@@ -10,6 +11,7 @@ use reth_provider::{
 use reth_rpc_builder::{
     auth::AuthServerHandle, RethModuleRegistry, RpcServerHandle, TransportRpcModules,
 };
+use reth_rpc_types::ExecutionPayload;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
@@ -39,6 +41,23 @@ impl<T> FullProvider for T where
         + Unpin
         + 'static
 {
+}
+
+pub trait BuiltPayload:
+    Into<ExecutionPayload> + PayloadInfo + Send + Sync + Clone + 'static
+{
+}
+
+impl<T> BuiltPayload for T where
+    T: Into<ExecutionPayload> + PayloadInfo + Send + Sync + Clone + 'static
+{
+}
+
+pub trait RethCustomComponents: Clone + Send + Sync + 'static {
+    /// The transaction pool type
+    type Pool: TransactionPool + Clone + Unpin + 'static;
+    /// The payload type used to build CL payloads
+    type Payload: BuiltPayload;
 }
 
 /// The trait that is implemented for the Node command.

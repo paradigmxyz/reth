@@ -80,7 +80,17 @@ impl BuiltPayload {
         self.into()
     }
 }
-
+/// Helper trait to get information about the payload.
+pub trait PayloadInfo {
+    /// Returns the payload id.
+    fn payload_id(&self) -> PayloadId;
+    /// Returns the block.
+    fn block(&self) -> &SealedBlock;
+    /// Returns the fees.
+    fn fees(&self) -> U256;
+    /// Returns the sidecars.
+    fn sidecars(&self) -> Vec<BlobTransactionSidecar>;
+}
 // V1 engine_getPayloadV1 response
 impl From<BuiltPayload> for ExecutionPayloadV1 {
     fn from(value: BuiltPayload) -> Self {

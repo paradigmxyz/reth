@@ -6,7 +6,9 @@ use crate::{
         GasPriceOracleArgs,
     },
     cli::{
-        components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
+        components::{
+            RethCustomComponents, RethNodeComponents, RethRpcComponents, RethRpcServerHandles,
+        },
         config::RethRpcConfig,
         ext::RethNodeCommandConfig,
     },
@@ -199,7 +201,7 @@ impl RpcServerArgs {
     /// for the auth server that handles the `engine_` API that's accessed by the consensus
     /// layer.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_servers<Reth, Engine, Conf>(
+    pub async fn start_servers<Reth, Engine, Conf, Comp>(
         &self,
         components: &Reth,
         engine_api: Engine,
@@ -209,7 +211,8 @@ impl RpcServerArgs {
     where
         Reth: RethNodeComponents,
         Engine: EngineApiServer,
-        Conf: RethNodeCommandConfig,
+        Conf: RethNodeCommandConfig<Comp>,
+        Comp: RethCustomComponents,
     {
         let auth_config = self.auth_server_config(jwt_secret)?;
 

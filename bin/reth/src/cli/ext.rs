@@ -10,6 +10,8 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
+use super::components::RethCustomComponents;
+
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
 /// This is intended as a way to allow to _extend_ the node command. For example, to register
@@ -20,12 +22,15 @@ pub trait RethCliExt {
     /// This supports additional CLI arguments that can be used to modify the node configuration.
     ///
     /// If no additional CLI arguments are required, the [NoArgs] wrapper type can be used.
-    type Node: RethNodeCommandExt;
+    type Node: RethNodeCommandExt<Self::CustomComponents>;
+
+    type CustomComponents: RethCustomComponents;
 }
 
 /// The default CLI extension.
 impl RethCliExt for () {
     type Node = DefaultRethNodeCommandConfig;
+    type CustomComponents = ();
 }
 
 /// A trait that allows for extending and customizing parts of the node command
@@ -39,7 +44,7 @@ impl RethCliExt for () {
 /// 4. [extend_rpc_modules](RethNodeCommandConfig::extend_rpc_modules)
 /// 5. [on_rpc_server_started](RethNodeCommandConfig::on_rpc_server_started)
 /// 6. [on_node_started](RethNodeCommandConfig::on_node_started)
-pub trait RethNodeCommandConfig: fmt::Debug {
+pub trait RethNodeCommandConfig<Components: RethCustomComponents>: fmt::Debug {
     /// Invoked with the network configuration before the network is configured.
     ///
     /// This allows additional configuration of the network before it is launched.
@@ -172,10 +177,19 @@ pub trait RethNodeCommandConfig: fmt::Debug {
 }
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
-pub trait RethNodeCommandExt: RethNodeCommandConfig + fmt::Debug + clap::Args {}
+pub trait RethNodeCommandExt<T>: RethNodeCommandConfig<T> + fmt::Debug + clap::Args
+where
+    T: RethCustomComponents,
+{
+}
 
 // blanket impl for all types that implement the required traits.
-impl<T> RethNodeCommandExt for T where T: RethNodeCommandConfig + fmt::Debug + clap::Args {}
+impl<T, C> RethNodeCommandExt<C> for T
+where
+    T: RethNodeCommandConfig<C> + fmt::Debug + clap::Args,
+    C: RethCustomComponents,
+{
+}
 
 /// The default configuration for the reth node command [Command](crate::node::NodeCommand).
 ///
@@ -184,16 +198,20 @@ impl<T> RethNodeCommandExt for T where T: RethNodeCommandConfig + fmt::Debug + c
 #[non_exhaustive]
 pub struct DefaultRethNodeCommandConfig;
 
-impl RethNodeCommandConfig for DefaultRethNodeCommandConfig {}
+impl<C> RethNodeCommandConfig<C> for DefaultRethNodeCommandConfig where C: RethCustomComponents {}
 
-impl RethNodeCommandConfig for () {}
+impl<C> RethNodeCommandConfig<C> for () where C: RethCustomComponents {}
 
 /// A helper type for [RethCliExt] extension that don't require any additional clap Arguments.
 #[derive(Debug, Clone, Copy)]
 pub struct NoArgsCliExt<Conf>(PhantomData<Conf>);
 
-impl<Conf: RethNodeCommandConfig> RethCliExt for NoArgsCliExt<Conf> {
+impl<Conf> RethCliExt for NoArgsCliExt<Conf>
+where
+    Conf: for<'a> RethNodeCommandConfig<&'a ()>,
+{
     type Node = NoArgs<Conf>;
+    type CustomComponents = ();
 }
 
 /// A helper struct that allows for wrapping a [RethNodeCommandConfig] value without providing
@@ -239,7 +257,11 @@ impl<T> NoArgs<T> {
     }
 }
 
-impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
+impl<T, C> RethNodeCommandConfig<C> for NoArgs<T>
+where
+    T: RethNodeCommandConfig<C>,
+    C: RethCustomComponents,
+{
     fn configure_network<Conf, Reth>(
         &mut self,
         config: &mut Conf,
