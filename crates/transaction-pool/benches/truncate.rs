@@ -35,8 +35,7 @@ fn create_transactions_for_sender(
         .unwrap()
         .current();
 
-    let mut nonce = 0;
-    for tx in txs.iter_mut() {
+    for (nonce, tx) in txs.iter_mut().enumerate() {
         // reject pre-eip1559 tx types, if there is a legacy tx, replace it with an eip1559 tx
         if tx.is_legacy() || tx.is_eip2930() {
             *tx = MockTransaction::eip1559();
@@ -48,7 +47,6 @@ fn create_transactions_for_sender(
 
         tx.set_sender(sender);
         tx.set_nonce(nonce);
-        nonce += 1;
     }
 
     txs
