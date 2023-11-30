@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     models::StoredBlockBodyIndices,
-    snapshot::{HeaderMask, SnapshotCursor, TransactionMask},
+    snapshot::{HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
@@ -265,7 +265,7 @@ impl SnapshotProvider {
     /// This function iteratively retrieves data using `get_fn` for each item in the given range.
     /// It continues fetching until the end of the range is reached or the provided `predicate`
     /// returns false.
-    fn fetch_range<T, F, P>(
+    pub fn fetch_range<T, F, P>(
         &self,
         segment: SnapshotSegment,
         range: Range<u64>,
@@ -409,6 +409,18 @@ impl ReceiptProvider for SnapshotProvider {
 
     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         unreachable!()
+    }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        self.fetch_range(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
+            |_| true,
+        )
     }
 }
 
