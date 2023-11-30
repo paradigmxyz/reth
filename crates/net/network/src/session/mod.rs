@@ -226,10 +226,19 @@ impl SessionManager {
         let pending_events = self.pending_sessions_tx.clone();
         let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
         let secret_key = self.secret_key;
-        let hello_message = self.hello_message.clone();
+        let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
+        let hello_message = {
+            let mut builder = HelloMessageBuilder::new_from(self.hello_message.clone());
+            for protocol in self.extra_protocols.iter() {
+                if let Some(handler) = protocol.on_incoming(remote_addr) {
+                    builder = builder.protocol(handler.protocol());
+                    extra_conns.push(handler);
+                }
+            }
+            builder.build()
+        };
         let status = self.status;
         let fork_filter = self.fork_filter.clone();
-        let extra_protocols = self.extra_protocols.clone();
         self.spawn(start_pending_incoming_session(
             disconnect_rx,
             session_id,
@@ -240,7 +249,7 @@ impl SessionManager {
             hello_message,
             status,
             fork_filter,
-            extra_protocols,
+            extra_conns,
         ));
 
         let handle = PendingSessionHandle {
@@ -260,11 +269,20 @@ impl SessionManager {
             let (disconnect_tx, disconnect_rx) = oneshot::channel();
             let pending_events = self.pending_sessions_tx.clone();
             let secret_key = self.secret_key;
-            let hello_message = self.hello_message.clone();
+            let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
+            let hello_message = {
+                let mut builder = HelloMessageBuilder::new_from(self.hello_message.clone());
+                for protocol in self.extra_protocols.iter() {
+                    if let Some(handler) = protocol.on_outgoing(remote_addr, remote_peer_id) {
+                        builder = builder.protocol(handler.protocol());
+                        extra_conns.push(handler);
+                    }
+                }
+                builder.build()
+            };
             let fork_filter = self.fork_filter.clone();
             let status = self.status;
             let band_with_meter = self.bandwidth_meter.clone();
-            let extra_protocols = self.extra_protocols.clone();
 
             self.spawn(start_pending_outbound_session(
                 disconnect_rx,
@@ -277,7 +295,7 @@ impl SessionManager {
                 status,
                 fork_filter,
                 band_with_meter,
-                extra_protocols,
+                extra_conns,
             ));
 
             let handle = PendingSessionHandle {
@@ -763,19 +781,8 @@ pub(crate) async fn start_pending_incoming_session(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
-    extra_protocols: RlpxSubProtocols,
+    extra_conns: Vec<Box<dyn DynConnectionHandler>>,
 ) {
-    let mut extra_conns = Vec::with_capacity(extra_protocols.len());
-
-    let mut hello_message_builder = HelloMessageBuilder::new_from(hello);
-    for protocol in extra_protocols.iter() {
-        if let Some(handler) = protocol.on_incoming(remote_addr) {
-            hello_message_builder = hello_message_builder.protocol(handler.protocol());
-            extra_conns.push(handler);
-        }
-    }
-    let hello = hello_message_builder.build();
-
     authenticate(
         disconnect_rx,
         events,
@@ -806,7 +813,7 @@ async fn start_pending_outbound_session(
     status: Status,
     fork_filter: ForkFilter,
     bandwidth_meter: BandwidthMeter,
-    extra_protocols: RlpxSubProtocols,
+    extra_conns: Vec<Box<dyn DynConnectionHandler>>,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
@@ -827,17 +834,6 @@ async fn start_pending_outbound_session(
             return
         }
     };
-
-    let mut extra_conns = Vec::with_capacity(extra_protocols.len());
-
-    let mut hello_message_builder = HelloMessageBuilder::new_from(hello);
-    for protocol in extra_protocols.iter() {
-        if let Some(handler) = protocol.on_outgoing(remote_addr, remote_peer_id) {
-            hello_message_builder = hello_message_builder.protocol(handler.protocol());
-            extra_conns.push(handler);
-        }
-    }
-    let hello = hello_message_builder.build();
 
     authenticate(
         disconnect_rx,

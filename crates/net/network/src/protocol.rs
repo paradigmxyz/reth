@@ -12,7 +12,7 @@ use reth_eth_wire::{
 use reth_network_api::Direction;
 use reth_primitives::BytesMut;
 use reth_rpc_types::PeerId;
-use std::{fmt, net::SocketAddr, pin::Pin, sync::Arc};
+use std::{fmt, net::SocketAddr, pin::Pin};
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
@@ -87,8 +87,8 @@ pub enum OnNotSupported {
 }
 
 /// A wrapper type for a RLPx sub-protocol.
-#[derive(Debug, Clone, Deref)]
-pub struct RlpxSubProtocol(Arc<dyn DynProtocolHandler>);
+#[derive(Debug, Deref)]
+pub struct RlpxSubProtocol(Box<dyn DynProtocolHandler>);
 
 /// A helper trait to convert a [ProtocolHandler] into a dynamic type
 pub trait IntoRlpxSubProtocol {
@@ -101,7 +101,7 @@ where
     T: ProtocolHandler + Send + Sync + 'static,
 {
     fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol {
-        RlpxSubProtocol(Arc::new(self))
+        RlpxSubProtocol(Box::new(self))
     }
 }
 
@@ -112,7 +112,7 @@ impl IntoRlpxSubProtocol for RlpxSubProtocol {
 }
 
 /// Additional RLPx-based sub-protocols.
-#[derive(Debug, Default, Clone, Deref)]
+#[derive(Debug, Default, Deref)]
 pub struct RlpxSubProtocols {
     /// All extra protocols
     protocols: Vec<RlpxSubProtocol>,

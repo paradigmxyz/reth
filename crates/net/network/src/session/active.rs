@@ -776,8 +776,8 @@ mod tests {
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        GetBlockBodies, HelloMessageWithProtocols, Status, StatusBuilder, UnauthedEthStream,
-        UnauthedP2PStream,
+        GetBlockBodies, HelloMessageBuilder, HelloMessageWithProtocols, Status, StatusBuilder,
+        UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
@@ -849,6 +849,17 @@ mod tests {
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
             let metered_stream =
                 MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
+            let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
+            let hello = {
+                let mut builder = HelloMessageBuilder::new_from(self.hello.clone());
+                for protocol in self.extra_protocols.iter() {
+                    if let Some(handler) = protocol.on_incoming(remote_addr) {
+                        builder = builder.protocol(handler.protocol());
+                        extra_conns.push(handler);
+                    }
+                }
+                builder.build()
+            };
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,
@@ -857,10 +868,10 @@ mod tests {
                 pending_sessions_tx,
                 remote_addr,
                 self.secret_key,
-                self.hello.clone(),
+                hello,
                 self.status,
                 self.fork_filter.clone(),
-                self.extra_protocols.clone(),
+                extra_conns,
             ));
 
             let mut stream = ReceiverStream::new(pending_sessions_rx);
