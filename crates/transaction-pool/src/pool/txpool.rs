@@ -810,8 +810,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             self, removed, [
                 pending_limit  => pending_pool,
                 basefee_limit  => basefee_pool,
-                queued_limit  => queued_pool,
-                blob_limit => blob_pool
+                blob_limit => blob_pool,
+                queued_limit  => queued_pool
             ]
         );
 
