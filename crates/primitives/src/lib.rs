@@ -55,9 +55,9 @@ pub use block::{
 };
 pub use bytes::{self, Buf, BufMut, BytesMut};
 pub use chain::{
-    AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
-    DisplayHardforks, ForkCondition, ForkTimestamps, NamedChain, DEV, GOERLI, HOLESKY, MAINNET,
-    SEPOLIA,
+    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainSpec,
+    ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, ForkTimestamps,
+    NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
 #[cfg(feature = "optimism")]
 pub use chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
@@ -95,7 +95,7 @@ pub use transaction::{
 };
 
 pub use transaction::{
-    util::secp256k1::{public_key_to_address, recover_signer, sign_message},
+    util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction,
     InvalidTransactionError, Signature, Transaction, TransactionKind, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,

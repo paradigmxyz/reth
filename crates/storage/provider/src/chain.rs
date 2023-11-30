@@ -105,6 +105,23 @@ impl Chain {
         (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.state)
     }
 
+    /// Returns an iterator over all the receipts of the blocks in the chain.
+    pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<Option<Receipt>>> + '_ {
+        self.state.receipts().iter()
+    }
+
+    /// Returns an iterator over all blocks in the chain with increasing block number.
+    pub fn blocks_iter(&self) -> impl Iterator<Item = &SealedBlockWithSenders> + '_ {
+        self.blocks().iter().map(|block| block.1)
+    }
+
+    /// Returns an iterator over all blocks and their receipts in the chain.
+    pub fn blocks_and_receipts(
+        &self,
+    ) -> impl Iterator<Item = (&SealedBlockWithSenders, &Vec<Option<Receipt>>)> + '_ {
+        self.blocks_iter().zip(self.block_receipts_iter())
+    }
+
     /// Get the block at which this chain forked.
     #[track_caller]
     pub fn fork_block(&self) -> ForkBlock {

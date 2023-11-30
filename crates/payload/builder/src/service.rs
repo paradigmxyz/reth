@@ -78,7 +78,11 @@ pub struct PayloadBuilderHandle {
 // === impl PayloadBuilderHandle ===
 
 impl PayloadBuilderHandle {
-    pub(crate) fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand>) -> Self {
+    /// Creates a new payload builder handle for the given channel.
+    ///
+    /// Note: this is only used internally by the [PayloadBuilderService] to manage the payload
+    /// building flow See [PayloadBuilderService::poll] for implementation details.
+    pub fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand>) -> Self {
         Self { to_service }
     }
 
@@ -208,7 +212,16 @@ where
         &self,
         id: PayloadId,
     ) -> Option<Result<Arc<BuiltPayload>, PayloadBuilderError>> {
-        self.payload_jobs.iter().find(|(_, job_id)| *job_id == id).map(|(j, _)| j.best_payload())
+        let res = self
+            .payload_jobs
+            .iter()
+            .find(|(_, job_id)| *job_id == id)
+            .map(|(j, _)| j.best_payload());
+        if let Some(Ok(ref best)) = res {
+            self.metrics.set_best_revenue(best.block.number, f64::from(best.fees));
+        }
+
+        res
     }
 
     /// Returns the payload attributes for the given payload.
@@ -216,15 +229,24 @@ where
         &self,
         id: PayloadId,
     ) -> Option<Result<PayloadBuilderAttributes, PayloadBuilderError>> {
-        self.payload_jobs
+        let attributes = self
+            .payload_jobs
             .iter()
             .find(|(_, job_id)| *job_id == id)
-            .map(|(j, _)| j.payload_attributes())
+            .map(|(j, _)| j.payload_attributes());
+
+        if attributes.is_none() {
+            trace!(%id, "no matching payload job found to get attributes for");
+        }
+
+        attributes
     }
 
     /// Returns the best payload for the given identifier that has been built so far and terminates
     /// the job if requested.
     fn resolve(&mut self, id: PayloadId) -> Option<PayloadFuture> {
+        trace!(%id, "resolving payload job");
+
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve();
 
@@ -232,6 +254,18 @@ where
             let (_, id) = self.payload_jobs.remove(job);
             trace!(%id, "terminated resolved job");
         }
+
+        // Since the fees will not be known until the payload future is resolved / awaited, we wrap
+        // the future in a new future that will update the metrics.
+        let resolved_metrics = self.metrics.clone();
+        let fut = async move {
+            let res = fut.await;
+            if let Ok(ref payload) = res {
+                resolved_metrics
+                    .set_resolved_revenue(payload.block.number, f64::from(payload.fees));
+            }
+            res
+        };
 
         Some(Box::pin(fut))
     }
@@ -328,7 +362,7 @@ type PayloadFuture =
     Pin<Box<dyn Future<Output = Result<Arc<BuiltPayload>, PayloadBuilderError>> + Send + Sync>>;
 
 /// Message type for the [PayloadBuilderService].
-pub(crate) enum PayloadServiceCommand {
+pub enum PayloadServiceCommand {
     /// Start building a new payload.
     BuildNewPayload(
         PayloadBuilderAttributes,

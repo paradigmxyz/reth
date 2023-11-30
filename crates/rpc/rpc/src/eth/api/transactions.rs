@@ -30,8 +30,8 @@ use reth_revm::{
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
-    BlockError, CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt,
-    TransactionRequest, TypedTransactionRequest,
+    CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -530,6 +530,7 @@ where
                     max_fee_per_blob_gas: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
+                None,
             )
             .await?;
         let gas_limit = estimated_gas;
@@ -779,12 +780,9 @@ where
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) =
-            futures::try_join!(self.evm_env_at(block_id), self.block_by_id(block_id),)?;
+            futures::try_join!(self.evm_env_at(block_id), self.block_with_senders(block_id))?;
 
-        let block = match block {
-            Some(block) => block,
-            None => return Ok(None),
-        };
+        let Some(block) = block else { return Ok(None) };
 
         // replay all transactions of the block
         self.spawn_tracing_task_with(move |this| {
@@ -799,13 +797,13 @@ where
             // prepare transactions, we do everything upfront to reduce time spent with open state
             let max_transactions =
                 highest_index.map_or(block.body.len(), |highest| highest as usize);
-            let transactions = block
-                .body
-                .into_iter()
+            let mut results = Vec::with_capacity(max_transactions);
+
+            let mut transactions = block
+                .into_transactions_ecrecovered()
                 .take(max_transactions)
                 .enumerate()
-                .map(|(idx, tx)| -> EthResult<_> {
-                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                .map(|(idx, tx)| {
                     let tx_info = TransactionInfo {
                         hash: Some(tx.hash()),
                         index: Some(idx as u64),
@@ -814,18 +812,13 @@ where
                         base_fee: Some(base_fee),
                     };
                     let tx_env = tx_env_with_recovered(&tx);
-
-                    Ok((tx_info, tx_env))
+                    (tx_info, tx_env)
                 })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let mut results = Vec::with_capacity(transactions.len());
+                .peekable();
 
             // now get the state
             let state = this.state_at(state_at.into())?;
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-            let mut transactions = transactions.into_iter().peekable();
 
             while let Some((tx_info, tx)) = transactions.next() {
                 let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
@@ -1254,7 +1247,10 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 mod tests {
     use super::*;
     use crate::{
-        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
+        eth::{
+            cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
+            FeeHistoryCacheConfig,
+        },
         BlockingTaskPool, EthApi,
     };
     use reth_network_api::noop::NoopNetwork;
@@ -1270,14 +1266,17 @@ mod tests {
         let pool = testing_pool();
 
         let cache = EthStateCache::spawn(noop_provider, Default::default());
+        let fee_history_cache =
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),
             noop_network_provider,
             cache.clone(),
-            GasPriceOracle::new(noop_provider, Default::default(), cache),
+            GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
+            fee_history_cache,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

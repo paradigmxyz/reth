@@ -520,7 +520,10 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
 }
 
 /// Applies the given state overrides (a set of [AccountOverride]) to the [CacheDB].
-fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
+pub(crate) fn apply_state_overrides<DB>(
+    overrides: StateOverride,
+    db: &mut CacheDB<DB>,
+) -> EthResult<()>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -609,7 +612,7 @@ mod tests {
         let CallFees { gas_price, .. } =
             CallFees::ensure_fees(None, None, None, U256::from(99), None, None, Some(U256::ZERO))
                 .unwrap();
-        assert_eq!(gas_price, U256::ZERO);
+        assert!(gas_price.is_zero());
     }
 
     #[test]
@@ -617,7 +620,7 @@ mod tests {
         let CallFees { gas_price, max_fee_per_blob_gas, .. } =
             CallFees::ensure_fees(None, None, None, U256::from(99), None, None, Some(U256::ZERO))
                 .unwrap();
-        assert_eq!(gas_price, U256::ZERO);
+        assert!(gas_price.is_zero());
         assert_eq!(max_fee_per_blob_gas, None);
 
         let CallFees { gas_price, max_fee_per_blob_gas, .. } = CallFees::ensure_fees(
@@ -630,7 +633,7 @@ mod tests {
             Some(U256::from(99)),
         )
         .unwrap();
-        assert_eq!(gas_price, U256::ZERO);
+        assert!(gas_price.is_zero());
         assert_eq!(max_fee_per_blob_gas, Some(U256::from(99)));
     }
 }

@@ -128,7 +128,6 @@ impl BundleStateWithReceipts {
     ///
     /// The hashed post state.
     pub fn hash_state_slow(&self) -> HashedPostState {
-        //let mut storages = BTreeMap::default();
         let mut hashed_state = HashedPostState::default();
 
         for (address, account) in self.bundle.state() {
@@ -136,7 +135,7 @@ impl BundleStateWithReceipts {
             if let Some(account) = &account.info {
                 hashed_state.insert_account(hashed_address, into_reth_acc(account.clone()))
             } else {
-                hashed_state.insert_cleared_account(hashed_address);
+                hashed_state.insert_destroyed_account(hashed_address);
             }
 
             // insert storage.
@@ -144,7 +143,7 @@ impl BundleStateWithReceipts {
 
             for (key, value) in account.storage.iter() {
                 let hashed_key = keccak256(B256::new(key.to_be_bytes()));
-                if value.present_value == U256::ZERO {
+                if value.present_value.is_zero() {
                     hashed_storage.insert_zero_valued_slot(hashed_key);
                 } else {
                     hashed_storage.insert_non_zero_valued_storage(hashed_key, value.present_value);
@@ -155,8 +154,8 @@ impl BundleStateWithReceipts {
         hashed_state.sorted()
     }
 
-    /// Returns [StateRoot] calculator.
-    fn state_root_calculator<'a, 'b, TX: DbTx>(
+    /// Returns [StateRoot] calculator based on database and in-memory state.
+    pub fn state_root_calculator<'a, 'b, TX: DbTx>(
         &self,
         tx: &'a TX,
         hashed_post_state: &'b HashedPostState,
@@ -167,6 +166,7 @@ impl BundleStateWithReceipts {
             .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefix_set)
             .with_changed_storage_prefixes(storage_prefix_set)
+            .with_destroyed_accounts(hashed_post_state.destroyed_accounts())
     }
 
     /// Calculate the state root for this [BundleState].
@@ -250,8 +250,22 @@ impl BundleStateWithReceipts {
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
+    #[cfg(not(feature = "optimism"))]
     pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<B256> {
         self.receipts.root_slow(self.block_number_to_index(block_number)?)
+    }
+
+    /// Returns the receipt root for all recorded receipts.
+    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
+    /// of receipt. This is a expensive operation.
+    #[cfg(feature = "optimism")]
+    pub fn receipts_root_slow(
+        &self,
+        block_number: BlockNumber,
+        chain_spec: &reth_primitives::ChainSpec,
+        timestamp: u64,
+    ) -> Option<B256> {
+        self.receipts.root_slow(self.block_number_to_index(block_number)?, chain_spec, timestamp)
     }
 
     /// Return reference to receipts.

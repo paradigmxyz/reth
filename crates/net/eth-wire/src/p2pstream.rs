@@ -578,8 +578,7 @@ where
         Ok(())
     }
 
-    /// Returns Poll::Ready(Ok(())) when no buffered items remain and the sink has been successfully
-    /// closed.
+    /// Returns `Poll::Ready(Ok(()))` when no buffered items remain.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.project();
         loop {
@@ -599,6 +598,7 @@ where
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         ready!(self.as_mut().poll_flush(cx))?;
+        ready!(self.project().inner.poll_close(cx))?;
 
         Poll::Ready(Ok(()))
     }

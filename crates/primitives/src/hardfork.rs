@@ -37,16 +37,19 @@ pub enum Hardfork {
     GrayGlacier,
     /// Paris.
     Paris,
-    /// Shanghai.
-    Shanghai,
-    /// Cancun.
-    Cancun,
     /// Bedrock.
     #[cfg(feature = "optimism")]
     Bedrock,
     /// Regolith
     #[cfg(feature = "optimism")]
     Regolith,
+    /// Shanghai.
+    Shanghai,
+    /// Canyon
+    #[cfg(feature = "optimism")]
+    Canyon,
+    /// Cancun.
+    Cancun,
 }
 
 impl Hardfork {
@@ -95,6 +98,8 @@ impl FromStr for Hardfork {
             "bedrock" => Hardfork::Bedrock,
             #[cfg(feature = "optimism")]
             "regolith" => Hardfork::Regolith,
+            #[cfg(feature = "optimism")]
+            "canyon" => Hardfork::Canyon,
             _ => return Err(format!("Unknown hardfork: {s}")),
         };
         Ok(hardfork)
@@ -163,8 +168,8 @@ mod tests {
     #[test]
     #[cfg(feature = "optimism")]
     fn check_op_hardfork_from_str() {
-        let hardfork_str = ["beDrOck", "rEgOlITH"];
-        let expected_hardforks = [Hardfork::Bedrock, Hardfork::Regolith];
+        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN"];
+        let expected_hardforks = [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon];
 
         let hardforks: Vec<Hardfork> =
             hardfork_str.iter().map(|h| Hardfork::from_str(h).unwrap()).collect();

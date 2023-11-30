@@ -18,6 +18,11 @@ impl TransactionMode {
             TransactionMode::ReadWrite => "read-write",
         }
     }
+
+    /// Returns `true` if the transaction mode is read-only.
+    pub(crate) const fn is_read_only(&self) -> bool {
+        matches!(self, TransactionMode::ReadOnly)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]

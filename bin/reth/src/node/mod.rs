@@ -13,7 +13,7 @@ use crate::{
         config::RethRpcConfig,
         ext::{RethCliExt, RethNodeCommandConfig},
     },
-    dirs::{DataDirPath, MaybePlatformPath},
+    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::cl_events::ConsensusLayerHealthEvents,
     prometheus_exporter,
@@ -241,18 +241,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
-
-        let mut config: Config = self.load_config(config_path.clone())?;
-
-        // always store reth.toml in the data dir, not the chain specific data dir
-        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+        // get config
+        let config = self.load_config()?;
 
         let prometheus_handle = self.install_prometheus_recorder()?;
 
+        let data_dir = self.data_dir();
         let db_path = data_dir.db_path();
+
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics());
         info!(target: "reth::cli", "Database opened");
@@ -273,13 +269,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
-        let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
+        let genesis_hash = init_genesis(Arc::clone(&db), self.chain.clone())?;
 
         info!(target: "reth::cli", "{}", DisplayHardforks::new(self.chain.hardforks()));
 
         let consensus = self.consensus();
-
-        self.init_trusted_nodes(&mut config);
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
@@ -295,9 +289,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             Arc::clone(&consensus),
             EvmProcessorFactory::new(self.chain.clone()),
         );
+        let tree_config = BlockchainTreeConfig::default();
         let tree = BlockchainTree::new(
             tree_externals,
-            BlockchainTreeConfig::default(),
+            tree_config,
             prune_config.clone().map(|config| config.segments),
         )?
         .with_sync_metrics_tx(sync_metrics_tx.clone());
@@ -479,6 +474,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             let mut pruner = self.build_pruner(
                 &prune_config,
                 db.clone(),
+                tree_config,
                 snapshotter.highest_snapshot_receiver(),
             );
 
@@ -647,10 +643,35 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(pipeline)
     }
 
+    /// Returns the chain specific path to the data dir.
+    fn data_dir(&self) -> ChainPath<DataDirPath> {
+        self.datadir.unwrap_or_chain_default(self.chain.chain)
+    }
+
+    /// Returns the path to the config file.
+    fn config_path(&self) -> PathBuf {
+        self.config.clone().unwrap_or_else(|| self.data_dir().config_path())
+    }
+
     /// Loads the reth config with the given datadir root
-    fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
-        confy::load_path::<Config>(config_path.clone())
-            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
+    fn load_config(&self) -> eyre::Result<Config> {
+        let config_path = self.config_path();
+        let mut config = confy::load_path::<Config>(&config_path)
+            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
+
+        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+
+        // Update the config with the command line arguments
+        config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+
+        if !self.network.trusted_peers.is_empty() {
+            info!(target: "reth::cli", "Adding trusted nodes");
+            self.network.trusted_peers.iter().for_each(|peer| {
+                config.peers.trusted_nodes.insert(*peer);
+            });
+        }
+
+        Ok(config)
     }
 
     /// Loads the trusted setup params from a given file path or falls back to
@@ -662,17 +683,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             Ok(Arc::new(trusted_setup))
         } else {
             Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
-        }
-    }
-
-    fn init_trusted_nodes(&self, config: &mut Config) {
-        config.peers.connect_trusted_nodes_only = self.network.trusted_only;
-
-        if !self.network.trusted_peers.is_empty() {
-            info!(target: "reth::cli", "Adding trusted nodes");
-            self.network.trusted_peers.iter().for_each(|peer| {
-                config.peers.trusted_nodes.insert(*peer);
-            });
         }
     }
 
@@ -720,9 +730,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         task_executor.spawn_critical("p2p eth request handler", eth);
 
         let known_peers_file = self.network.persistent_peers_file(default_peers_path);
-        task_executor.spawn_critical_with_shutdown_signal("p2p network task", |shutdown| {
-            run_network_until_shutdown(shutdown, network, known_peers_file)
-        });
+        task_executor
+            .spawn_critical_with_graceful_shutdown_signal("p2p network task", |shutdown| {
+                run_network_until_shutdown(shutdown, network, known_peers_file)
+            });
 
         handle
     }
@@ -966,6 +977,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         &self,
         config: &PruneConfig,
         db: DB,
+        tree_config: BlockchainTreeConfig,
         highest_snapshots_rx: HighestSnapshotsTracker,
     ) -> Pruner<DB> {
         let segments = SegmentSet::default()
@@ -1003,6 +1015,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             segments.into_vec(),
             config.block_interval,
             self.chain.prune_delete_limit,
+            tree_config.max_reorg_depth() as usize,
             highest_snapshots_rx,
         )
     }
@@ -1021,7 +1034,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 /// Drives the [NetworkManager] future until a [Shutdown](reth_tasks::shutdown::Shutdown) signal is
 /// received. If configured, this writes known peers to `persistent_peers_file` afterwards.
 async fn run_network_until_shutdown<C>(
-    shutdown: reth_tasks::shutdown::Shutdown,
+    shutdown: reth_tasks::shutdown::GracefulShutdown,
     network: NetworkManager<C>,
     persistent_peers_file: Option<PathBuf>,
 ) where
@@ -1029,9 +1042,12 @@ async fn run_network_until_shutdown<C>(
 {
     pin_mut!(network, shutdown);
 
+    let mut graceful_guard = None;
     tokio::select! {
         _ = &mut network => {},
-        _ = shutdown => {},
+        guard = shutdown => {
+            graceful_guard = Some(guard);
+        },
     }
 
     if let Some(file_path) = persistent_peers_file {
@@ -1049,6 +1065,8 @@ async fn run_network_until_shutdown<C>(
             }
         }
     }
+
+    drop(graceful_guard)
 }
 
 #[cfg(test)]

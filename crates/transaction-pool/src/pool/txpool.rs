@@ -1,6 +1,6 @@
 //! The internal transaction pool implementation.
 use crate::{
-    config::TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    config::{LocalTransactionConfig, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER},
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind},
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
@@ -92,8 +92,13 @@ pub struct TxPool<T: TransactionOrdering> {
     /// Holds all parked transactions that currently violate the dynamic fee requirement but could
     /// be moved to pending if the base fee changes in their favor (decreases) in future blocks.
     basefee_pool: ParkedPool<BasefeeOrd<T::Transaction>>,
-    /// All blob transactions in the pool
-    blob_transactions: BlobTransactions<T::Transaction>,
+    /// Blob transactions in the pool that are __not pending__.
+    ///
+    /// This means they either do not satisfy the dynamic fee requirement or the blob fee
+    /// requirement. These transactions can be moved to pending if the base fee or blob fee changes
+    /// in their favor (decreases) in future blocks. The transaction may need both the base fee and
+    /// blob fee to decrease to become executable.
+    blob_pool: BlobTransactions<T::Transaction>,
     /// All transactions in the pool.
     all_transactions: AllTransactions<T::Transaction>,
     /// Transaction pool metrics
@@ -110,7 +115,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             pending_pool: PendingPool::new(ordering),
             queued_pool: Default::default(),
             basefee_pool: Default::default(),
-            blob_transactions: Default::default(),
+            blob_pool: Default::default(),
             all_transactions: AllTransactions::new(&config),
             config,
             metrics: Default::default(),
@@ -136,8 +141,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             basefee_size: self.basefee_pool.size(),
             queued: self.queued_pool.len(),
             queued_size: self.queued_pool.size(),
-            blob: self.blob_transactions.len(),
-            blob_size: self.blob_transactions.size(),
+            blob: self.blob_pool.len(),
+            blob_size: self.blob_pool.size(),
             total: self.all_transactions.len(),
         }
     }
@@ -182,9 +187,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             (Ordering::Less, Ordering::Equal) | (_, Ordering::Less) => {
                 // decreased blob fee or base fee: recheck blob pool and promote all that are now
                 // valid
-                let removed = self
-                    .blob_transactions
-                    .enforce_pending_fees(&self.all_transactions.pending_fees);
+                let removed =
+                    self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
                 for tx in removed {
                     let to = {
                         let tx =
@@ -216,9 +220,8 @@ impl<T: TransactionOrdering> TxPool<T> {
 
                 // decreased blob fee or base fee: recheck blob pool and promote all that are now
                 // valid
-                let removed = self
-                    .blob_transactions
-                    .enforce_pending_fees(&self.all_transactions.pending_fees);
+                let removed =
+                    self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
                 for tx in removed {
                     let to = {
                         let tx =
@@ -355,7 +358,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // base fee decreased, we need to move transactions from the basefee pool to the
                 // pending pool and satisfy blob fee transactions as well
                 let unlocked_with_blob =
-                    self.blob_transactions.satisfy_attributes(best_transactions_attributes);
+                    self.blob_pool.satisfy_attributes(best_transactions_attributes);
 
                 Box::new(self.pending_pool.best_with_unlocked(
                     unlocked_with_blob,
@@ -389,7 +392,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::Queued => self.queued_pool.contains(id),
             SubPool::Pending => self.pending_pool.contains(id),
             SubPool::BaseFee => self.basefee_pool.contains(id),
-            SubPool::Blob => self.blob_transactions.contains(id),
+            SubPool::Blob => self.blob_pool.contains(id),
         }
     }
 
@@ -695,7 +698,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
-            SubPool::Blob => self.blob_transactions.remove_transaction(tx),
+            SubPool::Blob => self.blob_pool.remove_transaction(tx),
         }
     }
 
@@ -710,7 +713,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::Pending => self.pending_pool.prune_transaction(tx),
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
-            SubPool::Blob => self.blob_transactions.remove_transaction(tx),
+            SubPool::Blob => self.blob_pool.remove_transaction(tx),
         }
     }
 
@@ -756,7 +759,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 self.basefee_pool.add_transaction(tx);
             }
             SubPool::Blob => {
-                self.blob_transactions.add_transaction(tx);
+                self.blob_pool.add_transaction(tx);
             }
         }
     }
@@ -793,18 +796,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .$limit
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
-                        // pops the worst transaction from the sub-pool
-                        if let Some(tx) = $this.$pool.pop_worst() {
-                            let id = tx.transaction_id;
-
-                            // now that the tx is removed from the sub-pool, we need to remove it also from the total set
-                            $this.all_transactions.remove_transaction(&id);
-
-                            // record the removed transaction
-                            removed.push(tx);
-
-                            // this might have introduced a nonce gap, so we also discard any descendants
-                            $this.remove_descendants(&id, &mut $removed);
+                        removed = $this.$pool.truncate_pool($this.config.$limit.clone());
+                        for tx in removed.clone().iter() {
+                            $this.remove_descendants(tx.id(), &mut $removed);
                         }
                     }
 
@@ -816,6 +810,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             self, removed, [
                 pending_limit  => pending_pool,
                 basefee_limit  => basefee_pool,
+                blob_limit => blob_pool,
                 queued_limit  => queued_pool
             ]
         );
@@ -849,7 +844,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.assert_invariants();
         self.basefee_pool.assert_invariants();
         self.queued_pool.assert_invariants();
-        self.blob_transactions.assert_invariants();
+        self.blob_pool.assert_invariants();
     }
 }
 
@@ -918,6 +913,8 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     pending_fees: PendingFees,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
+    /// How to handle [TransactionOrigin::Local](crate::TransactionOrigin) transactions.
+    local_transactions_config: LocalTransactionConfig,
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
@@ -926,6 +923,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Self {
             max_account_slots: config.max_account_slots,
             price_bumps: config.price_bumps,
+            local_transactions_config: config.local_transactions_config.clone(),
             ..Default::default()
         }
     }
@@ -1274,7 +1272,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &self,
         transaction: ValidPoolTransaction<T>,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
-        if !transaction.origin.is_local() {
+        if !transaction.origin.is_local() || self.local_transactions_config.no_local_exemptions() {
             let current_txs =
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
             if current_txs >= self.max_account_slots {
@@ -1664,6 +1662,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             last_seen_block_hash: Default::default(),
             pending_fees: Default::default(),
             price_bumps: Default::default(),
+            local_transactions_config: Default::default(),
         }
     }
 }
@@ -1917,7 +1916,7 @@ mod tests {
         pool.add_transaction(validated, on_chain_balance, on_chain_nonce).unwrap();
 
         // assert pool lengths
-        assert!(pool.blob_transactions.is_empty());
+        assert!(pool.blob_pool.is_empty());
         assert_eq!(pool.pending_pool.len(), 1);
 
         // check tx state and derived subpool
@@ -1935,7 +1934,7 @@ mod tests {
         assert_eq!(internal_tx.subpool, SubPool::Blob);
 
         // make sure the blob transaction was promoted into the pending pool
-        assert_eq!(pool.blob_transactions.len(), 1);
+        assert_eq!(pool.blob_pool.len(), 1);
         assert!(pool.pending_pool.is_empty());
     }
 
@@ -1958,7 +1957,7 @@ mod tests {
 
         // assert pool lengths
         assert!(pool.pending_pool.is_empty());
-        assert_eq!(pool.blob_transactions.len(), 1);
+        assert_eq!(pool.blob_pool.len(), 1);
 
         // check tx state and derived subpool
         let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
@@ -1976,7 +1975,7 @@ mod tests {
 
         // make sure the blob transaction was promoted into the pending pool
         assert_eq!(pool.pending_pool.len(), 1);
-        assert!(pool.blob_transactions.is_empty());
+        assert!(pool.blob_pool.is_empty());
     }
 
     /// A struct representing a txpool promotion test instance
@@ -2017,25 +2016,25 @@ mod tests {
         ) {
             match check_subpool {
                 SubPool::Blob => {
-                    assert_eq!(pool.blob_transactions.len(), 1, "{failure_message}");
+                    assert_eq!(pool.blob_pool.len(), 1, "{failure_message}");
                     assert!(pool.pending_pool.is_empty(), "{failure_message}");
                     assert!(pool.basefee_pool.is_empty(), "{failure_message}");
                     assert!(pool.queued_pool.is_empty(), "{failure_message}");
                 }
                 SubPool::Pending => {
-                    assert!(pool.blob_transactions.is_empty(), "{failure_message}");
+                    assert!(pool.blob_pool.is_empty(), "{failure_message}");
                     assert_eq!(pool.pending_pool.len(), 1, "{failure_message}");
                     assert!(pool.basefee_pool.is_empty(), "{failure_message}");
                     assert!(pool.queued_pool.is_empty(), "{failure_message}");
                 }
                 SubPool::BaseFee => {
-                    assert!(pool.blob_transactions.is_empty(), "{failure_message}");
+                    assert!(pool.blob_pool.is_empty(), "{failure_message}");
                     assert!(pool.pending_pool.is_empty(), "{failure_message}");
                     assert_eq!(pool.basefee_pool.len(), 1, "{failure_message}");
                     assert!(pool.queued_pool.is_empty(), "{failure_message}");
                 }
                 SubPool::Queued => {
-                    assert!(pool.blob_transactions.is_empty(), "{failure_message}");
+                    assert!(pool.blob_pool.is_empty(), "{failure_message}");
                     assert!(pool.pending_pool.is_empty(), "{failure_message}");
                     assert!(pool.basefee_pool.is_empty(), "{failure_message}");
                     assert_eq!(pool.queued_pool.len(), 1, "{failure_message}");

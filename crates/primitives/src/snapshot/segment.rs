@@ -117,7 +117,7 @@ impl SnapshotSegment {
     ) -> Option<(Self, RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)> {
         let mut parts = name.to_str()?.split('_');
         if parts.next() != Some("snapshot") {
-            return None;
+            return None
         }
 
         let segment = Self::from_str(parts.next()?).ok()?;
@@ -125,7 +125,7 @@ impl SnapshotSegment {
         let (tx_start, tx_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
         if block_start >= block_end || tx_start > tx_end {
-            return None;
+            return None
         }
 
         Some((segment, block_start..=block_end, tx_start..=tx_end))
@@ -156,6 +156,11 @@ impl SegmentHeader {
     /// Returns the first block number of the segment.
     pub fn block_start(&self) -> BlockNumber {
         *self.block_range.start()
+    }
+
+    /// Returns the last block number of the segment.
+    pub fn block_end(&self) -> BlockNumber {
+        *self.block_range.end()
     }
 
     /// Returns the first transaction number of the segment.
