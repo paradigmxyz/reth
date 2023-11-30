@@ -89,7 +89,7 @@ impl_uint_compact!(u8, u64, u128);
 
 impl<T> Compact for Vec<T>
 where
-    T: Compact + Default,
+    T: Compact,
 {
     /// Returns 0 since we won't include it in the `StructFlags`.
     fn to_compact<B>(self, buf: &mut B) -> usize
@@ -116,15 +116,11 @@ where
     fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (length, mut buf) = decode_varuint(buf);
         let mut list = Vec::with_capacity(length);
-        #[allow(unused_assignments)]
-        let mut len = 0;
         for _ in 0..length {
-            #[allow(unused_assignments)]
-            let mut element = T::default();
-
+            let len;
             (len, buf) = decode_varuint(buf);
 
-            (element, _) = T::from_compact(&buf[..len], len);
+            let (element, _) = T::from_compact(&buf[..len], len);
             buf.advance(len);
 
             list.push(element);
@@ -139,7 +135,6 @@ where
         B: bytes::BufMut + AsMut<[u8]>,
     {
         encode_varuint(self.len(), buf);
-
         for element in self {
             element.to_compact(buf);
         }
@@ -152,11 +147,8 @@ where
         let mut list = Vec::with_capacity(length);
 
         for _ in 0..length {
-            #[allow(unused_assignments)]
-            let mut element = T::default();
-
+            let element;
             (element, buf) = T::from_compact(buf, len);
-
             list.push(element);
         }
 
@@ -331,7 +323,7 @@ where
 fn decode_varuint(mut buf: &[u8]) -> (usize, &[u8]) {
     let mut value: usize = 0;
 
-    for i in 0..33 {
+    for i in 0usize..33 {
         let byte = buf.get_u8();
         if byte < 128 {
             value |= usize::from(byte) << (i * 7);
