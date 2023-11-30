@@ -694,11 +694,10 @@ mod tests {
 
         // the independent set is the roots of each of these tx chains, these are the highest
         // nonces for each sender
-        let expected_highest_nonces =
-            vec![d[0].clone(), c[2].clone(), b[2].clone(), a[3].clone()]
-                .iter()
-                .map(|tx| (tx.sender(), tx.nonce()))
-                .collect::<HashSet<_>>();
+        let expected_highest_nonces = vec![d[0].clone(), c[2].clone(), b[2].clone(), a[3].clone()]
+            .iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
         let actual_highest_nonces = pool
             .highest_nonces
             .iter()
