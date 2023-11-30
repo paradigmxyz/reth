@@ -59,14 +59,14 @@ mod tests {
     // From manual regression test
     #[test]
     fn encode_leaf_node_nibble() {
-        let nibble = Nibbles::new_unchecked(hex!("0604060f"));
+        let nibble = Nibbles::from_nibbles_unchecked(hex!("0604060f"));
         let encoded = nibble.encode_path_leaf(true);
-        assert_eq!(encoded, hex!("20646f"));
+        assert_eq!(encoded[..], hex!("20646f"));
     }
 
     #[test]
     fn rlp_leaf_node_roundtrip() {
-        let nibble = Nibbles::new_unchecked(hex!("0604060f"));
+        let nibble = Nibbles::from_nibbles_unchecked(hex!("0604060f"));
         let val = hex!("76657262");
         let leaf = LeafNode::new(&nibble, &val);
         let rlp = leaf.rlp(&mut vec![]);

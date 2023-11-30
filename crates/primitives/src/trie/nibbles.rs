@@ -25,7 +25,7 @@ impl From<Nibbles> for StoredNibblesSubKey {
 impl From<Vec<u8>> for StoredNibblesSubKey {
     #[inline]
     fn from(value: Vec<u8>) -> Self {
-        Self(Nibbles::new_unchecked(value))
+        Self(Nibbles::from_nibbles_unchecked(value))
     }
 }
 
@@ -54,7 +54,7 @@ impl Compact for StoredNibblesSubKey {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let len = buf[64] as usize;
-        (Self(Nibbles::new_unchecked(&buf[..len])), &buf[65..])
+        (Self(Nibbles::from_nibbles_unchecked(&buf[..len])), &buf[65..])
     }
 }
 
@@ -106,7 +106,7 @@ impl proptest::arbitrary::Arbitrary for Nibbles {
     #[inline]
     fn arbitrary_with((): ()) -> Self::Strategy {
         use proptest::prelude::*;
-        proptest::collection::vec(0x0..=0xf, 0..64).prop_map(Self::new_unchecked)
+        proptest::collection::vec(0x0..=0xf, 0..64).prop_map(Self::from_nibbles_unchecked)
     }
 }
 
@@ -122,7 +122,7 @@ impl Compact for Nibbles {
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         let nibbles = &buf[..len];
         buf.advance(len);
-        (Nibbles::new_unchecked(nibbles), buf)
+        (Nibbles::from_nibbles_unchecked(nibbles), buf)
     }
 }
 
@@ -188,10 +188,29 @@ impl Borrow<[u8]> for Nibbles {
     }
 }
 
+impl Extend<u8> for Nibbles {
+    #[inline]
+    fn extend<T: IntoIterator<Item = u8>>(&mut self, iter: T) {
+        self.0.extend(iter)
+    }
+}
+
 impl Nibbles {
+    /// Creates a new empty [`Nibbles`] instance.
+    #[inline]
+    pub const fn new() -> Self {
+        Self(SmallVec::new_const())
+    }
+
+    /// Creates a new [`Nibbles`] instance with the given capacity.
+    #[inline]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(SmallVec::with_capacity(capacity))
+    }
+
     /// Creates a new [`Nibbles`] instance from nibble bytes, without checking their validity.
     #[inline]
-    pub fn new_unchecked<T: AsRef<[u8]>>(nibbles: T) -> Self {
+    pub fn from_nibbles_unchecked<T: AsRef<[u8]>>(nibbles: T) -> Self {
         Self(SmallVec::from_slice(nibbles.as_ref()))
     }
 
@@ -360,20 +379,20 @@ impl Nibbles {
     /// # use reth_primitives::trie::Nibbles;
     ///
     /// // Extension node with an even path length:
-    /// let nibbles = Nibbles::new_unchecked(&[0x0A, 0x0B, 0x0C, 0x0D]);
-    /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x00, 0xAB, 0xCD]);
+    /// let nibbles = Nibbles::from_nibbles_unchecked(&[0x0A, 0x0B, 0x0C, 0x0D]);
+    /// assert_eq!(nibbles.encode_path_leaf(false)[..], [0x00, 0xAB, 0xCD]);
     ///
     /// // Extension node with an odd path length:
-    /// let nibbles = Nibbles::new_unchecked(&[0x0A, 0x0B, 0x0C]);
-    /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x1A, 0xBC]);
+    /// let nibbles = Nibbles::from_nibbles_unchecked(&[0x0A, 0x0B, 0x0C]);
+    /// assert_eq!(nibbles.encode_path_leaf(false)[..], [0x1A, 0xBC]);
     ///
     /// // Leaf node with an even path length:
-    /// let nibbles = Nibbles::new_unchecked(&[0x0A, 0x0B, 0x0C, 0x0D]);
-    /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x20, 0xAB, 0xCD]);
+    /// let nibbles = Nibbles::from_nibbles_unchecked(&[0x0A, 0x0B, 0x0C, 0x0D]);
+    /// assert_eq!(nibbles.encode_path_leaf(true)[..], [0x20, 0xAB, 0xCD]);
     ///
     /// // Leaf node with an odd path length:
-    /// let nibbles = Nibbles::new_unchecked(&[0x0A, 0x0B, 0x0C]);
-    /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x3A, 0xBC]);
+    /// let nibbles = Nibbles::from_nibbles_unchecked(&[0x0A, 0x0B, 0x0C]);
+    /// assert_eq!(nibbles.encode_path_leaf(true)[..], [0x3A, 0xBC]);
     /// ```
     pub fn encode_path_leaf(&self, is_leaf: bool) -> Vec<u8> {
         let mut encoded = vec![0u8; self.len() / 2 + 1];
@@ -398,13 +417,13 @@ impl Nibbles {
 
     /// Increments the nibble sequence by one.
     pub fn increment(&self) -> Option<Self> {
-        let mut incremented = self.0.to_vec();
+        let mut incremented = self.clone();
 
-        for nibble in incremented.iter_mut().rev() {
-            debug_assert!(*nibble < 0x10);
+        for nibble in incremented.0.iter_mut().rev() {
+            debug_assert!(*nibble <= 0xf);
             if *nibble < 0xf {
                 *nibble += 1;
-                return Some(Self::new_unchecked(incremented))
+                return Some(incremented);
             } else {
                 *nibble = 0;
             }
@@ -479,7 +498,7 @@ impl Nibbles {
             Bound::Excluded(&n) => n,
             Bound::Unbounded => self.len(),
         };
-        Self::new_unchecked(&self[start..end])
+        Self::from_nibbles_unchecked(&self[start..end])
     }
 
     /// Join two nibbles together.
@@ -499,7 +518,7 @@ impl Nibbles {
 
     /// Extend the current nibbles with another nibbles.
     #[inline]
-    pub fn extend(&mut self, b: impl AsRef<[u8]>) {
+    pub fn extend_from_slice(&mut self, b: impl AsRef<[u8]>) {
         self.0.extend_from_slice(b.as_ref());
     }
 
@@ -524,10 +543,10 @@ mod tests {
 
     #[test]
     fn hashed_regression() {
-        let nibbles = Nibbles::new_unchecked(hex!("05010406040a040203030f010805020b050c04070003070e0909070f010b0a0805020301070c0a0902040b0f000f0006040a04050f020b090701000a0a040b"));
+        let nibbles = Nibbles::from_nibbles_unchecked(hex!("05010406040a040203030f010805020b050c04070003070e0909070f010b0a0805020301070c0a0902040b0f000f0006040a04050f020b090701000a0a040b"));
         let path = nibbles.encode_path_leaf(true);
         let expected = hex!("351464a4233f1852b5c47037e997f1ba852317ca924bf0f064a45f2b9710aa4b");
-        assert_eq!(path, expected);
+        assert_eq!(path[..], expected);
     }
 
     #[test]
@@ -543,7 +562,7 @@ mod tests {
         ];
         for (input, expected) in tests {
             assert!(input.iter().all(|&x| x <= 0xf));
-            let nibbles = Nibbles::new_unchecked(input);
+            let nibbles = Nibbles::from_nibbles_unchecked(input);
             let encoded = nibbles.pack();
             assert_eq!(&encoded[..], expected);
         }
@@ -555,9 +574,9 @@ mod tests {
 
         #[track_caller]
         fn test_slice(range: impl RangeBounds<usize>, expected: &[u8]) {
-            let nibbles = Nibbles::new_unchecked(RAW);
+            let nibbles = Nibbles::from_nibbles_unchecked(RAW);
             let sliced = nibbles.slice(range);
-            assert_eq!(sliced, Nibbles::new_unchecked(expected));
+            assert_eq!(sliced, Nibbles::from_nibbles_unchecked(expected));
             assert_eq!(sliced.as_slice(), expected);
         }
 
