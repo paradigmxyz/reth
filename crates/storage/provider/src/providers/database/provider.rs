@@ -207,15 +207,17 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is
     ///   terminated when this function returns false, thereby filtering the data based on the
     ///   provided condition.
-    fn get_range_with_snapshot<T, P>(
+    fn get_range_with_snapshot<T, P, FS, FD>(
         &self,
         segment: SnapshotSegment,
         block_range: Range<u64>,
-        fetch_from_snapshot: impl Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
-        mut fetch_from_database: impl FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
+        fetch_from_snapshot: FS,
+        mut fetch_from_database: FD,
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
+        FS: Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
         P: FnMut(&T) -> bool,
     {
         let mut adjusted_range = to_range(block_range);
@@ -254,13 +256,17 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     ///   provider.
     /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
     ///   when the snapshot doesn't contain the required data or is not available.
-    fn get_with_snapshot<T>(
+    fn get_with_snapshot<T, FS, FD>(
         &self,
         segment: SnapshotSegment,
         number: u64,
-        fetch_from_snapshot: impl Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
-        fetch_from_database: impl Fn() -> ProviderResult<Option<T>>,
-    ) -> ProviderResult<Option<T>> {
+        fetch_from_snapshot: FS,
+        fetch_from_database: FD,
+    ) -> ProviderResult<Option<T>>
+    where
+        FS: Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
+        FD: Fn() -> ProviderResult<Option<T>>,
+    {
         if let Some(provider) = &self.snapshot_provider {
             // If there is, check the maximum block or transaction number of the segment.
             let snapshot_upper_bound = match segment {
@@ -1555,7 +1561,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                 results.push(Vec::new());
             } else {
                 results.push(
-                    self.transactions_by_tx_range_with_cursor(tx_num_range, || &mut tx_cursor)?
+                    self.transactions_by_tx_range_with_cursor(tx_num_range, &mut tx_cursor)?
                         .into_iter()
                         .map(Into::into)
                         .collect(),

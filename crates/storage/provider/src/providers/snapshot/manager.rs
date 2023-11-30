@@ -265,13 +265,17 @@ impl SnapshotProvider {
     /// This function iteratively retrieves data using `get_fn` for each item in the given range.
     /// It continues fetching until the end of the range is reached or the provided `predicate`
     /// returns false.
-    fn fetch_range<T>(
+    fn fetch_range<T, F, P>(
         &self,
         segment: SnapshotSegment,
         range: Range<u64>,
-        get_fn: impl Fn(&mut SnapshotCursor<'_>, u64) -> ProviderResult<Option<T>>,
-        mut predicate: impl FnMut(&T) -> bool,
-    ) -> ProviderResult<Vec<T>> {
+        get_fn: F,
+        mut predicate: P,
+    ) -> ProviderResult<Vec<T>>
+    where
+        F: Fn(&mut SnapshotCursor<'_>, u64) -> ProviderResult<Option<T>>,
+        P: FnMut(&T) -> bool,
+    {
         let get_provider = |start: u64| match segment {
             SnapshotSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
             _ => self.get_segment_provider_from_transaction(segment, start, None),
