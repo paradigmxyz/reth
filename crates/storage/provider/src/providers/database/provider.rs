@@ -207,15 +207,17 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is
     ///   terminated when this function returns false, thereby filtering the data based on the
     ///   provided condition.
-    fn get_range_with_snapshot<T, P>(
+    fn get_range_with_snapshot<T, P, FS, FD>(
         &self,
         segment: SnapshotSegment,
         block_range: Range<u64>,
-        fetch_from_snapshot: impl Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
-        fetch_from_database: impl Fn(Range<u64>, P) -> ProviderResult<Vec<T>>,
+        fetch_from_snapshot: FS,
+        fetch_from_database: FD,
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
+        FS: Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        FD: Fn(Range<u64>, P) -> ProviderResult<Vec<T>>,
         P: FnMut(&T) -> bool,
     {
         let mut adjusted_range = to_range(block_range);
@@ -250,13 +252,17 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     ///   provider.
     /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
     ///   when the snapshot doesn't contain the required data or is not available.
-    fn get_with_snapshot<T>(
+    fn get_with_snapshot<T, FS, FD>(
         &self,
         segment: SnapshotSegment,
         block_number: u64,
-        fetch_from_snapshot: impl Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
-        fetch_from_database: impl Fn() -> ProviderResult<Option<T>>,
-    ) -> ProviderResult<Option<T>> {
+        fetch_from_snapshot: FS,
+        fetch_from_database: FD,
+    ) -> ProviderResult<Option<T>>
+    where
+        FS: Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
+        FD: Fn() -> ProviderResult<Option<T>>,
+    {
         if let Some(provider) = &self.snapshot_provider {
             if provider
                 .get_highest_snapshot(segment)
