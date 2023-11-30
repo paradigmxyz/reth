@@ -669,23 +669,20 @@ mod tests {
         // create a chain of transactions by sender A, B, C
         let mut tx_set =
             MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::EIP1559);
-        let a_set = tx_set.clone().into_vec();
+        let a = tx_set.clone().into_vec();
 
-        let b_set = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
-            .clone()
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
             .into_vec();
-        tx_set.extend(b_set.clone());
+        tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c_set = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
-            .clone()
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
             .into_vec();
-        tx_set.extend(c_set.clone());
+        tx_set.extend(c.clone());
 
-        let d_set = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
-            .clone()
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
             .into_vec();
-        tx_set.extend(d_set.clone());
+        tx_set.extend(d.clone());
 
         // add all the transactions to the pool
         let all_txs = tx_set.into_vec();
@@ -698,7 +695,7 @@ mod tests {
         // the independent set is the roots of each of these tx chains, these are the highest
         // nonces for each sender
         let expected_highest_nonces =
-            vec![d_set[0].clone(), c_set[2].clone(), b_set[2].clone(), a_set[3].clone()]
+            vec![d[0].clone(), c[2].clone(), b[2].clone(), a[3].clone()]
                 .iter()
                 .map(|tx| (tx.sender(), tx.nonce()))
                 .collect::<HashSet<_>>();

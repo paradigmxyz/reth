@@ -466,7 +466,7 @@ impl<T: PoolTransaction> Ord for QueuedOrd<T> {
 mod tests {
     use super::*;
     use crate::test_utils::{MockTransaction, MockTransactionFactory, MockTransactionSet};
-    use reth_primitives::address;
+    use reth_primitives::{address, TxType};
     use std::collections::HashSet;
 
     #[test]
@@ -536,46 +536,38 @@ mod tests {
         let d_sender = address!("000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
-        let mut tx_set =
-            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::EIP1559);
-        let a_set = tx_set.clone().into_vec();
+        let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::EIP1559);
+        let a = tx_set.clone().into_vec();
 
-        let b_set = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
-            .clone()
-            .into_vec();
-        tx_set.extend(b_set.clone());
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, TxType::EIP1559).into_vec();
+        tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c_set = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
-            .clone()
-            .into_vec();
-        tx_set.extend(c_set.clone());
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, TxType::EIP1559).into_vec();
+        tx_set.extend(c.clone());
 
-        let d_set = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
-            .clone()
-            .into_vec();
-        tx_set.extend(d_set.clone());
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, TxType::EIP1559).into_vec();
+        tx_set.extend(d.clone());
 
         let all_txs = tx_set.into_vec();
 
         // just construct a list of all txs to add
-        let expected_parked =
-            vec![c_set[0].clone(), c_set[1].clone(), c_set[2].clone(), d_set[0].clone()]
-                .into_iter()
-                .map(|tx| (tx.sender(), tx.nonce()))
-                .collect::<HashSet<_>>();
+        let expected_parked = vec![c[0].clone(), c[1].clone(), c[2].clone(), d[0].clone()]
+            .into_iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
 
         // we expect the truncate operation to go through the senders with the most txs, removing
         // txs based on when they were submitted, removing the oldest txs first, until the pool is
         // not over the limit
         let expected_removed = vec![
-            a_set[0].clone(),
-            a_set[1].clone(),
-            a_set[2].clone(),
-            a_set[3].clone(),
-            b_set[0].clone(),
-            b_set[1].clone(),
-            b_set[2].clone(),
+            a[0].clone(),
+            a[1].clone(),
+            a[2].clone(),
+            a[3].clone(),
+            b[0].clone(),
+            b[1].clone(),
+            b[2].clone(),
         ]
         .into_iter()
         .map(|tx| (tx.sender(), tx.nonce()))
@@ -621,27 +613,20 @@ mod tests {
         // create a chain of transactions by sender A, B, C
         let mut tx_set =
             MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::EIP1559);
-        let a_set = tx_set.clone().into_vec();
-        let a1 = a_set[0].clone();
+        let a = tx_set.clone().into_vec();
 
-        let b_set = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
-            .clone()
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
             .into_vec();
-        tx_set.extend(b_set.clone());
-        let b1 = b_set[0].clone();
+        tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c_set = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
-            .clone()
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
             .into_vec();
-        tx_set.extend(c_set.clone());
-        let c1 = c_set[0].clone();
+        tx_set.extend(c.clone());
 
-        let d_set = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
-            .clone()
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
             .into_vec();
-        tx_set.extend(d_set.clone());
-        let d1 = d_set[0].clone();
+        tx_set.extend(d.clone());
 
         let all_txs = tx_set.into_vec();
 
@@ -665,7 +650,7 @@ mod tests {
 
         // manually order the txs
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
-        let all_txs = vec![d1, b1, c1, a1];
+        let all_txs = vec![d[0].clone(), b[0].clone(), c[0].clone(), a[0].clone()];
 
         // add all the transactions to the pool
         for tx in all_txs {

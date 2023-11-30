@@ -1160,7 +1160,7 @@ impl MockTransactionSet {
     }
 
     /// Add transactions to the [MockTransactionSet]
-    pub fn extend(&mut self, txs: Vec<MockTransaction>) {
+    pub fn extend<T: IntoIterator<Item = MockTransaction>>(&mut self, txs: T) {
         self.transactions.extend(txs);
     }
 
