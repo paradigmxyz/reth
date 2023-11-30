@@ -1143,7 +1143,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.clone().into(), node.clone()))
+                    Some((nibbles.clone(), node.clone()))
                 }
                 _ => None,
             })
@@ -1170,7 +1170,7 @@ mod tests {
         let mut account_updates = HashMap::new();
         for item in walker {
             let (key, node) = item.unwrap();
-            account_updates.insert(key.into(), node);
+            account_updates.insert(key, node);
         }
 
         assert_trie_updates(&account_updates);

@@ -79,9 +79,9 @@ impl TrieUpdates {
     /// Extend the updates with account trie updates.
     pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
         self.extend(
-            updates.into_iter().map(|(nibbles, node)| {
-                (TrieKey::AccountNode(nibbles.into()), TrieOp::Update(node))
-            }),
+            updates
+                .into_iter()
+                .map(|(nibbles, node)| (TrieKey::AccountNode(nibbles), TrieOp::Update(node))),
         );
     }
 

@@ -46,7 +46,7 @@ fn create_transactions_for_sender(
         }
 
         tx.set_sender(sender);
-        tx.set_nonce(nonce);
+        tx.set_nonce(nonce as u64);
     }
 
     txs

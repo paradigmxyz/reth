@@ -23,6 +23,13 @@ impl From<Vec<u8>> for StoredNibblesSubKey {
     }
 }
 
+impl From<StoredNibblesSubKey> for Nibbles {
+    #[inline]
+    fn from(value: StoredNibblesSubKey) -> Self {
+        value.0
+    }
+}
+
 impl Compact for StoredNibblesSubKey {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
