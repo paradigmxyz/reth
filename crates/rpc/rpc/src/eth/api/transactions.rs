@@ -530,7 +530,7 @@ where
                     max_fee_per_blob_gas: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
-                EvmOverrides { state: None, block: None },
+                None,
             )
             .await?;
         let gas_limit = estimated_gas;

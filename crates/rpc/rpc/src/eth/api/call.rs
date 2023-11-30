@@ -4,8 +4,9 @@ use crate::{
     eth::{
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
-            build_call_evm_env, caller_gas_allowance, cap_tx_gas_limit_with_caller_allowance,
-            get_precompiles, inspect, prepare_call_env, transact, EvmOverrides,
+            apply_state_overrides, build_call_evm_env, caller_gas_allowance,
+            cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect, prepare_call_env,
+            transact, EvmOverrides,
         },
         EthTransactions,
     },
@@ -45,28 +46,15 @@ where
         &self,
         request: CallRequest,
         at: BlockId,
-        overrides: EvmOverrides,
+        state_override: Option<StateOverride>,
     ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let this = self.clone();
-        self.inner
-            .blocking_task_pool
-            .spawn(move || {
-                let state = this.state_at(at)?;
-                let mut db = CacheDB::new(StateProviderDatabase::new(&state));
 
-                let env = prepare_call_env(
-                    cfg,
-                    block_env,
-                    request.clone(),
-                    this.call_gas_limit(),
-                    &mut db,
-                    overrides,
-                )?;
-                this.estimate_gas_with(env.cfg, env.block, request, state)
-            })
-            .await
-            .map_err(|_| EthApiError::InternalBlockingTaskError)?
+        self.on_blocking_task(|this| async move {
+            let state = this.state_at(at)?;
+            this.estimate_gas_with(cfg, block_env, request, state, state_override)
+        })
+        .await
     }
 
     /// Executes the call request (`eth_call`) and returns the output
@@ -189,6 +177,7 @@ where
         block: BlockEnv,
         request: CallRequest,
         state: S,
+        state_override: Option<StateOverride>,
     ) -> EthResult<U256>
     where
         S: StateProvider,
@@ -215,6 +204,10 @@ where
         let mut env = build_call_evm_env(cfg, block, request)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
+        if let Some(state_override) = state_override {
+            // apply state overrides
+            apply_state_overrides(state_override, &mut db)?;
+        }
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
@@ -427,7 +420,7 @@ where
 
         // calculate the gas used using the access list
         request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state())?;
+        let gas_used = self.estimate_gas_with(env.cfg, env.block, request, db.db.state(), None)?;
 
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }

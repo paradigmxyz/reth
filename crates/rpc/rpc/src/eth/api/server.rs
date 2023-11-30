@@ -273,7 +273,7 @@ where
             .estimate_gas_at(
                 request,
                 block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                EvmOverrides { state: state_override, block: None },
+                state_override,
             )
             .await?)
     }
