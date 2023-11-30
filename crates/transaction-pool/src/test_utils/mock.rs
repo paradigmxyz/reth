@@ -246,6 +246,55 @@ impl MockTransaction {
         }
     }
 
+    /// Returns a new EIP2930 transaction with random address and hash and empty values
+    pub fn eip2930() -> Self {
+        MockTransaction::Eip2930 {
+            hash: B256::random(),
+            sender: Address::random(),
+            nonce: 0,
+            to: TransactionKind::Call(Address::random()),
+            gas_limit: 0,
+            input: Bytes::new(),
+            value: Default::default(),
+            gas_price: 0,
+            accesslist: Default::default(),
+        }
+    }
+
+    /// Returns a new deposit transaction with random address and hash and empty values
+    #[cfg(feature = "optimism")]
+    pub fn deposit() -> Self {
+        MockTransaction::Deposit(TxDeposit {
+            source_hash: B256::random(),
+            from: Address::random(),
+            to: TransactionKind::Call(Address::random()),
+            mint: Some(0),
+            value: Default::default(),
+            gas_limit: 0,
+            is_system_transaction: false,
+            input: Bytes::new(),
+        })
+    }
+
+    /// Creates a new transaction with the given [TxType].
+    ///
+    /// See the default constructors for each of the transaction types:
+    ///
+    /// * [MockTransaction::legacy]
+    /// * [MockTransaction::eip2930]
+    /// * [MockTransaction::eip1559]
+    /// * [MockTransaction::eip4844]
+    pub fn new_from_type(tx_type: TxType) -> Self {
+        match tx_type {
+            TxType::Legacy => Self::legacy(),
+            TxType::EIP2930 => Self::eip2930(),
+            TxType::EIP1559 => Self::eip1559(),
+            TxType::EIP4844 => Self::eip4844(),
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => Self::deposit(),
+        }
+    }
+
     /// Sets the max fee per blob gas for EIP-4844 transactions,
     pub fn with_blob_fee(mut self, val: u128) -> Self {
         self.set_blob_fee(val);
@@ -588,12 +637,12 @@ impl PoolTransaction for MockTransaction {
         let base_fee = base_fee as u128;
         let max_fee_per_gas = self.max_fee_per_gas();
         if max_fee_per_gas < base_fee {
-            return None
+            return None;
         }
 
         let fee = max_fee_per_gas - base_fee;
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee))
+            return Some(fee.min(priority_fee));
         }
 
         Some(fee)
@@ -1000,6 +1049,7 @@ impl MockTransactionFactory {
     pub fn validated(&mut self, transaction: MockTransaction) -> MockValidTx {
         self.validated_with_origin(TransactionOrigin::External, transaction)
     }
+
     pub fn validated_arc(&mut self, transaction: MockTransaction) -> Arc<MockValidTx> {
         Arc::new(self.validated(transaction))
     }
@@ -1080,6 +1130,43 @@ impl MockTransactionDistribution {
             MockTransaction::legacy()
         };
         tx.with_nonce(nonce).with_gas_limit(self.gas_limit_range.sample(rng))
+    }
+}
+
+/// A set of [MockTransaction]s that can be modified at once
+#[derive(Debug, Clone)]
+pub struct MockTransactionSet {
+    pub(crate) transactions: Vec<MockTransaction>,
+}
+
+impl MockTransactionSet {
+    /// Create a new [MockTransactionSet] from a list of transactions
+    fn new(transactions: Vec<MockTransaction>) -> Self {
+        Self { transactions }
+    }
+
+    /// Create a list of dependent transactions with a common sender. The transactions start at the
+    /// given nonce, and the sender is incremented by the given tx_count.
+    pub fn dependent(sender: Address, from_nonce: u64, tx_count: usize, tx_type: TxType) -> Self {
+        let mut txs = Vec::with_capacity(tx_count);
+        let mut curr_tx = MockTransaction::new_from_type(tx_type).with_nonce(from_nonce);
+        for i in 0..tx_count {
+            let nonce = from_nonce + i as u64;
+            curr_tx = curr_tx.next().with_sender(sender);
+            txs.push(curr_tx.clone());
+        }
+
+        MockTransactionSet::new(txs)
+    }
+
+    /// Add transactions to the [MockTransactionSet]
+    pub fn extend(&mut self, txs: Vec<MockTransaction>) {
+        self.transactions.extend(txs);
+    }
+
+    /// Extract the inner [Vec] of [MockTransaction]s
+    pub fn into_vec(self) -> Vec<MockTransaction> {
+        self.transactions
     }
 }
 

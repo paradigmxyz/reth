@@ -152,7 +152,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if self.len() <= limit.max_txs {
             // if we are below the limits, we don't need to drop anything
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut removed = Vec::new();
@@ -173,7 +173,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
                     }
                 }
                 drop -= list.len();
-                continue
+                continue;
             }
 
             // Otherwise drop only last few transactions
@@ -252,7 +252,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
                     // still parked -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
-                            break 'this
+                            break 'this;
                         }
                         iter.next();
                     }
@@ -465,7 +465,7 @@ impl<T: PoolTransaction> Ord for QueuedOrd<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{MockTransaction, MockTransactionFactory};
+    use crate::test_utils::{MockTransaction, MockTransactionFactory, MockTransactionSet};
     use reth_primitives::address;
     use std::collections::HashSet;
 
@@ -608,41 +608,37 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
 
-        let a = address!("000000000000000000000000000000000000000a");
-        let b = address!("000000000000000000000000000000000000000b");
-        let c = address!("000000000000000000000000000000000000000c");
-        let d = address!("000000000000000000000000000000000000000d");
+        let a_sender = address!("000000000000000000000000000000000000000a");
+        let b_sender = address!("000000000000000000000000000000000000000b");
+        let c_sender = address!("000000000000000000000000000000000000000c");
+        let d_sender = address!("000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
-        let a1 = MockTransaction::eip1559().with_sender(a);
-        let a2 = a1.next();
-        let a3 = a2.next();
-        let a4 = a3.next();
+        let mut tx_set =
+            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::EIP1559);
+        let a_set = tx_set.clone().into_vec();
+        let a1 = a_set[0].clone();
 
-        let b1 = MockTransaction::eip1559().with_sender(b);
-        let b2 = b1.next();
-        let b3 = b2.next();
+        let b_set = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
+            .clone()
+            .into_vec();
+        tx_set.extend(b_set.clone());
+        let b1 = b_set[0].clone();
 
         // C has the same number of txs as B
-        let c1 = MockTransaction::eip1559().with_sender(c);
-        let c2 = c1.next();
-        let c3 = c2.next();
+        let c_set = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
+            .clone()
+            .into_vec();
+        tx_set.extend(c_set.clone());
+        let c1 = c_set[0].clone();
 
-        let d1 = MockTransaction::eip1559().with_sender(d);
+        let d_set = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
+            .clone()
+            .into_vec();
+        tx_set.extend(d_set.clone());
+        let d1 = d_set[0].clone();
 
-        let all_txs = vec![
-            a1.clone(),
-            a2.clone(),
-            a3.clone(),
-            a4.clone(),
-            b1.clone(),
-            b2.clone(),
-            b3.clone(),
-            c1.clone(),
-            c2.clone(),
-            c3.clone(),
-            d1.clone(),
-        ];
+        let all_txs = tx_set.into_vec();
 
         // add all the transactions to the pool
         for tx in all_txs {
@@ -656,12 +652,15 @@ mod tests {
             .map(|s| s.sender_id)
             .collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
-        let expected_senders =
-            vec![d, c, b, a].into_iter().map(|s| f.ids.sender_id(&s).unwrap()).collect::<Vec<_>>();
+        let expected_senders = vec![d_sender, c_sender, b_sender, a_sender]
+            .into_iter()
+            .map(|s| f.ids.sender_id(&s).unwrap())
+            .collect::<Vec<_>>();
         assert_eq!(senders, expected_senders);
 
+        // manually order the txs
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
-        let all_txs = vec![a1, b1, c1, d1, a2, b2, c2, a3, b3, c3, a4];
+        let all_txs = vec![d1, b1, c1, a1];
 
         // add all the transactions to the pool
         for tx in all_txs {
@@ -674,8 +673,10 @@ mod tests {
             .map(|s| s.sender_id)
             .collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
-        let expected_senders =
-            vec![a, c, b, d].into_iter().map(|s| f.ids.sender_id(&s).unwrap()).collect::<Vec<_>>();
+        let expected_senders = vec![a_sender, c_sender, b_sender, d_sender]
+            .into_iter()
+            .map(|s| f.ids.sender_id(&s).unwrap())
+            .collect::<Vec<_>>();
         assert_eq!(senders, expected_senders);
     }
 }
