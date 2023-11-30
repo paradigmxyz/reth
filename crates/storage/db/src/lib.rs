@@ -182,12 +182,17 @@ pub mod test_utils {
     }
 
     impl<DB> TempDatabase<DB> {
-        /// returns the ref of inner db
+        /// Returns the reference to inner db.
         pub fn db(&self) -> &DB {
             self.db.as_ref().unwrap()
         }
 
-        /// returns the inner db
+        /// Returns the path to the database.
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
+
+        /// Convert temp database into inner.
         pub fn into_inner_db(mut self) -> DB {
             self.db.take().unwrap() // take out db to avoid clean path in drop fn
         }
