@@ -254,6 +254,7 @@ impl Nibbles {
     /// If the number of nibbles is odd, the last nibble is shifted left by 4 bits and
     /// added to the packed byte vector.
     #[inline]
+    #[allow(clippy::collapsible_else_if)]
     pub fn pack(&self) -> SmallVec<[u8; 32]> {
         let is_odd = self.len() % 2 != 0;
         // SAFETY: checked length and `is_odd` is correct.
