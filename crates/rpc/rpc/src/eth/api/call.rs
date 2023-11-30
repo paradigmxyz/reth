@@ -12,10 +12,7 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes,
-    TransactionSignedEcRecovered, U256,
-};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
@@ -94,8 +91,7 @@ where
             self.block_with_senders(target_block)
         )?;
 
-        let (block, senders) =
-            block.ok_or_else(|| EthApiError::UnknownBlockNumber)?.into_components();
+        let Some(block) = block else { return Err(EthApiError::UnknownBlockNumber) };
         let gas_limit = self.inner.gas_cap;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
@@ -117,17 +113,15 @@ where
             if replay_block_txs {
                 // only need to replay the transactions in the block if not all transactions are
                 // to be replayed
-                let transactions = block.body.into_iter().take(num_txs);
-
-                // Execute all transactions until index
-                for (idx, tx) in transactions.enumerate() {
-                    let tx =
-                        TransactionSignedEcRecovered::from_signed_transaction(tx, senders[idx]);
-                    let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                    let (res, _) = transact(&mut db, env)?;
-                    db.commit(res.state);
-                }
+                let _transactions =
+                    block.into_transactions_ecrecovered().take(num_txs).enumerate().map(
+                        |(_idx, tx)| {
+                            let tx = tx_env_with_recovered(&tx);
+                            let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                            let (res, _) = transact(&mut db, env).unwrap();
+                            db.commit(res.state);
+                        },
+                    );
             }
 
             let block_overrides = block_override.map(Box::new);
