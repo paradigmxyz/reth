@@ -212,7 +212,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         segment: SnapshotSegment,
         block_range: Range<u64>,
         fetch_from_snapshot: impl Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
-        fetch_from_database: impl Fn(Range<u64>, P) -> ProviderResult<Vec<T>>,
+        mut fetch_from_database: impl FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
@@ -275,6 +275,28 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             }
         }
         fetch_from_database()
+    }
+
+    fn transactions_by_tx_range_with_cursor<C>(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+        cursor: &mut C,
+    ) -> ProviderResult<Vec<TransactionSignedNoHash>>
+    where
+        C: DbCursorRO<tables::Transactions>,
+    {
+        self.get_range_with_snapshot(
+            SnapshotSegment::Transactions,
+            to_range(range),
+            |snapshot, range, _| snapshot.transactions_by_tx_range(range),
+            |range, _| {
+                cursor
+                    .walk_range(range)?
+                    .map(|entry| entry.map(|tx| tx.1).map_err(Into::into))
+                    .collect::<ProviderResult<Vec<_>>>()
+            },
+            |_| true,
+        )
     }
 }
 
@@ -1292,6 +1314,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
         let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
 
         for num in range {
             if let Some((_, header)) = headers_cursor.seek_exact(num)? {
@@ -1305,7 +1328,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     let body = if tx_range.is_empty() {
                         Vec::new()
                     } else {
-                        self.transactions_by_tx_range(tx_range)?
+                        self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
                             .into_iter()
                             .map(Into::into)
                             .collect()
@@ -1498,6 +1521,8 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+
         if let Some(block_number) = self.convert_hash_or_number(id)? {
             if let Some(body) = self.block_body_indices(block_number)? {
                 let tx_range = body.tx_num_range();
@@ -1505,7 +1530,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                     Ok(Some(Vec::new()))
                 } else {
                     Ok(Some(
-                        self.transactions_by_tx_range(tx_range)?
+                        self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
                             .into_iter()
                             .map(Into::into)
                             .collect(),
@@ -1520,6 +1545,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
         let mut results = Vec::new();
         let mut body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
         for entry in body_cursor.walk_range(range)? {
@@ -1529,7 +1555,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                 results.push(Vec::new());
             } else {
                 results.push(
-                    self.transactions_by_tx_range(tx_num_range)?
+                    self.transactions_by_tx_range_with_cursor(tx_num_range, || &mut tx_cursor)?
                         .into_iter()
                         .map(Into::into)
                         .collect(),
@@ -1543,19 +1569,9 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
-        // TODO can we reuse cursor? parent functions are usually on a loop.
-        self.get_range_with_snapshot(
-            SnapshotSegment::Transactions,
-            to_range(range),
-            |snapshot, range, _| snapshot.transactions_by_tx_range(range),
-            |range, _| {
-                self.tx
-                    .cursor_read::<tables::Transactions>()?
-                    .walk_range(range)?
-                    .map(|entry| entry.map(|tx| tx.1).map_err(Into::into))
-                    .collect::<ProviderResult<Vec<_>>>()
-            },
-            |_| true,
+        self.transactions_by_tx_range_with_cursor(
+            range,
+            &mut self.tx.cursor_read::<tables::Transactions>()?,
         )
     }
 
