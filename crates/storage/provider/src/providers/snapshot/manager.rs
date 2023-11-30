@@ -1,5 +1,6 @@
 use super::{LoadedJar, SnapshotJarProvider};
 use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
+use core::ops::Bound;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_db::{
@@ -274,8 +275,26 @@ impl HeaderProvider for SnapshotProvider {
             .header_td_by_number(num)
     }
 
-    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        todo!();
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+        let start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(&start) => start,
+            Bound::Excluded(&start) => start + 1,
+        };
+
+        let end = match range.end_bound() {
+            Bound::Unbounded => self.best_block_number()?,
+            Bound::Included(&end) => end,
+            Bound::Excluded(&end) => end - 1,
+        };
+
+        let mut headers = Vec::new();
+        for num in start..=end {
+            if let Some(header) = self.header_by_number(num)? {
+                headers.push(header);
+            }
+        }
+        Ok(headers)
     }
 
     fn sealed_header(&self, num: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
