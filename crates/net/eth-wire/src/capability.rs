@@ -98,6 +98,12 @@ impl Capability {
     pub fn is_eth_v68(&self) -> bool {
         self.name == "eth" && self.version == 68
     }
+
+    /// Whether this is any eth version.
+    #[inline]
+    pub fn is_eth(&self) -> bool {
+        self.is_eth_v66() || self.is_eth_v67() || self.is_eth_v68()
+    }
 }
 
 impl fmt::Display for Capability {

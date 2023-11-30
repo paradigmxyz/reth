@@ -10,8 +10,8 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthVersion, HelloMessageWithProtocols, Status, UnauthedEthStream,
-    UnauthedP2PStream,
+    DisconnectReason, EthVersion, HelloMessageBuilder, HelloMessageWithProtocols, Status,
+    UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::{
@@ -177,6 +177,12 @@ impl SessionManager {
 
     /// Adds an additional protocol handler to the RLPx sub-protocol list.
     pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        let protocol = protocol.into_rlpx_sub_protocol();
+
+        self.hello_message = HelloMessageBuilder::new_from(self.hello_message.clone())
+            .protocol(protocol.protocol())
+            .build();
+
         self.extra_protocols.push(protocol)
     }
 

@@ -4,7 +4,9 @@
 
 use futures::Stream;
 use reth_eth_wire::{
-    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
+    capability::{SharedCapabilities, SharedCapability},
+    multiplex::ProtocolConnection,
+    protocol::Protocol,
 };
 use reth_network_api::Direction;
 use reth_primitives::BytesMut;
@@ -39,12 +41,12 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     /// The connection that yields messages to send to the remote.
     ///
     /// The connection will be closed when this stream resolves.
-    type Connection: Stream<Item = BytesMut> + Send + 'static;
+    type Connection: Stream<Item = BytesMut> + Send + ReadConnectionMeta + 'static;
 
-    /// Returns the protocol to announce when the RLPx connection will be established.
+    /// Returns the protocol to announce when the p2p connection will be established.
     ///
-    /// This will be negotiated with the remote peer.
-    fn protocol(&self) -> Protocol;
+    /// This will be used to negotiate capability message id offsets with the remote peer.
+    fn protocol() -> Protocol;
 
     /// Invoked when the RLPx connection has been established by the peer does not share the
     /// protocol.
@@ -66,6 +68,13 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     ) -> Self::Connection;
 }
 
+/// Read metadata about the connection that is useful for processing its messages.
+pub trait ReadConnectionMeta {
+    /// Returns the message id offset of this protocol as negotiated with the peer upon
+    /// establishment of the underlying p2p connection.
+    fn shared_capability(&self) -> SharedCapability;
+}
+
 /// What to do when a protocol is not supported by the remote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OnNotSupported {
@@ -79,6 +88,13 @@ pub enum OnNotSupported {
 /// A wrapper type for a RLPx sub-protocol.
 #[derive(Debug)]
 pub struct RlpxSubProtocol(Box<dyn DynProtocolHandler>);
+
+impl RlpxSubProtocol {
+    /// The handled protocol.
+    pub fn protocol(&self) -> Protocol {
+        self.0.protocol()
+    }
+}
 
 /// A helper trait to convert a [ProtocolHandler] into a dynamic type
 pub trait IntoRlpxSubProtocol {
@@ -116,6 +132,8 @@ impl RlpxSubProtocols {
 }
 
 pub(crate) trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
+    fn protocol(&self) -> Protocol;
+
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>>;
 
     fn on_outgoing(
@@ -129,6 +147,10 @@ impl<T> DynProtocolHandler for T
 where
     T: ProtocolHandler,
 {
+    fn protocol(&self) -> Protocol {
+        <<T as ProtocolHandler>::ConnectionHandler as ConnectionHandler>::protocol()
+    }
+
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>> {
         T::on_incoming(self, socket_addr)
             .map(|handler| Box::new(handler) as Box<dyn DynConnectionHandler>)
@@ -168,7 +190,7 @@ where
     T: ConnectionHandler,
 {
     fn protocol(&self) -> Protocol {
-        T::protocol(self)
+        T::protocol()
     }
 
     fn on_unsupported_by_peer(

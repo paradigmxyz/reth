@@ -135,6 +135,22 @@ impl HelloMessageBuilder {
         Self { protocol_version: None, client_version: None, protocols: None, port: None, id }
     }
 
+    /// Create a new builder to configure a [`HelloMessage`] from an existing instance and a
+    /// callback to retrieve the [`Protocol`] type for user defined capabilities, which contains
+    /// the number of messages.
+    pub fn new_from(hello_message: HelloMessageWithProtocols) -> Self {
+        let HelloMessageWithProtocols { protocol_version, client_version, protocols, port, id } =
+            hello_message;
+
+        Self {
+            protocol_version: Some(protocol_version),
+            client_version: Some(client_version),
+            protocols: Some(protocols),
+            port: Some(port),
+            id,
+        }
+    }
+
     /// Sets the port the client is listening on
     pub fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
