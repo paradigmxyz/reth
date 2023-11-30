@@ -1,17 +1,23 @@
 use super::{LoadedJar, SnapshotJarProvider};
-use crate::{to_range, BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
+use crate::{
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
+    ReceiptProvider, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    WithdrawalsProvider,
+};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
+    models::StoredBlockBodyIndices,
     snapshot::{HeaderMask, SnapshotCursor, TransactionMask},
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::HighestSnapshots, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo,
-    Header, SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    snapshot::HighestSnapshots, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
+    BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use revm::primitives::HashMap;
 use std::{
@@ -399,6 +405,94 @@ impl BlockNumReader for SnapshotProvider {
 
     fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
         todo!()
+    }
+}
+
+impl ReceiptProvider for SnapshotProvider {
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
+        todo!()
+    }
+
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+        todo!()
+    }
+
+    fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+        todo!()
+    }
+}
+
+impl BlockReader for SnapshotProvider {
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
+        todo!()
+    }
+
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+        todo!()
+    }
+
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+        todo!()
+    }
+
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        todo!()
+    }
+
+    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+        todo!()
+    }
+
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+        todo!()
+    }
+
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        todo!()
+    }
+
+    fn block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<BlockWithSenders>> {
+        todo!()
+    }
+
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+        todo!()
+    }
+}
+
+impl WithdrawalsProvider for SnapshotProvider {
+    fn withdrawals_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+        todo!()
+    }
+
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+        todo!()
+    }
+}
+
+impl TransactionsProviderExt for SnapshotProvider {
+    fn transaction_hashes_by_range(
+        &self,
+        tx_range: Range<TxNumber>,
+    ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
+        self.fetch_range(
+            SnapshotSegment::Transactions,
+            tx_range,
+            |cursor, number| {
+                let tx =
+                    cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?;
+                Ok(tx.map(|tx| (tx.hash(), cursor.number())))
+            },
+            |_| true,
+        )
     }
 }
 
