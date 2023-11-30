@@ -1,13 +1,13 @@
 use crate::Bytes;
-use alloy_rlp::RlpEncodableWrapper;
-use arrayvec::ArrayVec;
 use bytes::Buf;
 use derive_more::{Deref, From, Index};
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::{
     borrow::Borrow,
     fmt,
+    mem::MaybeUninit,
     ops::{Bound, RangeBounds},
 };
 
@@ -54,7 +54,7 @@ impl Compact for StoredNibblesSubKey {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let len = buf[64] as usize;
-        (Self(Nibbles::new_unchecked(buf[..len].to_vec())), &buf[65..])
+        (Self(Nibbles::new_unchecked(&buf[..len])), &buf[65..])
     }
 }
 
@@ -76,14 +76,26 @@ impl Compact for StoredNibblesSubKey {
     PartialOrd,
     Ord,
     Hash,
-    RlpEncodableWrapper,
     Index,
     From,
     Deref,
     serde::Serialize,
     serde::Deserialize,
 )]
-pub struct Nibbles(ArrayVec<u8, 64>);
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+pub struct Nibbles(SmallVec<[u8; 64]>);
+
+impl alloy_rlp::Encodable for Nibbles {
+    #[inline]
+    fn length(&self) -> usize {
+        alloy_rlp::Encodable::length(self.as_slice())
+    }
+
+    #[inline]
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        alloy_rlp::Encodable::encode(self.as_slice(), out)
+    }
+}
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for Nibbles {
@@ -96,7 +108,7 @@ impl proptest::arbitrary::Arbitrary for Nibbles {
     #[inline]
     fn arbitrary_with((): ()) -> Self::Strategy {
         use proptest::prelude::*;
-        proptest::collection::vec(0x0..=0xf, 0..64).prop_map(|v| Self::new_unchecked(v))
+        proptest::collection::vec(0x0..=0xf, 0..64).prop_map(Self::new_unchecked)
     }
 }
 
@@ -124,7 +136,7 @@ impl fmt::Debug for Nibbles {
 impl From<Vec<u8>> for Nibbles {
     #[inline]
     fn from(value: Vec<u8>) -> Self {
-        Self::new_unchecked(value)
+        Self(SmallVec::from_vec(value))
     }
 }
 
@@ -181,19 +193,58 @@ impl Nibbles {
     /// Creates a new [`Nibbles`] instance from nibble bytes, without checking their validity.
     #[inline]
     pub fn new_unchecked<T: AsRef<[u8]>>(nibbles: T) -> Self {
-        Self(ArrayVec::from_iter(nibbles.as_ref().iter().copied()))
+        Self(SmallVec::from_slice(nibbles.as_ref()))
     }
 
     /// Converts a byte slice into a [`Nibbles`] instance containing the nibbles (half-bytes or 4
     /// bits) that make up the input byte data.
+    #[inline]
     pub fn unpack<T: AsRef<[u8]>>(data: T) -> Self {
         let data = data.as_ref();
-        let mut nibbles = Vec::with_capacity(data.len() * 2);
-        for &byte in data {
-            nibbles.push(byte >> 4);
-            nibbles.push(byte & 0x0f);
+        if data.len() <= 32 {
+            // SAFETY: checked length.
+            unsafe { Self::unpack_stack(data) }
+        } else {
+            Self::unpack_heap(data)
         }
-        Self::new_unchecked(nibbles)
+    }
+
+    /// Unpacks on the stack.
+    ///
+    /// # Safety
+    ///
+    /// `data.len()` must be less than or equal to 32.
+    unsafe fn unpack_stack(data: &[u8]) -> Self {
+        let mut nibbles = MaybeUninit::<[u8; 64]>::uninit();
+        Self::unpack_to(data, nibbles.as_mut_ptr().cast());
+        let unpacked_len = data.len() * 2;
+        Self(SmallVec::from_buf_and_len_unchecked(nibbles, unpacked_len))
+    }
+
+    /// Unpacks on the heap.
+    fn unpack_heap(data: &[u8]) -> Self {
+        // Collect into a vec directly to avoid the smallvec overhead since we know this is going on
+        // the heap.
+        let unpacked_len = data.len() * 2;
+        let mut nibbles = Vec::with_capacity(unpacked_len);
+        // SAFETY: enough capacity.
+        unsafe { Self::unpack_to(data, nibbles.as_mut_ptr()) };
+        // SAFETY: within capacity and `unpack_to` initialized the memory.
+        unsafe { nibbles.set_len(unpacked_len) };
+        Self(SmallVec::from_vec(nibbles))
+    }
+
+    /// Unpacks into the given pointer.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be valid for at least `data.len() * 2` bytes.
+    #[inline]
+    unsafe fn unpack_to(data: &[u8], ptr: *mut u8) {
+        for (i, &byte) in data.iter().enumerate() {
+            ptr.add(i * 2).write(byte >> 4);
+            ptr.add(i * 2 + 1).write(byte & 0x0f);
+        }
     }
 
     /// Packs the nibbles stored in the struct into a byte vector.
@@ -202,15 +253,80 @@ impl Nibbles {
     /// effectively reducing the size of the data by a factor of two.
     /// If the number of nibbles is odd, the last nibble is shifted left by 4 bits and
     /// added to the packed byte vector.
-    pub fn pack(&self) -> Vec<u8> {
-        let packed_len = (self.len() + 1) / 2;
-        let mut v = Vec::with_capacity(packed_len);
-        for i in 0..packed_len {
-            let hi = *unsafe { self.get_unchecked(i * 2) };
-            let lo = self.get(i * 2 + 1).copied().unwrap_or(0);
-            v.push((hi << 4) | lo);
+    #[inline]
+    pub fn pack(&self) -> SmallVec<[u8; 32]> {
+        let is_odd = self.len() % 2 != 0;
+        // SAFETY: checked length and `is_odd` is correct.
+        unsafe {
+            if self.len() <= 64 {
+                if is_odd {
+                    self.pack_stack::<true>()
+                } else {
+                    self.pack_stack::<false>()
+                }
+            } else {
+                if is_odd {
+                    self.pack_heap::<true>()
+                } else {
+                    self.pack_heap::<false>()
+                }
+            }
         }
-        v
+    }
+
+    /// Packs on the stack.
+    ///
+    /// # Safety
+    ///
+    /// `self.len()` must be less than or equal to 32.
+    unsafe fn pack_stack<const IS_ODD: bool>(&self) -> SmallVec<[u8; 32]> {
+        let mut nibbles = MaybeUninit::<[u8; 32]>::uninit();
+        self.pack_to::<IS_ODD>(nibbles.as_mut_ptr().cast());
+        let packed_len = (self.len() + 1) / 2;
+        SmallVec::from_buf_and_len_unchecked(nibbles, packed_len)
+    }
+
+    /// Packs on the heap.
+    ///
+    /// # Safety
+    ///
+    /// `IS_ODD` must be `self.len() % 2 != 0`.
+    unsafe fn pack_heap<const IS_ODD: bool>(&self) -> SmallVec<[u8; 32]> {
+        // Collect into a vec directly to avoid the smallvec overhead since we know this is going on
+        // the heap.
+        let packed_len = self.len() / 2;
+        let mut vec = Vec::with_capacity(packed_len);
+        self.pack_to::<IS_ODD>(vec.as_mut_ptr());
+        vec.set_len(packed_len);
+        SmallVec::from_vec(vec)
+    }
+
+    /// Packs into the given pointer.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be valid for at least `self.len() / 2 + IS_ODD` bytes.
+    #[inline]
+    unsafe fn pack_to<const IS_ODD: bool>(&self, ptr: *mut u8) {
+        for i in 0..self.len() / 2 {
+            ptr.add(i).write(self.get_byte_unchecked(i * 2));
+        }
+        if IS_ODD {
+            let i = self.len() / 2;
+            ptr.add(i).write(self.last().unwrap() << 4);
+        }
+    }
+
+    /// Gets the byte at the given index by combining two consecutive nibbles.
+    ///
+    /// # Safety
+    ///
+    /// `i..i + 1` must be in range.
+    #[inline]
+    unsafe fn get_byte_unchecked(&self, i: usize) -> u8 {
+        let hi = *self.get_unchecked(i);
+        let lo = *self.get_unchecked(i + 1);
+        (hi << 4) | lo
     }
 
     /// Encodes a given path leaf as a compact array of bytes, where each byte represents two
@@ -381,7 +497,7 @@ impl Nibbles {
     /// Extend the current nibbles with another nibbles.
     #[inline]
     pub fn extend(&mut self, b: impl AsRef<[u8]>) {
-        self.0.try_extend_from_slice(b.as_ref()).unwrap();
+        self.0.extend_from_slice(b.as_ref());
     }
 
     /// Truncates the current nibbles to the given length.
@@ -414,16 +530,16 @@ mod tests {
     #[test]
     fn pack_nibbles() {
         for (input, expected) in [
-            (vec![], vec![]),
-            (vec![0xa], vec![0xa0]),
-            (vec![0xa, 0xb], vec![0xab]),
-            (vec![0xa, 0xb, 0x2], vec![0xab, 0x20]),
-            (vec![0xa, 0xb, 0x2, 0x0], vec![0xab, 0x20]),
-            (vec![0xa, 0xb, 0x2, 0x7], vec![0xab, 0x27]),
+            (&[][..], &[][..]),
+            (&[0xa], &[0xa0]),
+            (&[0xa, 0xb], &[0xab]),
+            (&[0xa, 0xb, 0x2], &[0xab, 0x20]),
+            (&[0xa, 0xb, 0x2, 0x0], &[0xab, 0x20]),
+            (&[0xa, 0xb, 0x2, 0x7], &[0xab, 0x27]),
         ] {
             let nibbles = Nibbles::new_unchecked(input);
             let encoded = nibbles.pack();
-            assert_eq!(encoded, expected);
+            assert_eq!(&encoded[..], expected);
         }
     }
 
@@ -432,7 +548,7 @@ mod tests {
         fn pack_unpack_roundtrip(input in any::<Vec<u8>>()) {
             let nibbles = Nibbles::unpack(&input);
             let packed = nibbles.pack();
-            prop_assert_eq!(packed, input);
+            prop_assert_eq!(&packed[..], input);
         }
 
         #[test]

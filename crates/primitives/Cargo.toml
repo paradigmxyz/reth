@@ -33,7 +33,7 @@ crc = "3"
 tracing.workspace = true
 
 # misc
-arrayvec = { version = "0.7", features = ["serde"] }
+smallvec = { version = "1.11", features = ["arbitrary", "serde", "union", "const_generics"] }
 bytes.workspace = true
 byteorder = "1"
 clap = { workspace = true, features = ["derive"], optional = true }
