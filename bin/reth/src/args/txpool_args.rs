@@ -65,6 +65,10 @@ impl TxPoolArgs {
                 max_txs: self.queued_max_count,
                 max_size: self.queued_max_size * 1024 * 1024,
             },
+            blob_limit: SubPoolLimit {
+                max_txs: self.queued_max_count,
+                max_size: self.queued_max_size * 1024 * 1024,
+            },
             max_account_slots: self.max_account_slots,
             price_bumps: PriceBumpConfig {
                 default_price_bump: self.price_bump,
