@@ -1,5 +1,6 @@
 use super::{super::Nibbles, rlp_node};
 use alloy_rlp::{BufMut, Encodable};
+use smallvec::SmallVec;
 
 /// A leaf node represents the endpoint or terminal node in the trie. In other words, a leaf node is
 /// where actual values are stored.
@@ -11,8 +12,8 @@ use alloy_rlp::{BufMut, Encodable};
 #[derive(Default)]
 pub struct LeafNode<'a> {
     /// The key path.
-    pub key: Vec<u8>,
-    /// value: SmallVec<[u8; 36]>
+    pub key: SmallVec<[u8; 36]>,
+    /// The node value.
     pub value: &'a [u8],
 }
 

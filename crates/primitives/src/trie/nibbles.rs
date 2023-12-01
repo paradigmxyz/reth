@@ -344,7 +344,6 @@ impl Nibbles {
     /// `i..i + 1` must be in range.
     #[inline]
     unsafe fn get_byte_unchecked(&self, i: usize) -> u8 {
-        debug_assert!(i % 2 == 0, "index {i} is not a multiple of 2");
         debug_assert!(i + 1 < self.len(), "index {i}..{} out of bounds of {}", i + 1, self.len());
         let hi = *self.get_unchecked(i);
         let lo = *self.get_unchecked(i + 1);
@@ -394,25 +393,38 @@ impl Nibbles {
     /// let nibbles = Nibbles::from_nibbles_unchecked(&[0x0A, 0x0B, 0x0C]);
     /// assert_eq!(nibbles.encode_path_leaf(true)[..], [0x3A, 0xBC]);
     /// ```
-    pub fn encode_path_leaf(&self, is_leaf: bool) -> Vec<u8> {
-        let mut encoded = vec![0u8; self.len() / 2 + 1];
-        let odd_nibbles = self.len() % 2 != 0;
+    pub fn encode_path_leaf(&self, is_leaf: bool) -> SmallVec<[u8; 36]> {
+        let encoded_len = self.len() / 2 + 1;
+        let mut encoded = SmallVec::with_capacity(encoded_len);
+        // SAFETY: enough capacity.
+        unsafe { self.encode_path_leaf_to(is_leaf, encoded.as_mut_ptr()) };
+        // SAFETY: within capacity and `encode_path_leaf_to` initialized the memory.
+        unsafe { encoded.set_len(encoded_len) };
+        encoded
+    }
 
-        // Set the first byte of the encoded vector.
-        encoded[0] = match (is_leaf, odd_nibbles) {
+    /// # Safety
+    ///
+    /// `ptr` must be valid for at least `self.len() / 2 + 1` bytes.
+    #[inline]
+    unsafe fn encode_path_leaf_to(&self, is_leaf: bool, ptr: *mut u8) {
+        let odd_nibbles = self.len() % 2 != 0;
+        *ptr = self.encode_path_leaf_first_byte(is_leaf, odd_nibbles);
+        let mut nibble_idx = if odd_nibbles { 1 } else { 0 };
+        for i in 0..self.len() / 2 {
+            ptr.add(i + 1).write(self.get_byte_unchecked(nibble_idx));
+            nibble_idx += 2;
+        }
+    }
+
+    #[inline]
+    fn encode_path_leaf_first_byte(&self, is_leaf: bool, odd_nibbles: bool) -> u8 {
+        match (is_leaf, odd_nibbles) {
             (true, true) => 0x30 | self[0],
             (true, false) => 0x20,
             (false, true) => 0x10 | self[0],
             (false, false) => 0x00,
-        };
-
-        let mut nibble_idx = if odd_nibbles { 1 } else { 0 };
-        for byte in encoded.iter_mut().skip(1) {
-            *byte = (self[nibble_idx] << 4) + self[nibble_idx + 1];
-            nibble_idx += 2;
         }
-
-        encoded
     }
 
     /// Increments the nibble sequence by one.
@@ -454,6 +466,12 @@ impl Nibbles {
     #[track_caller]
     pub fn at(&self, i: usize) -> usize {
         self[i] as usize
+    }
+
+    /// Returns the first nibble of the current nibble sequence.
+    #[inline]
+    pub fn first(&self) -> Option<u8> {
+        self.0.first().copied()
     }
 
     /// Returns the last nibble of the current nibble sequence.
@@ -620,7 +638,7 @@ mod tests {
             assert_ne!(leaf_flag & 0x20, 0);
             assert_eq!(input_is_odd, (leaf_flag & 0x10) != 0);
             if input_is_odd {
-                assert_eq!(leaf_flag & 0x0f, *input.first().unwrap());
+                assert_eq!(leaf_flag & 0x0f, input.first().unwrap());
             }
 
 
@@ -630,7 +648,7 @@ mod tests {
             assert_eq!(extension_flag & 0x20, 0);
             assert_eq!(input_is_odd, (extension_flag & 0x10) != 0);
             if input_is_odd {
-                assert_eq!(extension_flag & 0x0f, *input.first().unwrap());
+                assert_eq!(extension_flag & 0x0f, input.first().unwrap());
             }
         }
     }

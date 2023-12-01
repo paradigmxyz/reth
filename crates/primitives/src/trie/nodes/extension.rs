@@ -1,5 +1,6 @@
 use super::{super::Nibbles, rlp_node};
 use alloy_rlp::{BufMut, Encodable};
+use smallvec::SmallVec;
 
 /// An intermediate node that exists solely to compress the trie's paths. It contains a path segment
 /// (a shared prefix of keys) and a single child pointer. Essentially, an extension node can be
@@ -10,7 +11,7 @@ use alloy_rlp::{BufMut, Encodable};
 /// complexity when performing operations on the trie.
 pub struct ExtensionNode<'a> {
     /// A common prefix for keys.
-    pub prefix: Vec<u8>,
+    pub prefix: SmallVec<[u8; 36]>,
     /// A pointer to the child.
     pub node: &'a [u8],
 }
