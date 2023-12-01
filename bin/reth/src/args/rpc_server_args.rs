@@ -459,6 +459,41 @@ impl RethRpcConfig for RpcServerArgs {
     }
 }
 
+impl Default for RpcServerArgs {
+    fn default() -> Self {
+        Self {
+            http: true,
+            http_addr: Ipv4Addr::LOCALHOST.into(),
+            http_port: constants::DEFAULT_HTTP_RPC_PORT,
+            http_api: None,
+            http_corsdomain: None,
+            ws: false,
+            ws_addr: Ipv4Addr::LOCALHOST.into(),
+            ws_port: constants::DEFAULT_WS_RPC_PORT,
+            ws_allowed_origins: None,
+            ws_api: None,
+            ipcdisable: false,
+            ipcpath: constants::DEFAULT_IPC_ENDPOINT.to_string(),
+            auth_addr: Ipv4Addr::LOCALHOST.into(),
+            auth_port: constants::DEFAULT_AUTH_PORT,
+            auth_jwtsecret: None,
+            rpc_jwtsecret: None,
+            rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
+            rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
+            rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
+            rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS.into(),
+            rpc_max_tracing_requests: constants::DEFAULT_MAX_TRACING_REQUESTS,
+            rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
+            rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
+            rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
+            gas_price_oracle: GasPriceOracleArgs::default(),
+            block_cache_len: DEFAULT_BLOCK_CACHE_MAX_LEN,
+            receipt_cache_len: DEFAULT_RECEIPT_CACHE_MAX_LEN,
+            env_cache_len: DEFAULT_ENV_CACHE_MAX_LEN,
+        }
+    }
+}
+
 /// clap value parser for [RpcModuleSelection].
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
