@@ -1,22 +1,87 @@
 //! Support for customizing the node
 use crate::{
     args::{
+        get_secret_key,
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-        RpcServerArgs, TxPoolArgs, get_secret_key,
+        RpcServerArgs, TxPoolArgs,
     },
-    cli::{RethCliExt, components::RethNodeComponentsImpl},
-    version::SHORT_VERSION, init::init_genesis,
+    cli::{
+        components::RethNodeComponentsImpl,
+        config::RethRpcConfig,
+        ext::{RethCliExt, RethNodeCommandConfig},
+    },
+    dirs::{ChainPath, DataDirPath},
+    init::init_genesis,
+    node::cl_events::ConsensusLayerHealthEvents,
+    prometheus_exporter,
+    utils::get_single_header,
+    version::SHORT_VERSION,
+    node::events,
 };
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-use tokio::sync::{mpsc::unbounded_channel, oneshot};
+use eyre::Context;
 use fdlimit::raise_fd_limit;
-use reth_db::init_db;
-use reth_network::NetworkManager;
-use reth_provider::ProviderFactory;
-use tracing::{info, debug};
-use reth_primitives::{
-    ChainSpec, DisplayHardforks,
+use futures::{future::Either, stream, stream_select, StreamExt};
+use metrics_exporter_prometheus::PrometheusHandle;
+use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
+use reth_beacon_consensus::{
+    hooks::{EngineHooks, PruneHook},
+    BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
+use reth_blockchain_tree::{
+    config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
+};
+use reth_config::{config::PruneConfig, Config};
+use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_downloaders::{
+    bodies::bodies::BodiesDownloaderBuilder,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+};
+use reth_interfaces::{
+    consensus::Consensus,
+    p2p::{
+        bodies::{client::BodiesClient, downloader::BodyDownloader},
+        either::EitherDownloader,
+        headers::{client::HeadersClient, downloader::HeaderDownloader},
+    },
+    RethResult,
+};
+use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager};
+use reth_network_api::{NetworkInfo, PeersInfo};
+use reth_primitives::{
+    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
+    kzg::KzgSettings,
+    stage::StageId,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
+};
+use reth_provider::{
+    providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
+    HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
+};
+use reth_prune::{segments::SegmentSet, Pruner};
+use reth_revm::EvmProcessorFactory;
+use reth_revm_inspectors::stack::Hook;
+use reth_rpc_engine_api::EngineApi;
+use reth_snapshot::HighestSnapshotsTracker;
+use reth_stages::{
+    prelude::*,
+    stages::{
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TotalDifficultyStage, TransactionLookupStage,
+    },
+};
+use reth_tasks::TaskExecutor;
+use reth_transaction_pool::{
+    blobstore::InMemoryBlobStore, TransactionPool, TransactionValidationTaskExecutor,
+};
+use secp256k1::SecretKey;
+use std::{
+    net::{SocketAddr, SocketAddrV4},
+    path::PathBuf,
+    sync::Arc,
+};
+use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
+use tracing::*;
 
 
 /// Start the node
@@ -93,7 +158,7 @@ pub struct NodeConfig {
 
 impl NodeConfig {
     /// Launches the node, also adding any RPC extensions passed.
-    pub async fn launch<E: RethCliExt>(self, ext: E::Node) -> NodeHandle {
+    pub async fn launch<E: RethCliExt>(self, ext: E::Node) -> eyre::Result<NodeHandle> {
         // TODO: add easy way to handle auto seal, etc, without introducing generics
         // TODO: do we need ctx: CliContext here?
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
@@ -224,7 +289,7 @@ impl NodeConfig {
         };
 
         // allow network modifications
-        self.ext.configure_network(network_builder.network_mut(), &components)?;
+        ext.configure_network(network_builder.network_mut(), &components)?;
 
         // launch network
         let network = self.start_network(
@@ -239,10 +304,10 @@ impl NodeConfig {
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
         let network_client = network.fetch_client().await?;
 
-        self.ext.on_components_initialized(&components)?;
+        ext.on_components_initialized(&components)?;
 
         debug!(target: "reth::cli", "Spawning payload builder service");
-        let payload_builder = self.ext.spawn_payload_builder_service(&self.builder, &components)?;
+        let payload_builder = ext.spawn_payload_builder_service(&self.builder, &components)?;
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
         let max_block = if let Some(block) = self.debug.max_block {
@@ -404,7 +469,7 @@ impl NodeConfig {
 
         // Start RPC servers
         let _rpc_server_handles =
-            self.rpc.start_servers(&components, engine_api, jwt_secret, &mut self.ext).await?;
+            self.rpc.start_servers(&components, engine_api, jwt_secret, &mut ext).await?;
 
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
@@ -414,7 +479,7 @@ impl NodeConfig {
             let _ = tx.send(res);
         });
 
-        self.ext.on_node_started(&components)?;
+        ext.on_node_started(&components)?;
 
         // If `enable_genesis_walkback` is set to true, the rollup client will need to
         // perform the derivation pipeline from genesis, validating the data dir.
@@ -540,6 +605,448 @@ impl NodeConfig {
     pub fn rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
         self.rollup = rollup;
         self
+    }
+
+    /// Returns the [Consensus] instance to use.
+    ///
+    /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
+    /// will be an [AutoSealConsensus] instance.
+    pub fn consensus(&self) -> Arc<dyn Consensus> {
+        if self.dev.dev {
+            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
+        } else {
+            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
+        }
+    }
+
+    /// Constructs a [Pipeline] that's wired to the network
+    #[allow(clippy::too_many_arguments)]
+    async fn build_networked_pipeline<DB, Client>(
+        &self,
+        config: &Config,
+        client: Client,
+        consensus: Arc<dyn Consensus>,
+        provider_factory: ProviderFactory<DB>,
+        task_executor: &TaskExecutor,
+        metrics_tx: reth_stages::MetricEventsSender,
+        prune_config: Option<PruneConfig>,
+        max_block: Option<BlockNumber>,
+    ) -> eyre::Result<Pipeline<DB>>
+    where
+        DB: Database + Unpin + Clone + 'static,
+        Client: HeadersClient + BodiesClient + Clone + 'static,
+    {
+        // building network downloaders using the fetch client
+        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
+            .build(client.clone(), Arc::clone(&consensus))
+            .into_task_with(task_executor);
+
+        let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
+            .build(client, Arc::clone(&consensus), provider_factory.clone())
+            .into_task_with(task_executor);
+
+        let pipeline = self
+            .build_pipeline(
+                provider_factory,
+                config,
+                header_downloader,
+                body_downloader,
+                consensus,
+                max_block,
+                self.debug.continuous,
+                metrics_tx,
+                prune_config,
+            )
+            .await?;
+
+        Ok(pipeline)
+    }
+
+    /// Returns the chain specific path to the data dir.
+    fn data_dir(&self) -> ChainPath<DataDirPath> {
+        self.datadir.unwrap_or_chain_default(self.chain.chain)
+    }
+
+    /// Returns the path to the config file.
+    fn config_path(&self) -> PathBuf {
+        self.config.clone().unwrap_or_else(|| self.data_dir().config_path())
+    }
+
+    /// Loads the reth config with the given datadir root
+    fn load_config(&self) -> eyre::Result<Config> {
+        let config_path = self.config_path();
+        let mut config = confy::load_path::<Config>(&config_path)
+            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
+
+        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+
+        // Update the config with the command line arguments
+        config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+
+        if !self.network.trusted_peers.is_empty() {
+            info!(target: "reth::cli", "Adding trusted nodes");
+            self.network.trusted_peers.iter().for_each(|peer| {
+                config.peers.trusted_nodes.insert(*peer);
+            });
+        }
+
+        Ok(config)
+    }
+
+    /// Loads the trusted setup params from a given file path or falls back to
+    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
+        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
+            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
+                .map_err(LoadKzgSettingsError::KzgError)?;
+            Ok(Arc::new(trusted_setup))
+        } else {
+            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+        }
+    }
+
+    fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
+        prometheus_exporter::install_recorder()
+    }
+
+    async fn start_metrics_endpoint(
+        &self,
+        prometheus_handle: PrometheusHandle,
+        db: Arc<DatabaseEnv>,
+    ) -> eyre::Result<()> {
+        if let Some(listen_addr) = self.metrics {
+            info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
+            prometheus_exporter::serve(
+                listen_addr,
+                prometheus_handle,
+                db,
+                metrics_process::Collector::default(),
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
+    /// to that network.
+    fn start_network<C, Pool>(
+        &self,
+        builder: NetworkBuilder<C, (), ()>,
+        task_executor: &TaskExecutor,
+        pool: Pool,
+        client: C,
+        default_peers_path: PathBuf,
+    ) -> NetworkHandle
+    where
+        C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
+        Pool: TransactionPool + Unpin + 'static,
+    {
+        let (handle, network, txpool, eth) =
+            builder.transactions(pool).request_handler(client).split_with_handle();
+
+        task_executor.spawn_critical("p2p txpool", txpool);
+        task_executor.spawn_critical("p2p eth request handler", eth);
+
+        let known_peers_file = self.network.persistent_peers_file(default_peers_path);
+        task_executor
+            .spawn_critical_with_graceful_shutdown_signal("p2p network task", |shutdown| {
+                run_network_until_shutdown(shutdown, network, known_peers_file)
+            });
+
+        handle
+    }
+
+    /// Fetches the head block from the database.
+    ///
+    /// If the database is empty, returns the genesis block.
+    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> RethResult<Head> {
+        let factory = ProviderFactory::new(db, self.chain.clone());
+        let provider = factory.provider()?;
+
+        let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
+
+        let header = provider
+            .header_by_number(head)?
+            .expect("the header for the latest block is missing, database is corrupt");
+
+        let total_difficulty = provider
+            .header_td_by_number(head)?
+            .expect("the total difficulty for the latest block is missing, database is corrupt");
+
+        let hash = provider
+            .block_hash(head)?
+            .expect("the hash for the latest block is missing, database is corrupt");
+
+        Ok(Head {
+            number: head,
+            hash,
+            difficulty: header.difficulty,
+            total_difficulty,
+            timestamp: header.timestamp,
+        })
+    }
+
+    /// Attempt to look up the block number for the tip hash in the database.
+    /// If it doesn't exist, download the header and return the block number.
+    ///
+    /// NOTE: The download is attempted with infinite retries.
+    async fn lookup_or_fetch_tip<DB, Client>(
+        &self,
+        db: DB,
+        client: Client,
+        tip: B256,
+    ) -> RethResult<u64>
+    where
+        DB: Database,
+        Client: HeadersClient,
+    {
+        Ok(self.fetch_tip(db, client, BlockHashOrNumber::Hash(tip)).await?.number)
+    }
+
+    /// Attempt to look up the block with the given number and return the header.
+    ///
+    /// NOTE: The download is attempted with infinite retries.
+    async fn fetch_tip<DB, Client>(
+        &self,
+        db: DB,
+        client: Client,
+        tip: BlockHashOrNumber,
+    ) -> RethResult<SealedHeader>
+    where
+        DB: Database,
+        Client: HeadersClient,
+    {
+        let factory = ProviderFactory::new(db, self.chain.clone());
+        let provider = factory.provider()?;
+
+        let header = provider.header_by_hash_or_number(tip)?;
+
+        // try to look up the header in the database
+        if let Some(header) = header {
+            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
+            return Ok(header.seal_slow())
+        }
+
+        info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
+        loop {
+            match get_single_header(&client, tip).await {
+                Ok(tip_header) => {
+                    info!(target: "reth::cli", ?tip, "Successfully fetched tip");
+                    return Ok(tip_header)
+                }
+                Err(error) => {
+                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
+                }
+            }
+        }
+    }
+
+    fn load_network_config(
+        &self,
+        config: &Config,
+        db: Arc<DatabaseEnv>,
+        executor: TaskExecutor,
+        head: Head,
+        secret_key: SecretKey,
+        default_peers_path: PathBuf,
+    ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
+        let cfg_builder = self
+            .network
+            .network_config(config, self.chain.clone(), secret_key, default_peers_path)
+            .with_task_executor(Box::new(executor))
+            .set_head(head)
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
+                self.network.addr,
+                // set discovery port based on instance number
+                self.network.port + self.instance - 1,
+            )))
+            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
+                self.network.addr,
+                // set discovery port based on instance number
+                self.network.port + self.instance - 1,
+            )));
+
+        // When `sequencer_endpoint` is configured, the node will forward all transactions to a
+        // Sequencer node for execution and inclusion on L1, and disable its own txpool
+        // gossip to prevent other parties in the network from learning about them.
+        #[cfg(feature = "optimism")]
+        let cfg_builder = cfg_builder
+            .sequencer_endpoint(self.rollup.sequencer_http.clone())
+            .disable_tx_gossip(self.rollup.disable_txpool_gossip);
+
+        cfg_builder.build(ProviderFactory::new(db, self.chain.clone()))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn build_pipeline<DB, H, B>(
+        &self,
+        provider_factory: ProviderFactory<DB>,
+        config: &Config,
+        header_downloader: H,
+        body_downloader: B,
+        consensus: Arc<dyn Consensus>,
+        max_block: Option<u64>,
+        continuous: bool,
+        metrics_tx: reth_stages::MetricEventsSender,
+        prune_config: Option<PruneConfig>,
+    ) -> eyre::Result<Pipeline<DB>>
+    where
+        DB: Database + Clone + 'static,
+        H: HeaderDownloader + 'static,
+        B: BodyDownloader + 'static,
+    {
+        let stage_config = &config.stages;
+
+        let mut builder = Pipeline::builder();
+
+        if let Some(max_block) = max_block {
+            debug!(target: "reth::cli", max_block, "Configuring builder to use max block");
+            builder = builder.with_max_block(max_block)
+        }
+
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
+        use reth_revm_inspectors::stack::InspectorStackConfig;
+        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
+
+        let stack_config = InspectorStackConfig {
+            use_printer_tracer: self.debug.print_inspector,
+            hook: if let Some(hook_block) = self.debug.hook_block {
+                Hook::Block(hook_block)
+            } else if let Some(tx) = self.debug.hook_transaction {
+                Hook::Transaction(tx)
+            } else if self.debug.hook_all {
+                Hook::All
+            } else {
+                Hook::None
+            },
+        };
+
+        let factory = factory.with_stack_config(stack_config);
+
+        let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
+
+        let header_mode =
+            if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
+        let pipeline = builder
+            .with_tip_sender(tip_tx)
+            .with_metrics_tx(metrics_tx.clone())
+            .add_stages(
+                DefaultStages::new(
+                    provider_factory.clone(),
+                    header_mode,
+                    Arc::clone(&consensus),
+                    header_downloader,
+                    body_downloader,
+                    factory.clone(),
+                )
+                .set(
+                    TotalDifficultyStage::new(consensus)
+                        .with_commit_threshold(stage_config.total_difficulty.commit_threshold),
+                )
+                .set(SenderRecoveryStage {
+                    commit_threshold: stage_config.sender_recovery.commit_threshold,
+                })
+                .set(
+                    ExecutionStage::new(
+                        factory,
+                        ExecutionStageThresholds {
+                            max_blocks: stage_config.execution.max_blocks,
+                            max_changes: stage_config.execution.max_changes,
+                            max_cumulative_gas: stage_config.execution.max_cumulative_gas,
+                        },
+                        stage_config
+                            .merkle
+                            .clean_threshold
+                            .max(stage_config.account_hashing.clean_threshold)
+                            .max(stage_config.storage_hashing.clean_threshold),
+                        prune_modes.clone(),
+                    )
+                    .with_metrics_tx(metrics_tx),
+                )
+                .set(AccountHashingStage::new(
+                    stage_config.account_hashing.clean_threshold,
+                    stage_config.account_hashing.commit_threshold,
+                ))
+                .set(StorageHashingStage::new(
+                    stage_config.storage_hashing.clean_threshold,
+                    stage_config.storage_hashing.commit_threshold,
+                ))
+                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
+                .set(TransactionLookupStage::new(
+                    stage_config.transaction_lookup.commit_threshold,
+                    prune_modes.transaction_lookup,
+                ))
+                .set(IndexAccountHistoryStage::new(
+                    stage_config.index_account_history.commit_threshold,
+                    prune_modes.account_history,
+                ))
+                .set(IndexStorageHistoryStage::new(
+                    stage_config.index_storage_history.commit_threshold,
+                    prune_modes.storage_history,
+                )),
+            )
+            .build(provider_factory);
+
+        Ok(pipeline)
+    }
+
+    /// Builds a [Pruner] with the given config.
+    fn build_pruner<DB: Database>(
+        &self,
+        config: &PruneConfig,
+        db: DB,
+        tree_config: BlockchainTreeConfig,
+        highest_snapshots_rx: HighestSnapshotsTracker,
+    ) -> Pruner<DB> {
+        let segments = SegmentSet::default()
+            // Receipts
+            .segment_opt(config.segments.receipts.map(reth_prune::segments::Receipts::new))
+            // Receipts by logs
+            .segment_opt((!config.segments.receipts_log_filter.is_empty()).then(|| {
+                reth_prune::segments::ReceiptsByLogs::new(
+                    config.segments.receipts_log_filter.clone(),
+                )
+            }))
+            // Transaction lookup
+            .segment_opt(
+                config
+                    .segments
+                    .transaction_lookup
+                    .map(reth_prune::segments::TransactionLookup::new),
+            )
+            // Sender recovery
+            .segment_opt(
+                config.segments.sender_recovery.map(reth_prune::segments::SenderRecovery::new),
+            )
+            // Account history
+            .segment_opt(
+                config.segments.account_history.map(reth_prune::segments::AccountHistory::new),
+            )
+            // Storage history
+            .segment_opt(
+                config.segments.storage_history.map(reth_prune::segments::StorageHistory::new),
+            );
+
+        Pruner::new(
+            db,
+            self.chain.clone(),
+            segments.into_vec(),
+            config.block_interval,
+            self.chain.prune_delete_limit,
+            tree_config.max_reorg_depth() as usize,
+            highest_snapshots_rx,
+        )
+    }
+
+    /// Change rpc port numbers based on the instance number.
+    fn adjust_instance_ports(&mut self) {
+        // auth port is scaled by a factor of instance * 100
+        self.rpc.auth_port += self.instance * 100 - 100;
+        // http port is scaled by a factor of -instance
+        self.rpc.http_port -= self.instance - 1;
+        // ws port is scaled by a factor of instance * 2
+        self.rpc.ws_port += self.instance * 2 - 2;
     }
 }
 
