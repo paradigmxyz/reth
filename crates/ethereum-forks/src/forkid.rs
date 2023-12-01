@@ -2,8 +2,6 @@
 //!
 //! Previously version of Apache licenced [`ethereum-forkid`](https://crates.io/crates/ethereum-forkid).
 
-#![deny(missing_docs)]
-
 use crate::Head;
 use alloy_primitives::{hex, BlockNumber, B256};
 use alloy_rlp::*;
@@ -73,12 +71,12 @@ where
     }
 }
 
-/// TODO: Move
+/// How to filter forks.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ForkFilterKey {
-    /// TODO
+    /// By block number activation.
     Block(BlockNumber),
-    /// TODO
+    /// By timestamp activation.
     Time(u64),
 }
 
@@ -382,7 +380,7 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{hex_literal::hex, revm_primitives::b256};
+    use alloy_primitives::b256;
 
     const GENESIS_HASH: B256 =
         b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");

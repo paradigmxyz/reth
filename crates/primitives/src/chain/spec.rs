@@ -559,6 +559,7 @@ impl ChainSpec {
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
+    #[inline]
     pub fn is_optimism(&self) -> bool {
         self.chain.is_optimism()
     }
@@ -669,6 +670,7 @@ impl ChainSpec {
     ///
     /// Note: technically this would also be valid for the block before the paris upgrade, but this
     /// edge case is omitted here.
+    #[inline]
     pub fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
         self.paris_block_and_final_difficulty.and_then(|(activated_at, final_difficulty)| {
             if block_number >= activated_at {
@@ -693,6 +695,7 @@ impl ChainSpec {
     }
 
     /// Get the fork id for the given hardfork.
+    #[inline]
     pub fn hardfork_fork_id(&self, fork: Hardfork) -> Option<ForkId> {
         match self.fork(fork) {
             ForkCondition::Never => None,
@@ -701,11 +704,15 @@ impl ChainSpec {
     }
 
     /// Convenience method to get the fork id for [Hardfork::Shanghai] from a given chainspec.
+    #[inline]
     pub fn shanghai_fork_id(&self) -> Option<ForkId> {
-        match self.fork(Hardfork::Shanghai) {
-            ForkCondition::Never => None,
-            _ => Some(self.fork_id(&self.satisfy(self.fork(Hardfork::Shanghai)))),
-        }
+        self.hardfork_fork_id(Hardfork::Shanghai)
+    }
+
+    /// Convenience method to get the fork id for [Hardfork::Cancun] from a given chainspec.
+    #[inline]
+    pub fn cancun_fork_id(&self) -> Option<ForkId> {
+        self.hardfork_fork_id(Hardfork::Cancun)
     }
 
     /// Get the fork condition for the given fork.

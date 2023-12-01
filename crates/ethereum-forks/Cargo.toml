@@ -11,7 +11,6 @@ description = "Ethereum fork types used in reth."
 [dependencies]
 # reth
 reth-codecs.workspace = true
-revm-primitives.workspace = true
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
@@ -21,32 +20,22 @@ alloy-rlp = { workspace = true, features = ["arrayvec"] }
 crc = "3"
 
 # misc
-clap = { workspace = true, features = ["derive"], optional = true }
 serde.workspace = true
 thiserror.workspace = true
 
-# `test-utils` feature
-plain_hasher = { version = "0.2", optional = true }
-hash-db = { version = "~0.15", optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
-strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 rand.workspace = true
-revm-primitives = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
 
-plain_hasher = "0.2"
-hash-db = "~0.15"
 
 [features]
-arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-clap = ["dep:clap"]
-optimism = ["reth-codecs/optimism", "revm-primitives/optimism"]
-test-utils = ["dep:plain_hasher", "dep:hash-db"]
+arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+optimism = ["reth-codecs/optimism"]

@@ -18,7 +18,6 @@ normal = [
 # reth
 reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
-reth-ethereum-forks = { workspace = true }
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -121,7 +120,6 @@ min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 optimism = [
     "reth-primitives/optimism",
-    "reth-ethereum-forks/optimism",
     "reth-revm/optimism",
     "reth-interfaces/optimism",
     "reth-rpc/optimism",

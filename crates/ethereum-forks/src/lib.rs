@@ -5,7 +5,6 @@
 //! ## Feature Flags
 //!
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
-//! - `test-utils`: Export utilities for testing
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -13,7 +12,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![deny(unused_must_use, rust_2018_idioms, unused_crate_dependencies)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::non_canonical_clone_impl)]
 
