@@ -6,7 +6,9 @@ use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_primitives::constants::MAXIMUM_EXTRA_DATA_SIZE;
+use reth_primitives::constants::{
+    ETHEREUM_BLOCK_GAS_LIMIT, MAXIMUM_EXTRA_DATA_SIZE, SLOT_DURATION,
+};
 use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
@@ -50,9 +52,9 @@ impl Default for PayloadBuilderArgs {
     fn default() -> Self {
         Self {
             extradata: default_extradata(),
-            max_gas_limit: 30_000_000,
+            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
-            deadline: Duration::from_secs(12),
+            deadline: SLOT_DURATION,
             max_payload_tasks: 3,
             #[cfg(feature = "optimism")]
             compute_pending_block: false,
