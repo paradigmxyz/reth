@@ -5,14 +5,21 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![warn(
+    missing_debug_implementations,
+    missing_docs,
+    unused_crate_dependencies,
+    unreachable_pub,
+    rustdoc::all
+)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![allow(clippy::non_canonical_clone_impl)]
 
 pub use codecs_derive::*;
 
+use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
 use bytes::Buf;
-use revm_primitives::{
-    alloy_primitives::{Bloom, B512},
-    Address, Bytes, B256, U256,
-};
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -338,7 +345,7 @@ fn decode_varuint(mut buf: &[u8]) -> (usize, &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm_primitives::{Address, Bytes};
+    use alloy_primitives::{Address, Bytes};
 
     #[test]
     fn compact_bytes() {
