@@ -31,8 +31,9 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 tracing.workspace = true
 
 # misc
-byteorder = "1"
+smallvec = { version = "1.11", features = ["arbitrary", "serde", "union", "const_new"] }
 bytes.workspace = true
+byteorder = "1"
 clap = { workspace = true, features = ["derive"], optional = true }
 derive_more = "0.99"
 itertools = "0.11"
@@ -82,16 +83,21 @@ secp256k1.workspace = true
 [features]
 default = ["c-kzg"]
 arbitrary = [
-  "revm-primitives/arbitrary",
-  "reth-rpc-types/arbitrary",
-  "reth-ethereum-forks/arbitrary",
-  "dep:arbitrary",
-  "dep:proptest",
-  "dep:proptest-derive",
+    "revm-primitives/arbitrary",
+    "reth-rpc-types/arbitrary",
+    "reth-ethereum-forks/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-derive",
 ]
 c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg"]
 clap = ["dep:clap"]
-optimism = ["reth-codecs/optimism", "revm-primitives/optimism", "reth-ethereum-forks/optimism", "revm/optimism"]
+optimism = [
+    "reth-codecs/optimism",
+    "revm-primitives/optimism",
+    "reth-ethereum-forks/optimism",
+    "revm/optimism",
+]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 
 [[bench]]

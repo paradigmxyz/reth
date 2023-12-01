@@ -63,7 +63,7 @@ pub struct HashBuilder {
 impl From<HashBuilderState> for HashBuilder {
     fn from(state: HashBuilderState) -> Self {
         Self {
-            key: Nibbles::new_unchecked(state.key),
+            key: Nibbles::from_nibbles_unchecked(state.key),
             stack: state.stack,
             value: state.value,
             groups: state.groups,
@@ -564,7 +564,7 @@ mod tests {
 
         let (_, updates) = hb.split();
 
-        let update = updates.get(&Nibbles::new_unchecked(hex!("01"))).unwrap();
+        let update = updates.get(&Nibbles::from_nibbles_unchecked(hex!("01"))).unwrap();
         assert_eq!(update.state_mask, TrieMask::new(0b1111)); // 1st nibble: 0, 1, 2, 3
         assert_eq!(update.tree_mask, TrieMask::new(0));
         assert_eq!(update.hash_mask, TrieMask::new(6)); // in the 1st nibble, the ones with 1 and 2 are branches with `hashes`
@@ -634,7 +634,7 @@ mod tests {
 
         let mut hb2 = HashBuilder::default();
         // Insert the branch with the `0x6` shared prefix.
-        hb2.add_branch(Nibbles::new_unchecked([0x6]), branch_node_hash, false);
+        hb2.add_branch(Nibbles::from_nibbles_unchecked([0x6]), branch_node_hash, false);
 
         let expected = trie_root(raw_input.clone());
         assert_eq!(hb.root(), expected);

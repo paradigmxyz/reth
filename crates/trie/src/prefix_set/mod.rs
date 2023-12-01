@@ -26,8 +26,8 @@ pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 /// use reth_trie::prefix_set::PrefixSetMut;
 ///
 /// let mut prefix_set = PrefixSetMut::default();
-/// prefix_set.insert(Nibbles::new_unchecked(&[0xa, 0xb]));
-/// prefix_set.insert(Nibbles::new_unchecked(&[0xa, 0xb, 0xc]));
+/// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
+/// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb, 0xc]));
 /// assert!(prefix_set.contains(&[0xa, 0xb]));
 /// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
 /// ```
@@ -158,10 +158,10 @@ mod tests {
     #[test]
     fn test_contains_with_multiple_inserts_and_duplicates() {
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::new_unchecked(b"123"));
-        prefix_set.insert(Nibbles::new_unchecked(b"124"));
-        prefix_set.insert(Nibbles::new_unchecked(b"456"));
-        prefix_set.insert(Nibbles::new_unchecked(b"123")); // Duplicate
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123"));
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"124"));
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"456"));
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123")); // Duplicate
 
         assert!(prefix_set.contains(b"12"));
         assert!(prefix_set.contains(b"45"));

@@ -41,7 +41,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},

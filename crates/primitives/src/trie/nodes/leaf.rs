@@ -1,5 +1,6 @@
 use super::{super::Nibbles, rlp_node};
 use alloy_rlp::{BufMut, Encodable};
+use smallvec::SmallVec;
 
 /// A leaf node represents the endpoint or terminal node in the trie. In other words, a leaf node is
 /// where actual values are stored.
@@ -10,9 +11,9 @@ use alloy_rlp::{BufMut, Encodable};
 /// node means that the search has successfully found the value associated with that key.
 #[derive(Default)]
 pub struct LeafNode<'a> {
-    /// The key path.
-    pub key: Vec<u8>,
-    /// value: SmallVec<[u8; 36]>
+    /// The key path. See [`Nibbles::encode_path_leaf`] for more information.
+    pub key: SmallVec<[u8; 36]>,
+    /// The node value.
     pub value: &'a [u8],
 }
 
@@ -59,14 +60,14 @@ mod tests {
     // From manual regression test
     #[test]
     fn encode_leaf_node_nibble() {
-        let nibble = Nibbles::new_unchecked(hex!("0604060f"));
+        let nibble = Nibbles::from_nibbles_unchecked(hex!("0604060f"));
         let encoded = nibble.encode_path_leaf(true);
-        assert_eq!(encoded, hex!("20646f"));
+        assert_eq!(encoded[..], hex!("20646f"));
     }
 
     #[test]
     fn rlp_leaf_node_roundtrip() {
-        let nibble = Nibbles::new_unchecked(hex!("0604060f"));
+        let nibble = Nibbles::from_nibbles_unchecked(hex!("0604060f"));
         let val = hex!("76657262");
         let leaf = LeafNode::new(&nibble, &val);
         let rlp = leaf.rlp(&mut vec![]);
