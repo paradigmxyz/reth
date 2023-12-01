@@ -291,6 +291,11 @@ pub struct ProtocolProxy {
 }
 
 impl ProtocolProxy {
+    /// Shared capability assigned to proxy.
+    pub fn cap(&self) -> &SharedCapability {
+        &self.cap
+    }
+
     /// Sends a _non-empty_ message on the wire.
     fn try_send(&self, msg: Bytes) -> Result<(), io::Error> {
         if msg.is_empty() {
