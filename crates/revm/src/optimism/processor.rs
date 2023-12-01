@@ -1,5 +1,7 @@
 use crate::processor::{verify_receipt, EVMProcessor};
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_interfaces::executor::{
+    BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
+};
 use reth_primitives::{
     revm::compat::into_reth_log, revm_primitives::ResultAndState, Address, Block, Hardfork,
     Receipt, U256,
@@ -74,7 +76,11 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         // so we can safely assume that this will always be triggered upon the transition and that
         // the above check for empty blocks will never be hit on OP chains.
         super::ensure_create2_deployer(self.chain_spec().clone(), block.timestamp, self.db_mut())
-            .map_err(|_| BlockExecutionError::ProviderError)?;
+            .map_err(|_| {
+            BlockExecutionError::OptimismBlockExecution(
+                OptimismBlockExecutionError::ForceCreate2DeployerFail,
+            )
+        })?;
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
