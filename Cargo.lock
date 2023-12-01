@@ -6177,7 +6177,6 @@ dependencies = [
  "bytes",
  "c-kzg",
  "clap",
- "crc",
  "criterion",
  "derive_more",
  "ethers-core",
@@ -6200,7 +6199,6 @@ dependencies = [
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
- "serde_with",
  "sha2",
  "strum",
  "sucds 0.6.0",
@@ -6210,7 +6208,6 @@ dependencies = [
  "toml 0.8.8",
  "tracing",
  "triehash",
- "url",
  "zstd 0.12.4",
 ]
 
