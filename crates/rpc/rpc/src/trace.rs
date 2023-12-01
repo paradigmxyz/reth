@@ -265,8 +265,9 @@ where
             let mut transaction_indices = HashSet::new();
             let mut highest_matching_index = 0;
 
-            for (tx_idx, tx) in block_with_senders.block.body.iter().enumerate() {
-                let from = block_with_senders.senders[tx_idx];
+            let block_number = block_with_senders.number;
+            for (tx_idx, tx) in block_with_senders.into_transactions_ecrecovered().enumerate() {
+                let from = tx.signer();
                 let to = tx.to();
                 if matcher.matches(from, to) {
                     let idx = tx_idx as u64;
@@ -275,11 +276,7 @@ where
                 }
             }
             if !transaction_indices.is_empty() {
-                target_blocks.push((
-                    block_with_senders.number,
-                    transaction_indices,
-                    highest_matching_index,
-                ));
+                target_blocks.push((block_number, transaction_indices, highest_matching_index));
             }
         }
 
