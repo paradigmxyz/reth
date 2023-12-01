@@ -5700,13 +5700,13 @@ dependencies = [
 name = "reth-codecs"
 version = "0.1.0-alpha.12"
 dependencies = [
+ "alloy-primitives",
  "arbitrary",
  "bytes",
  "codecs-derive",
  "modular-bitfield",
  "proptest",
  "proptest-derive",
- "revm-primitives",
  "serde",
  "test-fuzz",
 ]
