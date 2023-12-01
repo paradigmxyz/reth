@@ -85,7 +85,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     let metrics = MaintainPoolMetrics::default();
     let MaintainPoolConfig { max_update_depth, max_reload_accounts } = config;
     // ensure the pool points to latest state
-    if let Ok(Some(latest)) = client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
+    if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = latest.seal_slow();
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
