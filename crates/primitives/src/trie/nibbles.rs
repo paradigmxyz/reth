@@ -354,10 +354,14 @@ impl Nibbles {
     ///
     /// # Returns
     ///
-    /// A `Vec<u8>` containing the compact byte representation of the nibble sequence, including the
+    /// A vector containing the compact byte representation of the nibble sequence, including the
     /// header byte.
     ///
-    /// # Example
+    /// This vector's length is `self.len() / 2 + 1`. For stack-allocated nibbles, this is at most
+    /// 33 bytes, so 36 was chosen as the stack capacity to round up to the next usize-aligned
+    /// size.
+    ///
+    /// # Examples
     ///
     /// ```
     /// # use reth_primitives::trie::Nibbles;

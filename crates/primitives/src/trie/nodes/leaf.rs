@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 /// node means that the search has successfully found the value associated with that key.
 #[derive(Default)]
 pub struct LeafNode<'a> {
-    /// The key path.
+    /// The key path. See [`Nibbles::encode_path_leaf`] for more information.
     pub key: SmallVec<[u8; 36]>,
     /// The node value.
     pub value: &'a [u8],

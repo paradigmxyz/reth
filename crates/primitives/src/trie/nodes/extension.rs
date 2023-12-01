@@ -10,7 +10,7 @@ use smallvec::SmallVec;
 /// with a single child into one node. This simplification reduces the space and computational
 /// complexity when performing operations on the trie.
 pub struct ExtensionNode<'a> {
-    /// A common prefix for keys.
+    /// A common prefix for keys. See [`Nibbles::encode_path_leaf`] for more information.
     pub prefix: SmallVec<[u8; 36]>,
     /// A pointer to the child.
     pub node: &'a [u8],
