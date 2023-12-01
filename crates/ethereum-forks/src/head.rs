@@ -51,27 +51,27 @@ impl Head {
         self.timestamp = timestamp;
     }
 
-    /// Returns the hash of the head block.
+    
     pub fn hash(&self) -> B256 {
         self.hash
     }
 
-    /// Returns the block number of the head block.
+    
     pub fn number(&self) -> BlockNumber {
         self.number
     }
 
-    /// Returns the difficulty of the head block.
+    
     pub fn difficulty(&self) -> U256 {
         self.difficulty
     }
 
-    /// Returns the total difficulty of the blockchain up to the head block.
+    
     pub fn total_difficulty(&self) -> U256 {
         self.total_difficulty
     }
 
-    /// Returns the timestamp of the head block.
+    
     pub fn timestamp(&self) -> u64 {
         self.timestamp
     }
