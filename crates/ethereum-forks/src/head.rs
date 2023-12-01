@@ -50,32 +50,7 @@ impl Head {
         self.total_difficulty = total_difficulty;
         self.timestamp = timestamp;
     }
-
-    
-    pub fn hash(&self) -> B256 {
-        self.hash
-    }
-
-    
-    pub fn number(&self) -> BlockNumber {
-        self.number
-    }
-
-    
-    pub fn difficulty(&self) -> U256 {
-        self.difficulty
-    }
-
-    
-    pub fn total_difficulty(&self) -> U256 {
-        self.total_difficulty
-    }
-
-    
-    pub fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-
+   
     /// Checks if the head block is an empty block (i.e., has default values).
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
