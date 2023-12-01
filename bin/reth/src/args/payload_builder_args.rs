@@ -10,7 +10,7 @@ use reth_primitives::constants::MAXIMUM_EXTRA_DATA_SIZE;
 use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
-#[derive(Debug, Args, PartialEq, Default)]
+#[derive(Debug, Args, PartialEq)]
 #[clap(next_help_heading = "Builder")]
 pub struct PayloadBuilderArgs {
     /// Block extra data set by the payload builder.
@@ -44,6 +44,20 @@ pub struct PayloadBuilderArgs {
     #[cfg(feature = "optimism")]
     #[arg(long = "rollup.compute-pending-block")]
     pub compute_pending_block: bool,
+}
+
+impl Default for PayloadBuilderArgs {
+    fn default() -> Self {
+        Self {
+            extradata: default_extradata(),
+            max_gas_limit: 30_000_000,
+            interval: Duration::from_secs(1),
+            deadline: Duration::from_secs(12),
+            max_payload_tasks: 3,
+            #[cfg(feature = "optimism")]
+            compute_pending_block: false,
+        }
+    }
 }
 
 impl PayloadBuilderConfig for PayloadBuilderArgs {
@@ -94,7 +108,7 @@ impl TypedValueParser for ExtradataValueParser {
                 format!(
                     "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}bytes limit"
                 ),
-            ))
+            ));
         }
         Ok(val.to_string())
     }
@@ -151,5 +165,12 @@ mod tests {
             extradata.as_str(),
         ]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn payload_builder_args_default_sanity_check() {
+        let default_args = PayloadBuilderArgs::default();
+        let args = CommandParser::<PayloadBuilderArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
     }
 }
