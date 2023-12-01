@@ -90,7 +90,6 @@ pub enum OnNotSupported {
 #[derive(Debug, Deref)]
 pub struct RlpxSubProtocol(Box<dyn DynProtocolHandler>);
 
-/// A helper trait to convert a [ProtocolHandler] into a dynamic type
 pub trait IntoRlpxSubProtocol {
     /// Converts the type into a [RlpxSubProtocol].
     fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol;
