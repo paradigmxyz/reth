@@ -1037,21 +1037,16 @@ where
         block_id: impl Into<BlockId>,
         index: Index,
     ) -> EthResult<Option<Transaction>> {
-        let block_id = block_id.into();
-
-        if let Some(block_with_senders) = self.block_with_senders(block_id).await? {
-            let (block, senders) = block_with_senders.into_components();
+        if let Some(block) = self.block_with_senders(block_id.into()).await? {
             let block_hash = block.hash;
-            let block = block.unseal();
-            if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
-                let idx: usize = index.into();
-                let tx =
-                    TransactionSignedEcRecovered::from_signed_transaction(tx_signed, senders[idx]);
+            let block_number = block.number;
+            let base_fee_per_gas = block.base_fee_per_gas;
+            if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
                 return Ok(Some(from_recovered_with_block_context(
                     tx,
                     block_hash,
-                    block.header.number,
-                    block.header.base_fee_per_gas,
+                    block_number,
+                    base_fee_per_gas,
                     index.into(),
                 )))
             }
