@@ -19,7 +19,7 @@ mod subnode;
 
 pub use self::{
     mask::TrieMask,
-    nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey},
+    nibbles::{Nibbles, StoredNibblesSubKey},
     storage::StorageTrieEntry,
     subnode::StoredSubNode,
 };

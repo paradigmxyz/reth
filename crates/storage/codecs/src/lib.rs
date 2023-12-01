@@ -5,14 +5,21 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![warn(
+    missing_debug_implementations,
+    missing_docs,
+    unused_crate_dependencies,
+    unreachable_pub,
+    rustdoc::all
+)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![allow(clippy::non_canonical_clone_impl)]
 
 pub use codecs_derive::*;
 
+use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
 use bytes::Buf;
-use revm_primitives::{
-    alloy_primitives::{Bloom, B512},
-    Address, Bytes, B256, U256,
-};
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -89,7 +96,7 @@ impl_uint_compact!(u8, u64, u128);
 
 impl<T> Compact for Vec<T>
 where
-    T: Compact + Default,
+    T: Compact,
 {
     /// Returns 0 since we won't include it in the `StructFlags`.
     fn to_compact<B>(self, buf: &mut B) -> usize
@@ -116,15 +123,11 @@ where
     fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (length, mut buf) = decode_varuint(buf);
         let mut list = Vec::with_capacity(length);
-        #[allow(unused_assignments)]
-        let mut len = 0;
         for _ in 0..length {
-            #[allow(unused_assignments)]
-            let mut element = T::default();
-
+            let len;
             (len, buf) = decode_varuint(buf);
 
-            (element, _) = T::from_compact(&buf[..len], len);
+            let (element, _) = T::from_compact(&buf[..len], len);
             buf.advance(len);
 
             list.push(element);
@@ -139,7 +142,6 @@ where
         B: bytes::BufMut + AsMut<[u8]>,
     {
         encode_varuint(self.len(), buf);
-
         for element in self {
             element.to_compact(buf);
         }
@@ -152,11 +154,8 @@ where
         let mut list = Vec::with_capacity(length);
 
         for _ in 0..length {
-            #[allow(unused_assignments)]
-            let mut element = T::default();
-
+            let element;
             (element, buf) = T::from_compact(buf, len);
-
             list.push(element);
         }
 
@@ -331,7 +330,7 @@ where
 fn decode_varuint(mut buf: &[u8]) -> (usize, &[u8]) {
     let mut value: usize = 0;
 
-    for i in 0..33 {
+    for i in 0usize..33 {
         let byte = buf.get_u8();
         if byte < 128 {
             value |= usize::from(byte) << (i * 7);
@@ -346,7 +345,7 @@ fn decode_varuint(mut buf: &[u8]) -> (usize, &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm_primitives::{Address, Bytes};
+    use alloy_primitives::{Address, Bytes};
 
     #[test]
     fn compact_bytes() {

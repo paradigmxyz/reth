@@ -1,6 +1,6 @@
 use reth_interfaces::RethError;
 use reth_primitives::{Address, B256, KECCAK_EMPTY, U256};
-use reth_provider::StateProvider;
+use reth_provider::{ProviderError, StateProvider};
 use revm::{
     db::{CacheDB, DatabaseRef},
     primitives::{AccountInfo, Bytecode},
@@ -40,7 +40,7 @@ impl<DB: StateProvider> StateProviderDatabase<DB> {
 }
 
 impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
-    type Error = RethError;
+    type Error = ProviderError;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         Ok(self.0.basic_account(address)?.map(|account| AccountInfo {
