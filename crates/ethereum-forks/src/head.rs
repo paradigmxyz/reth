@@ -50,7 +50,7 @@ impl Head {
         self.total_difficulty = total_difficulty;
         self.timestamp = timestamp;
     }
-   
+
     /// Checks if the head block is an empty block (i.e., has default values).
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
