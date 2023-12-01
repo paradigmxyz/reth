@@ -43,7 +43,7 @@ mod config;
 mod conn;
 mod handle;
 pub use crate::message::PeerRequestSender;
-use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
+use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols};
 pub use config::{SessionLimits, SessionsConfig};
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
@@ -228,6 +228,7 @@ impl SessionManager {
         let hello_message = self.hello_message.clone();
         let status = self.status;
         let fork_filter = self.fork_filter.clone();
+        let extra_handlers = self.extra_protocols.on_incoming(remote_addr);
         self.spawn(start_pending_incoming_session(
             disconnect_rx,
             session_id,
@@ -238,6 +239,7 @@ impl SessionManager {
             hello_message,
             status,
             fork_filter,
+            extra_handlers,
         ));
 
         let handle = PendingSessionHandle {
@@ -261,6 +263,7 @@ impl SessionManager {
             let fork_filter = self.fork_filter.clone();
             let status = self.status;
             let band_with_meter = self.bandwidth_meter.clone();
+            let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
             self.spawn(start_pending_outbound_session(
                 disconnect_rx,
                 pending_events,
@@ -272,6 +275,7 @@ impl SessionManager {
                 status,
                 fork_filter,
                 band_with_meter,
+                extra_handlers,
             ));
 
             let handle = PendingSessionHandle {
@@ -757,6 +761,7 @@ pub(crate) async fn start_pending_incoming_session(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
+    extra_handlers: RlpxSubProtocolHandlers,
 ) {
     authenticate(
         disconnect_rx,
@@ -769,6 +774,7 @@ pub(crate) async fn start_pending_incoming_session(
         hello,
         status,
         fork_filter,
+        extra_handlers
     )
     .await
 }
@@ -787,6 +793,7 @@ async fn start_pending_outbound_session(
     status: Status,
     fork_filter: ForkFilter,
     bandwidth_meter: BandwidthMeter,
+    extra_handlers: RlpxSubProtocolHandlers,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
@@ -818,6 +825,7 @@ async fn start_pending_outbound_session(
         hello,
         status,
         fork_filter,
+        extra_handlers
     )
     .await
 }
@@ -835,6 +843,7 @@ async fn authenticate(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
+    extra_handlers: RlpxSubProtocolHandlers,
 ) {
     let local_addr = stream.inner().local_addr().ok();
     let stream = match get_eciess_stream(stream, secret_key, direction).await {
@@ -863,6 +872,7 @@ async fn authenticate(
         hello,
         status,
         fork_filter,
+        extra_handlers
     )
     .boxed();
 
@@ -908,10 +918,14 @@ async fn authenticate_stream(
     remote_addr: SocketAddr,
     local_addr: Option<SocketAddr>,
     direction: Direction,
-    hello: HelloMessageWithProtocols,
+    mut hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
+    extra_handlers: RlpxSubProtocolHandlers,
 ) -> PendingSessionEvent {
+
+    // Add extra protocols to the hello message
+
     // conduct the p2p handshake and return the authenticated stream
     let (p2p_stream, their_hello) = match stream.handshake(hello).await {
         Ok(stream_res) => stream_res,

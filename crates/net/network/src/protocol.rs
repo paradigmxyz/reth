@@ -113,7 +113,37 @@ impl RlpxSubProtocols {
     pub fn push(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.protocols.push(protocol.into_rlpx_sub_protocol());
     }
+
+    /// Returns all additional protocol handlers that should be announced to the remote during the
+    /// Rlpx handshake on an incoming connection.
+    pub(crate) fn on_incoming(&self, socket_addr: SocketAddr) -> RlpxSubProtocolHandlers {
+        RlpxSubProtocolHandlers(
+            self.protocols
+                .iter()
+                .filter_map(|protocol| protocol.0.on_incoming(socket_addr))
+                .collect(),
+        )
+    }
+
+    /// Returns all additional protocol handlers that should be announced to the remote during the
+    /// Rlpx handshake on an outgoing connection.
+    pub(crate) fn on_outgoing(
+        &self,
+        socket_addr: SocketAddr,
+        peer_id: PeerId,
+    ) -> RlpxSubProtocolHandlers {
+        RlpxSubProtocolHandlers(
+            self.protocols
+                .iter()
+                .filter_map(|protocol| protocol.0.on_outgoing(socket_addr, peer_id))
+                .collect(),
+        )
+    }
 }
+
+/// A set of additional RLPx-based sub-protocol connection handlers.
+#[derive(Default)]
+pub(crate) struct RlpxSubProtocolHandlers(Vec<Box<dyn DynConnectionHandler>>);
 
 pub(crate) trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>>;
