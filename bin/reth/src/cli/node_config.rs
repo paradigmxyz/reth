@@ -183,3 +183,45 @@ impl NodeConfig {
 /// The node handle
 #[derive(Debug)]
 pub struct NodeHandle;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_node_config() {
+        use super::*;
+        use crate::args::NetworkArgs;
+        use reth_primitives::ChainSpec;
+        use std::net::Ipv4Addr;
+
+        let config = NodeConfig::default()
+            .datadir("/tmp")
+            .config("/tmp/config.toml")
+            .chain(Arc::new(ChainSpec::default()))
+            .metrics(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080))
+            .instance(1)
+            .trusted_setup_file("/tmp/trusted_setup")
+            .network(NetworkArgs::default())
+            .rpc(RpcServerArgs::default())
+            .txpool(TxPoolArgs::default())
+            .builder(PayloadBuilderArgs::default())
+            .debug(DebugArgs::default())
+            .db(DatabaseArgs::default())
+            .dev(DevArgs::default())
+            .pruning(PruningArgs::default());
+
+        assert_eq!(config.datadir, PathBuf::from("/tmp"));
+        assert_eq!(config.config, Some(PathBuf::from("/tmp/config.toml")));
+        assert_eq!(config.chain, Arc::new(ChainSpec::default()));
+        assert_eq!(config.metrics, Some(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080)));
+        assert_eq!(config.instance, 1);
+        assert_eq!(config.trusted_setup_file, Some(PathBuf::from("/tmp/trusted_setup")));
+        assert_eq!(config.network, NetworkArgs::default());
+        assert_eq!(config.rpc, RpcServerArgs::default());
+        assert_eq!(config.txpool, TxPoolArgs::default());
+        assert_eq!(config.builder, PayloadBuilderArgs::default());
+        assert_eq!(config.debug, DebugArgs::default());
+        assert_eq!(config.db, DatabaseArgs::default());
+        assert_eq!(config.dev, DevArgs::default());
+        assert_eq!(config.pruning, PruningArgs::default());
+    }
+}
