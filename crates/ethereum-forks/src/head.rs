@@ -8,7 +8,9 @@ use std::fmt;
 ///
 /// Note: This is a slimmed down version of Header, primarily for communicating the highest block
 /// with the P2P network and the RPC.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct Head {
     /// The number of the head block.
     pub number: BlockNumber,
