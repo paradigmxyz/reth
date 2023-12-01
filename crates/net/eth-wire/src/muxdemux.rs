@@ -191,20 +191,39 @@ where
     type Item = Result<BytesMut, MuxDemuxError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // sink buffered bytes from `StreamClone`s
-        for _ in 0..self.demux.len() {
-            if self.inner.poll_ready_unpin(cx).is_pending() {
-                break
-            }
-            let Ok(item) = self.mux.try_recv() else { break };
-            self.inner.start_send_unpin(item)?;
-        }
-        _ = self.inner.poll_flush_unpin(cx);
+        let mut send_count = 0;
+        let mut mux_exhausted = false;
 
-        // advances the wire and either yields or delegates the message
         loop {
-            let res = ready!(self.inner.poll_next_unpin(cx));
-            let mut bytes = match res {
+            // send buffered bytes from `StreamClone`s. try send at least as many messages as
+            // there are stream clones.
+            if !mux_exhausted {
+                if self.inner.poll_ready_unpin(cx).is_ready() {
+                    if let Ok(item) = self.mux.try_recv() {
+                        self.inner.start_send_unpin(item)?;
+                    } else {
+                        mux_exhausted = true;
+                        _ = self.inner.poll_flush_unpin(cx);
+                    }
+                }
+
+                if send_count < self.demux.len() {
+                    send_count += 1;
+                    continue
+                }
+            }
+
+            // advances the wire and either yields message for the owner or delegates message to a
+            // stream clone
+            let res = self.inner.poll_next_unpin(cx);
+            if res.is_pending() {
+                // no message is received. continue to send messages from stream clones as long as
+                // there are messages left to send.
+                if !mux_exhausted {
+                    continue
+                }
+            }
+            let mut bytes = match ready!(res) {
                 Some(Ok(bytes)) => bytes,
                 Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
                 None => return Poll::Ready(None),
