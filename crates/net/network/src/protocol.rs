@@ -2,6 +2,7 @@
 //!
 //! See also <https://github.com/ethereum/devp2p/blob/master/README.md>
 
+use derive_more::Deref;
 use futures::Stream;
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
@@ -77,7 +78,7 @@ pub enum OnNotSupported {
 }
 
 /// A wrapper type for a RLPx sub-protocol.
-#[derive(Debug)]
+#[derive(Debug, Deref)]
 pub struct RlpxSubProtocol(Box<dyn DynProtocolHandler>);
 
 /// A helper trait to convert a [ProtocolHandler] into a dynamic type
@@ -102,7 +103,7 @@ impl IntoRlpxSubProtocol for RlpxSubProtocol {
 }
 
 /// Additional RLPx-based sub-protocols.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Deref)]
 pub struct RlpxSubProtocols {
     /// All extra protocols
     protocols: Vec<RlpxSubProtocol>,
@@ -117,8 +118,10 @@ impl RlpxSubProtocols {
 
 /// Wrapper trait for ease of use of [`ProtocolHandler`] as trait object.
 pub trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
+    /// See [`ProtocolHandler`].
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>>;
 
+    /// See [`ProtocolHandler`].
     fn on_outgoing(
         &self,
         socket_addr: SocketAddr,
@@ -147,8 +150,10 @@ where
 
 /// Wrapper trait for ease of use of [`ConnectionHandler`] as trait object.
 pub trait DynConnectionHandler: Send + Sync + 'static {
+    /// See [`ConnectionHandler`].
     fn protocol(&self) -> Protocol;
 
+    /// See [`ConnectionHandler`].
     fn on_unsupported_by_peer(
         self,
         supported: &SharedCapabilities,
@@ -156,6 +161,7 @@ pub trait DynConnectionHandler: Send + Sync + 'static {
         peer_id: PeerId,
     ) -> OnNotSupported;
 
+    /// See [`ConnectionHandler`].
     fn into_connection(
         self,
         direction: Direction,
