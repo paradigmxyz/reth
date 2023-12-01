@@ -272,24 +272,12 @@ impl Nibbles {
     /// If the number of nibbles is odd, the last nibble is shifted left by 4 bits and
     /// added to the packed byte vector.
     #[inline]
-    #[allow(clippy::collapsible_else_if)]
     pub fn pack(&self) -> SmallVec<[u8; 32]> {
-        let is_odd = self.len() % 2 != 0;
-        // SAFETY: checked length and `is_odd` is correct.
-        unsafe {
-            if self.len() <= 64 {
-                if is_odd {
-                    self.pack_stack::<true>()
-                } else {
-                    self.pack_stack::<false>()
-                }
-            } else {
-                if is_odd {
-                    self.pack_heap::<true>()
-                } else {
-                    self.pack_heap::<false>()
-                }
-            }
+        if self.len() <= 64 {
+            // SAFETY: checked length.
+            unsafe { self.pack_stack() }
+        } else {
+            self.pack_heap()
         }
     }
 
@@ -298,25 +286,23 @@ impl Nibbles {
     /// # Safety
     ///
     /// `self.len()` must be less than or equal to 32.
-    unsafe fn pack_stack<const IS_ODD: bool>(&self) -> SmallVec<[u8; 32]> {
+    unsafe fn pack_stack(&self) -> SmallVec<[u8; 32]> {
         let mut nibbles = MaybeUninit::<[u8; 32]>::uninit();
-        self.pack_to::<IS_ODD>(nibbles.as_mut_ptr().cast());
+        self.pack_to(nibbles.as_mut_ptr().cast());
         let packed_len = (self.len() + 1) / 2;
         SmallVec::from_buf_and_len_unchecked(nibbles, packed_len)
     }
 
     /// Packs on the heap.
-    ///
-    /// # Safety
-    ///
-    /// `IS_ODD` must be `self.len() % 2 != 0`.
-    unsafe fn pack_heap<const IS_ODD: bool>(&self) -> SmallVec<[u8; 32]> {
+    fn pack_heap(&self) -> SmallVec<[u8; 32]> {
         // Collect into a vec directly to avoid the smallvec overhead since we know this is going on
         // the heap.
         let packed_len = (self.len() + 1) / 2;
         let mut vec = Vec::with_capacity(packed_len);
-        self.pack_to::<IS_ODD>(vec.as_mut_ptr());
-        vec.set_len(packed_len);
+        // SAFETY: enough capacity.
+        unsafe { self.pack_to(vec.as_mut_ptr()) };
+        // SAFETY: within capacity and `pack_to` initialized the memory.
+        unsafe { vec.set_len(packed_len) };
         SmallVec::from_vec(vec)
     }
 
@@ -326,12 +312,11 @@ impl Nibbles {
     ///
     /// `ptr` must be valid for at least `self.len() / 2 + IS_ODD` bytes.
     #[inline]
-    unsafe fn pack_to<const IS_ODD: bool>(&self, ptr: *mut u8) {
+    unsafe fn pack_to(&self, ptr: *mut u8) {
         for i in 0..self.len() / 2 {
             ptr.add(i).write(self.get_byte_unchecked(i * 2));
         }
-        if IS_ODD {
-            debug_assert!(self.len() % 2 != 0);
+        if self.len() % 2 != 0 {
             let i = self.len() / 2;
             ptr.add(i).write(self.last().unwrap_unchecked() << 4);
         }
