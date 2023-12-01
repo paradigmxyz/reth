@@ -112,6 +112,13 @@ impl BlockReader for NoopProvider {
     fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         Ok(vec![])
     }
+
+    fn block_range_with_senders(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<reth_primitives::BlockWithSenders>> {
+        Ok(vec![])
+    }
 }
 
 impl BlockReaderIdExt for NoopProvider {

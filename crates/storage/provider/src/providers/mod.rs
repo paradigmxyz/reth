@@ -288,6 +288,13 @@ where
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         self.database.provider()?.block_range(range)
     }
+
+    fn block_range_with_senders(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        self.database.provider()?.block_range_with_senders(range)
+    }
 }
 
 impl<DB, Tree> TransactionsProvider for BlockchainProvider<DB, Tree>

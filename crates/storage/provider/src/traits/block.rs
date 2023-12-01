@@ -134,6 +134,14 @@ pub trait BlockReader:
     ///
     /// Note: returns only available blocks
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>>;
+
+    /// Returns all blocks with senders in the given inclusive range.
+    ///
+    /// Note: returns only available blocks
+    fn block_range_with_senders(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>>;
 }
 
 /// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.

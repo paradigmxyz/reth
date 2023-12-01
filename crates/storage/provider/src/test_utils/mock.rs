@@ -471,6 +471,23 @@ impl BlockReader for MockEthProvider {
 
         Ok(blocks)
     }
+
+    fn block_range_with_senders(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        let lock = self.blocks.lock();
+
+        let mut blocks: Vec<_> = lock
+            .values()
+            .filter(|block| range.contains(&block.number))
+            .map(|block| BlockWithSenders { block: block.clone(), senders: vec![] })
+            .collect();
+
+        blocks.sort_by_key(|block| block.block.number);
+
+        Ok(blocks)
+    }
 }
 
 impl BlockReaderIdExt for MockEthProvider {
