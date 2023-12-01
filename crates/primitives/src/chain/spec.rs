@@ -3,12 +3,10 @@ use crate::{
         EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
     },
-    forkid::ForkFilterKey,
-    header::Head,
     proofs::genesis_state_root,
     revm_primitives::{address, b256},
-    Address, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, Hardfork, Header,
-    SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Address, BlockNumber, Chain, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
+    Head, Header, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -561,6 +559,7 @@ impl ChainSpec {
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
+    #[inline]
     pub fn is_optimism(&self) -> bool {
         self.chain.is_optimism()
     }
@@ -671,6 +670,7 @@ impl ChainSpec {
     ///
     /// Note: technically this would also be valid for the block before the paris upgrade, but this
     /// edge case is omitted here.
+    #[inline]
     pub fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
         self.paris_block_and_final_difficulty.and_then(|(activated_at, final_difficulty)| {
             if block_number >= activated_at {
@@ -681,19 +681,38 @@ impl ChainSpec {
         })
     }
 
+    /// Get the fork filter for the given hardfork
+    pub fn hardfork_fork_filter(&self, fork: Hardfork) -> Option<ForkFilter> {
+        match self.fork(fork) {
+            ForkCondition::Never => None,
+            _ => Some(self.fork_filter(self.satisfy(self.fork(fork)))),
+        }
+    }
+
     /// Returns the forks in this specification and their activation conditions.
     pub fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
         &self.hardforks
     }
 
     /// Get the fork id for the given hardfork.
+    #[inline]
     pub fn hardfork_fork_id(&self, fork: Hardfork) -> Option<ForkId> {
-        fork.fork_id(self)
+        match self.fork(fork) {
+            ForkCondition::Never => None,
+            _ => Some(self.fork_id(&self.satisfy(self.fork(fork)))),
+        }
     }
 
     /// Convenience method to get the fork id for [Hardfork::Shanghai] from a given chainspec.
+    #[inline]
     pub fn shanghai_fork_id(&self) -> Option<ForkId> {
-        Hardfork::Shanghai.fork_id(self)
+        self.hardfork_fork_id(Hardfork::Shanghai)
+    }
+
+    /// Convenience method to get the fork id for [Hardfork::Cancun] from a given chainspec.
+    #[inline]
+    pub fn cancun_fork_id(&self) -> Option<ForkId> {
+        self.hardfork_fork_id(Hardfork::Cancun)
     }
 
     /// Get the fork condition for the given fork.
@@ -2748,5 +2767,35 @@ Post-merge hard forks (timestamp based):
         let deserialized_chain_spec: AllGenesisFormats =
             serde_json::from_str(&serialized_chain_spec).unwrap();
         assert!(matches!(deserialized_chain_spec, AllGenesisFormats::Reth(_)))
+    }
+
+    #[test]
+    fn check_fork_id_chainspec_with_fork_condition_never() {
+        let spec = ChainSpec {
+            chain: Chain::mainnet(),
+            genesis: Genesis::default(),
+            genesis_hash: None,
+            hardforks: BTreeMap::from([(Hardfork::Frontier, ForkCondition::Never)]),
+            paris_block_and_final_difficulty: None,
+            deposit_contract: None,
+            ..Default::default()
+        };
+
+        assert_eq!(spec.hardfork_fork_id(Hardfork::Frontier), None);
+    }
+
+    #[test]
+    fn check_fork_filter_chainspec_with_fork_condition_never() {
+        let spec = ChainSpec {
+            chain: Chain::mainnet(),
+            genesis: Genesis::default(),
+            genesis_hash: None,
+            hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Never)]),
+            paris_block_and_final_difficulty: None,
+            deposit_contract: None,
+            ..Default::default()
+        };
+
+        assert_eq!(spec.hardfork_fork_filter(Hardfork::Shanghai), None);
     }
 }
