@@ -483,7 +483,7 @@ impl Default for RpcServerArgs {
             rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
             rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS.into(),
             rpc_max_tracing_requests: constants::DEFAULT_MAX_TRACING_REQUESTS,
-            rpc_max_blocks_per_filter: (constants::DEFAULT_MAX_BLOCKS_PER_FILTER as u64).into(),
+            rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             gas_price_oracle: GasPriceOracleArgs::default(),
