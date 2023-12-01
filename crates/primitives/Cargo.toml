@@ -89,6 +89,7 @@ default = ["c-kzg"]
 arbitrary = [
   "revm-primitives/arbitrary",
   "reth-rpc-types/arbitrary",
+  "reth-ethereum-forks/arbitrary",
   "dep:arbitrary",
   "dep:proptest",
   "dep:proptest-derive",
