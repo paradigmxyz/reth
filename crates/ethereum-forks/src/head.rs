@@ -91,5 +91,3 @@ impl fmt::Display for Head {
         )
     }
 }
-
-
