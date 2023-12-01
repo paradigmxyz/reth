@@ -1623,7 +1623,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    self.receipts_by_tx_range(tx_range).map(|receipts| Some(receipts))
+                    self.receipts_by_tx_range(tx_range).map(Some)
                 }
             }
         }
