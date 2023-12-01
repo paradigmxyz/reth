@@ -39,7 +39,7 @@ impl From<StoredSubNode> for CursorSubNode {
             Some(n) => n as i8,
             None => -1,
         };
-        Self { key: Nibbles::new_unchecked(value.key), nibble, node: value.node }
+        Self { key: Nibbles::from_nibbles_unchecked(value.key), nibble, node: value.node }
     }
 }
 
