@@ -180,9 +180,9 @@ where
     // If the canyon hardfork is active at the current timestamp, and it was not active at the
     // previous block timestamp (heuristically, block time is not perfectly constant at 2s), and the
     // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
-    if chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp - 2) &&
-        chain_spec.is_optimism()
+    if chain_spec.is_optimism() &&
+        chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp - 2)
     {
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 

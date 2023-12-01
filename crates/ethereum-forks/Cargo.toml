@@ -1,0 +1,41 @@
+[package]
+name = "reth-ethereum-forks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Ethereum fork types used in reth."
+
+[dependencies]
+# reth
+reth-codecs.workspace = true
+
+# ethereum
+alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
+alloy-rlp = { workspace = true, features = ["arrayvec"] }
+
+# used for forkid
+crc = "3"
+
+# misc
+serde.workspace = true
+thiserror.workspace = true
+
+
+# arbitrary utils
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+
+[dev-dependencies]
+rand.workspace = true
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-derive.workspace = true
+
+
+[features]
+arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+optimism = ["reth-codecs/optimism"]
