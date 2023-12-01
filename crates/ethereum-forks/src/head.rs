@@ -1,5 +1,6 @@
 use alloy_primitives::{BlockNumber, B256, U256};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Describes the current head block.
 ///
@@ -7,9 +8,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Note: This is a slimmed down version of Header, primarily for communicating the highest block
 /// with the P2P network and the RPC.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Head {
     /// The number of the head block.
     pub number: BlockNumber,
@@ -50,14 +49,6 @@ impl Head {
         self.timestamp = timestamp;
     }
 
-    /// Returns a formatted string representing the head block details.
-    pub fn to_string(&self) -> String {
-        format!(
-            "Head Block:\n Number: {}\n Hash: {:?}\n Difficulty: {:?}\n Total Difficulty: {:?}\n Timestamp: {}",
-            self.number, self.hash, self.difficulty, self.total_difficulty, self.timestamp
-        )
-    }
-
     /// Returns the hash of the head block.
     pub fn hash(&self) -> B256 {
         self.hash
@@ -87,9 +78,20 @@ impl Head {
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
+}
 
-    /// Default implementation for Head struct.
-    pub fn default() -> Self {
+impl fmt::Display for Head {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Head Block:\n Number: {}\n Hash: {:?}\n Difficulty: {:?}\n Total Difficulty: {:?}\n Timestamp: {}",
+            self.number, self.hash, self.difficulty, self.total_difficulty, self.timestamp
+        )
+    }
+}
+
+impl Default for Head {
+    fn default() -> Self {
         Self {
             number: 0,
             hash: B256::default(),
