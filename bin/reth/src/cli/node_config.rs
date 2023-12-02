@@ -9,7 +9,7 @@ use crate::{
         config::RethRpcConfig,
         ext::{RethCliExt, RethNodeCommandConfig},
     },
-    dirs::{ChainPath, DataDirPath},
+    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::{cl_events::ConsensusLayerHealthEvents, events, run_network_until_shutdown},
     prometheus_exporter,
@@ -29,7 +29,10 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_config::{config::{PruneConfig, StageConfig}, Config};
+use reth_config::{
+    config::{PruneConfig, StageConfig},
+    Config,
+};
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -50,7 +53,7 @@ use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
     stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256,
+    BlockHashOrNumber, BlockNumber, ChainSpec, DisplayHardforks, Head, SealedHeader, B256, MAINNET,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
@@ -94,7 +97,7 @@ pub struct NodeConfig {
     /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
-    pub datadir: ChainPath<DataDirPath>,
+    pub datadir: MaybePlatformPath<DataDirPath>,
 
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
@@ -527,8 +530,8 @@ impl NodeConfig {
     }
 
     /// Set the datadir for the node
-    pub fn datadir(mut self, datadir: ChainPath<DataDirPath>) -> Self {
-        self.datadir = datadir.into();
+    pub fn datadir(mut self, datadir: MaybePlatformPath<DataDirPath>) -> Self {
+        self.datadir = datadir;
         self
     }
 
@@ -553,6 +556,12 @@ impl NodeConfig {
     /// Set the instance for the node
     pub fn instance(mut self, instance: u16) -> Self {
         self.instance = instance;
+        self
+    }
+
+    /// Set the [Chain] for the node
+    pub fn chain_spec(mut self, chain: Arc<ChainSpec>) -> Self {
+        self.chain = chain;
         self
     }
 
@@ -673,8 +682,8 @@ impl NodeConfig {
     }
 
     /// Returns the chain specific path to the data dir.
-    fn data_dir(&self) -> &ChainPath<DataDirPath> {
-        &self.datadir
+    fn data_dir(&self) -> ChainPath<DataDirPath> {
+        self.datadir.unwrap_or_chain_default(self.chain.chain)
     }
 
     /// Returns the path to the config file.
@@ -1055,6 +1064,29 @@ impl NodeConfig {
         self.rpc.http_port -= self.instance - 1;
         // ws port is scaled by a factor of instance * 2
         self.rpc.ws_port += self.instance * 2 - 2;
+    }
+}
+
+impl Default for NodeConfig {
+    fn default() -> Self {
+        Self {
+            datadir: MaybePlatformPath::<DataDirPath>::default(),
+            config: None,
+            chain: MAINNET.clone(),
+            metrics: None,
+            instance: 1,
+            trusted_setup_file: None,
+            network: NetworkArgs::default(),
+            rpc: RpcServerArgs::default(),
+            txpool: TxPoolArgs::default(),
+            builder: PayloadBuilderArgs::default(),
+            debug: DebugArgs::default(),
+            db: DatabaseArgs::default(),
+            dev: DevArgs::default(),
+            pruning: PruningArgs::default(),
+            #[cfg(feature = "optimism")]
+            rollup: crate::args::RollupArgs::default(),
+        }
     }
 }
 
