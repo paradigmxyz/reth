@@ -25,6 +25,10 @@ pub struct GasPriceOracleArgs {
 mod tests {
     use super::*;
     use clap::Parser;
+    use reth_primitives::constants::{
+        DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_IGNORE, DEFAULT_GAS_PRICE_MAX,
+        DEFAULT_GAS_PRICE_PERCENTILE,
+    };
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -39,10 +43,10 @@ mod tests {
         assert_eq!(
             args,
             GasPriceOracleArgs {
-                blocks: Some(20),
-                ignore_price: Some(2),
-                max_price: Some(500000000000),
-                percentile: Some(60),
+                blocks: Some(DEFAULT_GAS_PRICE_BLOCKS),
+                ignore_price: Some(DEFAULT_GAS_PRICE_IGNORE),
+                max_price: Some(DEFAULT_GAS_PRICE_MAX),
+                percentile: Some(DEFAULT_GAS_PRICE_PERCENTILE),
             }
         );
     }
