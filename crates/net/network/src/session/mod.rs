@@ -176,6 +176,60 @@ impl SessionManager {
         self.hello_message.clone()
     }
 
+    // Update hello message with extra protocols to support in the session.
+    fn update_hello_message(
+        &self,
+        extra_conns: &[Box<dyn DynConnectionHandler>],
+    ) -> HelloMessageWithProtocols {
+        let hello_message = self.hello_message.clone();
+        if extra_conns.is_empty() {
+            return hello_message
+        }
+
+        let mut builder = HelloMessageBuilder::new_from(hello_message);
+        for handler in extra_conns {
+            builder = builder.protocol(handler.protocol());
+        }
+
+        builder.build()
+    }
+
+    /// Returns connection handlers for the extra protocols that should be supported in the
+    /// incoming session.
+    pub fn extra_protocols_on_incoming(
+        &self,
+        remote_addr: SocketAddr,
+    ) -> (HelloMessageWithProtocols, Vec<Box<dyn DynConnectionHandler>>) {
+        let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
+        for protocol in self.extra_protocols.iter() {
+            if let Some(handler) = protocol.on_incoming(remote_addr) {
+                extra_conns.push(handler);
+            }
+        }
+
+        let hello_message = self.update_hello_message(&extra_conns);
+
+        (hello_message, extra_conns)
+    }
+
+    /// Returns connection handlers for the extra protocols that should be supported in the
+    /// outgoing session.
+    pub fn extra_protocols_on_outgoing(
+        &self,
+        remote_addr: SocketAddr,
+        remote_peer_id: PeerId,
+    ) -> (HelloMessageWithProtocols, Vec<Box<dyn DynConnectionHandler>>) {
+        let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
+        for protocol in self.extra_protocols.iter() {
+            if let Some(handler) = protocol.on_outgoing(remote_addr, remote_peer_id) {
+                extra_conns.push(handler);
+            }
+        }
+        let hello_message = self.update_hello_message(&extra_conns);
+
+        (hello_message, extra_conns)
+    }
+
     /// Adds an additional protocol handler to the RLPx sub-protocol list.
     pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.extra_protocols.push(protocol)
@@ -226,17 +280,7 @@ impl SessionManager {
         let pending_events = self.pending_sessions_tx.clone();
         let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
         let secret_key = self.secret_key;
-        let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
-        let hello_message = {
-            let mut builder = HelloMessageBuilder::new_from(self.hello_message.clone());
-            for protocol in self.extra_protocols.iter() {
-                if let Some(handler) = protocol.on_incoming(remote_addr) {
-                    builder = builder.protocol(handler.protocol());
-                    extra_conns.push(handler);
-                }
-            }
-            builder.build()
-        };
+        let (hello_message, extra_conns) = self.extra_protocols_on_incoming(remote_addr);
         let status = self.status;
         let fork_filter = self.fork_filter.clone();
         self.spawn(start_pending_incoming_session(
@@ -269,17 +313,8 @@ impl SessionManager {
             let (disconnect_tx, disconnect_rx) = oneshot::channel();
             let pending_events = self.pending_sessions_tx.clone();
             let secret_key = self.secret_key;
-            let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
-            let hello_message = {
-                let mut builder = HelloMessageBuilder::new_from(self.hello_message.clone());
-                for protocol in self.extra_protocols.iter() {
-                    if let Some(handler) = protocol.on_outgoing(remote_addr, remote_peer_id) {
-                        builder = builder.protocol(handler.protocol());
-                        extra_conns.push(handler);
-                    }
-                }
-                builder.build()
-            };
+            let (hello_message, extra_conns) =
+                self.extra_protocols_on_outgoing(remote_addr, remote_peer_id);
             let fork_filter = self.fork_filter.clone();
             let status = self.status;
             let band_with_meter = self.bandwidth_meter.clone();

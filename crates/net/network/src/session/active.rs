@@ -849,17 +849,7 @@ mod tests {
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
             let metered_stream =
                 MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
-            let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
-            let hello = {
-                let mut builder = HelloMessageBuilder::new_from(self.hello.clone());
-                for protocol in self.extra_protocols.iter() {
-                    if let Some(handler) = protocol.on_incoming(remote_addr) {
-                        builder = builder.protocol(handler.protocol());
-                        extra_conns.push(handler);
-                    }
-                }
-                builder.build()
-            };
+            let (hello, extra_conns) = self.extra_protocols_on_incoming(remote_addr);
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,
