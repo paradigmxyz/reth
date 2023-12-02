@@ -43,6 +43,8 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
 
     if chain_spec.fork(Hardfork::Cancun).active_at_head(&block) {
         revm_primitives::CANCUN
+    } else if chain_spec.fork(Hardfork::Prague).active_at_head(&block) {
+        revm_primitives::PRAGUE
     } else if chain_spec.fork(Hardfork::Shanghai).active_at_head(&block) {
         revm_primitives::SHANGHAI
     } else if chain_spec.fork(Hardfork::Paris).active_at_head(&block) {

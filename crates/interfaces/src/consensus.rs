@@ -39,7 +39,7 @@ pub trait Consensus: Debug + Send + Sync {
     fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), ConsensusError> {
         let mut headers = headers.iter();
         let Some(mut parent) = headers.next() else {
-            return Ok(());
+            return Ok(())
         };
         self.validate_header(parent)?;
         for child in headers {

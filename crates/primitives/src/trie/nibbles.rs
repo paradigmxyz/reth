@@ -424,7 +424,7 @@ impl Nibbles {
             debug_assert!(*nibble <= 0xf);
             if *nibble < 0xf {
                 *nibble += 1;
-                return Some(incremented);
+                return Some(incremented)
             } else {
                 *nibble = 0;
             }

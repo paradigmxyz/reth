@@ -137,8 +137,8 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze",  features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = ["std"], default-features = false }
+revm = { git = "https://github.com/clabby/revm", branch = "cl/eip-3074",  features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { git = "https://github.com/clabby/revm", branch = "cl/eip-3074", features = ["std"], default-features = false }
 
 # eth
 alloy-primitives = "0.5"

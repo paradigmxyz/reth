@@ -241,12 +241,14 @@ impl CallTraceNode {
     /// Returns the `Output` for a parity trace
     pub(crate) fn parity_trace_output(&self) -> TraceOutput {
         match self.kind() {
-            CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
-                TraceOutput::Call(CallOutput {
-                    gas_used: U64::from(self.trace.gas_used),
-                    output: self.trace.output.clone(),
-                })
-            }
+            CallKind::Call |
+            CallKind::StaticCall |
+            CallKind::CallCode |
+            CallKind::DelegateCall |
+            CallKind::AuthCall => TraceOutput::Call(CallOutput {
+                gas_used: U64::from(self.trace.gas_used),
+                output: self.trace.output.clone(),
+            }),
             CallKind::Create | CallKind::Create2 => TraceOutput::Create(CreateOutput {
                 gas_used: U64::from(self.trace.gas_used),
                 code: self.trace.output.clone(),
@@ -304,16 +306,18 @@ impl CallTraceNode {
     /// since those are handled in addition to the call action.
     pub(crate) fn parity_action(&self) -> Action {
         match self.kind() {
-            CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
-                Action::Call(CallAction {
-                    from: self.trace.caller,
-                    to: self.trace.address,
-                    value: self.trace.value,
-                    gas: U64::from(self.trace.gas_limit),
-                    input: self.trace.data.clone(),
-                    call_type: self.kind().into(),
-                })
-            }
+            CallKind::Call |
+            CallKind::StaticCall |
+            CallKind::CallCode |
+            CallKind::DelegateCall |
+            CallKind::AuthCall => Action::Call(CallAction {
+                from: self.trace.caller,
+                to: self.trace.address,
+                value: self.trace.value,
+                gas: U64::from(self.trace.gas_limit),
+                input: self.trace.data.clone(),
+                call_type: self.kind().into(),
+            }),
             CallKind::Create | CallKind::Create2 => Action::Create(CreateAction {
                 from: self.trace.caller,
                 value: self.trace.value,
@@ -378,6 +382,7 @@ pub enum CallKind {
     StaticCall,
     CallCode,
     DelegateCall,
+    AuthCall,
     Create,
     Create2,
 }
@@ -417,6 +422,9 @@ impl std::fmt::Display for CallKind {
             CallKind::DelegateCall => {
                 write!(f, "DELEGATECALL")
             }
+            CallKind::AuthCall => {
+                write!(f, "AUTHCALL")
+            }
             CallKind::Create => {
                 write!(f, "CREATE")
             }
@@ -434,6 +442,7 @@ impl From<CallScheme> for CallKind {
             CallScheme::StaticCall => CallKind::StaticCall,
             CallScheme::CallCode => CallKind::CallCode,
             CallScheme::DelegateCall => CallKind::DelegateCall,
+            CallScheme::AuthCall => CallKind::AuthCall,
         }
     }
 }
@@ -450,9 +459,11 @@ impl From<CreateScheme> for CallKind {
 impl From<CallKind> for ActionType {
     fn from(kind: CallKind) -> Self {
         match kind {
-            CallKind::Call | CallKind::StaticCall | CallKind::DelegateCall | CallKind::CallCode => {
-                ActionType::Call
-            }
+            CallKind::Call |
+            CallKind::StaticCall |
+            CallKind::DelegateCall |
+            CallKind::CallCode |
+            CallKind::AuthCall => ActionType::Call,
             CallKind::Create => ActionType::Create,
             CallKind::Create2 => ActionType::Create,
         }
@@ -466,6 +477,7 @@ impl From<CallKind> for CallType {
             CallKind::StaticCall => CallType::StaticCall,
             CallKind::CallCode => CallType::CallCode,
             CallKind::DelegateCall => CallType::DelegateCall,
+            CallKind::AuthCall => CallType::AuthCall,
             CallKind::Create => CallType::None,
             CallKind::Create2 => CallType::None,
         }
@@ -611,12 +623,6 @@ pub enum StorageChangeReason {
 }
 
 /// Represents a storage change during execution.
-///
-/// This maps to evm internals:
-/// [JournalEntry::StorageChange](revm::JournalEntry::StorageChange)
-///
-/// It is used to track both storage change and warm load of a storage slot. For warm load in regard
-/// to EIP-2929 AccessList had_value will be None.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StorageChange {
     /// key of the storage slot

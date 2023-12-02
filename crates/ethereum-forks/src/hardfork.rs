@@ -47,6 +47,8 @@ pub enum Hardfork {
     /// Canyon
     #[cfg(feature = "optimism")]
     Canyon,
+    /// Prague (After Cancun in reality, but ordered so that it can be activated after Shanghai)
+    Prague,
     /// Cancun.
     Cancun,
 }
@@ -73,6 +75,7 @@ impl FromStr for Hardfork {
             "grayglacier" => Hardfork::GrayGlacier,
             "paris" => Hardfork::Paris,
             "shanghai" => Hardfork::Shanghai,
+            "prague" => Hardfork::Prague,
             "cancun" => Hardfork::Cancun,
             #[cfg(feature = "optimism")]
             "bedrock" => Hardfork::Bedrock,
@@ -115,6 +118,7 @@ mod tests {
             "grayglacier",
             "PARIS",
             "ShAnGhAI",
+            "PrAgUe",
             "CaNcUn",
         ];
         let expected_hardforks = [
@@ -134,6 +138,7 @@ mod tests {
             Hardfork::GrayGlacier,
             Hardfork::Paris,
             Hardfork::Shanghai,
+            Hardfork::Prague,
             Hardfork::Cancun,
         ];
 

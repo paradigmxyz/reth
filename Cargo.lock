@@ -6612,7 +6612,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.5.0"
-source = "git+https://github.com/bluealloy/revm?branch=reth_freeze#b00ebab8b3477f87e3d876a11b8f18d00a8f4103"
+source = "git+https://github.com/clabby/revm?branch=cl/eip-3074#7b6365ab030f94b88fde70c934af736a58ae2e04"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -6622,7 +6622,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.3.0"
-source = "git+https://github.com/bluealloy/revm?branch=reth_freeze#b00ebab8b3477f87e3d876a11b8f18d00a8f4103"
+source = "git+https://github.com/clabby/revm?branch=cl/eip-3074#7b6365ab030f94b88fde70c934af736a58ae2e04"
 dependencies = [
  "revm-primitives",
 ]
@@ -6630,15 +6630,13 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.2.0"
-source = "git+https://github.com/bluealloy/revm?branch=reth_freeze#b00ebab8b3477f87e3d876a11b8f18d00a8f4103"
+source = "git+https://github.com/clabby/revm?branch=cl/eip-3074#7b6365ab030f94b88fde70c934af736a58ae2e04"
 dependencies = [
  "aurora-engine-modexp",
  "c-kzg",
- "k256",
  "once_cell",
  "revm-primitives",
  "ripemd",
- "secp256k1 0.28.0",
  "sha2",
  "substrate-bn",
 ]
@@ -6646,7 +6644,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.3.0"
-source = "git+https://github.com/bluealloy/revm?branch=reth_freeze#b00ebab8b3477f87e3d876a11b8f18d00a8f4103"
+source = "git+https://github.com/clabby/revm?branch=cl/eip-3074#7b6365ab030f94b88fde70c934af736a58ae2e04"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -6658,7 +6656,9 @@ dependencies = [
  "enumn",
  "hashbrown 0.14.3",
  "hex",
+ "k256",
  "once_cell",
+ "secp256k1 0.28.0",
  "serde",
 ]
 
