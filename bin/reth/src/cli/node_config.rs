@@ -1050,6 +1050,10 @@ impl NodeConfig {
 }
 
 /// The node handle
+// We need from each component on init:
+// * channels (for wiring into other components)
+// * handles (for wiring into other components)
+//   * also for giving to the NodeHandle, for example everything rpc
 #[derive(Debug)]
 pub struct NodeHandle;
 
