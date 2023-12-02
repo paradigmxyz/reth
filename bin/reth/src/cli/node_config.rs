@@ -505,12 +505,14 @@ impl NodeConfig {
         }
 
         // we should return here
-        let _node_handle = NodeHandle {
-            rpc_server_handles
-        };
+        let _node_handle = NodeHandle { rpc_server_handles };
 
         // TODO: we need a way to do this in the background because this method will just block
         // until the consensus engine exits
+        //
+        // We should probably return the node handle AND `rx` so the `execute` method can do all of
+        // this stuff below, in the meantime we will spawn everything (analogous to foundry
+        // spawning the NodeService).
         rx.await??;
 
         info!(target: "reth::cli", "Consensus engine has exited.");
@@ -1068,6 +1070,10 @@ pub struct NodeHandle {
     /// The handles to the RPC servers
     rpc_server_handles: RethRpcServerHandles,
 }
+
+/// The node service
+#[derive(Debug)]
+pub struct NodeService;
 
 #[cfg(test)]
 mod tests {
