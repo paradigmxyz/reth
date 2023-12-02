@@ -182,7 +182,7 @@ pub const SYSTEM_ADDRESS: Address = address!("ffffffffffffffffffffffffffffffffff
 /// Number of recent blocks to check for gas price
 pub const DEFAULT_GAS_PRICE_BLOCKS: u32 = 20;
 
-/// Gas Price below which gpo will ignore transactions
+/// Gas Price below which the gas price oracle will ignore transactions
 pub const DEFAULT_GAS_PRICE_IGNORE: u64 = 2;
 
 /// Maximum transaction priority fee (or gas price before London Fork) to be recommended by the gas price oracle
