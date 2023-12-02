@@ -19,7 +19,7 @@ use std::{
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
-    CanDisconnect, DisconnectReason, EthStream, EthVersion, P2PStream, Status, UnauthedEthStream,
+    CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
 use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
@@ -106,13 +106,41 @@ impl<St> RlpxProtocolMultiplexer<St> {
     /// Returns an error if the primary protocol is not supported by the remote or the handshake
     /// failed.
     pub async fn into_satellite_stream_with_handshake<F, Fut, Err, Primary>(
-        mut self,
+        self,
         cap: &Capability,
         handshake: F,
     ) -> Result<RlpxSatelliteStream<St, Primary>, Err>
     where
         F: FnOnce(ProtocolProxy) -> Fut,
         Fut: Future<Output = Result<Primary, Err>>,
+        St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+        P2PStreamError: Into<Err>,
+    {
+        self.into_satellite_stream_with_tuple_handshake(cap, move |proxy| async move {
+            let st = handshake(proxy).await?;
+            Ok((st, ()))
+        })
+        .await
+        .map(|(st, _)| st)
+    }
+
+    /// Converts this multiplexer into a [RlpxSatelliteStream] with the given primary protocol.
+    ///
+    /// Returns an error if the primary protocol is not supported by the remote or the handshake
+    /// failed.
+    ///
+    /// This accepts a closure that does a handshake with the remote peer and returns a tuple of the
+    /// primary stream and extra data.
+    ///
+    /// See also [UnauthedEthStream::handshake]
+    pub async fn into_satellite_stream_with_tuple_handshake<F, Fut, Err, Primary, Extra>(
+        mut self,
+        cap: &Capability,
+        handshake: F,
+    ) -> Result<(RlpxSatelliteStream<St, Primary>, Extra), Err>
+    where
+        F: FnOnce(ProtocolProxy) -> Fut,
+        Fut: Future<Output = Result<(Primary, Extra), Err>>,
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
         P2PStreamError: Into<Err>,
     {
@@ -155,8 +183,8 @@ impl<St> RlpxProtocolMultiplexer<St> {
                     self.inner.conn.send(msg).await.map_err(Into::into)?;
                 }
                 res = &mut f => {
-                    let st = res?;
-                    return Ok(RlpxSatelliteStream {
+                    let (st, extra) = res?;
+                    return Ok((RlpxSatelliteStream {
                             inner: self.inner,
                             primary: PrimaryProtocol {
                                 to_primary,
@@ -164,7 +192,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                                 st,
                                 shared_cap,
                             }
-                    })
+                    }, extra))
                 }
             }
         }
@@ -174,17 +202,17 @@ impl<St> RlpxProtocolMultiplexer<St> {
     /// primary protocol.
     pub async fn into_eth_satellite_stream(
         self,
-        eth_version: EthVersion,
         status: Status,
         fork_filter: ForkFilter,
-    ) -> Result<RlpxSatelliteStream<St, EthStream<ProtocolProxy>>, EthStreamError>
+    ) -> Result<(RlpxSatelliteStream<St, EthStream<ProtocolProxy>>, Status), EthStreamError>
     where
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {
-        self.into_satellite_stream_with_handshake(
-            &Capability::eth(eth_version),
+        let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
+        self.into_satellite_stream_with_tuple_handshake(
+            &Capability::eth(eth_cap),
             move |proxy| async move {
-                Ok(UnauthedEthStream::new(proxy).handshake(status, fork_filter).await?.0)
+                UnauthedEthStream::new(proxy).handshake(status, fork_filter).await
             },
         )
         .await
@@ -673,8 +701,8 @@ mod tests {
             let (server_hello, _) = test_hello();
             let (conn, _) = UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
-            let mut st = RlpxProtocolMultiplexer::new(conn)
-                .into_eth_satellite_stream(EthVersion::Eth67, other_status, other_fork_filter)
+            let (mut st, _their_status) = RlpxProtocolMultiplexer::new(conn)
+                .into_eth_satellite_stream(other_status, other_fork_filter)
                 .await
                 .unwrap();
 
@@ -704,8 +732,8 @@ mod tests {
         });
 
         let conn = connect_passthrough(local_addr, test_hello().0).await;
-        let mut st = RlpxProtocolMultiplexer::new(conn)
-            .into_eth_satellite_stream(EthVersion::Eth67, status, fork_filter)
+        let (mut st, _their_status) = RlpxProtocolMultiplexer::new(conn)
+            .into_eth_satellite_stream(status, fork_filter)
             .await
             .unwrap();
 

@@ -145,6 +145,21 @@ impl RlpxSubProtocols {
 #[derive(Default)]
 pub(crate) struct RlpxSubProtocolHandlers(Vec<Box<dyn DynConnectionHandler>>);
 
+impl RlpxSubProtocolHandlers {
+    /// Returns all handlers.
+    pub(crate) fn into_iter(self) -> impl Iterator<Item = Box<dyn DynConnectionHandler>> {
+        self.0.into_iter()
+    }
+
+    /// Retains only the handlers for which the predicate returns `true`.
+    pub(crate) fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&dyn DynConnectionHandler) -> bool,
+    {
+        self.0.retain(|handler| f(handler.as_ref()))
+    }
+}
+
 pub(crate) trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>>;
 
@@ -186,7 +201,7 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
     ) -> OnNotSupported;
 
     fn into_connection(
-        self,
+        self: Box<Self>,
         direction: Direction,
         peer_id: PeerId,
         conn: ProtocolConnection,
@@ -211,11 +226,11 @@ where
     }
 
     fn into_connection(
-        self,
+        self: Box<Self>,
         direction: Direction,
         peer_id: PeerId,
         conn: ProtocolConnection,
     ) -> Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>> {
-        Box::pin(T::into_connection(self, direction, peer_id, conn))
+        Box::pin(T::into_connection(*self, direction, peer_id, conn))
     }
 }

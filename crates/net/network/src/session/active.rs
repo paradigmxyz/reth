@@ -12,16 +12,16 @@ use crate::{
 use core::sync::atomic::Ordering;
 use fnv::FnvHashMap;
 use futures::{stream::Fuse, SinkExt, StreamExt};
-use reth_ecies::stream::ECIESStream;
+
 use reth_eth_wire::{
     capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    DisconnectReason, EthMessage, EthStream, P2PStream,
+    DisconnectReason, EthMessage,
 };
 use reth_interfaces::p2p::error::RequestError;
 use reth_metrics::common::mpsc::MeteredPollSender;
-use reth_net_common::bandwidth_meter::MeteredStream;
+
 use reth_primitives::PeerId;
 use std::{
     collections::VecDeque,
@@ -33,7 +33,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    net::TcpStream,
     sync::{mpsc::error::TrySendError, oneshot},
     time::Interval,
 };
@@ -761,26 +760,25 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 }
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use secp256k1::{SecretKey, SECP256K1};
-    use tokio::{net::TcpListener, sync::mpsc};
-
-    use reth_ecies::util::pk2id;
-    use reth_eth_wire::{
-        GetBlockBodies, HelloMessageWithProtocols, Status, StatusBuilder, UnauthedEthStream,
-        UnauthedP2PStream,
-    };
-    use reth_net_common::bandwidth_meter::BandwidthMeter;
-    use reth_primitives::{ForkFilter, Hardfork, MAINNET};
-
+    use super::*;
     use crate::session::{
         config::{INITIAL_REQUEST_TIMEOUT, PROTOCOL_BREACH_REQUEST_TIMEOUT},
         handle::PendingSessionEvent,
         start_pending_incoming_session,
     };
-
-    use super::*;
+    use reth_ecies::{stream::ECIESStream, util::pk2id};
+    use reth_eth_wire::{
+        EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream, Status, StatusBuilder,
+        UnauthedEthStream, UnauthedP2PStream,
+    };
+    use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
+    use reth_primitives::{ForkFilter, Hardfork, MAINNET};
+    use secp256k1::{SecretKey, SECP256K1};
+    use std::time::Duration;
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+    };
 
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
