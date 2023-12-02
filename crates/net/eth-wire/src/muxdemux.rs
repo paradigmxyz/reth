@@ -265,6 +265,11 @@ where
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        while let Ok(item) = self.mux.try_recv() {
+            self.inner.start_send_unpin(item)?;
+        }
+        _ = self.inner.poll_flush_unpin(cx)?;
+
         self.inner.poll_close_unpin(cx).map_err(Into::into)
     }
 }
