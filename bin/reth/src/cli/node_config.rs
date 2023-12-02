@@ -29,7 +29,7 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_config::{config::PruneConfig, Config};
+use reth_config::{config::{PruneConfig, StageConfig}, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -348,7 +348,7 @@ impl NodeConfig {
 
             let mut pipeline = self
                 .build_networked_pipeline(
-                    &config,
+                    &config.stages,
                     client.clone(),
                     Arc::clone(&consensus),
                     provider_factory,
@@ -368,7 +368,7 @@ impl NodeConfig {
         } else {
             let pipeline = self
                 .build_networked_pipeline(
-                    &config,
+                    &config.stages,
                     network_client.clone(),
                     Arc::clone(&consensus),
                     provider_factory,
@@ -633,7 +633,7 @@ impl NodeConfig {
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
         &self,
-        config: &Config,
+        config: &StageConfig,
         client: Client,
         consensus: Arc<dyn Consensus>,
         provider_factory: ProviderFactory<DB>,
@@ -647,18 +647,18 @@ impl NodeConfig {
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
         // building network downloaders using the fetch client
-        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
+        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.headers)
             .build(client.clone(), Arc::clone(&consensus))
             .into_task_with(task_executor);
 
-        let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
+        let body_downloader = BodiesDownloaderBuilder::from(config.bodies)
             .build(client, Arc::clone(&consensus), provider_factory.clone())
             .into_task_with(task_executor);
 
         let pipeline = self
             .build_pipeline(
                 provider_factory,
-                config,
+                &config,
                 header_downloader,
                 body_downloader,
                 consensus,
@@ -892,7 +892,7 @@ impl NodeConfig {
     async fn build_pipeline<DB, H, B>(
         &self,
         provider_factory: ProviderFactory<DB>,
-        config: &Config,
+        stage_config: &StageConfig,
         header_downloader: H,
         body_downloader: B,
         consensus: Arc<dyn Consensus>,
@@ -906,8 +906,6 @@ impl NodeConfig {
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
     {
-        let stage_config = &config.stages;
-
         let mut builder = Pipeline::builder();
 
         if let Some(max_block) = max_block {
