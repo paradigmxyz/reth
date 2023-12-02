@@ -185,13 +185,13 @@ pub const DEFAULT_GAS_PRICE_BLOCKS: u32 = 20;
 /// Gas Price below which the gas price oracle will ignore transactions
 pub const DEFAULT_GAS_PRICE_IGNORE: u64 = 2;
 
-/// Maximum transaction priority fee (or gas price before London Fork) to be recommended by the gas price oracle
+/// Maximum transaction priority fee (or gas price before London Fork) to be recommended by the gas
+/// price oracle
 pub const DEFAULT_GAS_PRICE_MAX: u64 = 500_000_000_000;
 
 /// The percentile of gas prices to use for the estimate
 pub const DEFAULT_GAS_PRICE_PERCENTILE: u32 = 60;
 
-///
 #[cfg(test)]
 mod tests {
     use super::*;
