@@ -24,7 +24,7 @@ pub type EthSatelliteConnection =
 
 /// Connection types that support the ETH protocol.
 ///
-/// Either a [`PeerConnection`] or an [`EthSatelliteConnection`].
+/// Either a [`EthPeerConnection`] or an [`EthSatelliteConnection`].
 // This type is boxed because the underlying stream is ~6KB,
 // mostly coming from `P2PStream`'s `snap::Encoder` (2072), and `ECIESStream` (3600).
 #[derive(Debug)]

@@ -435,6 +435,12 @@ impl SharedCapabilities {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+
+    /// Returns true if there are no shared capabilities.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 /// Determines the offsets for each shared capability between the input list of peer
