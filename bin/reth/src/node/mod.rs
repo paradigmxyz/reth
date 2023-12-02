@@ -34,7 +34,10 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_config::{config::PruneConfig, Config};
+use reth_config::{
+    config::{PruneConfig, StageConfig},
+    Config,
+};
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -419,7 +422,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
             let mut pipeline = self
                 .build_networked_pipeline(
-                    &config,
+                    &config.stages,
                     client.clone(),
                     Arc::clone(&consensus),
                     provider_factory,
@@ -439,7 +442,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             let pipeline = self
                 .build_networked_pipeline(
-                    &config,
+                    &config.stages,
                     network_client.clone(),
                     Arc::clone(&consensus),
                     provider_factory,
@@ -604,7 +607,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
         &self,
-        config: &Config,
+        config: &StageConfig,
         client: Client,
         consensus: Arc<dyn Consensus>,
         provider_factory: ProviderFactory<DB>,
@@ -618,11 +621,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
         // building network downloaders using the fetch client
-        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
+        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.headers)
             .build(client.clone(), Arc::clone(&consensus))
             .into_task_with(task_executor);
 
-        let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
+        let body_downloader = BodiesDownloaderBuilder::from(config.bodies)
             .build(client, Arc::clone(&consensus), provider_factory.clone())
             .into_task_with(task_executor);
 
@@ -806,7 +809,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -814,7 +817,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -863,7 +866,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     async fn build_pipeline<DB, H, B>(
         &self,
         provider_factory: ProviderFactory<DB>,
-        config: &Config,
+        config: &StageConfig,
         header_downloader: H,
         body_downloader: B,
         consensus: Arc<dyn Consensus>,
@@ -877,8 +880,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
     {
-        let stage_config = &config.stages;
-
         let mut builder = Pipeline::builder();
 
         if let Some(max_block) = max_block {
@@ -923,47 +924,47 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 )
                 .set(
                     TotalDifficultyStage::new(consensus)
-                        .with_commit_threshold(stage_config.total_difficulty.commit_threshold),
+                        .with_commit_threshold(config.total_difficulty.commit_threshold),
                 )
                 .set(SenderRecoveryStage {
-                    commit_threshold: stage_config.sender_recovery.commit_threshold,
+                    commit_threshold: config.sender_recovery.commit_threshold,
                 })
                 .set(
                     ExecutionStage::new(
                         factory,
                         ExecutionStageThresholds {
-                            max_blocks: stage_config.execution.max_blocks,
-                            max_changes: stage_config.execution.max_changes,
-                            max_cumulative_gas: stage_config.execution.max_cumulative_gas,
+                            max_blocks: config.execution.max_blocks,
+                            max_changes: config.execution.max_changes,
+                            max_cumulative_gas: config.execution.max_cumulative_gas,
                         },
-                        stage_config
+                        config
                             .merkle
                             .clean_threshold
-                            .max(stage_config.account_hashing.clean_threshold)
-                            .max(stage_config.storage_hashing.clean_threshold),
+                            .max(config.account_hashing.clean_threshold)
+                            .max(config.storage_hashing.clean_threshold),
                         prune_modes.clone(),
                     )
                     .with_metrics_tx(metrics_tx),
                 )
                 .set(AccountHashingStage::new(
-                    stage_config.account_hashing.clean_threshold,
-                    stage_config.account_hashing.commit_threshold,
+                    config.account_hashing.clean_threshold,
+                    config.account_hashing.commit_threshold,
                 ))
                 .set(StorageHashingStage::new(
-                    stage_config.storage_hashing.clean_threshold,
-                    stage_config.storage_hashing.commit_threshold,
+                    config.storage_hashing.clean_threshold,
+                    config.storage_hashing.commit_threshold,
                 ))
-                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
+                .set(MerkleStage::new_execution(config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
-                    stage_config.transaction_lookup.commit_threshold,
+                    config.transaction_lookup.commit_threshold,
                     prune_modes.transaction_lookup,
                 ))
                 .set(IndexAccountHistoryStage::new(
-                    stage_config.index_account_history.commit_threshold,
+                    config.index_account_history.commit_threshold,
                     prune_modes.account_history,
                 ))
                 .set(IndexStorageHistoryStage::new(
-                    stage_config.index_storage_history.commit_threshold,
+                    config.index_storage_history.commit_threshold,
                     prune_modes.storage_history,
                 )),
             )
