@@ -82,6 +82,8 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
+use super::components::RethRpcServerHandles;
+
 /// Start the node
 #[derive(Debug)]
 pub struct NodeConfig {
@@ -468,7 +470,7 @@ impl NodeConfig {
         self.adjust_instance_ports();
 
         // Start RPC servers
-        let _rpc_server_handles =
+        let rpc_server_handles =
             self.rpc.start_servers(&components, engine_api, jwt_secret, &mut ext).await?;
 
         // Run consensus engine to completion
@@ -502,6 +504,13 @@ impl NodeConfig {
             .await?;
         }
 
+        // we should return here
+        let _node_handle = NodeHandle {
+            rpc_server_handles
+        };
+
+        // TODO: we need a way to do this in the background because this method will just block
+        // until the consensus engine exits
         rx.await??;
 
         info!(target: "reth::cli", "Consensus engine has exited.");
@@ -1055,7 +1064,10 @@ impl NodeConfig {
 // * handles (for wiring into other components)
 //   * also for giving to the NodeHandle, for example everything rpc
 #[derive(Debug)]
-pub struct NodeHandle;
+pub struct NodeHandle {
+    /// The handles to the RPC servers
+    rpc_server_handles: RethRpcServerHandles,
+}
 
 #[cfg(test)]
 mod tests {
