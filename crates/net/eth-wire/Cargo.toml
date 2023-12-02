@@ -39,9 +39,11 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-net-common.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 ethers-core = { workspace = true, default-features = false }
+
 
 test-fuzz = "4"
 tokio-util = { workspace = true, features = ["io", "codec"] }

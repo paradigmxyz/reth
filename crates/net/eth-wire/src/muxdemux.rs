@@ -122,8 +122,12 @@ impl<S> MuxDemuxStream<S> {
         for shared_cap in shared_capabilities.iter_caps() {
             match shared_cap {
                 SharedCapability::Eth { .. } if cap.is_eth() => return Ok(shared_cap),
+                SharedCapability::UnknownCapability { cap: unknown_cap, .. }
+                    if cap == unknown_cap =>
+                {
+                    return Ok(shared_cap)
+                }
                 _ => continue,
-                // more caps to come ..
             }
         }
 
@@ -148,10 +152,9 @@ impl<S> MuxDemuxStream<S> {
     fn unmask_msg_id(&self, id: &mut u8) -> Result<&SharedCapability, MuxDemuxError> {
         for cap in self.shared_capabilities.iter_caps() {
             let offset = cap.relative_message_id_offset();
-            let next_offset = offset + cap.num_messages()?;
+            let next_offset = offset + cap.num_messages();
             if *id < next_offset {
                 *id -= offset;
-
                 return Ok(cap)
             }
         }
@@ -197,18 +200,15 @@ where
         loop {
             // send buffered bytes from `StreamClone`s. try send at least as many messages as
             // there are stream clones.
-            if !mux_exhausted {
-                if self.inner.poll_ready_unpin(cx).is_ready() {
-                    if let Ok(item) = self.mux.try_recv() {
-                        self.inner.start_send_unpin(item)?;
-                    } else {
-                        mux_exhausted = true;
+            if self.inner.poll_ready_unpin(cx).is_ready() {
+                if let Ok(item) = self.mux.try_recv() {
+                    self.inner.start_send_unpin(item)?;
+                    if send_count < self.demux.len() {
+                        send_count += 1;
+                        continue
                     }
-                }
-
-                if send_count < self.demux.len() {
-                    send_count += 1;
-                    continue
+                } else {
+                    mux_exhausted = true;
                 }
             }
             _ = self.inner.poll_flush_unpin(cx)?;
@@ -219,9 +219,10 @@ where
             if res.is_pending() {
                 // no message is received. continue to send messages from stream clones as long as
                 // there are messages left to send.
-                if !mux_exhausted {
+                if !mux_exhausted && self.inner.poll_ready_unpin(cx).is_ready() {
                     continue
                 }
+                cx.waker().wake_by_ref();
             }
             let mut bytes = match ready!(res) {
                 Some(Ok(bytes)) => bytes,
@@ -348,19 +349,164 @@ impl CanDisconnect<Bytes> for StreamClone {
 
 #[cfg(test)]
 mod test {
-    use reth_primitives::bytes::{BufMut, BytesMut};
+    use std::{net::SocketAddr, pin::Pin};
+
+    use futures::{Future, SinkExt, StreamExt};
+    use reth_ecies::util::pk2id;
+    use reth_primitives::{
+        bytes::{BufMut, Bytes, BytesMut},
+        ForkFilter, Hardfork, MAINNET,
+    };
+    use secp256k1::{SecretKey, SECP256K1};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        task::JoinHandle,
+    };
+    use tokio_util::codec::{Decoder, Framed, LengthDelimitedCodec};
 
     use crate::{
         capability::{Capability, SharedCapabilities},
         muxdemux::MuxDemuxStream,
         protocol::Protocol,
-        EthVersion,
+        EthVersion, HelloMessageWithProtocols, Status, StatusBuilder, StreamClone,
+        UnauthedEthStream, UnauthedP2PStream,
     };
 
+    const ETH_68_CAP: Capability = Capability::eth(EthVersion::Eth68);
+    const ETH_68_PROTOCOL: Protocol = Protocol::new(ETH_68_CAP, 13);
+    const CUSTOM_CAP: Capability = Capability::new_static("snap", 1);
+    const CUSTOM_CAP_PROTOCOL: Protocol = Protocol::new(CUSTOM_CAP, 10);
+    // message IDs `0x00` and `0x01` are normalized for the custom protocol stream
+    const CUSTOM_REQUEST: [u8; 5] = [0x00, 0x00, 0x01, 0x0, 0xc0];
+    const CUSTOM_RESPONSE: [u8; 5] = [0x01, 0x00, 0x01, 0x0, 0xc0];
+
     fn shared_caps_eth68() -> SharedCapabilities {
-        let local_capabilities: Vec<Protocol> = vec![Protocol::new(EthVersion::Eth68.into(), 10)];
-        let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth68.into()];
+        let local_capabilities: Vec<Protocol> = vec![ETH_68_PROTOCOL];
+        let peer_capabilities: Vec<Capability> = vec![ETH_68_CAP];
         SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap()
+    }
+
+    fn shared_caps_eth68_and_custom() -> SharedCapabilities {
+        let local_capabilities: Vec<Protocol> = vec![ETH_68_PROTOCOL, CUSTOM_CAP_PROTOCOL];
+        let peer_capabilities: Vec<Capability> = vec![ETH_68_CAP, CUSTOM_CAP];
+        SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap()
+    }
+
+    struct ConnectionBuilder {
+        local_addr: SocketAddr,
+        local_hello: HelloMessageWithProtocols,
+        status: Status,
+        fork_filter: ForkFilter,
+    }
+
+    impl ConnectionBuilder {
+        fn new() -> Self {
+            let (_secret_key, pk) = SECP256K1.generate_keypair(&mut rand::thread_rng());
+
+            let hello = HelloMessageWithProtocols::builder(pk2id(&pk))
+                .protocol(ETH_68_PROTOCOL)
+                .protocol(CUSTOM_CAP_PROTOCOL)
+                .build();
+
+            let local_addr = "127.0.0.1:30303".parse().unwrap();
+
+            Self {
+                local_hello: hello,
+                local_addr,
+                status: StatusBuilder::default().build(),
+                fork_filter: MAINNET
+                    .hardfork_fork_filter(Hardfork::Frontier)
+                    .expect("The Frontier fork filter should exist on mainnet"),
+            }
+        }
+
+        /// Connects a custom sub protocol stream and executes the given closure with that
+        /// established stream (main stream is eth).
+        fn with_connect_custom_protocol<F, G>(
+            self,
+            f_local: F,
+            f_remote: G,
+        ) -> (JoinHandle<BytesMut>, JoinHandle<BytesMut>)
+        where
+            F: FnOnce(StreamClone) -> Pin<Box<(dyn Future<Output = BytesMut> + Send)>>
+                + Send
+                + Sync
+                + Send
+                + 'static,
+            G: FnOnce(StreamClone) -> Pin<Box<(dyn Future<Output = BytesMut> + Send)>>
+                + Send
+                + Sync
+                + Send
+                + 'static,
+        {
+            let local_addr = self.local_addr;
+
+            let local_hello = self.local_hello.clone();
+            let status = self.status;
+            let fork_filter = self.fork_filter.clone();
+
+            let local_handle = tokio::spawn(async move {
+                let local_listener = TcpListener::bind(local_addr).await.unwrap();
+                let (incoming, _) = local_listener.accept().await.unwrap();
+                let stream = crate::PassthroughCodec::default().framed(incoming);
+
+                let protocol_proxy =
+                    connect_protocol(stream, local_hello, status, fork_filter).await;
+
+                f_local(protocol_proxy).await
+            });
+
+            let remote_key = SecretKey::new(&mut rand::thread_rng());
+            let remote_id = pk2id(&remote_key.public_key(SECP256K1));
+            let mut remote_hello = self.local_hello.clone();
+            remote_hello.id = remote_id;
+            let fork_filter = self.fork_filter.clone();
+
+            let remote_handle = tokio::spawn(async move {
+                let outgoing = TcpStream::connect(local_addr).await.unwrap();
+                let stream = crate::PassthroughCodec::default().framed(outgoing);
+
+                let protocol_proxy =
+                    connect_protocol(stream, remote_hello, status, fork_filter).await;
+
+                f_remote(protocol_proxy).await
+            });
+
+            (local_handle, remote_handle)
+        }
+    }
+
+    async fn connect_protocol(
+        stream: Framed<TcpStream, LengthDelimitedCodec>,
+        hello: HelloMessageWithProtocols,
+        status: Status,
+        fork_filter: ForkFilter,
+    ) -> StreamClone {
+        let unauthed_stream = UnauthedP2PStream::new(stream);
+        let (p2p_stream, _) = unauthed_stream.handshake(hello).await.unwrap();
+
+        // ensure that the two share capabilities
+        assert_eq!(*p2p_stream.shared_capabilities(), shared_caps_eth68_and_custom(),);
+
+        let shared_caps = p2p_stream.shared_capabilities().clone();
+        let main_cap = shared_caps.eth().unwrap();
+        let proxy_server =
+            MuxDemuxStream::try_new(p2p_stream, main_cap.capability().into_owned(), shared_caps)
+                .expect("should start mxdmx stream");
+
+        let (mut main_stream, _) =
+            UnauthedEthStream::new(proxy_server).handshake(status, fork_filter).await.unwrap();
+
+        let protocol_proxy =
+            main_stream.inner_mut().try_clone_stream(&CUSTOM_CAP).expect("should clone stream");
+
+        tokio::spawn(async move {
+            loop {
+                _ = main_stream.next().await.unwrap()
+            }
+        });
+
+        protocol_proxy
     }
 
     #[test]
@@ -402,7 +548,38 @@ mod test {
         assert!(mxdmx_stream.unmask_msg_id(&mut msg[0]).is_err());
     }
 
-    #[test]
-    #[ignore = "more subprotocols than eth have to be implemented"]
-    fn test_try_drop_stream_owner() {}
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_mux_demux() {
+        let builder = ConnectionBuilder::new();
+
+        let request = Bytes::from(&CUSTOM_REQUEST[..]);
+        let response = Bytes::from(&CUSTOM_RESPONSE[..]);
+        let expected_request = request.clone();
+        let expected_response = response.clone();
+
+        let (local_handle, remote_handle) = builder.with_connect_custom_protocol(
+            // send request from local addr
+            |mut protocol_proxy| {
+                Box::pin(async move {
+                    protocol_proxy.send(request).await.unwrap();
+                    protocol_proxy.next().await.unwrap()
+                })
+            },
+            // respond from remote addr
+            |mut protocol_proxy| {
+                Box::pin(async move {
+                    let request = protocol_proxy.next().await.unwrap();
+                    protocol_proxy.send(response).await.unwrap();
+                    request
+                })
+            },
+        );
+
+        let (local_res, remote_res) = tokio::join!(local_handle, remote_handle);
+
+        // remote address receives request
+        assert_eq!(expected_request, remote_res.unwrap().freeze());
+        // local address receives response
+        assert_eq!(expected_response, local_res.unwrap().freeze());
+    }
 }
