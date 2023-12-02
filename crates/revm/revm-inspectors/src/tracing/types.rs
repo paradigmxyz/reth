@@ -61,7 +61,7 @@ impl CallTrace {
     /// Returns true if the status code is an error or revert, See [InstructionResult::Revert]
     #[inline]
     pub fn is_error(&self) -> bool {
-        self.status.is_error()
+        !self.status.is_ok()
     }
 
     /// Returns true if the status code is a revert

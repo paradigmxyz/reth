@@ -61,7 +61,7 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 150;
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
-#[derive(Debug, Clone, Args)]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[clap(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
@@ -462,7 +462,7 @@ impl RethRpcConfig for RpcServerArgs {
 impl Default for RpcServerArgs {
     fn default() -> Self {
         Self {
-            http: true,
+            http: false,
             http_addr: Ipv4Addr::LOCALHOST.into(),
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
             http_api: None,
@@ -708,5 +708,13 @@ mod tests {
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+    }
+
+    #[test]
+    fn rpc_server_args_default_sanity_test() {
+        let default_args = RpcServerArgs::default();
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+
+        assert_eq!(args, default_args);
     }
 }

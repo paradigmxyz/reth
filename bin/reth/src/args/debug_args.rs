@@ -58,3 +58,23 @@ pub struct DebugArgs {
     )]
     pub hook_all: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[clap(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn test_parse_database_args() {
+        let default_args = DebugArgs::default();
+        let args = CommandParser::<DebugArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
+    }
+}

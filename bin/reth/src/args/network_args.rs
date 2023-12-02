@@ -11,7 +11,7 @@ use secp256k1::SecretKey;
 use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
-#[derive(Debug, Args)]
+#[derive(Debug, Args, PartialEq, Eq)]
 #[clap(next_help_heading = "Networking")]
 pub struct NetworkArgs {
     /// Disable the discovery service.
@@ -118,15 +118,35 @@ impl NetworkArgs {
     /// If `no_persist_peers` is true then this returns the path to the persistent peers file path.
     pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
         if self.no_persist_peers {
-            return None
+            return None;
         }
 
         Some(peers_file)
     }
 }
 
+impl Default for NetworkArgs {
+    fn default() -> Self {
+        Self {
+            discovery: DiscoveryArgs::default(),
+            trusted_peers: vec![],
+            trusted_only: false,
+            bootnodes: None,
+            peers_file: None,
+            identity: P2P_CLIENT_VERSION.to_string(),
+            p2p_secret_key: None,
+            no_persist_peers: false,
+            nat: NatResolver::Any,
+            addr: DEFAULT_DISCOVERY_ADDR,
+            port: DEFAULT_DISCOVERY_PORT,
+            max_outbound_peers: None,
+            max_inbound_peers: None,
+        }
+    }
+}
+
 /// Arguments to setup discovery
-#[derive(Debug, Args)]
+#[derive(Debug, Args, PartialEq, Eq)]
 pub struct DiscoveryArgs {
     /// Disable the discovery service.
     #[arg(short, long, default_value_if("dev", "true", "true"))]
@@ -163,6 +183,18 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
         network_config_builder
+    }
+}
+
+impl Default for DiscoveryArgs {
+    fn default() -> Self {
+        Self {
+            disable_discovery: false,
+            disable_dns_discovery: false,
+            disable_discv4_discovery: false,
+            addr: DEFAULT_DISCOVERY_ADDR,
+            port: DEFAULT_DISCOVERY_PORT,
+        }
     }
 }
 
@@ -223,5 +255,13 @@ mod tests {
             "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303".parse().unwrap()
             ]
         );
+    }
+
+    #[test]
+    fn network_args_default_sanity_test() {
+        let default_args = NetworkArgs::default();
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+
+        assert_eq!(args, default_args);
     }
 }

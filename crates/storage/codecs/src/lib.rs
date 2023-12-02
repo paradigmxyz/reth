@@ -70,7 +70,9 @@ macro_rules! impl_uint_compact {
     ($($name:tt),+) => {
         $(
             impl Compact for $name {
-                fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
+                fn to_compact<B>(self, buf: &mut B) -> usize
+                    where B: bytes::BufMut + AsMut<[u8]>
+                {
                     let leading = self.leading_zeros() as usize / 8;
                     buf.put_slice(&self.to_be_bytes()[leading..]);
                     std::mem::size_of::<$name>() - leading
@@ -262,44 +264,49 @@ impl Compact for Bytes {
     }
 }
 
-/// Implements the [`Compact`] trait for fixed size hash types like [`B256`].
+impl<const N: usize> Compact for [u8; N] {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        buf.put_slice(&self);
+        N
+    }
+
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        if len == 0 {
+            return ([0; N], buf)
+        }
+
+        let v = buf[..N].try_into().unwrap();
+        buf.advance(N);
+        (v, buf)
+    }
+}
+
+/// Implements the [`Compact`] trait for fixed size byte array types like [`B256`].
 #[macro_export]
-macro_rules! impl_hash_compact {
+macro_rules! impl_compact_for_bytes {
     ($($name:tt),+) => {
         $(
             impl Compact for $name {
-                fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
-                    buf.put_slice(self.as_slice());
-                    std::mem::size_of::<$name>()
-                }
-
-                fn from_compact(mut buf: &[u8], len: usize) -> (Self,&[u8]) {
-                    if len == 0 {
-                        return ($name::default(), buf)
-                    }
-
-                    let v = $name::from_slice(
-                        buf.get(..std::mem::size_of::<$name>()).expect("size not matching"),
-                    );
-                    buf.advance(std::mem::size_of::<$name>());
-                    (v, buf)
-                }
-
-                fn specialized_to_compact<B>(self, buf: &mut B) -> usize
+                fn to_compact<B>(self, buf: &mut B) -> usize
                 where
-                    B: bytes::BufMut + AsMut<[u8]> {
-                    self.to_compact(buf)
+                    B: bytes::BufMut + AsMut<[u8]>
+                {
+                    self.0.to_compact(buf)
                 }
 
-                fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-                    Self::from_compact(buf, len)
+                fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+                    let (v, buf) = <[u8; std::mem::size_of::<$name>()]>::from_compact(buf, len);
+                    (Self::from(v), buf)
                 }
             }
         )+
     };
 }
 
-impl_hash_compact!(Address, B256, B512, Bloom);
+impl_compact_for_bytes!(Address, B256, B512, Bloom);
 
 impl Compact for bool {
     /// `bool` vars go directly to the `StructFlags` and are not written to the buffer.
