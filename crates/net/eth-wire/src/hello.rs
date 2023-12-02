@@ -48,6 +48,11 @@ impl HelloMessageWithProtocols {
         HelloMessageBuilder::new(id)
     }
 
+    /// Create a new builder based on existing [`HelloMessageWithProtocols`].
+    pub fn builder_from(hello: HelloMessageWithProtocols) -> HelloMessageBuilder {
+        HelloMessageBuilder::new_from(hello)
+    }
+
     /// Returns the raw [HelloMessage] without the additional protocol information.
     pub fn message(&self) -> HelloMessage {
         HelloMessage {
@@ -135,7 +140,8 @@ impl HelloMessageBuilder {
         Self { protocol_version: None, client_version: None, protocols: None, port: None, id }
     }
 
-    /// Create a new builder to configure a [`HelloMessage`] from an existing instance.
+    /// Create a new builder to configure a [`HelloMessageWithProtocols`] from an existing
+    /// instance.
     pub fn new_from(hello_message: HelloMessageWithProtocols) -> Self {
         let HelloMessageWithProtocols { protocol_version, client_version, protocols, port, id } =
             hello_message;

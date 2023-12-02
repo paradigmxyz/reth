@@ -11,8 +11,8 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthVersion, HelloMessageBuilder, HelloMessageWithProtocols, Status,
-    UnauthedEthStream, UnauthedP2PStream,
+    DisconnectReason, EthVersion, HelloMessageWithProtocols, Status, UnauthedEthStream,
+    UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::{
@@ -186,7 +186,7 @@ impl SessionManager {
             return hello_message
         }
 
-        let mut builder = HelloMessageBuilder::new_from(hello_message);
+        let mut builder = HelloMessageWithProtocols::builder_from(hello_message);
         for handler in extra_conns {
             builder = builder.protocol(handler.protocol());
         }
