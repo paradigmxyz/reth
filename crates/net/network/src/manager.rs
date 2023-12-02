@@ -354,7 +354,7 @@ where
         let hello_message = sessions.hello_message();
 
         NetworkStatus {
-            client_version: hello_message.client_version,
+            client_version: hello_message.client_version.clone(),
             protocol_version: hello_message.protocol_version as u64,
             eth_protocol_info: EthProtocolInfo {
                 difficulty: status.total_difficulty,

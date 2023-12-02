@@ -171,9 +171,9 @@ impl SessionManager {
         self.status
     }
 
-    /// Returns the session hello message.
-    pub fn hello_message(&self) -> HelloMessageWithProtocols {
-        self.hello_message.clone()
+    /// Returns the session default hello message.
+    pub fn hello_message(&self) -> &HelloMessageWithProtocols {
+        &self.hello_message
     }
 
     // Update hello message with extra protocols to support in the session.
