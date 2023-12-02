@@ -6,7 +6,7 @@ use derive_more::Deref;
 use futures::{Sink, Stream};
 use reth_eth_wire::{
     capability::{SharedCapabilities, SharedCapability},
-    multiplex::ProtocolProxy,
+    multiplex::ProtocolStream,
     protocol::Protocol,
     CanDisconnect,
 };
@@ -140,12 +140,22 @@ pub trait ProxyProtocol {
     fn relative_mask_msg_id(&self, msg: BytesMut) -> Bytes;
 }
 
+impl ProxyProtocol for ProtocolStream {
+    fn shared_capability(&self) -> &SharedCapability {
+        self.cap()
+    }
+
+    fn relative_mask_msg_id(&self, msg: BytesMut) -> Bytes {
+        self.mask_msg_id(msg)
+    }
+}
+
 /// Convenience type setting associated type for [`ProtocolHandler`].
 pub type DynProtocolHandler = dyn ProtocolHandler<ConnectionHandler = DynConnectionHandler>;
 
 /// Convenience type setting associated types for [`ConnectionHandler`].
 pub type DynConnectionHandler =
-    dyn ConnectionHandler<Connection = dyn Connection, P2PConnection = ProtocolProxy>;
+    dyn ConnectionHandler<Connection = dyn Connection, P2PConnection = ProtocolStream>;
 
 /// A wrapper type for a RLPx sub-protocol.
 #[derive(Debug, Deref)]
