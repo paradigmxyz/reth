@@ -13,7 +13,7 @@ use crate::{
     init::init_genesis,
     node::{cl_events::ConsensusLayerHealthEvents, events, run_network_until_shutdown},
     prometheus_exporter,
-    runner::{CliContext, tokio_runtime},
+    runner::tokio_runtime,
     utils::get_single_header,
     version::SHORT_VERSION,
 };
@@ -85,19 +85,15 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use super::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
+use super::{
+    components::RethRpcServerHandles, db_type::DatabaseType, ext::DefaultRethNodeCommandConfig,
+};
 
 /// Start the node
 #[derive(Debug)]
 pub struct NodeConfig {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    pub datadir: MaybePlatformPath<DataDirPath>,
+    /// The test database
+    pub database: DatabaseType,
 
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
@@ -160,20 +156,41 @@ pub struct NodeConfig {
 }
 
 impl NodeConfig {
+    /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
+    pub fn test() -> Self {
+        Self {
+            database: DatabaseType::default(),
+            config: None,
+            chain: MAINNET.clone(),
+            metrics: None,
+            instance: 1,
+            trusted_setup_file: None,
+            network: NetworkArgs::default(),
+            rpc: RpcServerArgs::default(),
+            txpool: TxPoolArgs::default(),
+            builder: PayloadBuilderArgs::default(),
+            debug: DebugArgs::default(),
+            db: DatabaseArgs::default(),
+            dev: DevArgs::default(),
+            pruning: PruningArgs::default(),
+            #[cfg(feature = "optimism")]
+            rollup: crate::args::RollupArgs::default(),
+        }
+    }
+
     /// Launches the node, also adding any RPC extensions passed.
     ///
     /// # Example
     /// ```rust
-    ///
     /// # use reth_tasks::TaskManager;
     /// fn t() {
-    ///  use reth_tasks::TaskSpawner;
-    /// let rt = tokio::runtime::Runtime::new().unwrap();
-    /// let manager = TaskManager::new(rt.handle().clone());
-    /// let executor = manager.executor();
-    /// let config = NodeConfig::default();
-    /// let ext = DefaultRethNodeCommandConfig;
-    /// let handle = config.launch(ext, executor);
+    ///     use reth_tasks::TaskSpawner;
+    ///     let rt = tokio::runtime::Runtime::new().unwrap();
+    ///     let manager = TaskManager::new(rt.handle().clone());
+    ///     let executor = manager.executor();
+    ///     let config = NodeConfig::default();
+    ///     let ext = DefaultRethNodeCommandConfig;
+    ///     let handle = config.launch(ext, executor);
     /// }
     /// ```
     pub async fn launch<E: RethCliExt>(
@@ -192,11 +209,22 @@ impl NodeConfig {
 
         let prometheus_handle = self.install_prometheus_recorder()?;
 
-        let data_dir = self.data_dir();
+        let data_dir = self.data_dir().expect("see below");
         let db_path = data_dir.db_path();
 
-        info!(target: "reth::cli", path = ?db_path, "Opening database");
         // TODO: set up test database, see if we can configure either real or test db
+        // let db =
+        //     DatabaseBuilder::new(self.database).build_db(self.db.log_level, self.chain.chain)?;
+        // TODO: ok, this doesn't work because:
+        // * Database is not object safe, and is sealed
+        // * DatabaseInstance is not sealed
+        // * ProviderFactory takes DB
+        // * But this would make it ProviderFactory<DatabaseEnv> OR
+        // ProviderFactory<TempDatabase<DatabaseEnv>>
+        // * But we also have no Either<A: Database, B: Database> impl for
+        // ProviderFactory<Either<A, B>> etc
+        // * Because Database is not object safe we can't return Box<dyn Database> either
+        // * EitherDatabase is nontrivial due to associated types
         let db = Arc::new(init_db(&db_path, self.db.log_level)?.with_metrics());
         info!(target: "reth::cli", "Database opened");
 
@@ -523,7 +551,7 @@ impl NodeConfig {
         }
 
         // we should return here
-        let _node_handle = NodeHandle { rpc_server_handles };
+        let _node_handle = NodeHandle { _rpc_server_handles: rpc_server_handles };
 
         // TODO: we need a way to do this in the background because this method will just block
         // until the consensus engine exits
@@ -546,7 +574,7 @@ impl NodeConfig {
 
     /// Set the datadir for the node
     pub fn datadir(mut self, datadir: MaybePlatformPath<DataDirPath>) -> Self {
-        self.datadir = datadir;
+        self.database = DatabaseType::Real(datadir);
         self
     }
 
@@ -696,19 +724,29 @@ impl NodeConfig {
         Ok(pipeline)
     }
 
-    /// Returns the chain specific path to the data dir.
-    fn data_dir(&self) -> ChainPath<DataDirPath> {
-        self.datadir.unwrap_or_chain_default(self.chain.chain)
+    /// Returns the chain specific path to the data dir. This returns `None` if the database is
+    /// configured for testing.
+    fn data_dir(&self) -> Option<ChainPath<DataDirPath>> {
+        match &self.database {
+            DatabaseType::Real(data_dir) => {
+                Some(data_dir.unwrap_or_chain_default(self.chain.chain))
+            }
+            DatabaseType::Test => None,
+        }
     }
 
     /// Returns the path to the config file.
-    fn config_path(&self) -> PathBuf {
-        self.config.clone().unwrap_or_else(|| self.data_dir().config_path())
+    fn config_path(&self) -> Option<PathBuf> {
+        let chain_dir = self.data_dir()?;
+
+        let config = self.config.clone().unwrap_or_else(|| chain_dir.config_path());
+        Some(config)
     }
 
     /// Loads the reth config with the given datadir root
     fn load_config(&self) -> eyre::Result<Config> {
-        let config_path = self.config_path();
+        let Some(config_path) = self.config_path() else { todo!() };
+
         let mut config = confy::load_path::<Config>(&config_path)
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
 
@@ -1085,7 +1123,7 @@ impl NodeConfig {
 impl Default for NodeConfig {
     fn default() -> Self {
         Self {
-            datadir: MaybePlatformPath::<DataDirPath>::default(),
+            database: DatabaseType::default(),
             config: None,
             chain: MAINNET.clone(),
             metrics: None,
@@ -1113,13 +1151,12 @@ impl Default for NodeConfig {
 #[derive(Debug)]
 pub struct NodeHandle {
     /// The handles to the RPC servers
-    rpc_server_handles: RethRpcServerHandles,
+    _rpc_server_handles: RethRpcServerHandles,
 }
 
 /// The node service
 #[derive(Debug)]
 pub struct NodeService;
-
 
 /// A simple function to launch a node with the specified [NodeConfig], spawning tasks on the
 /// [TaskExecutor] constructed from [tokio_runtime].
@@ -1130,13 +1167,13 @@ pub async fn spawn_node(config: NodeConfig) -> eyre::Result<NodeHandle> {
     config.launch::<()>(ext, task_manager.executor()).await
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn test_node_config() {
+        // we need to override the db
         let _handle = spawn_node(NodeConfig::default()).await;
     }
 }
