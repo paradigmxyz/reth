@@ -25,7 +25,7 @@ pub struct GasPriceOracleArgs {
 mod tests {
     use super::*;
     use clap::Parser;
-    use reth_primitives::constants::{
+    use reth_rpc_builder::constants::{
         DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_IGNORE, DEFAULT_GAS_PRICE_MAX,
         DEFAULT_GAS_PRICE_PERCENTILE,
     };

@@ -179,19 +179,6 @@ pub const BEACON_ROOTS_ADDRESS: Address = address!("000F3df6D732807Ef1319fB7B8bB
 /// block.
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
 
-/// Number of recent blocks to check for gas price
-pub const DEFAULT_GAS_PRICE_BLOCKS: u32 = 20;
-
-/// Gas Price below which the gas price oracle will ignore transactions
-pub const DEFAULT_GAS_PRICE_IGNORE: u64 = 2;
-
-/// Maximum transaction priority fee (or gas price before London Fork) to be recommended by the gas
-/// price oracle
-pub const DEFAULT_GAS_PRICE_MAX: u64 = 500_000_000_000;
-
-/// The percentile of gas prices to use for the estimate
-pub const DEFAULT_GAS_PRICE_PERCENTILE: u32 = 60;
-
 #[cfg(test)]
 mod tests {
     use super::*;
