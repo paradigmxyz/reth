@@ -80,7 +80,7 @@ impl Signature {
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
         #[cfg(feature = "optimism")]
         if self.r.is_zero() && self.s.is_zero() {
-            return 0
+            return 0;
         }
 
         if let Some(chain_id) = chain_id {
@@ -107,7 +107,7 @@ impl Signature {
         } else {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
-                return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
+                return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"));
             }
             let odd_y_parity = v == 28;
             Ok((Signature { r, s, odd_y_parity }, None))
@@ -160,7 +160,7 @@ impl Signature {
     /// If the S value is too large, then this will return `None`
     pub fn recover_signer(&self, hash: B256) -> Option<Address> {
         if self.s > SECP256K1N_HALF {
-            return None
+            return None;
         }
 
         self.recover_signer_unchecked(hash)
