@@ -511,12 +511,12 @@ pub fn shared_capability_offsets(
     for name in shared_capability_names {
         let proto_version = shared_capabilities.get(&name).expect("shared; qed");
 
-        // todo: make EthMessageID version sensitive
-        let messages =
-            if name == "eth" { EthMessageID::Receipts as u8 + 1 } else { proto_version.messages };
-
-        let shared_capability =
-            SharedCapability::new(&name, proto_version.version as u8, offset, messages)?;
+        let shared_capability = SharedCapability::new(
+            &name,
+            proto_version.version as u8,
+            offset,
+            proto_version.messages,
+        )?;
 
         offset += shared_capability.num_messages();
         shared_with_offsets.push(shared_capability);
