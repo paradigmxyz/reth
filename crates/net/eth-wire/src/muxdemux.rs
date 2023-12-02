@@ -203,7 +203,6 @@ where
                         self.inner.start_send_unpin(item)?;
                     } else {
                         mux_exhausted = true;
-                        _ = self.inner.poll_flush_unpin(cx);
                     }
                 }
 
