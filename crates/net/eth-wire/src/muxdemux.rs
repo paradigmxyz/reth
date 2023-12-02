@@ -212,6 +212,7 @@ where
                     continue
                 }
             }
+            _ = self.inner.poll_flush_unpin(cx);
 
             // advances the wire and either yields message for the owner or delegates message to a
             // stream clone
