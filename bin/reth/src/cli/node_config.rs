@@ -13,7 +13,7 @@ use crate::{
     init::init_genesis,
     node::{cl_events::ConsensusLayerHealthEvents, events, run_network_until_shutdown},
     prometheus_exporter,
-    runner::CliContext,
+    runner::{CliContext, tokio_runtime},
     utils::get_single_header,
     version::SHORT_VERSION,
 };
@@ -72,7 +72,7 @@ use reth_stages::{
         TotalDifficultyStage, TransactionLookupStage,
     },
 };
-use reth_tasks::TaskExecutor;
+use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, TransactionPool, TransactionValidationTaskExecutor,
 };
@@ -85,7 +85,7 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-use super::components::RethRpcServerHandles;
+use super::{components::RethRpcServerHandles, ext::DefaultRethNodeCommandConfig};
 
 /// Start the node
 #[derive(Debug)]
@@ -161,10 +161,25 @@ pub struct NodeConfig {
 
 impl NodeConfig {
     /// Launches the node, also adding any RPC extensions passed.
+    ///
+    /// # Example
+    /// ```rust
+    ///
+    /// # use reth_tasks::TaskManager;
+    /// fn t() {
+    ///  use reth_tasks::TaskSpawner;
+    /// let rt = tokio::runtime::Runtime::new().unwrap();
+    /// let manager = TaskManager::new(rt.handle().clone());
+    /// let executor = manager.executor();
+    /// let config = NodeConfig::default();
+    /// let ext = DefaultRethNodeCommandConfig;
+    /// let handle = config.launch(ext, executor);
+    /// }
+    /// ```
     pub async fn launch<E: RethCliExt>(
         mut self,
         mut ext: E::Node,
-        ctx: CliContext,
+        executor: TaskExecutor,
     ) -> eyre::Result<NodeHandle> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
@@ -210,7 +225,7 @@ impl NodeConfig {
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
-        ctx.task_executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
+        executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
         let prune_config =
             self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
@@ -243,7 +258,7 @@ impl NodeConfig {
             .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
             .with_additional_tasks(1)
-            .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
+            .build_with_tasks(blockchain_db.clone(), executor.clone(), blob_store.clone());
 
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
@@ -254,13 +269,13 @@ impl NodeConfig {
             let pool = transaction_pool.clone();
             let chain_events = blockchain_db.canonical_state_stream();
             let client = blockchain_db.clone();
-            ctx.task_executor.spawn_critical(
+            executor.spawn_critical(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
                     pool,
                     chain_events,
-                    ctx.task_executor.clone(),
+                    executor.clone(),
                     Default::default(),
                 ),
             );
@@ -276,7 +291,7 @@ impl NodeConfig {
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
-            ctx.task_executor.clone(),
+            executor.clone(),
             head,
             secret_key,
             default_peers_path.clone(),
@@ -289,7 +304,7 @@ impl NodeConfig {
             provider: blockchain_db.clone(),
             pool: transaction_pool.clone(),
             network: network_builder.handle(),
-            task_executor: ctx.task_executor.clone(),
+            task_executor: executor.clone(),
             events: blockchain_db.clone(),
         };
 
@@ -299,7 +314,7 @@ impl NodeConfig {
         // launch network
         let network = self.start_network(
             network_builder,
-            &ctx.task_executor,
+            &executor,
             transaction_pool.clone(),
             network_client,
             default_peers_path,
@@ -355,7 +370,7 @@ impl NodeConfig {
                     client.clone(),
                     Arc::clone(&consensus),
                     provider_factory,
-                    &ctx.task_executor,
+                    &executor,
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
@@ -365,7 +380,7 @@ impl NodeConfig {
             let pipeline_events = pipeline.events();
             task.set_pipeline_events(pipeline_events);
             debug!(target: "reth::cli", "Spawning auto mine task");
-            ctx.task_executor.spawn(Box::pin(task));
+            executor.spawn(Box::pin(task));
 
             (pipeline, EitherDownloader::Left(client))
         } else {
@@ -375,7 +390,7 @@ impl NodeConfig {
                     network_client.clone(),
                     Arc::clone(&consensus),
                     provider_factory,
-                    &ctx.task_executor,
+                    &executor,
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
@@ -411,7 +426,7 @@ impl NodeConfig {
             );
 
             let events = pruner.events();
-            hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
+            hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
 
             info!(target: "reth::cli", ?prune_config, "Pruner initialized");
             Either::Left(events)
@@ -424,7 +439,7 @@ impl NodeConfig {
             client,
             pipeline,
             blockchain_db.clone(),
-            Box::new(ctx.task_executor.clone()),
+            Box::new(executor.clone()),
             Box::new(network.clone()),
             max_block,
             self.debug.continuous,
@@ -451,7 +466,7 @@ impl NodeConfig {
             },
             pruner_events.map(Into::into)
         );
-        ctx.task_executor.spawn_critical(
+        executor.spawn_critical(
             "events task",
             events::handle_events(Some(network.clone()), Some(head.number), events, db.clone()),
         );
@@ -461,7 +476,7 @@ impl NodeConfig {
             self.chain.clone(),
             beacon_engine_handle,
             payload_builder.into(),
-            Box::new(ctx.task_executor.clone()),
+            Box::new(executor.clone()),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -479,7 +494,7 @@ impl NodeConfig {
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
+        executor.spawn_critical_blocking("consensus engine", async move {
             let res = beacon_consensus_engine.await;
             let _ = tx.send(res);
         });
@@ -1105,45 +1120,23 @@ pub struct NodeHandle {
 #[derive(Debug)]
 pub struct NodeService;
 
+
+/// A simple function to launch a node with the specified [NodeConfig], spawning tasks on the
+/// [TaskExecutor] constructed from [tokio_runtime].
+pub async fn spawn_node(config: NodeConfig) -> eyre::Result<NodeHandle> {
+    let runtime = tokio_runtime()?;
+    let task_manager = TaskManager::new(runtime.handle().clone());
+    let ext = DefaultRethNodeCommandConfig;
+    config.launch::<()>(ext, task_manager.executor()).await
+}
+
+
 #[cfg(test)]
 mod tests {
-    // use super::*;
-    // use crate::args::NetworkArgs;
-    // use reth_primitives::ChainSpec;
-    // use std::net::Ipv4Addr;
+    use super::*;
 
-    #[test]
-    fn test_node_config() {
-
-        // let config = NodeConfig::default()
-        //     .datadir("/tmp")
-        //     .config("/tmp/config.toml")
-        //     .chain(Arc::new(ChainSpec::default()))
-        //     .metrics(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080))
-        //     .instance(1)
-        //     .trusted_setup_file("/tmp/trusted_setup")
-        //     .network(NetworkArgs::default())
-        //     .rpc(RpcServerArgs::default())
-        //     .txpool(TxPoolArgs::default())
-        //     .builder(PayloadBuilderArgs::default())
-        //     .debug(DebugArgs::default())
-        //     .db(DatabaseArgs::default())
-        //     .dev(DevArgs::default())
-        //     .pruning(PruningArgs::default());
-
-        // assert_eq!(config.datadir, PathBuf::from("/tmp"));
-        // assert_eq!(config.config, Some(PathBuf::from("/tmp/config.toml")));
-        // assert_eq!(config.chain, Arc::new(ChainSpec::default()));
-        // assert_eq!(config.metrics, Some(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080)));
-        // assert_eq!(config.instance, 1);
-        // assert_eq!(config.trusted_setup_file, Some(PathBuf::from("/tmp/trusted_setup")));
-        // assert_eq!(config.network, NetworkArgs::default());
-        // assert_eq!(config.rpc, RpcServerArgs::default());
-        // assert_eq!(config.txpool, TxPoolArgs::default());
-        // assert_eq!(config.builder, PayloadBuilderArgs::default());
-        // assert_eq!(config.debug, DebugArgs::default());
-        // assert_eq!(config.db, DatabaseArgs::default());
-        // assert_eq!(config.dev, DevArgs::default());
-        // assert_eq!(config.pruning, PruningArgs::default());
+    #[tokio::test]
+    async fn test_node_config() {
+        let _handle = spawn_node(NodeConfig::default()).await;
     }
 }
