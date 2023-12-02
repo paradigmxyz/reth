@@ -857,7 +857,6 @@ mod tests {
                 hello,
                 self.status,
                 self.fork_filter.clone(),
-                Vec::default(),
             ));
 
             let mut stream = ReceiverStream::new(pending_sessions_rx);

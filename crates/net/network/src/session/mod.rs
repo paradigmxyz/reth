@@ -177,7 +177,7 @@ impl SessionManager {
     }
 
     // Update hello message with extra protocols to support in the session.
-    fn update_hello_message(
+    fn _update_hello_message(
         &self,
         extra_conns: &[Box<dyn DynConnectionHandler>],
     ) -> HelloMessageWithProtocols {
@@ -192,42 +192,6 @@ impl SessionManager {
         }
 
         builder.build()
-    }
-
-    /// Returns connection handlers for the extra protocols that should be supported in the
-    /// incoming session.
-    pub fn extra_protocols_on_incoming(
-        &self,
-        remote_addr: SocketAddr,
-    ) -> (HelloMessageWithProtocols, Vec<Box<dyn DynConnectionHandler>>) {
-        let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
-        for protocol in self.extra_protocols.iter() {
-            if let Some(handler) = protocol.on_incoming(remote_addr) {
-                extra_conns.push(handler);
-            }
-        }
-
-        let hello_message = self.update_hello_message(&extra_conns);
-
-        (hello_message, extra_conns)
-    }
-
-    /// Returns connection handlers for the extra protocols that should be supported in the
-    /// outgoing session.
-    pub fn extra_protocols_on_outgoing(
-        &self,
-        remote_addr: SocketAddr,
-        remote_peer_id: PeerId,
-    ) -> (HelloMessageWithProtocols, Vec<Box<dyn DynConnectionHandler>>) {
-        let mut extra_conns = Vec::with_capacity(self.extra_protocols.len());
-        for protocol in self.extra_protocols.iter() {
-            if let Some(handler) = protocol.on_outgoing(remote_addr, remote_peer_id) {
-                extra_conns.push(handler);
-            }
-        }
-        let hello_message = self.update_hello_message(&extra_conns);
-
-        (hello_message, extra_conns)
     }
 
     /// Adds an additional protocol handler to the RLPx sub-protocol list.
@@ -280,7 +244,7 @@ impl SessionManager {
         let pending_events = self.pending_sessions_tx.clone();
         let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
         let secret_key = self.secret_key;
-        let (hello_message, extra_conns) = self.extra_protocols_on_incoming(remote_addr);
+        let hello_message = self.hello_message.clone();
         let status = self.status;
         let fork_filter = self.fork_filter.clone();
         self.spawn(start_pending_incoming_session(
@@ -293,7 +257,6 @@ impl SessionManager {
             hello_message,
             status,
             fork_filter,
-            extra_conns,
         ));
 
         let handle = PendingSessionHandle {
@@ -313,12 +276,10 @@ impl SessionManager {
             let (disconnect_tx, disconnect_rx) = oneshot::channel();
             let pending_events = self.pending_sessions_tx.clone();
             let secret_key = self.secret_key;
-            let (hello_message, extra_conns) =
-                self.extra_protocols_on_outgoing(remote_addr, remote_peer_id);
+            let hello_message = self.hello_message.clone();
             let fork_filter = self.fork_filter.clone();
             let status = self.status;
             let band_with_meter = self.bandwidth_meter.clone();
-
             self.spawn(start_pending_outbound_session(
                 disconnect_rx,
                 pending_events,
@@ -330,7 +291,6 @@ impl SessionManager {
                 status,
                 fork_filter,
                 band_with_meter,
-                extra_conns,
             ));
 
             let handle = PendingSessionHandle {
@@ -816,7 +776,6 @@ pub(crate) async fn start_pending_incoming_session(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
-    extra_conns: Vec<Box<dyn DynConnectionHandler>>,
 ) {
     authenticate(
         disconnect_rx,
@@ -829,7 +788,6 @@ pub(crate) async fn start_pending_incoming_session(
         hello,
         status,
         fork_filter,
-        extra_conns,
     )
     .await
 }
@@ -848,7 +806,6 @@ async fn start_pending_outbound_session(
     status: Status,
     fork_filter: ForkFilter,
     bandwidth_meter: BandwidthMeter,
-    extra_conns: Vec<Box<dyn DynConnectionHandler>>,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
@@ -869,7 +826,6 @@ async fn start_pending_outbound_session(
             return
         }
     };
-
     authenticate(
         disconnect_rx,
         events,
@@ -881,7 +837,6 @@ async fn start_pending_outbound_session(
         hello,
         status,
         fork_filter,
-        extra_conns,
     )
     .await
 }
@@ -899,7 +854,6 @@ async fn authenticate(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
-    extra_conns: Vec<Box<dyn DynConnectionHandler>>,
 ) {
     let local_addr = stream.inner().local_addr().ok();
     let stream = match get_eciess_stream(stream, secret_key, direction).await {
@@ -928,7 +882,6 @@ async fn authenticate(
         hello,
         status,
         fork_filter,
-        extra_conns,
     )
     .boxed();
 
@@ -977,7 +930,6 @@ async fn authenticate_stream(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
-    _extra_conns: Vec<Box<dyn DynConnectionHandler>>,
 ) -> PendingSessionEvent {
     // conduct the p2p handshake and return the authenticated stream
     let (p2p_stream, their_hello) = match stream.handshake(hello).await {
@@ -1021,19 +973,6 @@ async fn authenticate_stream(
             }
         }
     };
-
-    // let mut shared_extra_conns: Vec<Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>>>  =
-    // Vec::with_capacity(extra_conns.len());
-
-    // for conn in extra_conns {
-    //     // get a clone of the p2p connection de-/muxed for this capability connection
-    //   if let Some(conn) = conn.into_connection(direction, their_hello.id, p2p_conn) {
-    //     shared_extra_conns.push(conn);
-    //  }
-    // }
-
-    // //...pass shared extra conns back in established event
-
     PendingSessionEvent::Established {
         session_id,
         remote_addr,
