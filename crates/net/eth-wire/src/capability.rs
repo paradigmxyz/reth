@@ -535,9 +535,6 @@ pub enum SharedCapabilityError {
     /// Unsupported `eth` version.
     #[error(transparent)]
     UnsupportedVersion(#[from] ParseVersionError),
-    /// Cannot determine the number of messages for unknown capabilities.
-    #[error("cannot determine the number of messages for unknown capabilities")]
-    UnknownCapability,
     /// Thrown when the message id for a [SharedCapability] overlaps with the reserved p2p message
     /// id space [`MAX_RESERVED_MESSAGE_ID`].
     #[error("message id offset `{0}` is reserved")]
