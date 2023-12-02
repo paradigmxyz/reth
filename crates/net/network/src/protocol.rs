@@ -11,7 +11,7 @@ use reth_eth_wire::{
     CanDisconnect,
 };
 use reth_network_api::Direction;
-use reth_primitives::{Bytes, BytesMut};
+use reth_primitives::bytes::{Bytes, BytesMut};
 use reth_rpc_types::PeerId;
 use std::{error, fmt, io, net::SocketAddr, pin::Pin};
 
@@ -107,7 +107,12 @@ where
 /// An established connection to the p2p connection. Passed to [`ConnectionHandler`] to
 /// establish a rlpx subprotocol [`Connection`].
 pub trait P2PConnection<E = io::Error>:
-    Stream<Item = BytesMut> + Sink<Bytes, Error = E> + CanDisconnect<Bytes> + P2PMeta + Send + 'static
+    Stream<Item = BytesMut>
+    + Sink<Bytes, Error = E>
+    + CanDisconnect<Bytes>
+    + ProxyProtocol
+    + Send
+    + 'static
 {
 }
 
@@ -115,24 +120,24 @@ impl<T, E> P2PConnection<E> for T where
     T: Stream<Item = BytesMut>
         + Sink<Bytes, Error = E>
         + CanDisconnect<Bytes>
-        + P2PMeta
+        + ProxyProtocol
         + Send
         + ?Sized
         + 'static
 {
 }
 
-/// Read metadata about the connection that is useful for processing its messages.
-pub trait P2PMeta {
-    /// Returns the message id offset of this protocol as negotiated with the peer upon
-    /// establishment of the underlying p2p connection.
+/// Act as intermediary between p2p connection and protocol connection.
+pub trait ProxyProtocol {
+    /// Shared capability assigned to proxy.
     fn shared_capability(&self) -> &SharedCapability;
-}
 
-impl P2PMeta for ProtocolProxy {
-    fn shared_capability(&self) -> &SharedCapability {
-        self.cap()
-    }
+    /// Returns the message with masked message ID.
+    ///
+    /// Mask the message ID of outgoing messages relative to suffix used for capability message
+    /// IDs. [`reth_eth_wire::P2PStream`] further masks the message ID relative to the reserved
+    /// p2p prefix. (todo: mask ID completely at this layer or sink BytesMut)
+    fn relative_mask_msg_id(&self, msg: BytesMut) -> Bytes;
 }
 
 /// Convenience type setting associated type for [`ProtocolHandler`].

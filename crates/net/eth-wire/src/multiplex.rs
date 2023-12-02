@@ -16,6 +16,11 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
+use reth_primitives::bytes::{Bytes, BytesMut};
+use tokio::sync::{mpsc, mpsc::UnboundedSender};
+use tokio_stream::wrappers::UnboundedReceiverStream;
+
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
@@ -596,13 +601,18 @@ struct ProtocolStream {
 }
 
 impl ProtocolStream {
+    /// Shared capability assigned to proxy.
+    pub fn cap(&self) -> &SharedCapability {
+        &self.cap
+    }
+
     /// Masks the message ID of a message to be sent on the wire.
     ///
     /// # Panics
     ///
     /// If the message is empty.
     #[inline]
-    fn mask_msg_id(&self, mut msg: BytesMut) -> Bytes {
+    pub fn mask_msg_id(&self, mut msg: BytesMut) -> Bytes {
         msg[0] += self.shared_cap.relative_message_id_offset();
         msg.freeze()
     }
