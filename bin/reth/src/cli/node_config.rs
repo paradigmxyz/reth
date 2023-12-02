@@ -1,9 +1,8 @@
 //! Support for customizing the node
 use crate::{
     args::{
-        get_secret_key,
-        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-        RpcServerArgs, TxPoolArgs,
+        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     cli::{
         components::RethNodeComponentsImpl,
@@ -12,11 +11,11 @@ use crate::{
     },
     dirs::{ChainPath, DataDirPath},
     init::init_genesis,
-    node::cl_events::ConsensusLayerHealthEvents,
+    node::{cl_events::ConsensusLayerHealthEvents, events, run_network_until_shutdown},
     prometheus_exporter,
+    runner::CliContext,
     utils::get_single_header,
     version::SHORT_VERSION,
-    node::events,
 };
 use eyre::Context;
 use fdlimit::raise_fd_limit;
@@ -83,7 +82,6 @@ use std::{
 use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
-
 /// Start the node
 #[derive(Debug)]
 pub struct NodeConfig {
@@ -94,7 +92,7 @@ pub struct NodeConfig {
     /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
-    pub datadir: PathBuf,
+    pub datadir: ChainPath<DataDirPath>,
 
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
@@ -158,9 +156,11 @@ pub struct NodeConfig {
 
 impl NodeConfig {
     /// Launches the node, also adding any RPC extensions passed.
-    pub async fn launch<E: RethCliExt>(self, ext: E::Node) -> eyre::Result<NodeHandle> {
-        // TODO: add easy way to handle auto seal, etc, without introducing generics
-        // TODO: do we need ctx: CliContext here?
+    pub async fn launch<E: RethCliExt>(
+        mut self,
+        mut ext: E::Node,
+        ctx: CliContext,
+    ) -> eyre::Result<NodeHandle> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // Raise the fd limit of the process.
@@ -507,17 +507,16 @@ impl NodeConfig {
         info!(target: "reth::cli", "Consensus engine has exited.");
 
         if self.debug.terminate {
-            Ok(())
+            todo!()
         } else {
             // The pipeline has finished downloading blocks up to `--debug.tip` or
             // `--debug.max-block`. Keep other node components alive for further usage.
             futures::future::pending().await
         }
-        todo!()
     }
 
     /// Set the datadir for the node
-    pub fn datadir(mut self, datadir: impl Into<PathBuf>) -> Self {
+    pub fn datadir(mut self, datadir: ChainPath<DataDirPath>) -> Self {
         self.datadir = datadir.into();
         self
     }
@@ -663,8 +662,8 @@ impl NodeConfig {
     }
 
     /// Returns the chain specific path to the data dir.
-    fn data_dir(&self) -> ChainPath<DataDirPath> {
-        self.datadir.unwrap_or_chain_default(self.chain.chain)
+    fn data_dir(&self) -> &ChainPath<DataDirPath> {
+        &self.datadir
     }
 
     /// Returns the path to the config file.
@@ -825,7 +824,7 @@ impl NodeConfig {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -833,7 +832,7 @@ impl NodeConfig {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
