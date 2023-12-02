@@ -985,7 +985,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
 /// Drives the [NetworkManager] future until a [Shutdown](reth_tasks::shutdown::Shutdown) signal is
 /// received. If configured, this writes known peers to `persistent_peers_file` afterwards.
-async fn run_network_until_shutdown<C>(
+pub(crate) async fn run_network_until_shutdown<C>(
     shutdown: reth_tasks::shutdown::GracefulShutdown,
     network: NetworkManager<C>,
     persistent_peers_file: Option<PathBuf>,
