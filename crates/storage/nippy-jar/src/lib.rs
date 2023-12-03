@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
-    io::{Seek, Write},
     marker::Sync,
     ops::Range,
     path::{Path, PathBuf},
@@ -38,6 +37,9 @@ pub use error::NippyJarError;
 
 mod cursor;
 pub use cursor::NippyJarCursor;
+
+mod writer;
+pub use writer::NippyJarWriter;
 
 const NIPPY_JAR_VERSION: usize = 1;
 
@@ -97,7 +99,6 @@ pub struct NippyJar<H = ()> {
     offsets_index: PrefixSummedEliasFano,
     /// Maximum uncompressed row size of the set. This will enable decompression without any
     /// resizing of the output buffer.
-    #[serde(skip)]
     max_row_size: usize,
     /// Data path for file. Index file will be `{path}.idx`
     #[serde(skip)]
@@ -109,6 +110,7 @@ impl<H: std::fmt::Debug> std::fmt::Debug for NippyJar<H> {
         f.debug_struct("NippyJar")
             .field("version", &self.version)
             .field("user_header", &self.user_header)
+            .field("rows", &self.rows)
             .field("columns", &self.columns)
             .field("compressor", &self.compressor)
             .field("filter", &self.filter)
@@ -220,17 +222,16 @@ where
     /// **The user must ensure the header type matches the one used during the jar's creation.**
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
         // Read [`Self`] located at the data file.
-        let data_file = File::open(path)?;
+        let config_file = File::open(
+            path.parent()
+                .expect("exists")
+                .join(format!("{}.conf", path.file_name().expect("exists").to_string_lossy())),
+        )?;
 
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let data_reader = unsafe { memmap2::Mmap::map(&data_file)? };
-        let max_row_size: [u8; 8] =
-            data_reader.as_ref()[0..8].try_into().expect("slice with incorrect length");
-        let max_row_size = u64::from_le_bytes(max_row_size);
-
-        let mut obj: Self = bincode::deserialize_from(&data_reader.as_ref()[8..])?;
+        let data_reader = unsafe { memmap2::Mmap::map(&config_file)? };
+        let mut obj: Self = bincode::deserialize_from(data_reader.as_ref())?;
         obj.path = Some(path.to_path_buf());
-        obj.max_row_size = max_row_size as usize;
         Ok(obj)
     }
 
@@ -265,6 +266,14 @@ where
     pub fn offsets_path(&self) -> PathBuf {
         self.data_path().parent().expect("exists").join(format!(
             "{}.off",
+            self.data_path().file_name().expect("exists").to_string_lossy()
+        ))
+    }
+
+    /// Returns the path from the config file
+    pub fn config_path(&self) -> PathBuf {
+        self.data_path().parent().expect("exists").join(format!(
+            "{}.conf",
             self.data_path().file_name().expect("exists").to_string_lossy()
         ))
     }
@@ -342,100 +351,27 @@ where
         columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
         total_rows: u64,
     ) -> Result<(), NippyJarError> {
-        self.rows = total_rows as usize;
+        self.freeze_check(&columns)?;
 
-        let mut file = self.freeze_check(&columns)?;
-        self.freeze_config(&mut file)?;
+        // Creates the writer, data and offsets file
+        let mut appender = NippyJarWriter::new(self)?;
+        
+        // Append rows to file while holding offsets in memory
+        appender.append_rows(columns, total_rows)?;
 
-        // Special case for zstd that might use custom dictionaries/compressors per column
-        // If any other compression algorithm is added and uses a similar flow, then revisit
-        // implementation
-        let mut maybe_zstd_compressors = None;
-        if let Some(Compressors::Zstd(zstd)) = &self.compressor {
-            maybe_zstd_compressors = zstd.compressors()?;
-        }
+        // Flushes configuration and offsets to disk
+        appender.commit()?;
 
-        // Temporary buffer to avoid multiple reallocations if compressing to a buffer (eg. zstd w/
-        // dict)
-        let mut tmp_buf = Vec::with_capacity(1_000_000);
-
-        // Write all rows while taking all row start offsets
-        let mut row_number = 0u64;
-        let mut offsets = Vec::with_capacity(total_rows as usize * self.columns);
-        let mut column_iterators =
-            columns.into_iter().map(|v| v.into_iter()).collect::<Vec<_>>().into_iter();
-
-        debug!(target: "nippy-jar", compressor=?self.compressor, "Writing rows.");
-
-        loop {
-            let mut iterators = Vec::with_capacity(self.columns);
-
-            // Write the column value of each row
-            // TODO: iter_mut if we remove the IntoIterator interface.
-            let mut uncompressed_row_size = 0;
-            for (column_number, mut column_iter) in column_iterators.enumerate() {
-                offsets.push(file.stream_position()?);
-
-                match column_iter.next() {
-                    Some(Ok(value)) => {
-                        uncompressed_row_size += value.len();
-
-                        if let Some(compression) = &self.compressor {
-                            // Special zstd case with dictionaries
-                            if let (Some(dict_compressors), Compressors::Zstd(_)) =
-                                (maybe_zstd_compressors.as_mut(), compression)
-                            {
-                                compression::Zstd::compress_with_dictionary(
-                                    &value,
-                                    &mut tmp_buf,
-                                    &mut file,
-                                    Some(dict_compressors.get_mut(column_number).expect("exists")),
-                                )?;
-                            } else {
-                                let before = tmp_buf.len();
-                                let len = compression.compress_to(&value, &mut tmp_buf)?;
-                                file.write_all(&tmp_buf[before..before + len])?;
-                            }
-                        } else {
-                            file.write_all(&value)?;
-                        }
-                    }
-                    None => {
-                        return Err(NippyJarError::UnexpectedMissingValue(
-                            row_number,
-                            column_number as u64,
-                        ))
-                    }
-                    Some(Err(err)) => return Err(err.into()),
-                }
-
-                iterators.push(column_iter);
-            }
-
-            tmp_buf.clear();
-            row_number += 1;
-            self.max_row_size = self.max_row_size.max(uncompressed_row_size);
-
-            if row_number == total_rows {
-                break
-            }
-
-            column_iterators = iterators.into_iter();
-        }
-
-        // drops immutable borrow
-        drop(maybe_zstd_compressors);
-
-        // Write offsets and offset index to file
-        self.freeze_offsets()?;
+        // Write phf, filter and offset index to file
+        self.freeze_filters()?;
 
         debug!(target: "nippy-jar", jar=?self, "Finished.");
 
         Ok(())
     }
 
-    /// Freezes offsets and its own index.
-    fn freeze_offsets(&mut self) -> Result<(), NippyJarError> {
+    /// Freezes [`PerfectHashingFunction`], [`InclusionFilter`] and the offset index to file.
+    fn freeze_filters(&mut self) -> Result<(), NippyJarError> {
         debug!(target: "nippy-jar", path=?self.index_path(), "Writing offsets and offsets index to file.");
 
         let mut file = File::create(self.index_path())?;
@@ -450,7 +386,7 @@ where
     fn freeze_check(
         &mut self,
         columns: &Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
-    ) -> Result<File, NippyJarError> {
+    ) -> Result<(), NippyJarError> {
         if columns.len() != self.columns {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
@@ -468,18 +404,12 @@ where
 
         debug!(target: "nippy-jar", path=?self.data_path(), "Opening data file.");
 
-        Ok(File::create(self.data_path())?)
+        Ok(())
     }
 
     /// Writes all necessary configuration to file.
-    fn freeze_config(&mut self, handle: &mut File) -> Result<(), NippyJarError> {
-        // TODO Split Dictionaries and Bloomfilters Configuration so we dont have to load everything
-        // at once
-
-        // Placeholder for max_row_size
-        handle.write_all(&[0; 8])?;
-
-        Ok(bincode::serialize_into(handle, &self)?)
+    fn freeze_config(&mut self) -> Result<(), NippyJarError> {
+        Ok(bincode::serialize_into(File::create(self.config_path())?, &self)?)
     }
 }
 
