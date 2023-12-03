@@ -31,7 +31,7 @@ where
     H: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug,
 {
     pub fn new(jar: &'a mut NippyJar<H>) -> Result<Self, NippyJarError> {
-        let (data_file, offsets_file) =
+        let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 
         let mut writer = Self {
@@ -44,10 +44,17 @@ where
             column: 0,
         };
 
+        // If we are opening a previously created jar, we need to check its consistency, and make changes if necessary.
+        if !is_created {
+            writer.consistency_check()?;
+        }
+        
         Ok(writer)
     }
 
-    fn create_or_open_files(data: &Path, offsets: &Path) -> Result<(File, File), NippyJarError> {
+    fn create_or_open_files(data: &Path, offsets: &Path) -> Result<(File, File, bool), NippyJarError> {
+        let is_created = !data.exists() || !offsets.exists();
+    
         let mut data_file = if !data.exists() {
             File::create(data)?
         } else {
@@ -67,10 +74,44 @@ where
         };
         offsets_file.seek(SeekFrom::End(0))?;
 
-        Ok((data_file, offsets_file))
+        Ok((data_file, offsets_file, is_created))
     }
 
-    /// Appends rows to data file.
+
+    /// Performs consistency checks on the [`NippyJar`] file and acts upon any issues:
+    /// * Is the offsets file size expected? If not, truncate it.
+    /// * Is the data file size expected? If not truncate it.
+    /// 
+    /// This is based on the assumption that [`NippyJar`] configuration is **always** the last one to be updated when something is written, as by the `commit()` function shows.
+    fn consistency_check(&mut self) -> Result<(), NippyJarError> {
+        let config_rows = self.jar.rows as u64;
+
+        // 1 byte: for byte-len offset representation
+        // 8 bytes * num rows * num columns
+        // 8 bytes: expected size of the data file.
+        let expected_offsets_file_size = 1 + config_rows * self.jar.columns as u64 * 8 + 8;
+        let offsets_file_size = self.offsets_file.metadata()?.len();
+        
+        if expected_offsets_file_size != offsets_file_size {
+            // TODO: ideally we could truncate until the last offset of the last column of the last row inserted
+            self.offsets_file.set_len(expected_offsets_file_size)?;
+        }
+
+        // Last offset is always the expected size of the data file.
+        let mut last_offset = [0u8; 8];
+        self.offsets_file.seek(SeekFrom::Start(1 + (config_rows * self.jar.columns as u64 * 8)))?;
+        self.offsets_file.read_exact(&mut last_offset)?;
+        let last_offset = u64::from_le_bytes(last_offset);
+
+        // Offset list wasn't properly committed, so we need to truncate the data, since there's no way to recover it.
+        if last_offset != self.data_file.metadata()?.len() {
+            self.data_file.set_len(last_offset)?;
+        }
+
+        Ok(())
+    }
+
+    /// Appends rows to data file.  `fn commit()` should be called to flush offsets and config to disk.
     pub fn append_rows(
         &mut self,
         columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
@@ -83,7 +124,6 @@ where
             let mut iterators = Vec::with_capacity(self.jar.columns);
 
             for (column_number, mut column_iter) in column_iterators.enumerate() {
-                self.offsets.push(self.data_file.stream_position()?);
                 self.append_row(&mut column_iter, column_number)?;
 
                 iterators.push(column_iter);
@@ -94,7 +134,7 @@ where
         Ok(())
     }
 
-    /// Appends a row to data file.
+    /// Appends a row to data file. `fn commit()` should be called to flush offsets and config to disk.
     pub fn append_row(
         &mut self,
         column_iter: &mut impl Iterator<Item = ColumnResult<Vec<u8>>>,
@@ -102,7 +142,16 @@ where
     ) -> Result<(), NippyJarError> {
         match column_iter.next() {
             Some(Ok(value)) => {
+                if self.offsets.is_empty() {
+                    // Represents the offset of the soon to be appended data column
+                    self.offsets.push(self.data_file.stream_position()?);
+                }
+
                 self.append_column(&value)?;
+
+                // Last offset represents the size of the data file if no more data is to be appended. 
+                // Otherwise, represents the offset of the next data item.
+                self.offsets.push(self.data_file.stream_position()?);
             }
             None => {
                 return Err(NippyJarError::UnexpectedMissingValue(
@@ -136,17 +185,21 @@ where
         Ok(())
     }
 
-    /// Prunes rows from data file
-    pub fn prune_rows(&mut self, number: usize) -> Result<(), NippyJarError> {
+    /// Prunes rows from data and offsets file and updates its configuration on disk
+    pub fn prune_rows(&mut self, num_rows: usize) -> Result<(), NippyJarError> {
+
+        // Each column of a row is one offset
+        let num_offsets = num_rows * self.jar.columns;
+
         // Calculate the number of offsets to prune from in-memory list
-        let prune_count = number.min(self.offsets.len());
-        let remaining_to_prune = number.saturating_sub(prune_count);
+        let offsets_prune_count = num_offsets.min(self.offsets.len().saturating_sub(1)); // last element is the expected size of the data file
+        let remaining_to_prune = num_offsets.saturating_sub(offsets_prune_count);
 
         // Prune in-memory offsets if needed
-        if prune_count > 0 {
+        if offsets_prune_count > 0 {
             // Determine new length based on the offset to prune up to
-            let new_len = self.offsets[self.offsets.len() - prune_count];
-            self.offsets.truncate(self.offsets.len() - prune_count);
+            let new_len = self.offsets[(self.offsets.len() - 1) - offsets_prune_count]; // last element is the expected size of the data file
+            self.offsets.truncate(self.offsets.len() - offsets_prune_count);
 
             // Truncate the data file to the new length
             self.data_file.set_len(new_len)?;
@@ -160,6 +213,7 @@ where
 
             // Handle non-empty offset file
             if length > 1 {
+                // first byte is reserved for `bytes_per_offset`, which is 8 initially.
                 let num_offsets = (length - 1) / bytes_per_offset;
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
 
@@ -188,6 +242,9 @@ where
                 self.data_file.set_len(0)?;
             }
         }
+        
+        self.jar.rows -= num_rows.min(self.jar.rows);
+        self.jar.freeze_config()?;
 
         Ok(())
     }
