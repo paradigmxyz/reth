@@ -207,7 +207,6 @@ impl Command {
         let mb = 1024.0 * 1024.0;
         let mut total_filters_size = 0;
         let mut total_index_size = 0;
-        let mut total_offsets_size = 0;
         let mut total_duration = Duration::new(0, 0);
         let mut total_file_size = 0;
 
@@ -220,7 +219,6 @@ impl Command {
 
             total_filters_size += jar.filter_size();
             total_index_size += jar.offsets_index_size();
-            total_offsets_size += jar.offsets_size();
             total_duration += duration;
             total_file_size += file_size;
 
@@ -228,7 +226,6 @@ impl Command {
             println!("  File Size:           {:>7.2} MB", file_size as f64 / mb);
             println!("  Filters Size:        {:>7.2} MB", jar.filter_size() as f64 / mb);
             println!("  Offset Index Size:   {:>7.2} MB", jar.offsets_index_size() as f64 / mb);
-            println!("  Offset List Size:    {:>7.2} MB", jar.offsets_size() as f64 / mb);
             println!(
                 "  Loading Time:        {:>7.2} ms | {:>7.2} µs",
                 duration.as_millis() as f64,
@@ -240,7 +237,6 @@ impl Command {
 
         println!("Total Filters Size:     {:>7.2} MB", total_filters_size as f64 / mb);
         println!("Total Offset Index Size: {:>7.2} MB", total_index_size as f64 / mb);
-        println!("Total Offset List Size:  {:>7.2} MB", total_offsets_size as f64 / mb);
         println!("Total File Size:         {:>7.2} GB", total_file_size as f64 / (mb * 1024.0));
         println!(
             "Average Loading Time:    {:>7.2} ms | {:>7.2} µs",
