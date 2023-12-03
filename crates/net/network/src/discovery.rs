@@ -4,9 +4,10 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
-use reth_discv5::Discv5;
 use futures::StreamExt;
+use k256::ecdsa::SigningKey;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
+use reth_discv5::{CombinedKey, Discv5, Discv5Config, Discv5Service, Event};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
@@ -14,9 +15,10 @@ use reth_primitives::{ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
+    fmt,
     net::{IpAddr, SocketAddr},
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{ready, Context, Poll},
 };
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -26,7 +28,6 @@ use tokio_stream::{wrappers::ReceiverStream, Stream};
 ///
 /// Listens for new discovered nodes and emits events for discovered nodes and their
 /// address.
-#[derive(Debug)]
 pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
@@ -37,7 +38,11 @@ pub struct Discovery {
     /// Handler to interact with the Discovery v4 service
     discv4: Option<Discv4>,
     /// Handler to interact with the Discovery v5 service
-    discv5: Option<Discv5>,
+    discv5: Option<Arc<Mutex<Discv5>>>,
+
+    discv5_updates: Option<ReceiverStream<Event>>,
+
+    _discv5_service: Option<JoinHandle<()>>,
     /// All KAD table updates from the discv4 service.
     discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
     /// The handle to the spawned discv4 service
@@ -54,6 +59,25 @@ pub struct Discovery {
     discovery_listeners: Vec<mpsc::UnboundedSender<DiscoveryEvent>>,
 }
 
+impl fmt::Debug for Discovery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Discovery")
+            .field("discovered_nodes", &self.discovered_nodes)
+            .field("local_enr", &self.local_enr)
+            .field("discv4", &self.discv4)
+            // Use a placeholder for `discv5` since it doesn't implement Debug
+            .field("discv5", &format_args!("<Discv5>"))
+            .field("discv4_updates", &self.discv4_updates)
+            .field("_discv4_service", &self._discv4_service)
+            .field("_dns_discovery", &self._dns_discovery)
+            .field("dns_discovery_updates", &self.dns_discovery_updates)
+            .field("_dns_disc_service", &self._dns_disc_service)
+            .field("queued_events", &self.queued_events)
+            .field("discovery_listeners", &self.discovery_listeners)
+            .finish()
+    }
+}
+
 impl Discovery {
     /// Spawns the discovery service.
     ///
@@ -63,6 +87,7 @@ impl Discovery {
         discovery_addr: SocketAddr,
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
+        discv5_config: Option<Discv5Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         // setup discv4
@@ -76,6 +101,60 @@ impl Discovery {
             // spawn the service
             let _discv4_service = discv4_service.spawn();
             (Some(discv4), Some(discv4_updates), Some(_discv4_service))
+        } else {
+            (None, None, None)
+        };
+
+        // setup discv5
+        let (discv5, discv5_updates, discv5_service) = if let Some(discv5_config) = discv5_config {
+            let secret_key_bytes = sk.as_ref();
+            let signing_key = SigningKey::from_slice(secret_key_bytes).unwrap();
+            let enr_key = CombinedKey::Secp256k1(signing_key);
+            let enr = enr::EnrBuilder::new("v4").build(&enr_key).unwrap();
+            let mut runtime = tokio::runtime::Builder::new_multi_thread()
+                .thread_name("Discv5")
+                .enable_all()
+                .build()
+                .unwrap();
+
+            // Construct the Discv5 server
+            let discv5 = Arc::new(Mutex::new(Discv5::new(enr, enr_key, discv5_config).unwrap()));
+            let discv5_ = Arc::clone(&discv5);
+            let mut service = discv5_.lock().unwrap();
+
+            runtime.block_on(service.start()).map_err(|err| {
+                NetworkError::from_discv5_error(
+                    err.to_string(),
+                    ServiceKind::Discovery(discovery_addr),
+                )
+            })?;
+
+            let discv5_for_event_stream = Arc::clone(&discv5);
+            let service = discv5_for_event_stream.lock().unwrap();
+            let discv5_updates = match runtime.block_on(service.event_stream()) {
+                Ok(stream) => Some(ReceiverStream::new(stream)),
+                Err(err) => {
+                    return Err(NetworkError::from_discv5_error(
+                        err.to_string(),
+                        ServiceKind::Discovery(discovery_addr),
+                    ))
+                }
+            };
+            let discv5_clone_for_async = Arc::clone(&discv5);
+
+            let discv5_service_handle = runtime.spawn(async move {
+                // Lock the mutex and clone the Discv5 instance
+
+                let discv5_locked = discv5_clone_for_async.lock().unwrap();
+
+                // Now, the lock is released, and you can safely await
+                if let Err(err) = discv5_locked.start().await {
+                    // Handle the error
+                    println!("Discv5 start error: {:?}", err);
+                }
+            });
+
+            (Some(discv5), discv5_updates, Some(discv5_service_handle))
         } else {
             (None, None, None)
         };
@@ -98,6 +177,9 @@ impl Discovery {
             discovery_listeners: Default::default(),
             local_enr,
             discv4,
+            discv5,
+            discv5_updates,
+            _discv5_service: discv5_service,
             discv4_updates,
             _discv4_service,
             discovered_nodes: Default::default(),

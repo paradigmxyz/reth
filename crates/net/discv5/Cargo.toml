@@ -13,3 +13,5 @@ exclude.workspace = true
 [dependencies]
 discv5.workspace = true
 tokio-stream.workspace = true
+tokio.workspace = true
+futures-util = "*"

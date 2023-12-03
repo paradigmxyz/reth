@@ -210,9 +210,14 @@ where
             disc_config
         });
 
-        let discovery =
-            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
-                .await?;
+        let discovery = Discovery::new(
+            discovery_addr,
+            secret_key,
+            discovery_v4_config,
+            discovery_v5_config,
+            dns_discovery_config,
+        )
+        .await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
 

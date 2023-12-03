@@ -63,6 +63,16 @@ impl NetworkError {
             }
         }
     }
+
+    pub fn from_discv5_error(err: String, kind: ServiceKind) -> Self {
+        let error_message = format!("Discv5 error: {:?}", err);
+
+        // Create a new std::io::Error with the error message
+        let io_error = io::Error::new(ErrorKind::Other, error_message);
+
+        // Assuming NetworkError::Discovery expects an std::io::Error
+        NetworkError::Discovery(io_error)
+    }
 }
 
 /// Abstraction over errors that can lead to a failed session

@@ -7,8 +7,8 @@ use crate::{
     session::SessionsConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_discv5::{Discv5Config,Discv5ConfigBuilder};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
+use reth_discv5::{Discv5Config, Discv5ConfigBuilder};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
@@ -45,7 +45,7 @@ pub struct NetworkConfig<C> {
     /// How to set up discovery.
     pub discovery_v4_config: Option<Discv4Config>,
     /// How to set up discovery
-    pub discovery_v5_config:Option<Discv5Config>,
+    pub discovery_v5_config: Option<Discv5Config>,
     /// Address to use for discovery
     pub discovery_addr: SocketAddr,
     /// Address to listen for incoming connections
@@ -112,7 +112,7 @@ impl<C> NetworkConfig<C> {
     }
 
     /// Sets the config to use for the discovery v5 protocol.
-    pub fn set_discovery_v5(mut self, discovery_config: Discv5Config) -> Self{
+    pub fn set_discovery_v5(mut self, discovery_config: Discv5Config) -> Self {
         self.discovery_v5_config = Some(discovery_config);
         self
     }

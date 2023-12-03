@@ -32,7 +32,7 @@ reth-rpc-types.workspace = true
 reth-tokio-util.workspace = true
 
 alloy-rlp.workspace = true
-
+k256 = "0.13.2"
 # async/futures
 futures.workspace = true
 pin-project.workspace = true

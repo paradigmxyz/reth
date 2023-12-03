@@ -5826,6 +5826,8 @@ name = "reth-discv5"
 version = "0.1.0-alpha.11"
 dependencies = [
  "discv5",
+ "futures-util",
+ "tokio",
  "tokio-stream",
 ]
 
@@ -6080,6 +6082,7 @@ dependencies = [
  "fnv",
  "futures",
  "humantime-serde",
+ "k256",
  "linked-hash-map",
  "linked_hash_set",
  "metrics",
