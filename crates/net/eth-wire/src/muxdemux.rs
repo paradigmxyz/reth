@@ -222,12 +222,19 @@ where
                     continue
                 }
                 cx.waker().wake_by_ref();
+                // flush before returning pending
+                _ = self.inner.poll_flush_unpin(cx)?;
             }
-            _ = self.inner.poll_flush_unpin(cx)?;
             let mut bytes = match ready!(res) {
                 Some(Ok(bytes)) => bytes,
-                Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
-                None => return Poll::Ready(None),
+                Some(Err(err)) => {
+                    _ = self.inner.poll_flush_unpin(cx)?;
+                    return Poll::Ready(Some(Err(err.into())))
+                }
+                None => {
+                    _ = self.inner.poll_flush_unpin(cx)?;
+                    return Poll::Ready(None)
+                }
             };
 
             // normalize message id suffix for capability
@@ -235,6 +242,7 @@ where
 
             // yield message for main stream
             if *cap == self.owner {
+                _ = self.inner.poll_flush_unpin(cx)?;
                 return Poll::Ready(Some(Ok(bytes)))
             }
 
