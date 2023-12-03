@@ -385,7 +385,7 @@ where
     /// Safety checks before creating and returning a [`File`] handle to write data to.
     fn freeze_check(
         &mut self,
-        columns: &Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
+        columns: &[impl IntoIterator<Item = ColumnResult<Vec<u8>>>],
     ) -> Result<(), NippyJarError> {
         if columns.len() != self.columns {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))

@@ -180,10 +180,10 @@ where
         self.uncompressed_row_size += value.len();
         if let Some(compression) = &self.jar.compressor {
             let before = self.tmp_buf.len();
-            let len = compression.compress_to(&value, &mut self.tmp_buf)?;
+            let len = compression.compress_to(value, &mut self.tmp_buf)?;
             self.data_file.write_all(&self.tmp_buf[before..before + len])?;
         } else {
-            self.data_file.write_all(&value)?;
+            self.data_file.write_all(value)?;
         }
 
         self.column += 1;
