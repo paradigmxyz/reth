@@ -6,11 +6,13 @@ use std::{
     path::Path,
 };
 
-/// Writer of [`NippyJar`]. Handles table data and offsets only. 
-/// 
-/// Table data is written directly to disk, while offsets and configuration need to be flushed by calling `commit()`.
+/// Writer of [`NippyJar`]. Handles table data and offsets only.
+///
+/// Table data is written directly to disk, while offsets and configuration need to be flushed by
+/// calling `commit()`.
 pub struct NippyJarWriter<'a, H> {
-    /// Reference to the associated [`NippyJar`], containing all necessary configurations for data handling.
+    /// Reference to the associated [`NippyJar`], containing all necessary configurations for data
+    /// handling.
     jar: &'a mut NippyJar<H>,
     /// File handle to where the data is stored.
     data_file: File,
@@ -44,17 +46,21 @@ where
             column: 0,
         };
 
-        // If we are opening a previously created jar, we need to check its consistency, and make changes if necessary.
+        // If we are opening a previously created jar, we need to check its consistency, and make
+        // changes if necessary.
         if !is_created {
             writer.consistency_check()?;
         }
-        
+
         Ok(writer)
     }
 
-    fn create_or_open_files(data: &Path, offsets: &Path) -> Result<(File, File, bool), NippyJarError> {
+    fn create_or_open_files(
+        data: &Path,
+        offsets: &Path,
+    ) -> Result<(File, File, bool), NippyJarError> {
         let is_created = !data.exists() || !offsets.exists();
-    
+
         let mut data_file = if !data.exists() {
             File::create(data)?
         } else {
@@ -77,12 +83,12 @@ where
         Ok((data_file, offsets_file, is_created))
     }
 
-
     /// Performs consistency checks on the [`NippyJar`] file and acts upon any issues:
     /// * Is the offsets file size expected? If not, truncate it.
     /// * Is the data file size expected? If not truncate it.
-    /// 
-    /// This is based on the assumption that [`NippyJar`] configuration is **always** the last one to be updated when something is written, as by the `commit()` function shows.
+    ///
+    /// This is based on the assumption that [`NippyJar`] configuration is **always** the last one
+    /// to be updated when something is written, as by the `commit()` function shows.
     fn consistency_check(&mut self) -> Result<(), NippyJarError> {
         let config_rows = self.jar.rows as u64;
 
@@ -91,9 +97,10 @@ where
         // 8 bytes: expected size of the data file.
         let expected_offsets_file_size = 1 + config_rows * self.jar.columns as u64 * 8 + 8;
         let offsets_file_size = self.offsets_file.metadata()?.len();
-        
+
         if expected_offsets_file_size != offsets_file_size {
-            // TODO: ideally we could truncate until the last offset of the last column of the last row inserted
+            // TODO: ideally we could truncate until the last offset of the last column of the last
+            // row inserted
             self.offsets_file.set_len(expected_offsets_file_size)?;
         }
 
@@ -103,7 +110,8 @@ where
         self.offsets_file.read_exact(&mut last_offset)?;
         let last_offset = u64::from_le_bytes(last_offset);
 
-        // Offset list wasn't properly committed, so we need to truncate the data, since there's no way to recover it.
+        // Offset list wasn't properly committed, so we need to truncate the data, since there's no
+        // way to recover it.
         if last_offset != self.data_file.metadata()?.len() {
             self.data_file.set_len(last_offset)?;
         }
@@ -111,7 +119,8 @@ where
         Ok(())
     }
 
-    /// Appends rows to data file.  `fn commit()` should be called to flush offsets and config to disk.
+    /// Appends rows to data file.  `fn commit()` should be called to flush offsets and config to
+    /// disk.
     pub fn append_rows(
         &mut self,
         columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
@@ -134,7 +143,8 @@ where
         Ok(())
     }
 
-    /// Appends a row to data file. `fn commit()` should be called to flush offsets and config to disk.
+    /// Appends a row to data file. `fn commit()` should be called to flush offsets and config to
+    /// disk.
     pub fn append_row(
         &mut self,
         column_iter: &mut impl Iterator<Item = ColumnResult<Vec<u8>>>,
@@ -149,8 +159,8 @@ where
 
                 self.append_column(&value)?;
 
-                // Last offset represents the size of the data file if no more data is to be appended. 
-                // Otherwise, represents the offset of the next data item.
+                // Last offset represents the size of the data file if no more data is to be
+                // appended. Otherwise, represents the offset of the next data item.
                 self.offsets.push(self.data_file.stream_position()?);
             }
             None => {
@@ -187,7 +197,6 @@ where
 
     /// Prunes rows from data and offsets file and updates its configuration on disk
     pub fn prune_rows(&mut self, num_rows: usize) -> Result<(), NippyJarError> {
-
         // Each column of a row is one offset
         let num_offsets = num_rows * self.jar.columns;
 
@@ -242,7 +251,7 @@ where
                 self.data_file.set_len(0)?;
             }
         }
-        
+
         self.jar.rows -= num_rows.min(self.jar.rows);
         self.jar.freeze_config()?;
 

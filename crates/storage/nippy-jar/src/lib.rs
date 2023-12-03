@@ -355,7 +355,7 @@ where
 
         // Creates the writer, data and offsets file
         let mut appender = NippyJarWriter::new(self)?;
-        
+
         // Append rows to file while holding offsets in memory
         appender.append_rows(columns, total_rows)?;
 
