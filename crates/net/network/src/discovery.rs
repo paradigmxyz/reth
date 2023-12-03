@@ -143,13 +143,10 @@ impl Discovery {
             let discv5_clone_for_async = Arc::clone(&discv5);
 
             let discv5_service_handle = runtime.spawn(async move {
-                // Lock the mutex and clone the Discv5 instance
 
                 let discv5_locked = discv5_clone_for_async.lock().unwrap();
 
-                // Now, the lock is released, and you can safely await
                 if let Err(err) = discv5_locked.start().await {
-                    // Handle the error
                     println!("Discv5 start error: {:?}", err);
                 }
             });
