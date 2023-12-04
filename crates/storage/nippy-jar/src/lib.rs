@@ -279,7 +279,7 @@ where
     }
 
     /// Returns a [`DataReader`] of the data and offset file
-    pub fn open_data(&self) -> Result<DataReader, NippyJarError> {
+    pub fn open_data_reader(&self) -> Result<DataReader, NippyJarError> {
         DataReader::new(self.data_path())
     }
 
@@ -982,5 +982,241 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_writer() {
+        let (col1, col2) = test_data(None);
+        let num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        append_two_rows(num_columns, file_path.path(), &col1, &col2);
+
+        // Appends a third row and prunes two rows, to make sure we prune from memory and disk
+        // offset list
+        prune_rows(num_columns, file_path.path(), &col1, &col2);
+
+        // Should be able to append new rows
+        append_two_rows(num_columns, file_path.path(), &col1, &col2);
+
+        // Simulate an unexpected shutdown before there's a chance to commit, and see that it
+        // unwinds successfully
+        test_consistency_no_commit(file_path.path(), &col1, &col2);
+
+        // Simulate an unexpected shutdown during commit, and see that it unwinds successfully
+        test_consistency_partial_commit(file_path.path(), &col1, &col2);
+    }
+
+    fn test_consistency_partial_commit(file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
+        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+
+        // Set the baseline that should be unwinded to
+        let initial_rows = nippy.rows;
+        let initial_data_size =
+            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
+        let initial_offset_size =
+            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize;
+        assert!(initial_data_size > 0);
+        assert!(initial_offset_size > 0);
+
+        // Appends a third row
+        let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+        writer.append_column(Some(Ok(&col1[2]))).unwrap();
+        writer.append_column(Some(Ok(&col2[2]))).unwrap();
+
+        // Makes sure it doesn't write the last one offset (which is the expected file data size)
+        let _ = writer.offsets_mut().pop();
+
+        // `commit_offsets` is not a pub function. we call it here to simulate the shutdown before
+        // it can flush nippy.rows (config) to disk.
+        writer.commit_offsets().unwrap();
+
+        // Simulate an unexpected shutdown of the writer, before it can finish commit()
+        drop(writer);
+
+        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+        assert_eq!(initial_rows, nippy.rows);
+
+        // Data was written successfuly
+        let new_data_size =
+            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
+        assert_eq!(new_data_size, initial_data_size + col1[2].len() + col2[2].len());
+
+        // It should be + 16 (two columns were added), but there's a missing one (the one we pop)
+        assert_eq!(
+            initial_offset_size + 8,
+            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize
+        );
+
+        // Writer will execute a consistency check and verify first that the offset list on disk
+        // doesn't match the nippy.rows, and prune it. Then, it will prune the data file
+        // accordingly as well.
+        let _writer = NippyJarWriter::new(&mut nippy).unwrap();
+        assert_eq!(initial_rows, nippy.rows);
+        assert_eq!(
+            initial_offset_size,
+            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize
+        );
+        assert_eq!(
+            initial_data_size,
+            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize
+        );
+        assert_eq!(initial_rows, nippy.rows);
+    }
+
+    fn test_consistency_no_commit(file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
+        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+
+        // Set the baseline that should be unwinded to
+        let initial_rows = nippy.rows;
+        let initial_data_size =
+            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
+        let initial_offset_size =
+            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize;
+        assert!(initial_data_size > 0);
+        assert!(initial_offset_size > 0);
+
+        // Appends a third row, so we have an offset list in memory, which is not flushed to disk,
+        // while the data has been.
+        let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+        writer.append_column(Some(Ok(&col1[2]))).unwrap();
+        writer.append_column(Some(Ok(&col2[2]))).unwrap();
+
+        // Simulate an unexpected shutdown of the writer, before it can call commit()
+        drop(writer);
+
+        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+        assert_eq!(initial_rows, nippy.rows);
+
+        // Data was written successfuly
+        let new_data_size =
+            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
+        assert_eq!(new_data_size, initial_data_size + col1[2].len() + col2[2].len());
+
+        // Since offsets only get written on commit(), this remains the same
+        assert_eq!(
+            initial_offset_size,
+            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize
+        );
+
+        // Writer will execute a consistency check and verify that the data file has more data than
+        // it should, and resets it to the last offset of the list (on disk here)
+        let _writer = NippyJarWriter::new(&mut nippy).unwrap();
+        assert_eq!(initial_rows, nippy.rows);
+        assert_eq!(
+            initial_data_size,
+            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize
+        );
+        assert_eq!(initial_rows, nippy.rows);
+    }
+
+    fn append_two_rows(num_columns: usize, file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
+        // Create and add 1 row
+        {
+            let mut nippy = NippyJar::new_without_header(num_columns, file_path);
+            nippy.freeze_config().unwrap();
+            assert_eq!(nippy.max_row_size, 0);
+            assert_eq!(nippy.rows, 0);
+
+            let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+            assert_eq!(writer.column(), 0);
+
+            writer.append_column(Some(Ok(&col1[0]))).unwrap();
+            assert_eq!(writer.column(), 1);
+
+            writer.append_column(Some(Ok(&col2[0]))).unwrap();
+
+            // Adding last column of a row resets writer and updates jar config
+            assert_eq!(writer.column(), 0);
+
+            // One offset per column + 1 offset at the end representing the expected file data size
+            assert_eq!(writer.offsets().len(), 3);
+            let expected_data_file_size = *writer.offsets().last().unwrap();
+            writer.commit().unwrap();
+
+            assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
+            assert_eq!(nippy.rows, 1);
+            assert_eq!(
+                File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len(),
+                1 + num_columns as u64 * 8 + 8
+            );
+            assert_eq!(
+                File::open(nippy.data_path()).unwrap().metadata().unwrap().len(),
+                expected_data_file_size
+            );
+        }
+
+        // Load and add 1 row
+        {
+            let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+            // Check if it was committed successfuly
+            assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
+            assert_eq!(nippy.rows, 1);
+
+            let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+            assert_eq!(writer.column(), 0);
+
+            writer.append_column(Some(Ok(&col1[1]))).unwrap();
+            assert_eq!(writer.column(), 1);
+
+            writer.append_column(Some(Ok(&col2[1]))).unwrap();
+
+            // Adding last column of a row resets writer and updates jar config
+            assert_eq!(writer.column(), 0);
+
+            // One offset per column + 1 offset at the end representing the expected file data size
+            assert_eq!(writer.offsets().len(), 3);
+            let expected_data_file_size = *writer.offsets().last().unwrap();
+            writer.commit().unwrap();
+
+            assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
+            assert_eq!(nippy.rows, 2);
+            assert_eq!(
+                File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len(),
+                1 + nippy.rows as u64 * num_columns as u64 * 8 + 8
+            );
+            assert_eq!(
+                File::open(nippy.data_path()).unwrap().metadata().unwrap().len(),
+                expected_data_file_size
+            );
+        }
+    }
+
+    fn prune_rows(num_columns: usize, file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
+        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+        let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+
+        // Appends a third row, so we have an offset list in memory, which is not flushed to disk
+        writer.append_column(Some(Ok(&col1[2]))).unwrap();
+        writer.append_column(Some(Ok(&col2[2]))).unwrap();
+
+        // This should prune from the on-memory offset list and ondisk offset list
+        writer.prune_rows(2).unwrap();
+        assert_eq!(nippy.rows, 1);
+
+        assert_eq!(
+            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len(),
+            1 + nippy.rows as u64 * num_columns as u64 * 8 + 8
+        );
+
+        let expected_data_size = col1[0].len() + col2[0].len();
+        assert_eq!(
+            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize,
+            expected_data_size
+        );
+
+        let data_reader = nippy.open_data_reader().unwrap();
+        // there are only two valid offsets. so index 2 actually represents the expected file
+        // data size.
+        assert_eq!(data_reader.offset(2), expected_data_size as u64);
+
+        // This should prune from the ondisk offset list and clear the jar.
+        let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+        writer.prune_rows(1).unwrap();
+        assert_eq!(nippy.rows, 0);
+        assert_eq!(nippy.max_row_size, 0);
+        assert_eq!(File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
+        // Only the byte that indicates how many bytes per offset should be left
+        assert_eq!(File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize, 1);
     }
 }

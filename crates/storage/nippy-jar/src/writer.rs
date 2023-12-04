@@ -121,23 +121,26 @@ where
 
     /// Appends rows to data file.  `fn commit()` should be called to flush offsets and config to
     /// disk.
-    /// 
-    /// `column_values_per_row`: A vector where each element is a column's values in sequence, 
+    ///
+    /// `column_values_per_row`: A vector where each element is a column's values in sequence,
     /// corresponding to each row. The vector's length equals the number of columns.
     pub fn append_rows(
         &mut self,
         column_values_per_row: Vec<impl IntoIterator<Item = ColumnResult<impl AsRef<[u8]>>>>,
         num_rows: u64,
     ) -> Result<(), NippyJarError> {
-        let mut column_iterators =
-            column_values_per_row.into_iter().map(|v| v.into_iter()).collect::<Vec<_>>().into_iter();
+        let mut column_iterators = column_values_per_row
+            .into_iter()
+            .map(|v| v.into_iter())
+            .collect::<Vec<_>>()
+            .into_iter();
 
         for _ in 0..num_rows {
             let mut iterators = Vec::with_capacity(self.jar.columns);
 
             for mut column_iter in column_iterators {
                 self.append_column(column_iter.next())?;
-                
+
                 iterators.push(column_iter);
             }
 
@@ -230,7 +233,8 @@ where
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
 
                 // If all rows are to be pruned
-                if new_num_offsets == 0 {
+                if new_num_offsets <= 1 {
+                    // <= 1 because the one offset would actually be the expected file data size
                     self.offsets_file.set_len(1)?;
                     self.data_file.set_len(0)?;
                 } else {
@@ -255,7 +259,10 @@ where
             }
         }
 
-        self.jar.rows -= num_rows.min(self.jar.rows);
+        self.jar.rows = self.jar.rows.saturating_sub(num_rows);
+        if self.jar.rows == 0 {
+            self.jar.max_row_size = 0;
+        }
         self.jar.freeze_config()?;
 
         Ok(())
@@ -274,14 +281,55 @@ where
 
     /// Commits configuration and offsets to disk. It drains the internal offset list.
     pub fn commit(&mut self) -> Result<(), NippyJarError> {
-        // Appends new offsets to disk
-        for offset in self.offsets.drain(..) {
-            self.offsets_file.write_all(&offset.to_le_bytes())?;
-        }
+        self.commit_offsets()?;
 
         // Flushes `max_row_size` and total `rows` to disk.
         self.jar.freeze_config()?;
 
         Ok(())
+    }
+
+    /// Flushes offsets to disk.
+    pub(crate) fn commit_offsets(&mut self) -> Result<(), NippyJarError> {
+        // The last offset on disk can be the first offset on `self.offset_list` given how
+        // `append_column()` works alongside commit. So we need to skip it.
+        let mut last_offset_ondisk = None;
+
+        if self.offsets_file.metadata()?.len() > 1 {
+            self.offsets_file.seek(SeekFrom::End(-8))?;
+
+            let mut buf = [0u8; 8];
+            self.offsets_file.read_exact(&mut buf)?;
+            last_offset_ondisk = Some(u64::from_le_bytes(buf));
+        }
+
+        self.offsets_file.seek(SeekFrom::End(0))?;
+
+        // Appends new offsets to disk
+        for offset in self.offsets.drain(..) {
+            if let Some(last_offset_ondisk) = last_offset_ondisk.take() {
+                if last_offset_ondisk == offset {
+                    continue
+                }
+            }
+            self.offsets_file.write_all(&offset.to_le_bytes())?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn column(&self) -> usize {
+        self.column
+    }
+
+    #[cfg(test)]
+    pub fn offsets(&self) -> &[u64] {
+        &self.offsets
+    }
+
+    #[cfg(test)]
+    pub fn offsets_mut(&mut self) -> &mut Vec<u64> {
+        &mut self.offsets
     }
 }

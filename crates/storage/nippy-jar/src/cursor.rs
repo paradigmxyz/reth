@@ -37,7 +37,7 @@ where
         let max_row_size = jar.max_row_size;
         Ok(NippyJarCursor {
             jar,
-            reader: Arc::new(jar.open_data()?),
+            reader: Arc::new(jar.open_data_reader()?),
             // Makes sure that we have enough buffer capacity to decompress any row of data.
             internal_buffer: Vec::with_capacity(max_row_size),
             row: 0,
