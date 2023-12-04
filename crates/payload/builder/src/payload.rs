@@ -169,7 +169,7 @@ impl PayloadBuilderAttributes {
 
         #[cfg(feature = "optimism")]
         let (id, transactions) = {
-            let transactions = attributes
+            let transactions: Vec<_> = attributes
                 .optimism_payload_attributes
                 .transactions
                 .as_deref()
