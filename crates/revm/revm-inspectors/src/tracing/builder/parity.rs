@@ -32,7 +32,7 @@ pub struct ParityTraceBuilder {
 
 impl ParityTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(
+    pub fn new(
         nodes: Vec<CallTraceNode>,
         spec_id: Option<SpecId>,
         _config: TracingInspectorConfig,
