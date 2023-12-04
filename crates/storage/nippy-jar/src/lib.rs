@@ -273,7 +273,7 @@ where
     /// If required, prepares any compression algorithm to an early pass of the data.
     pub fn prepare_compression(
         &mut self,
-        columns: Vec<impl IntoIterator<Item = Vec<u8>>>,
+        columns: &[impl IntoIterator<Item = Vec<u8>>],
     ) -> Result<(), NippyJarError> {
         // Makes any necessary preparations for the compressors
         if let Some(compression) = &mut self.compressor {
