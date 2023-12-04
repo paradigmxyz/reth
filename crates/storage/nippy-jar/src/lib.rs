@@ -273,7 +273,7 @@ where
     /// If required, prepares any compression algorithm to an early pass of the data.
     pub fn prepare_compression(
         &mut self,
-        columns: &[impl IntoIterator<Item = Vec<u8>>],
+        columns: Vec<impl IntoIterator<Item = Vec<u8>>>,
     ) -> Result<(), NippyJarError> {
         // Makes any necessary preparations for the compressors
         if let Some(compression) = &mut self.compressor {
@@ -454,7 +454,7 @@ where
     /// Safety checks before creating and returning a [`File`] handle to write data to.
     fn freeze_check(
         &mut self,
-        columns: &Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
+        columns: &[impl IntoIterator<Item = ColumnResult<Vec<u8>>>],
     ) -> Result<File, NippyJarError> {
         if columns.len() != self.columns {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
