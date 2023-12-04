@@ -139,7 +139,7 @@ impl ParityTraceBuilder {
         })
     }
 
-    /// Returns an iterator over all recorded traces  for `trace_transaction`
+    /// Returns all recorded traces for `trace_transaction`
     pub fn into_localized_transaction_traces(
         self,
         info: TransactionInfo,
