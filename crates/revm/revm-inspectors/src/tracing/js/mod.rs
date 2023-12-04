@@ -40,8 +40,15 @@ pub struct JsInspector {
     result_fn: JsObject,
     fault_fn: JsObject,
 
-    /// EVM inspector hook functions
+    // EVM inspector hook functions
+    /// Invoked when the EVM enters a new call that is _NOT_ the top level call.
+    ///
+    /// Corresponds to [Inspector::call] and [Inspector::create_end] but is also invoked on
+    /// [Inspector::selfdestruct].
     enter_fn: Option<JsObject>,
+    /// Invoked when the EVM exits a call that is _NOT_ the top level call.
+    ///
+    /// Corresponds to [Inspector::call_end] and [Inspector::create_end].
     exit_fn: Option<JsObject>,
     /// Executed before each instruction is executed.
     step_fn: Option<JsObject>,
@@ -51,6 +58,11 @@ pub struct JsInspector {
     to_db_service: mpsc::Sender<JsDbRequest>,
     /// Marker to track whether the precompiles have been registered.
     precompiles_registered: bool,
+    /// Helper to record when selfdestruct was called
+    ///
+    /// We need this because selfdestruct is treated as a new scope, so we need to call exit even
+    /// it is in the root call
+    is_selfdestruct: Option<()>,
 }
 
 impl JsInspector {
@@ -62,6 +74,7 @@ impl JsInspector {
     ///  - `fault`: a function that will be called when the transaction fails.
     ///
     /// Optional functions are invoked during inspection:
+    /// - `setup`: a function that will be called before the inspection starts.
     /// - `enter`: a function that will be called when the execution enters a new call.
     /// - `exit`: a function that will be called when the execution exits a call.
     /// - `step`: a function that will be called when the execution steps to the next instruction.
@@ -134,6 +147,7 @@ impl JsInspector {
             call_stack: Default::default(),
             to_db_service,
             precompiles_registered: false,
+            is_selfdestruct: None,
         })
     }
 
@@ -246,6 +260,31 @@ impl JsInspector {
         self.call_stack.last().expect("call stack is empty")
     }
 
+    #[inline]
+    fn pop_call(&mut self) {
+        self.call_stack.pop();
+    }
+
+    /// Returns true whether the active call is the root call.
+    #[inline]
+    fn is_root_call_active(&self) -> bool {
+        self.call_stack.len() == 1
+    }
+
+    /// Returns true if there's an enter function and the active call is not the root call.
+    #[inline]
+    fn can_call_enter(&self) -> bool {
+        self.enter_fn.is_some() && !self.is_root_call_active()
+    }
+
+    /// Returns true if there's an exit function and the active call is not the root call.
+    /// Or if the active call is the root call and selfdestruct was called.
+    #[inline]
+    fn can_call_exit(&mut self) -> bool {
+        self.enter_fn.is_some() &&
+            (self.is_selfdestruct.take().is_some() || !self.is_root_call_active())
+    }
+
     /// Pushes a new call to the stack
     fn push_call(
         &mut self,
@@ -263,10 +302,6 @@ impl JsInspector {
         };
         self.call_stack.push(call);
         self.active_call()
-    }
-
-    fn pop_call(&mut self) {
-        self.call_stack.pop();
     }
 
     /// Registers the precompiles in the JS context
@@ -376,7 +411,7 @@ where
             inputs.gas_limit,
         );
 
-        if self.enter_fn.is_some() {
+        if self.can_call_enter() {
             let call = self.active_call();
             let frame = CallFrame {
                 contract: call.contract.clone(),
@@ -399,7 +434,7 @@ where
         ret: InstructionResult,
         out: Bytes,
     ) -> (InstructionResult, Gas, Bytes) {
-        if self.exit_fn.is_some() {
+        if self.can_call_exit() {
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
             if let Err(err) = self.try_exit(frame_result) {
@@ -431,7 +466,7 @@ where
             inputs.gas_limit,
         );
 
-        if self.enter_fn.is_some() {
+        if self.can_call_enter() {
             let call = self.active_call();
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
@@ -452,7 +487,7 @@ where
         remaining_gas: Gas,
         out: Bytes,
     ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
-        if self.exit_fn.is_some() {
+        if self.can_call_exit() {
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
             if let Err(err) = self.try_exit(frame_result) {
@@ -466,12 +501,16 @@ where
     }
 
     fn selfdestruct(&mut self, _contract: Address, _target: Address, _value: U256) {
+        // Note: this is exempt from teh root call constraint, because selfdestruct is treated as a
+        // new scope
         if self.enter_fn.is_some() {
             let call = self.active_call();
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
             let _ = self.try_enter(frame);
         }
+
+        self.is_selfdestruct = Some(());
     }
 }
 
