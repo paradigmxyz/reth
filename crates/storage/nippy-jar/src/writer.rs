@@ -116,6 +116,9 @@ where
             self.data_file.set_len(last_offset)?;
         }
 
+        self.offsets_file.seek(SeekFrom::End(0))?;
+        self.data_file.seek(SeekFrom::End(0))?;
+
         Ok(())
     }
 
@@ -258,6 +261,9 @@ where
                 self.data_file.set_len(0)?;
             }
         }
+
+        self.offsets_file.seek(SeekFrom::End(0))?;
+        self.data_file.seek(SeekFrom::End(0))?;
 
         self.jar.rows = self.jar.rows.saturating_sub(num_rows);
         if self.jar.rows == 0 {
