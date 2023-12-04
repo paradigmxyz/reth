@@ -121,13 +121,16 @@ where
 
     /// Appends rows to data file.  `fn commit()` should be called to flush offsets and config to
     /// disk.
+    /// 
+    /// `column_values_per_row`: A vector where each element is a column's values in sequence, 
+    /// corresponding to each row. The vector's length equals the number of columns.
     pub fn append_rows(
         &mut self,
-        columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
+        column_values_per_row: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
         num_rows: u64,
     ) -> Result<(), NippyJarError> {
         let mut column_iterators =
-            columns.into_iter().map(|v| v.into_iter()).collect::<Vec<_>>().into_iter();
+            column_values_per_row.into_iter().map(|v| v.into_iter()).collect::<Vec<_>>().into_iter();
 
         for _ in 0..num_rows {
             let mut iterators = Vec::with_capacity(self.jar.columns);
