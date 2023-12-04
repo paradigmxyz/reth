@@ -126,7 +126,7 @@ where
     /// corresponding to each row. The vector's length equals the number of columns.
     pub fn append_rows(
         &mut self,
-        column_values_per_row: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
+        column_values_per_row: Vec<impl IntoIterator<Item = ColumnResult<impl AsRef<[u8]>>>>,
         num_rows: u64,
     ) -> Result<(), NippyJarError> {
         let mut column_iterators =
@@ -151,7 +151,7 @@ where
     /// disk.
     pub fn append_column(
         &mut self,
-        column: Option<ColumnResult<Vec<u8>>>,
+        column: Option<ColumnResult<impl AsRef<[u8]>>>,
     ) -> Result<(), NippyJarError> {
         match column {
             Some(Ok(value)) => {
@@ -160,7 +160,7 @@ where
                     self.offsets.push(self.data_file.stream_position()?);
                 }
 
-                self.write_column(&value)?;
+                self.write_column(value.as_ref())?;
 
                 // Last offset represents the size of the data file if no more data is to be
                 // appended. Otherwise, represents the offset of the next data item.
