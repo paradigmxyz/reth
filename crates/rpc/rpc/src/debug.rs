@@ -21,7 +21,7 @@ use reth_primitives::{
     },
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
 };
-use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox};
+use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox, TransactionVariant};
 use reth_revm::{
     database::{StateProviderDatabase, SubState},
     tracing::{
@@ -893,6 +893,18 @@ where
             .map(TransactionSource::into_recovered)
             .map(|tx| tx.envelope_encoded())
             .unwrap_or_default())
+    }
+
+    /// Handler for `debug_getRawTransactions`
+    /// Returns the bytes of the transaction for the given hash.
+    async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
+        let block = self
+            .inner
+            .provider
+            .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
+            .to_rpc_result()?
+            .unwrap_or_default();
+        Ok(block.into_transactions_ecrecovered().map(|tx| tx.envelope_encoded()).collect())
     }
 
     /// Handler for `debug_getRawReceipts`
