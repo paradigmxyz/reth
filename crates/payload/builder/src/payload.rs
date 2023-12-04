@@ -276,7 +276,7 @@ impl PayloadBuilderAttributes {
 pub(crate) fn payload_id(
     parent: &B256,
     attributes: &PayloadAttributes,
-    #[cfg(feature = "optimism")] txs: &Vec<TransactionSigned>,
+    #[cfg(feature = "optimism")] txs: &[TransactionSigned],
 ) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
