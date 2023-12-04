@@ -132,32 +132,32 @@ where
         for _ in 0..num_rows {
             let mut iterators = Vec::with_capacity(self.jar.columns);
 
-            for (column_number, mut column_iter) in column_iterators.enumerate() {
-                self.append_row(&mut column_iter, column_number)?;
-
+            for mut column_iter in column_iterators {
+                self.append_column(column_iter.next())?;
+                
                 iterators.push(column_iter);
             }
+
             column_iterators = iterators.into_iter();
         }
 
         Ok(())
     }
 
-    /// Appends a row to data file. `fn commit()` should be called to flush offsets and config to
+    /// Appends a column to data file. `fn commit()` should be called to flush offsets and config to
     /// disk.
-    pub fn append_row(
+    pub fn append_column(
         &mut self,
-        column_iter: &mut impl Iterator<Item = ColumnResult<Vec<u8>>>,
-        column_number: usize,
+        column: Option<ColumnResult<Vec<u8>>>,
     ) -> Result<(), NippyJarError> {
-        match column_iter.next() {
+        match column {
             Some(Ok(value)) => {
                 if self.offsets.is_empty() {
                     // Represents the offset of the soon to be appended data column
                     self.offsets.push(self.data_file.stream_position()?);
                 }
 
-                self.append_column(&value)?;
+                self.write_column(&value)?;
 
                 // Last offset represents the size of the data file if no more data is to be
                 // appended. Otherwise, represents the offset of the next data item.
@@ -166,7 +166,7 @@ where
             None => {
                 return Err(NippyJarError::UnexpectedMissingValue(
                     self.jar.rows as u64,
-                    column_number as u64,
+                    self.column as u64,
                 ))
             }
             Some(Err(err)) => return Err(err.into()),
@@ -175,8 +175,8 @@ where
         Ok(())
     }
 
-    /// Appends a column to data file.
-    fn append_column(&mut self, value: &[u8]) -> Result<(), NippyJarError> {
+    /// Writes column to data file. If it's the last column of the row, call `finalize_row()`
+    fn write_column(&mut self, value: &[u8]) -> Result<(), NippyJarError> {
         self.uncompressed_row_size += value.len();
         if let Some(compression) = &self.jar.compressor {
             let before = self.tmp_buf.len();
