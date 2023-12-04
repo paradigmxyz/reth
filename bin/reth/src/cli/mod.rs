@@ -226,13 +226,11 @@ const MB_TO_BYTES: u64 = 1024 * 1024;
 impl Logs {
     fn combined_filter(existing_filter: &str, rust_log: &str) -> String {
         let default_directives = DEFAULT_ENV_FILTER_DIRECTIVE;
-        let combined_filters = if rust_log.is_empty() {
+        if rust_log.is_empty() {
             format!("{},{}", existing_filter, default_directives)
         } else {
             format!("{},{},{}", existing_filter, rust_log, default_directives)
-        };
-
-        combined_filters
+        }
     }
 
     /// Builds tracing layers from the current log options.
@@ -243,13 +241,12 @@ impl Logs {
     {
         let mut layers = Vec::new();
 
-       
         let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "".to_string());
 
         if self.journald {
             let journald_filter_combined = Self::combined_filter(&self.journald_filter, &rust_log);
             layers.push(
-                reth_tracing::journald(EnvFilter::try_new(&journald_filter_combined)?)
+                reth_tracing::journald(EnvFilter::try_new(journald_filter_combined)?)
                     .expect("Could not connect to journald"),
             );
         }
