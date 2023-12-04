@@ -224,6 +224,17 @@ pub struct Logs {
 const MB_TO_BYTES: u64 = 1024 * 1024;
 
 impl Logs {
+    fn combined_filter(existing_filter: &str, rust_log: &str) -> String {
+        let default_directives = DEFAULT_ENV_FILTER_DIRECTIVE;
+        let combined_filters = if rust_log.is_empty() {
+            format!("{},{}", existing_filter, default_directives)
+        } else {
+            format!("{},{},{}", existing_filter, rust_log, default_directives)
+        };
+
+        combined_filters
+    }
+
     /// Builds tracing layers from the current log options.
     pub fn layers<S>(&self) -> eyre::Result<(Vec<BoxedLayer<S>>, Option<FileWorkerGuard>)>
     where
@@ -232,20 +243,21 @@ impl Logs {
     {
         let mut layers = Vec::new();
 
+       
+        let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "".to_string());
+
         if self.journald {
+            let journald_filter_combined = Self::combined_filter(&self.journald_filter, &rust_log);
             layers.push(
-                reth_tracing::journald(
-                    EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
-                        .add_directive(self.journald_filter.parse()?),
-                )
-                .expect("Could not connect to journald"),
+                reth_tracing::journald(EnvFilter::try_new(&journald_filter_combined)?)
+                    .expect("Could not connect to journald"),
             );
         }
 
         let file_guard = if self.log_file_max_files > 0 {
+            let file_filter_combined = Self::combined_filter(&self.log_file_filter, &rust_log);
             let (layer, guard) = reth_tracing::file(
-                EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
-                    .add_directive(self.log_file_filter.parse()?),
+                EnvFilter::try_new(&file_filter_combined)?,
                 &self.log_file_directory,
                 "reth.log",
                 self.log_file_max_size * MB_TO_BYTES,
