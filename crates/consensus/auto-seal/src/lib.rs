@@ -251,7 +251,7 @@ impl StorageInner {
     /// transactions.
     pub(crate) fn build_header_template(
         &self,
-        transactions: &Vec<TransactionSigned>,
+        transactions: &[TransactionSigned],
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
