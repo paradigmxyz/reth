@@ -64,7 +64,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// classDef pending fill:#FFCA3A
 /// classDef sidechain fill:#FF595E
 /// ```
-/// 
+///
 ///
 /// main functions:
 /// * [BlockchainTree::insert_block]: Connect block to chain, execute it and if valid insert block
@@ -1242,7 +1242,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         let tip = provider_rw.last_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
-        info!(target: "blockchain_tree", "Unwinding canonical chain blocks: {:?}", revert_range);
+        info!(target: "blockchain_tree", "Reorg: revert canonical from database by unwinding chain blocks {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider_rw
             .take_block_and_execution_range(
