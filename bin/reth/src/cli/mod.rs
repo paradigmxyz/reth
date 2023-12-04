@@ -254,7 +254,7 @@ impl Logs {
         let file_guard = if self.log_file_max_files > 0 {
             let file_filter_combined = Self::combined_filter(&self.log_file_filter, &rust_log);
             let (layer, guard) = reth_tracing::file(
-                EnvFilter::try_new(&file_filter_combined)?,
+                EnvFilter::try_new(file_filter_combined)?,
                 &self.log_file_directory,
                 "reth.log",
                 self.log_file_max_size * MB_TO_BYTES,
