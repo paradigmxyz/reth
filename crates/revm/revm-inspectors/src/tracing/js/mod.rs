@@ -99,9 +99,9 @@ impl JsInspector {
             .get("fault", &mut ctx)?
             .as_object()
             .cloned()
-            .ok_or(JsInspectorError::ResultFunctionMissing)?;
+            .ok_or(JsInspectorError::FaultFunctionMissing)?;
         if !result_fn.is_callable() {
-            return Err(JsInspectorError::ResultFunctionMissing)
+            return Err(JsInspectorError::FaultFunctionMissing)
         }
 
         let enter_fn = obj.get("enter", &mut ctx)?.as_object().cloned().filter(|o| o.is_callable());
