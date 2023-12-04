@@ -48,7 +48,8 @@ pub struct JsInspector {
     enter_fn: Option<JsObject>,
     /// Invoked when the EVM exits a call that is _NOT_ the top level call.
     ///
-    /// Corresponds to [Inspector::call_end] and [Inspector::create_end].
+    /// Corresponds to [Inspector::call_end] and [Inspector::create_end] but also invoked after
+    /// selfdestruct.
     exit_fn: Option<JsObject>,
     /// Executed before each instruction is executed.
     step_fn: Option<JsObject>,
@@ -58,11 +59,6 @@ pub struct JsInspector {
     to_db_service: mpsc::Sender<JsDbRequest>,
     /// Marker to track whether the precompiles have been registered.
     precompiles_registered: bool,
-    /// Helper to record when selfdestruct was called
-    ///
-    /// We need this because selfdestruct is treated as a new scope, so we need to call exit even
-    /// it is in the root call
-    is_selfdestruct: Option<()>,
 }
 
 impl JsInspector {
@@ -147,7 +143,6 @@ impl JsInspector {
             call_stack: Default::default(),
             to_db_service,
             precompiles_registered: false,
-            is_selfdestruct: None,
         })
     }
 
@@ -278,11 +273,9 @@ impl JsInspector {
     }
 
     /// Returns true if there's an exit function and the active call is not the root call.
-    /// Or if the active call is the root call and selfdestruct was called.
     #[inline]
     fn can_call_exit(&mut self) -> bool {
-        self.enter_fn.is_some() &&
-            (self.is_selfdestruct.take().is_some() || !self.is_root_call_active())
+        self.enter_fn.is_some() && !self.is_root_call_active()
     }
 
     /// Pushes a new call to the stack
@@ -501,8 +494,8 @@ where
     }
 
     fn selfdestruct(&mut self, _contract: Address, _target: Address, _value: U256) {
-        // Note: this is exempt from teh root call constraint, because selfdestruct is treated as a
-        // new scope
+        // This is exempt from the root call constraint, because selfdestruct is treated as a
+        // new scope that is entered and immediately exited.
         if self.enter_fn.is_some() {
             let call = self.active_call();
             let frame =
@@ -510,7 +503,11 @@ where
             let _ = self.try_enter(frame);
         }
 
-        self.is_selfdestruct = Some(());
+        // exit with empty frame result ref <https://github.com/ethereum/go-ethereum/blob/0004c6b229b787281760b14fb9460ffd9c2496f1/core/vm/instructions.go#L829-L829>
+        if self.exit_fn.is_some() {
+            let frame_result = FrameResult { gas_used: 0, output: Bytes::new(), error: None };
+            let _ = self.try_exit(frame_result);
+        }
     }
 }
 
