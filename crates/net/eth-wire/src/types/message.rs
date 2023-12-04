@@ -320,6 +320,7 @@ pub enum EthMessageID {
 }
 
 impl EthMessageID {
+    /// Returns the max value.
     pub const fn max() -> u8 {
         Self::Receipts as u8
     }
