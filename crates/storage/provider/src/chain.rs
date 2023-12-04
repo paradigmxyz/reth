@@ -59,6 +59,12 @@ impl Chain {
         &self.state
     }
 
+    /// Prepends the given state to the current state.
+    pub fn prepend_state(&mut self, mut state: BundleStateWithReceipts) {
+        std::mem::swap(&mut self.state, &mut state);
+        self.state.extend(state);
+    }
+
     /// Return true if chain is empty and has no blocks.
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
@@ -82,13 +88,13 @@ impl Chain {
     /// Return post state of the block at the `block_number` or None if block is not known
     pub fn state_at_block(&self, block_number: BlockNumber) -> Option<BundleStateWithReceipts> {
         if self.tip().number == block_number {
-            return Some(self.state.clone())
+            return Some(self.state.clone());
         }
 
         if self.blocks.get(&block_number).is_some() {
             let mut state = self.state.clone();
             state.revert_to(block_number);
-            return Some(state)
+            return Some(state);
         }
         None
     }
@@ -194,7 +200,7 @@ impl Chain {
                 chain_tip: Box::new(chain_tip.num_hash()),
                 other_chain_fork: Box::new(other_fork_block),
             }
-            .into())
+            .into());
         }
 
         // Insert blocks from other chain
@@ -226,20 +232,20 @@ impl Chain {
         let block_number = match split_at {
             ChainSplitTarget::Hash(block_hash) => {
                 let Some(block_number) = self.block_number(block_hash) else {
-                    return ChainSplit::NoSplitPending(self)
+                    return ChainSplit::NoSplitPending(self);
                 };
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
+                    return ChainSplit::NoSplitCanonical(self);
                 }
                 block_number
             }
             ChainSplitTarget::Number(block_number) => {
                 if block_number >= chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
+                    return ChainSplit::NoSplitCanonical(self);
                 }
                 if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
-                    return ChainSplit::NoSplitPending(self)
+                    return ChainSplit::NoSplitPending(self);
                 }
                 block_number
             }
