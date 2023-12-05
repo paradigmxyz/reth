@@ -185,7 +185,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this;
+                        break 'this
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
@@ -228,7 +228,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this;
+                        break 'this
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
@@ -420,12 +420,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
                         }
                     }
 
-                    return;
+                    return
                 }
 
                 if !remove_locals && tx.transaction.is_local() {
                     non_local_senders -= 1;
-                    continue;
+                    continue
                 }
 
                 total_size += tx.transaction.size();
@@ -460,7 +460,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.remove_to_limit(&limit, false, &mut removed);
 
         if self.size() <= limit.max_size && self.len() <= limit.max_txs {
-            return removed;
+            return removed
         }
 
         // now repeat for local transactions
