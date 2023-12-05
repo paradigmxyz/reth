@@ -1487,7 +1487,7 @@ mod tests {
                         tx_type: tx.tx_type(),
                         success: true,
                         cumulative_gas_used: (idx as u64 + 1) * 21_000,
-                        logs: Vec::new(),
+                        ..Default::default()
                     }
                     .with_bloom()
                 })
