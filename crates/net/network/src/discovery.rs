@@ -4,6 +4,7 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
+use enr;
 use futures::StreamExt;
 use k256::ecdsa::SigningKey;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
