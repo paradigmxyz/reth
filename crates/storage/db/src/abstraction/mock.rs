@@ -166,9 +166,13 @@ impl<T: Table> DbCursorRO<T> for CursorMock {
 
     fn walk_back(
         &mut self,
-        _start_key: Option<T::Key>,
+        start_key: Option<T::Key>,
     ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
-        todo!()
+        let start: IterPairResult<T> = match start_key {
+            Some(key) => <CursorMock as DbCursorRO<T>>::seek(self, key).transpose(),
+            None => <CursorMock as DbCursorRO<T>>::last(self).transpose(),
+        };
+        Ok(ReverseWalker::new(self, start))
     }
 }
 
