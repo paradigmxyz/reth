@@ -227,11 +227,11 @@ impl BundleStateWithReceipts {
     /// Transform block number to the index of block.
     fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
-            return None
+            return None;
         }
         let index = block_number - self.first_block;
         if index >= self.receipts.len() as u64 {
-            return None
+            return None;
         }
         Some(index as usize)
     }
@@ -324,7 +324,7 @@ impl BundleStateWithReceipts {
     /// If the target block number is not included in the state block range.
     pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self) {
         if at == self.first_block {
-            return (None, self)
+            return (None, self);
         }
 
         let (mut lower_state, mut higher_state) = (self.clone(), self);
@@ -349,6 +349,21 @@ impl BundleStateWithReceipts {
     pub fn extend(&mut self, other: Self) {
         self.bundle.extend(other.bundle);
         self.receipts.extend(other.receipts.receipt_vec);
+    }
+
+    /// Prepends the state with other.
+    ///
+    /// Reverts receipts are not updated.
+    pub fn prepend_state(&mut self, mut other: BundleState) {
+        let other_len = other.len();
+        // take this bundle
+        let this_bundle = std::mem::take(&mut self.bundle);
+        // extend other bundle with this
+        other.extend(this_bundle);
+        // discard other reverts
+        other.take_n_reverts(other_len);
+        // swap bundles
+        std::mem::swap(&mut self.bundle, &mut other)
     }
 
     /// Write bundle state to database.
