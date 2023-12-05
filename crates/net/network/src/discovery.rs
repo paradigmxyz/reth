@@ -39,6 +39,7 @@ pub struct Discovery {
     discv4: Option<Discv4>,
     /// Handler to interact with the Discovery v5 service
     discv5: Option<Arc<Discv5>>,
+    /// Event stream for Receiving Event from Discovery v5
     discv5_event_stream: Option<mpsc::Receiver<Event>>,
     /// All KAD table updates from the discv4 service.
     discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
@@ -103,7 +104,7 @@ impl Discovery {
         };
 
         // setup discv5
-        let (discv5, event_stream) = if let Some(discv5_config) = discv5_config {
+        let (discv5, discv5_event_stream) = if let Some(discv5_config) = discv5_config {
             let secret_key_bytes = sk.as_ref();
             let signing_key = SigningKey::from_slice(secret_key_bytes).unwrap();
             let enr_key = CombinedKey::Secp256k1(signing_key);
@@ -111,9 +112,9 @@ impl Discovery {
             // Construct the Discv5 server
             let mut discv5 = Discv5::new(enr, enr_key, discv5_config).unwrap();
             discv5.start().await.unwrap();
-            let event_stream = discv5.event_stream().await.unwrap();
+            let discv5_event_stream = discv5.event_stream().await.unwrap();
 
-            (Some(Arc::new(discv5)), Some(event_stream))
+            (Some(Arc::new(discv5)), Some(discv5_event_stream))
         } else {
             (None, None)
         };
@@ -137,7 +138,7 @@ impl Discovery {
             local_enr,
             discv4,
             discv5,
-            discv5_event_stream: event_stream,
+            discv5_event_stream,
             discv4_updates,
             _discv4_service,
             discovered_nodes: Default::default(),

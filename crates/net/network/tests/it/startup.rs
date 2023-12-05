@@ -1,5 +1,5 @@
 use reth_discv4::Discv4Config;
-use reth_discv5::{default_discv5_config, Discv5Config};
+use reth_discv5::default_discv5_config;
 use reth_network::{
     error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
