@@ -57,10 +57,10 @@ mod tests {
         assert_eq!(
             args,
             GasPriceOracleArgs {
-                blocks: Some(DEFAULT_GAS_PRICE_BLOCKS),
-                ignore_price: Some(DEFAULT_GAS_PRICE_IGNORE),
-                max_price: Some(DEFAULT_GAS_PRICE_MAX),
-                percentile: Some(DEFAULT_GAS_PRICE_PERCENTILE),
+                blocks: DEFAULT_GAS_PRICE_BLOCKS,
+                ignore_price: DEFAULT_GAS_PRICE_IGNORE,
+                max_price: DEFAULT_GAS_PRICE_MAX,
+                percentile: DEFAULT_GAS_PRICE_PERCENTILE,
             }
         );
     }
