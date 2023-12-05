@@ -1517,8 +1517,8 @@ impl DepositContract {
 mod tests {
     use super::*;
     use crate::{
-        b256, hex, ChainConfig, GenesisAccount, NamedChain, B256, DEV, GOERLI, HOLESKY, MAINNET,
-        SEPOLIA, U256,
+        b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount, NamedChain, B256, DEV, GOERLI,
+        HOLESKY, MAINNET, SEPOLIA, U256,
     };
     use alloy_rlp::Encodable;
     use bytes::BytesMut;
@@ -2520,7 +2520,7 @@ Post-merge hard forks (timestamp based):
         for (key, expected_rlp) in key_rlp {
             let account = chainspec.genesis.alloc.get(&key).expect("account should exist");
             let mut account_rlp = BytesMut::new();
-            account.encode(&mut account_rlp);
+            TrieAccount::from(account.clone()).encode(&mut account_rlp);
             assert_eq!(account_rlp, expected_rlp)
         }
 
