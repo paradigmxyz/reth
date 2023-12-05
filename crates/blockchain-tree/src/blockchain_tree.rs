@@ -612,27 +612,29 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         self.state.insert_chain(chain)
     }
 
-    /// Iterate over all childs that depend on this block and return
-    /// chain ids.
+    /// Iterate over all child chains that depend on this block and return
+    /// their ids.
     fn find_all_dependent_chains(&self, block: &BlockHash) -> HashSet<BlockChainId> {
-        // find all forks
+        // Find all forks of given block.
         let mut dependent_block =
             self.block_indices().fork_to_child().get(block).cloned().unwrap_or_default();
         let mut dependent_chains = HashSet::new();
 
         while let Some(block) = dependent_block.pop_back() {
+            // Get chain of dependent block.
             let chain_id =
                 self.block_indices().get_blocks_chain_id(&block).expect("Block should be in tree");
 
-            // find all forks of this chain blocks
+            // Find all blocks that fork from this chain.
             for (_, chain_block) in
                 self.state.chains.get(&chain_id).expect("Chain should be in tree").blocks()
             {
                 if let Some(forks) = self.block_indices().fork_to_child().get(&chain_block.hash()) {
+                    // If there are sub forks append them for processing.
                     dependent_block.extend(forks);
                 }
             }
-
+            // Insert dependent chain id.
             dependent_chains.insert(chain_id);
         }
         dependent_chains
@@ -640,19 +642,21 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
     /// Inserts unwind chain into the tree.
     ///
-    /// Unwind chain state needs to be applied to any dependent chain.
+    /// Unwind chain state needs to be applied to any dependent chain
+    /// As state need to be propagated to child chains.
     fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<BlockChainId> {
         // iterate over all blocks in chain and find any fork blocks that are in tree.
-
         for (number, block) in chain.blocks().iter() {
             let hash = block.hash();
 
             // find all chains that fork from this block.
             let chains_to_bump = self.find_all_dependent_chains(&hash);
             if !chains_to_bump.is_empty() {
+                // if there is such chain, revert state to this block.
                 let mut cloned_state = chain.state().clone();
                 cloned_state.revert_to(*number);
 
+                // prepend state to all chains that fork from this block.
                 for chain_id in chains_to_bump {
                     let chain =
                         self.state.chains.get_mut(&chain_id).expect("Chain should be in tree");
@@ -660,7 +664,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 }
             }
         }
-
+        // Insert unwound chain to the tree.
         self.insert_chain(chain)
     }
 
