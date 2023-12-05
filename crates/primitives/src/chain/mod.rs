@@ -19,7 +19,7 @@ pub use spec::{
 };
 
 #[cfg(feature = "optimism")]
-pub use spec::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
+pub use spec::{BASE_GOERLI, BASE_SEPOLIA, BASE_MAINNET, OP_GOERLI};
 
 // The chain info module.
 mod info;
@@ -64,6 +64,7 @@ pub enum NamedChain {
 
     Base = 8453,
     BaseGoerli = 84531,
+    BaseSepolia = 84532,
 
     Arbitrum = 42161,
     ArbitrumTestnet = 421611,
@@ -136,6 +137,11 @@ impl Chain {
     /// Returns the base goerli chain.
     pub const fn base_goerli() -> Self {
         Chain::Named(NamedChain::BaseGoerli)
+    }
+
+    /// Returns the base sepolia chain.
+    pub const fn base_sepolia() -> Self {
+        Chain::Named(NamedChain::BaseSepolia)
     }
 
     /// Returns the base mainnet chain.
