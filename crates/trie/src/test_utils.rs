@@ -1,6 +1,7 @@
-use crate::account::EthAccount;
 use alloy_rlp::{encode_fixed_size, Encodable};
-use reth_primitives::{proofs::triehash::KeccakHasher, Account, Address, B256, U256};
+use reth_primitives::{
+    proofs::triehash::KeccakHasher, trie::TrieAccount, Account, Address, B256, U256,
+};
 
 /// Re-export of [triehash].
 pub use triehash;
@@ -14,7 +15,7 @@ where
     let encoded_accounts = accounts.map(|(address, (account, storage))| {
         let storage_root = storage_root(storage.into_iter());
         let mut out = Vec::new();
-        EthAccount::from(account).with_storage_root(storage_root).encode(&mut out);
+        TrieAccount::from((account, storage_root)).encode(&mut out);
         (address, out)
     });
 
@@ -37,7 +38,7 @@ where
     let encoded_accounts = accounts.map(|(address, (account, storage))| {
         let storage_root = storage_root_prehashed(storage.into_iter());
         let mut out = Vec::new();
-        EthAccount::from(account).with_storage_root(storage_root).encode(&mut out);
+        TrieAccount::from((account, storage_root)).encode(&mut out);
         (address, out)
     });
 
