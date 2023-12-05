@@ -3,7 +3,7 @@
 use crate::node::cl_events::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::BeaconConsensusEngineEvent;
-use reth_db::DatabaseEnv;
+use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
@@ -28,11 +28,11 @@ use tracing::{info, warn};
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
 /// The current high-level state of the node.
-struct NodeState {
+struct NodeState<DB> {
     /// Database environment.
     /// Used for freelist calculation reported in the "Status" log message.
     /// See [EventHandler::poll].
-    db: Arc<DatabaseEnv>,
+    db: Arc<DB>,
     /// Connection to the network.
     network: Option<NetworkHandle>,
     /// The stage currently being executed.
@@ -41,12 +41,8 @@ struct NodeState {
     latest_block: Option<BlockNumber>,
 }
 
-impl NodeState {
-    fn new(
-        db: Arc<DatabaseEnv>,
-        network: Option<NetworkHandle>,
-        latest_block: Option<BlockNumber>,
-    ) -> Self {
+impl<DB: Database> NodeState<DB> {
+    fn new(db: Arc<DB>, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
         Self { db, network, current_stage: None, latest_block }
     }
 
@@ -200,6 +196,12 @@ impl NodeState {
     }
 }
 
+impl<DB: DatabaseMetadata<Metadata = usize>> NodeState<DB> {
+    fn freelist(&self) -> Option<usize> {
+        self.db.metadata().get("freelist").copied()
+    }
+}
+
 /// Helper type for formatting of optional fields:
 /// - If [Some(x)], then `x` is written
 /// - If [None], then `None` is written
@@ -270,13 +272,14 @@ impl From<PrunerEvent> for NodeEvent {
 
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-pub async fn handle_events<E>(
+pub async fn handle_events<E, DB>(
     network: Option<NetworkHandle>,
     latest_block_number: Option<BlockNumber>,
     events: E,
-    db: Arc<DatabaseEnv>,
+    db: Arc<DB>,
 ) where
     E: Stream<Item = NodeEvent> + Unpin,
+    DB: DatabaseMetadata<Metadata = usize> + 'static,
 {
     let state = NodeState::new(db, network, latest_block_number);
 
@@ -290,17 +293,18 @@ pub async fn handle_events<E>(
 
 /// Handles events emitted by the node and logs them accordingly.
 #[pin_project::pin_project]
-struct EventHandler<E> {
-    state: NodeState,
+struct EventHandler<E, DB> {
+    state: NodeState<DB>,
     #[pin]
     events: E,
     #[pin]
     info_interval: Interval,
 }
 
-impl<E> Future for EventHandler<E>
+impl<E, DB> Future for EventHandler<E, DB>
 where
     E: Stream<Item = NodeEvent> + Unpin,
+    DB: DatabaseMetadata<Metadata = usize> + 'static,
 {
     type Output = ();
 
@@ -308,7 +312,7 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            let freelist = OptionalField(this.state.db.freelist().ok());
+            let freelist = OptionalField(this.state.freelist());
 
             if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
                 &this.state.current_stage
@@ -428,7 +432,7 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                )
+                );
             }
         }
 

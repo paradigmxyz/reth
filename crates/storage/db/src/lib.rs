@@ -153,8 +153,11 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::{database::Database, database_metrics::DatabaseMetrics};
-    use std::{path::PathBuf, sync::Arc};
+    use crate::{
+        database::Database,
+        database_metrics::{DatabaseMetadata, DatabaseMetrics},
+    };
+    use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
@@ -213,6 +216,14 @@ pub mod test_utils {
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
         fn report_metrics(&self) {
             self.db().report_metrics()
+        }
+    }
+
+    impl<DB: DatabaseMetadata> DatabaseMetadata for TempDatabase<DB> {
+        type Metadata = <DB as DatabaseMetadata>::Metadata;
+
+        fn metadata(&self) -> HashMap<&'static str, Self::Metadata> {
+            self.db().metadata()
         }
     }
 
