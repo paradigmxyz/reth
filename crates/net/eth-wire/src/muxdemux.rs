@@ -82,7 +82,7 @@ impl<S> MuxDemuxStream<S> {
     /// Clones the stream if the given capability stream type is shared on the underlying p2p
     /// connection.
     pub fn try_clone_stream(&mut self, cap: &Capability) -> Result<StreamClone, MuxDemuxError> {
-        let cap = Self::shared_cap(cap, &self.shared_capabilities)?.clone();
+        let cap = self.shared_capabilities.ensure_matching_capability(cap)?.clone();
         let ingress = self.reg_new_ingress_buffer(&cap)?;
         let mux_tx = self.mux_tx.clone();
 

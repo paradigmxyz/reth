@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::capability::SharedCapabilityError;
+use crate::capability::{SharedCapabilityError, UnsupportedCapabilityError};
 
 use super::P2PStreamError;
 
@@ -41,4 +41,7 @@ pub enum MuxDemuxError {
     /// Shared capability error.
     #[error(transparent)]
     SharedCapabilityError(#[from] SharedCapabilityError),
+    /// Capability not supported on the p2p connection.
+    #[error(transparent)]
+    UnsupportedCapabilityError(#[from] UnsupportedCapabilityError),
 }
