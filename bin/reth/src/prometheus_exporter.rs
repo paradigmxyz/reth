@@ -7,7 +7,7 @@ use hyper::{
 use metrics::{describe_gauge, gauge};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use reth_db::{database::Database, database_metrics::DatabaseMetrics};
+use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 use tracing::error;
@@ -74,7 +74,7 @@ async fn start_endpoint<F: Hook + 'static>(
 }
 
 /// Serves Prometheus metrics over HTTP with database and process metrics.
-pub(crate) async fn serve<DB: Database + DatabaseMetrics + 'static>(
+pub(crate) async fn serve<DB: DatabaseMetrics + 'static>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     db: Arc<DB>,

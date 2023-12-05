@@ -38,7 +38,7 @@ use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
 };
-use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_db::{database::Database, database_metrics::DatabaseMetrics, init_db, DatabaseEnv};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -693,10 +693,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         prometheus_exporter::install_recorder()
     }
 
-    async fn start_metrics_endpoint(
+    async fn start_metrics_endpoint<DB: DatabaseMetrics + 'static>(
         &self,
         prometheus_handle: PrometheusHandle,
-        db: Arc<DatabaseEnv>,
+        db: Arc<DB>,
     ) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
@@ -809,7 +809,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -817,7 +817,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
