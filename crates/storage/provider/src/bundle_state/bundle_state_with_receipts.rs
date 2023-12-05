@@ -351,9 +351,10 @@ impl BundleStateWithReceipts {
         self.receipts.extend(other.receipts.receipt_vec);
     }
 
-    /// Prepends the state with other.
+    /// Prepends present the state with the given BundleState.
+    /// It adds changes from the given state but does not override any existing changes.
     ///
-    /// Reverts receipts are not updated.
+    /// Reverts  and receipts are not updated.
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.len();
         // take this bundle
