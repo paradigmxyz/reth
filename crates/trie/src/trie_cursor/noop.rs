@@ -13,14 +13,14 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
     fn account_trie_cursor(
         &self,
     ) -> Result<Box<dyn TrieCursor<Key = StoredNibbles> + '_>, DatabaseError> {
-        Ok(Box::new(NoopAccountTrieCursor::default()))
+        Ok(Box::<NoopAccountTrieCursor>::default())
     }
 
     fn storage_tries_cursor(
         &self,
         _hashed_address: reth_primitives::B256,
     ) -> Result<Box<dyn TrieCursor<Key = StoredNibblesSubKey> + '_>, DatabaseError> {
-        Ok(Box::new(NoopStorageTrieCursor::default()))
+        Ok(Box::<NoopStorageTrieCursor>::default())
     }
 }
 

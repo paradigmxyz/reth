@@ -156,18 +156,18 @@ mod tests {
         }
 
         let db_data = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(db_data[0].0.to_vec(), data[0]);
-        assert_eq!(db_data[1].0.to_vec(), data[1]);
-        assert_eq!(db_data[2].0.to_vec(), data[2]);
-        assert_eq!(db_data[3].0.to_vec(), data[3]);
+        assert_eq!(db_data[0].0 .0.to_vec(), data[0]);
+        assert_eq!(db_data[1].0 .0.to_vec(), data[1]);
+        assert_eq!(db_data[2].0 .0.to_vec(), data[2]);
+        assert_eq!(db_data[3].0 .0.to_vec(), data[3]);
 
         assert_eq!(
-            cursor.seek(hex!("0303040f").to_vec().into()).unwrap().map(|(k, _)| k.to_vec()),
+            cursor.seek(hex!("0303040f").to_vec().into()).unwrap().map(|(k, _)| k.0.to_vec()),
             Some(data[1].clone())
         );
     }
 
-    // tests that upsert and seek match on the storagetrie cursor
+    // tests that upsert and seek match on the storage trie cursor
     #[test]
     fn test_storage_cursor_abstraction() {
         let factory = create_test_provider_factory();
