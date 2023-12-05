@@ -33,9 +33,12 @@ impl From<GenesisAccount> for TrieAccount {
         let storage_root = account
             .storage
             .map(|storage| {
-                proofs::storage_root_unhashed(storage.into_iter().filter_map(|(slot, value)| {
-                    (value != B256::ZERO).then(|| (slot, U256::from_be_bytes(*value)))
-                }))
+                proofs::storage_root_unhashed(
+                    storage
+                        .into_iter()
+                        .filter(|(_, value)| *value != B256::ZERO)
+                        .map(|(slot, value)| (slot, U256::from_be_bytes(*value))),
+                )
             })
             .unwrap_or(EMPTY_ROOT_HASH);
 
