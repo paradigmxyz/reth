@@ -67,7 +67,6 @@ impl Compact for StoredNibblesSubKey {
 /// The internal representation is a [`SmallVec`] that stores one nibble per byte. This means that
 /// each byte has its upper 4 bits set to zero and the lower 4 bits representing the nibble value.
 #[derive(
-    Clone,
     Default,
     PartialEq,
     Eq,
@@ -82,6 +81,19 @@ impl Compact for StoredNibblesSubKey {
 )]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct Nibbles(SmallVec<[u8; 64]>);
+
+// Override `SmallVec::from` since it's not specialized for `Copy` types.
+impl Clone for Nibbles {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self(SmallVec::from_slice(&self.0))
+    }
+
+    #[inline]
+    fn clone_from(&mut self, source: &Self) {
+        self.0.clone_from(&source.0);
+    }
+}
 
 impl alloy_rlp::Encodable for Nibbles {
     #[inline]
