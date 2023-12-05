@@ -80,6 +80,8 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         #[cfg(feature = "optimism")]
         "base_goerli" | "base-goerli" => BASE_GOERLI.clone(),
         #[cfg(feature = "optimism")]
+        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
+        #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
         _ => {
             // try to read json from path first
