@@ -1,24 +1,23 @@
 use clap::Args;
-
 /// Parameters to configure Gas Price Oracle
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[clap(next_help_heading = "Gas Price Oracle")]
 pub struct GasPriceOracleArgs {
     /// Number of recent blocks to check for gas price
     #[arg(long = "gpo.blocks", default_value = "20")]
-    pub blocks: Option<u32>,
+    pub blocks: u32,
 
     /// Gas Price below which gpo will ignore transactions
     #[arg(long = "gpo.ignoreprice", default_value = "2")]
-    pub ignore_price: Option<u64>,
+    pub ignore_price: u64,
 
     /// Maximum transaction priority fee(or gasprice before London Fork) to be recommended by gpo
     #[arg(long = "gpo.maxprice", default_value = "500000000000")]
-    pub max_price: Option<u64>,
+    pub max_price: u64,
 
     /// The percentile of gas prices to use for the estimate
     #[arg(long = "gpo.percentile", default_value = "60")]
-    pub percentile: Option<u32>,
+    pub percentile: u32,
 }
 
 #[cfg(test)]
