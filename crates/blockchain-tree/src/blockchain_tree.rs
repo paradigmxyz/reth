@@ -1364,7 +1364,6 @@ mod tests {
 
     #[tokio::test]
     async fn consecutive_reorgs() {
-        reth_tracing::init_test_tracing();
         let signer = Address::random();
         let initial_signer_balance = U256::from(10).pow(U256::from(18));
         let chain_spec = Arc::new(
