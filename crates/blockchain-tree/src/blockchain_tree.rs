@@ -660,7 +660,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                     let chain =
                         self.state.chains.get_mut(&chain_id).expect("Chain should be in tree");
 
-                    info!(target: "blockchain_tree",
+                    debug!(target: "blockchain_tree",
                         unwound_block= ?block.num_hash(),
                         chain_id = ?chain_id,
                         chain_tip = ?chain.tip().num_hash(),
