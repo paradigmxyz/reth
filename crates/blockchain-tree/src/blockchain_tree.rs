@@ -638,10 +638,10 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         dependent_chains
     }
 
-    /// Inserts unwind chain into the tree.
+    /// Inserts unwound chain back into the tree and updates any dependent chains.
     ///
-    /// Unwind chain state needs to be applied to any dependent chain
-    /// As state need to be propagated to child chains.
+    /// This method searches for any chain that depended on this block being part of the canonical chain.
+    /// Each dependent chain's state is then updated with state entries removed from the plain state during the unwind.
     fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<BlockChainId> {
         // iterate over all blocks in chain and find any fork blocks that are in tree.
         for (number, block) in chain.blocks().iter() {
