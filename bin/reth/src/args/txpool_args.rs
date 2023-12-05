@@ -8,7 +8,7 @@ use reth_transaction_pool::{
 };
 
 /// Parameters for debugging purposes
-#[derive(Debug, Args, PartialEq, Default)]
+#[derive(Debug, Args, PartialEq)]
 #[clap(next_help_heading = "TxPool")]
 pub struct TxPoolArgs {
     /// Max number of transaction in the pending sub-pool.
@@ -48,6 +48,23 @@ pub struct TxPoolArgs {
     pub no_locals: bool,
 }
 
+impl Default for TxPoolArgs {
+    fn default() -> Self {
+        Self {
+            pending_max_count: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+            pending_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+            basefee_max_count: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+            basefee_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+            queued_max_count: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+            queued_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+            max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+            price_bump: DEFAULT_PRICE_BUMP,
+            blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
+            no_locals: false,
+        }
+    }
+}
+
 impl TxPoolArgs {
     /// Returns transaction pool configuration.
     pub fn pool_config(&self) -> PoolConfig {
@@ -75,5 +92,25 @@ impl TxPoolArgs {
                 replace_blob_tx_price_bump: self.blob_transaction_price_bump,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[clap(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn txpool_args_default_sanity_test() {
+        let default_args = TxPoolArgs::default();
+        let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
     }
 }

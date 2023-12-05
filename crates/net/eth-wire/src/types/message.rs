@@ -319,6 +319,13 @@ pub enum EthMessageID {
     Receipts = 0x10,
 }
 
+impl EthMessageID {
+    /// Returns the max value.
+    pub const fn max() -> u8 {
+        Self::Receipts as u8
+    }
+}
+
 impl Encodable for EthMessageID {
     fn encode(&self, out: &mut dyn BufMut) {
         out.put_u8(*self as u8);

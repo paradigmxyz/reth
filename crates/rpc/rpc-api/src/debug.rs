@@ -24,6 +24,10 @@ pub trait DebugApi {
     #[method(name = "getRawTransaction")]
     async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes>;
 
+    /// Returns an array of EIP-2718 binary-encoded transactions for the given [BlockId].
+    #[method(name = "getRawTransactions")]
+    async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>>;
+
     /// Returns an array of EIP-2718 binary-encoded receipts.
     #[method(name = "getRawReceipts")]
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>>;

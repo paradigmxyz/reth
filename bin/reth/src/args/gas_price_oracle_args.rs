@@ -1,6 +1,6 @@
 use clap::Args;
 /// Parameters to configure Gas Price Oracle
-#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[clap(next_help_heading = "Gas Price Oracle")]
 pub struct GasPriceOracleArgs {
     /// Number of recent blocks to check for gas price
@@ -18,6 +18,17 @@ pub struct GasPriceOracleArgs {
     /// The percentile of gas prices to use for the estimate
     #[arg(long = "gpo.percentile", default_value = "60")]
     pub percentile: u32,
+}
+
+impl Default for GasPriceOracleArgs {
+    fn default() -> Self {
+        Self {
+            blocks: Some(20),
+            ignore_price: Some(2),
+            max_price: Some(500000000000),
+            percentile: Some(60),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -48,5 +59,12 @@ mod tests {
                 percentile: Some(DEFAULT_GAS_PRICE_PERCENTILE),
             }
         );
+    }
+
+    #[test]
+    fn gpo_args_default_sanity_test() {
+        let default_args = GasPriceOracleArgs::default();
+        let args = CommandParser::<GasPriceOracleArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
     }
 }
