@@ -201,7 +201,7 @@ where
             // send buffered bytes from `StreamClone`s. try send at least as many messages as
             // there are stream clones.
             if self.inner.poll_ready_unpin(cx).is_ready() {
-                if let Ok(item) = self.mux.try_recv() {
+                if let Poll::Ready(Some(item)) = self.mux.poll_recv(cx) {
                     self.inner.start_send_unpin(item)?;
                     if send_count < self.demux.len() {
                         send_count += 1;
@@ -221,7 +221,6 @@ where
                 if !mux_exhausted && self.inner.poll_ready_unpin(cx).is_ready() {
                     continue
                 }
-                cx.waker().wake_by_ref();
                 // flush before returning pending
                 _ = self.inner.poll_flush_unpin(cx)?;
             }
