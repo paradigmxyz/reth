@@ -7,6 +7,7 @@ use crate::{
     cli::{
         components::RethNodeComponentsImpl,
         config::RethRpcConfig,
+        db_type::{DatabaseBuilder, DatabaseInstance},
         ext::{RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
@@ -178,6 +179,18 @@ impl NodeConfig {
         }
     }
 
+    /// Install a database
+    pub fn install_db<DB: Database>(self) -> eyre::Result<NodeBuilderWithDatabase<DB>> {
+        // let db_instance =
+        //     DatabaseBuilder::new(self.database).build_db(self.db.log_level, self.chain.chain)?;
+
+        // match db_instance {
+        //     DatabaseInstance::Real(database) => Ok(NodeBuilderWithDatabase { config: self, database }),
+        //     DatabaseInstance::Test(database) => Ok(NodeBuilderWithDatabase { config: self, database }),
+        // }
+        todo!()
+    }
+
     /// Launches the node, also adding any RPC extensions passed.
     ///
     /// # Example
@@ -198,6 +211,24 @@ impl NodeConfig {
         mut ext: E::Node,
         executor: TaskExecutor,
     ) -> eyre::Result<NodeHandle> {
+        let data_dir = self.data_dir().expect("see below");
+        let db_path = data_dir.db_path();
+
+        // TODO: set up test database, see if we can configure either real or test db
+        // let db_instance =
+        //     DatabaseBuilder::new(self.database).build_db(self.db.log_level, self.chain.chain)?;
+
+        // match db_instance {
+        //     DatabaseInstance::Real(database) => {
+        //         // let builder = NodeBuilderWithDatabase { config: self, database, data_dir };
+        //         // todo!()
+        //     },
+        //     DatabaseInstance::Test(database) => {
+        //         // let builder = NodeBuilderWithDatabase { config: self, database, data_dir };
+        //         // todo!();
+        //     },
+        // }
+
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // Raise the fd limit of the process.
@@ -209,12 +240,6 @@ impl NodeConfig {
 
         let prometheus_handle = self.install_prometheus_recorder()?;
 
-        let data_dir = self.data_dir().expect("see below");
-        let db_path = data_dir.db_path();
-
-        // TODO: set up test database, see if we can configure either real or test db
-        // let db =
-        //     DatabaseBuilder::new(self.database).build_db(self.db.log_level, self.chain.chain)?;
         // TODO: ok, this doesn't work because:
         // * Database is not object safe, and is sealed
         // * DatabaseInstance is not sealed
@@ -1140,6 +1165,49 @@ impl Default for NodeConfig {
             #[cfg(feature = "optimism")]
             rollup: crate::args::RollupArgs::default(),
         }
+    }
+}
+
+/// A version of the [NodeConfig] that has an installed database. This is used to construct the
+/// [NodeHandle].
+///
+/// This also contains a path to a data dir that cannot be changed.
+pub struct NodeBuilderWithDatabase<DB> {
+    /// The node config
+    pub config: NodeConfig,
+    /// The database
+    pub database: Arc<DB>,
+    /// The data dir
+    pub data_dir: ChainPath<DataDirPath>,
+}
+
+impl<DB: Database> NodeBuilderWithDatabase<DB> {
+    pub async fn launch<E: RethCliExt>(
+        mut self,
+        mut ext: E::Node,
+        executor: TaskExecutor,
+    ) -> eyre::Result<NodeHandle> {
+        let mut provider_factory = ProviderFactory::new(Arc::clone(&self.database), Arc::clone(&self.config.chain));
+
+        // configure snapshotter
+        let snapshotter = reth_snapshot::Snapshotter::new(
+            provider_factory.clone(),
+            self.data_dir.snapshots_path(),
+            self.config.chain.snapshot_block_interval,
+        )?;
+
+        provider_factory = provider_factory
+            .with_snapshots(self.data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
+
+        let prometheus_handle = self.config.install_prometheus_recorder()?;
+        self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.database)).await?;
+
+        debug!(target: "reth::cli", chain=%self.config.chain.chain, genesis=?self.config.chain.genesis_hash(), "Initializing genesis");
+
+        let genesis_hash = init_genesis(Arc::clone(&self.database), self.config.chain.clone())?;
+
+        info!(target: "reth::cli", "{}", DisplayHardforks::new(self.config.chain.hardforks()));
+        todo!()
     }
 }
 
