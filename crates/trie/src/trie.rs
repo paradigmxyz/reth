@@ -1,5 +1,4 @@
 use crate::{
-    account::EthAccount,
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
     prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut},
@@ -14,7 +13,7 @@ use reth_db::{tables, transaction::DbTx};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
-    trie::{HashBuilder, Nibbles},
+    trie::{HashBuilder, Nibbles, TrieAccount},
     Address, BlockNumber, B256,
 };
 use std::{
@@ -287,7 +286,7 @@ where
                         storage_root_calculator.root()?
                     };
 
-                    let account = EthAccount::from(account).with_storage_root(storage_root);
+                    let account = TrieAccount::from((account, storage_root));
 
                     account_rlp.clear();
                     account.encode(&mut account_rlp as &mut dyn BufMut);
@@ -769,10 +768,7 @@ mod tests {
     }
 
     fn encode_account(account: Account, storage_root: Option<B256>) -> Vec<u8> {
-        let mut account = EthAccount::from(account);
-        if let Some(storage_root) = storage_root {
-            account = account.with_storage_root(storage_root);
-        }
+        let account = TrieAccount::from((account, storage_root.unwrap_or(EMPTY_ROOT_HASH)));
         let mut account_rlp = Vec::with_capacity(account.length());
         account.encode(&mut account_rlp);
         account_rlp
