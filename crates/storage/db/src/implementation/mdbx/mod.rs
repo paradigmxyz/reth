@@ -64,7 +64,7 @@ impl Database for DatabaseEnv {
 }
 
 impl DatabaseMetrics for DatabaseEnv {
-    fn report_metrics<'a>(&'a self) {
+    fn report_metrics(&self) {
         for (name, value, labels) in self.gauge_metrics() {
             gauge!(name, value, labels);
         }
