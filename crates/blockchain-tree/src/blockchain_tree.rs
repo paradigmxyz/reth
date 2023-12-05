@@ -1501,6 +1501,12 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
+            #[cfg(not(feature = "optimism"))]
+            let receipts_root = calculate_receipt_root(&receipts);
+
+            #[cfg(feature = "optimism")]
+            let receipts_root = calculate_receipt_root(&receipts, &chain_spec, 0);
+
             SealedBlockWithSenders::new(
                 SealedBlock {
                     header: Header {
@@ -1511,7 +1517,7 @@ mod tests {
                         mix_hash: B256::random(),
                         base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
                         transactions_root,
-                        receipts_root: calculate_receipt_root(&receipts),
+                        receipts_root,
                         state_root: state_root_unhashed(HashMap::from([(
                             signer,
                             (
