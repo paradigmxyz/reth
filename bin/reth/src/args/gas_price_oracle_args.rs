@@ -1,4 +1,8 @@
 use clap::Args;
+use reth_rpc_builder::constants::{
+    DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_IGNORE, DEFAULT_GAS_PRICE_MAX,
+    DEFAULT_GAS_PRICE_PERCENTILE,
+};
 /// Parameters to configure Gas Price Oracle
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[clap(next_help_heading = "Gas Price Oracle")]
@@ -23,10 +27,10 @@ pub struct GasPriceOracleArgs {
 impl Default for GasPriceOracleArgs {
     fn default() -> Self {
         Self {
-            blocks: Some(20),
-            ignore_price: Some(2),
-            max_price: Some(500000000000),
-            percentile: Some(60),
+            blocks: DEFAULT_GAS_PRICE_BLOCKS,
+            ignore_price: DEFAULT_GAS_PRICE_IGNORE,
+            max_price: DEFAULT_GAS_PRICE_MAX,
+            percentile: DEFAULT_GAS_PRICE_PERCENTILE,
         }
     }
 }
