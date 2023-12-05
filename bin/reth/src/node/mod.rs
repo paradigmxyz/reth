@@ -744,7 +744,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_head<DB: Database>(&self, db: Arc<DB>) -> RethResult<Head> {
+    fn lookup_head<DB: Database>(&self, db: DB) -> RethResult<Head> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
@@ -829,12 +829,12 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     fn load_network_config<DB: Database>(
         &self,
         config: &Config,
-        db: Arc<DB>,
+        db: DB,
         executor: TaskExecutor,
         head: Head,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
-    ) -> NetworkConfig<ProviderFactory<Arc<DB>>> {
+    ) -> NetworkConfig<ProviderFactory<DB>> {
         let cfg_builder = self
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
