@@ -643,16 +643,13 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     /// Unwind chain state needs to be applied to any dependent chain
     /// As state need to be propagated to child chains.
     fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<BlockChainId> {
-        println!("Unwinding chain");
         // iterate over all blocks in chain and find any fork blocks that are in tree.
         for (number, block) in chain.blocks().iter() {
-            println!("dependent block: {}", number);
             let hash = block.hash();
 
             // find all chains that fork from this block.
             let chains_to_bump = self.find_all_dependent_chains(&hash);
             if !chains_to_bump.is_empty() {
-                println!("There are chains {:?}", chains_to_bump);
                 // if there is such chain, revert state to this block.
                 let mut cloned_state = chain.state().clone();
                 cloned_state.revert_to(*number);
@@ -1207,7 +1204,6 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
     /// Unwind tables and put it inside state
     pub fn unwind(&mut self, unwind_to: BlockNumber) -> RethResult<()> {
-        println!("UNWIND");
         // nothing to be done if unwind_to is higher then the tip
         if self.block_indices().canonical_tip().number <= unwind_to {
             return Ok(())
