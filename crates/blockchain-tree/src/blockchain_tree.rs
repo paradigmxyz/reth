@@ -640,8 +640,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
     /// Inserts unwound chain back into the tree and updates any dependent chains.
     ///
-    /// This method searches for any chain that depended on this block being part of the canonical chain.
-    /// Each dependent chain's state is then updated with state entries removed from the plain state during the unwind.
+    /// This method searches for any chain that depended on this block being part of the canonical
+    /// chain. Each dependent chain's state is then updated with state entries removed from the
+    /// plain state during the unwind.
     fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<BlockChainId> {
         // iterate over all blocks in chain and find any fork blocks that are in tree.
         for (number, block) in chain.blocks().iter() {
@@ -658,6 +659,13 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 for chain_id in chains_to_bump {
                     let chain =
                         self.state.chains.get_mut(&chain_id).expect("Chain should be in tree");
+
+                    info!(target: "blockchain_tree",
+                        unwound_block= ?block.num_hash(),
+                        chain_id = ?chain_id,
+                        chain_tip = ?chain.tip().num_hash(),
+                        "Prepend unwound block state to blockchain tree chain");
+
                     chain.prepend_state(cloned_state.state().clone())
                 }
             }
