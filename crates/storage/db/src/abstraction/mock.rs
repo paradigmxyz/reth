@@ -170,7 +170,7 @@ impl<T: Table> DbCursorRO<T> for CursorMock {
     ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
         let start: IterPairResult<T> = match start_key {
             Some(key) => <CursorMock as DbCursorRO<T>>::seek(self, key).transpose(),
-            None => <CursorMock as DbCursorRO<T>>::first(self).transpose(),
+            None => <CursorMock as DbCursorRO<T>>::last(self).transpose(),
         };
         Ok(ReverseWalker::new(self, start))
     }
