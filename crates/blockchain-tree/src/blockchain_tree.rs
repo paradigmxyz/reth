@@ -1452,7 +1452,7 @@ mod tests {
                 )
                 .unwrap();
             let account = Account { balance: initial_signer_balance, ..Default::default() };
-            provider_rw.tx_ref().put::<tables::PlainAccountState>(signer, account.clone()).unwrap();
+            provider_rw.tx_ref().put::<tables::PlainAccountState>(signer, account).unwrap();
             provider_rw.tx_ref().put::<tables::HashedAccount>(keccak256(signer), account).unwrap();
             provider_rw.commit().unwrap();
         }
