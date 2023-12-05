@@ -7,6 +7,7 @@ use super::{TrieCursor, TrieCursorFactory};
 
 /// Noop trie cursor factory.
 #[derive(Default, Debug)]
+#[non_exhaustive]
 pub struct NoopTrieCursorFactory;
 
 impl TrieCursorFactory for NoopTrieCursorFactory {
@@ -26,6 +27,7 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
 
 /// Noop account trie cursor.
 #[derive(Default, Debug)]
+#[non_exhaustive]
 pub struct NoopAccountTrieCursor;
 
 impl TrieCursor for NoopAccountTrieCursor {
@@ -52,6 +54,7 @@ impl TrieCursor for NoopAccountTrieCursor {
 
 /// Noop account trie cursor.
 #[derive(Default, Debug)]
+#[non_exhaustive]
 pub struct NoopStorageTrieCursor;
 
 impl TrieCursor for NoopStorageTrieCursor {
