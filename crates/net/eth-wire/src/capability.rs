@@ -5,7 +5,7 @@ use crate::{
     p2pstream::MAX_RESERVED_MESSAGE_ID,
     protocol::{ProtoVersion, Protocol},
     version::ParseVersionError,
-    EthMessage, EthVersion,
+    EthMessage, EthMessageID, EthVersion,
 };
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::add_arbitrary_tests;
@@ -97,6 +97,12 @@ impl Capability {
     #[inline]
     pub fn is_eth_v68(&self) -> bool {
         self.name == "eth" && self.version == 68
+    }
+
+    /// Whether this is any eth version.
+    #[inline]
+    pub fn is_eth(&self) -> bool {
+        self.is_eth_v66() || self.is_eth_v67() || self.is_eth_v68()
     }
 }
 
@@ -320,7 +326,7 @@ impl SharedCapability {
     /// Returns the number of protocol messages supported by this capability.
     pub fn num_messages(&self) -> Result<u8, SharedCapabilityError> {
         match self {
-            SharedCapability::Eth { version, .. } => Ok(version.total_messages()),
+            SharedCapability::Eth { version: _version, .. } => Ok(EthMessageID::max() + 1),
             _ => Err(SharedCapabilityError::UnknownCapability),
         }
     }
@@ -676,7 +682,7 @@ mod tests {
         assert_eq!(shared_eth.name(), proto.cap.name);
 
         // the 6th shared message is the first message of the eth capability
-        let shared_eth = shared.find_by_relative_offset(1 + proto.messages).unwrap();
+        let shared_eth = shared.find_by_relative_offset(1 + proto.messages()).unwrap();
         assert_eq!(shared_eth.name(), "eth");
     }
 }
