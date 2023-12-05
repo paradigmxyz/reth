@@ -163,7 +163,8 @@ impl Chain {
                     NamedChain::OptimismGoerli |
                     NamedChain::OptimismKovan |
                     NamedChain::Base |
-                    NamedChain::BaseGoerli
+                    NamedChain::BaseGoerli |
+                    NamedChain::BaseSepolia
             )
         })
     }
