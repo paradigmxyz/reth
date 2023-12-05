@@ -624,8 +624,8 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 self.block_indices().get_blocks_chain_id(&block).expect("Block should be in tree");
 
             // Find all blocks that fork from this chain.
-            for (_, chain_block) in
-                self.state.chains.get(&chain_id).expect("Chain should be in tree").blocks()
+            for chain_block in
+                self.state.chains.get(&chain_id).expect("Chain should be in tree").blocks().values()
             {
                 if let Some(forks) = self.block_indices().fork_to_child().get(&chain_block.hash()) {
                     // If there are sub forks append them for processing.
