@@ -68,6 +68,7 @@ tempfile = { workspace = true, optional = true }
 [dev-dependencies]
 # reth
 reth-discv4 = { workspace = true, features = ["test-utils"] }
+reth-discv5.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 

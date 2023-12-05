@@ -1,4 +1,5 @@
 use reth_discv4::Discv4Config;
+use reth_discv5::{default_discv5_config, Discv5Config};
 use reth_network::{
     error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
@@ -7,6 +8,7 @@ use reth_network_api::NetworkInfo;
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::{
+    default::Default,
     io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
 };
@@ -55,12 +57,17 @@ async fn test_listener_addr_in_use() {
 async fn test_discovery_addr_in_use() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let disc_config = Discv4Config::default();
+    let discv5_config = default_discv5_config();
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
     let any_port_listener = TcpListener::bind(addr).await.unwrap();
     let port = any_port_listener.local_addr().unwrap().port();
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port));
-    let _discovery = Discovery::new(addr, secret_key, Some(disc_config), None).await.unwrap();
+    let _discovery = Discovery::new(addr, secret_key, Some(disc_config), Some(discv5_config), None)
+        .await
+        .unwrap();
     let disc_config = Discv4Config::default();
-    let result = Discovery::new(addr, secret_key, Some(disc_config), None).await;
+    let discv5_config = default_discv5_config();
+    let result =
+        Discovery::new(addr, secret_key, Some(disc_config), Some(discv5_config), None).await;
     assert!(is_addr_in_use_kind(&result.err().unwrap(), ServiceKind::Discovery(addr)));
 }
