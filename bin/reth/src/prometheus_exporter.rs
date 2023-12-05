@@ -7,7 +7,7 @@ use hyper::{
 use metrics::{describe_gauge, gauge};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use reth_db::{database::Database, tables, DatabaseEnv};
+use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_metrics::metrics::Unit;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 use tracing::error;
@@ -74,54 +74,18 @@ async fn start_endpoint<F: Hook + 'static>(
 }
 
 /// Serves Prometheus metrics over HTTP with database and process metrics.
-pub(crate) async fn serve(
+pub(crate) async fn serve<DB: Database + DatabaseMetrics + 'static>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
-    db: Arc<DatabaseEnv>,
+    db: Arc<DB>,
     process: metrics_process::Collector,
 ) -> eyre::Result<()> {
-    let db_stats = move || {
-        // TODO: A generic stats abstraction for other DB types to deduplicate this and `reth db
-        //  stats`
-        let _ = db.view(|tx| {
-            for table in tables::Tables::ALL.iter().map(|table| table.name()) {
-                let table_db =
-                    tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
-
-                let stats = tx
-                    .inner
-                    .db_stat(&table_db)
-                    .wrap_err(format!("Could not find table: {table}"))?;
-
-                let page_size = stats.page_size() as usize;
-                let leaf_pages = stats.leaf_pages();
-                let branch_pages = stats.branch_pages();
-                let overflow_pages = stats.overflow_pages();
-                let num_pages = leaf_pages + branch_pages + overflow_pages;
-                let table_size = page_size * num_pages;
-                let entries = stats.entries();
-
-                gauge!("db.table_size", table_size as f64, "table" => table);
-                gauge!("db.table_pages", leaf_pages as f64, "table" => table, "type" => "leaf");
-                gauge!("db.table_pages", branch_pages as f64, "table" => table, "type" => "branch");
-                gauge!("db.table_pages", overflow_pages as f64, "table" => table, "type" => "overflow");
-                gauge!("db.table_entries", entries as f64, "table" => table);
-            }
-
-            Ok::<(), eyre::Report>(())
-        }).map_err(|error| error!(?error, "Failed to read db table stats"));
-
-        if let Ok(freelist) =
-            db.freelist().map_err(|error| error!(?error, "Failed to read db.freelist"))
-        {
-            gauge!("db.freelist", freelist as f64);
-        }
-    };
+    let db_metrics_hook = move || db.report_metrics();
 
     // Clone `process` to move it into the hook and use the original `process` for describe below.
     let cloned_process = process.clone();
     let hooks: Vec<Box<dyn Hook<Output = ()>>> = vec![
-        Box::new(db_stats),
+        Box::new(db_metrics_hook),
         Box::new(move || cloned_process.collect()),
         Box::new(collect_memory_stats),
     ];
@@ -145,7 +109,7 @@ fn collect_memory_stats() {
 
     if epoch::advance().map_err(|error| error!(?error, "Failed to advance jemalloc epoch")).is_err()
     {
-        return
+        return;
     }
 
     if let Ok(value) = stats::active::read()
