@@ -744,7 +744,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> RethResult<Head> {
+    fn lookup_head<DB: Database>(&self, db: Arc<DB>) -> RethResult<Head> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
@@ -809,7 +809,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -817,7 +817,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -826,15 +826,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
-    fn load_network_config(
+    fn load_network_config<DB: Database>(
         &self,
         config: &Config,
-        db: Arc<DatabaseEnv>,
+        db: Arc<DB>,
         executor: TaskExecutor,
         head: Head,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
-    ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
+    ) -> NetworkConfig<ProviderFactory<Arc<DB>>> {
         let cfg_builder = self
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
