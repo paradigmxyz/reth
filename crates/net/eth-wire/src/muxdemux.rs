@@ -89,7 +89,7 @@ impl<S> MuxDemuxStream<S> {
         Ok(StreamClone { stream: ingress, sink: mux_tx, cap })
     }
 
-    /// Starts a graceful disconnect. Returns a closure to drop the stream.
+    /// Starts a graceful disconnect.
     pub fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), MuxDemuxError>
     where
         S: DisconnectP2P,
