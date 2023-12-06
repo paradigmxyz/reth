@@ -56,6 +56,8 @@ pub enum NamedChain {
     Goerli = 5,
     Kovan = 42,
     Holesky = 17000,
+    ScrollSepolia = 534351,
+    Scroll = 534352,
     Sepolia = 11155111,
 
     Optimism = 10,
