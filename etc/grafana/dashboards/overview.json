@@ -6443,7 +6443,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert storage hashing\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -6455,7 +6455,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert storage hashing\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6468,7 +6468,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert storage hashing\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6481,7 +6481,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert storage hashing\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6495,7 +6495,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert storage hashing\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert storage hashing\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6592,7 +6592,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert account hashing\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -6604,7 +6604,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert account hashing\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6617,7 +6617,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert account hashing\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6630,7 +6630,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert account hashing\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6644,7 +6644,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert account hashing\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert account hashing\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6741,7 +6741,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert merkle tree\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -6753,7 +6753,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert merkle tree\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6766,7 +6766,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert merkle tree\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6779,7 +6779,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert merkle tree\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6793,7 +6793,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert merkle tree\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert merkle tree\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6890,7 +6890,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -6902,7 +6902,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6915,7 +6915,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6928,7 +6928,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -6942,7 +6942,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert block\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7039,7 +7039,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert state\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -7051,7 +7051,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert state\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7064,7 +7064,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert state\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7077,7 +7077,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert state\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7091,7 +7091,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert state\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert state\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7188,7 +7188,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert hashes\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -7200,7 +7200,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert hashes\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7213,7 +7213,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert hashes\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7226,7 +7226,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert hashes\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7240,7 +7240,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert hashes\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert hashes\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7337,7 +7337,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert history indices\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -7349,7 +7349,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert history indices\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7362,7 +7362,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert history indices\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7375,7 +7375,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert history indices\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7389,7 +7389,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert history indices\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert history indices\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7486,7 +7486,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"update pipeline stages\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -7498,7 +7498,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"update pipeline stages\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7511,7 +7511,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"update pipeline stages\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7524,7 +7524,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"update pipeline stages\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7538,7 +7538,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"update pipeline stages\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"update pipeline stages\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7635,7 +7635,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert canonical headers\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -7647,7 +7647,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert canonical headers\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7660,7 +7660,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert canonical headers\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7673,7 +7673,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert canonical headers\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7687,7 +7687,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert canonical headers\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert canonical headers\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7784,7 +7784,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert headers\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -7796,7 +7796,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert headers\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7809,7 +7809,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert headers\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7822,7 +7822,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert headers\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7836,7 +7836,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert headers\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7933,7 +7933,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert header numbers\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -7945,7 +7945,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert header numbers\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7958,7 +7958,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert header numbers\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7971,7 +7971,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert header numbers\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -7985,7 +7985,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert header numbers\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert header numbers\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8082,7 +8082,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header TD\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert header TD\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -8094,7 +8094,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert headers numbers\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert headers numbers\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8107,7 +8107,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header TD\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert header TD\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8120,7 +8120,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert header TD\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert header TD\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8134,7 +8134,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert header TD\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert header TD\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8231,7 +8231,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block ommers\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -8243,7 +8243,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block ommers\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8256,7 +8256,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block ommers\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8269,7 +8269,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block ommers\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8283,7 +8283,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert block ommers\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block ommers\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8380,7 +8380,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx senders\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -8392,7 +8392,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx senders\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8405,7 +8405,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx senders\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8418,7 +8418,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx senders\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8432,7 +8432,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx senders\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx senders\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8529,7 +8529,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transactions\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -8541,7 +8541,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transactions\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8554,7 +8554,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transactions\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8567,7 +8567,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transactions\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8581,7 +8581,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert transactions\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transactions\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8678,7 +8678,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx hash numbers\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -8690,7 +8690,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx hash numbers\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8703,7 +8703,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx hash numbers\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8716,7 +8716,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx hash numbers\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8730,7 +8730,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert tx hash numbers\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert tx hash numbers\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8827,7 +8827,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block withdrawals\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -8839,7 +8839,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block withdrawals\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8852,7 +8852,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block withdrawals\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8865,7 +8865,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block withdrawals\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8879,7 +8879,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert block withdrawals\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block withdrawals\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -8976,7 +8976,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block body indices\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -8988,7 +8988,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block body indices\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9001,7 +9001,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block body indices\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9014,7 +9014,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block body indices\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9028,7 +9028,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert block body indices\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert block body indices\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9125,7 +9125,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transaction block\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -9137,7 +9137,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transaction block\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9150,7 +9150,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transaction block\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9163,7 +9163,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transaction block\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9177,7 +9177,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"insert transaction block\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"insert transaction block\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9274,7 +9274,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"recover signers\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -9286,7 +9286,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"recover signers\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9299,7 +9299,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"recover signers\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9312,7 +9312,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"recover signers\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9326,7 +9326,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"recover signers\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"recover signers\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9423,7 +9423,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get next tx num\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -9435,7 +9435,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get next tx num\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9448,7 +9448,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get next tx num\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9461,7 +9461,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get next tx num\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9475,7 +9475,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"get next tx num\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get next tx num\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9572,7 +9572,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.5\"}",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get parent TD\", quantile=\"0.5\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -9584,7 +9584,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.9\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get parent TD\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9597,7 +9597,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.95\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get parent TD\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9610,7 +9610,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.99\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get parent TD\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9624,7 +9624,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_storage_providers_database_duration{action=\"get parent TD\", quantile=\"0.999\"} ",
+          "expr": "reth_storage_providers_database_duration{instance=~\"$instance\", action=\"get parent TD\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9736,7 +9736,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.5\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"clone old blocks\", quantile=\"0.5\"} ",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -9748,7 +9748,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.9\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"clone old blocks\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9761,7 +9761,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.95\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"clone old blocks\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9774,7 +9774,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.99\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"clone old blocks\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9788,7 +9788,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"clone old blocks\", quantile=\"0.999\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"clone old blocks\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9885,7 +9885,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.5\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"find canonical header\", quantile=\"0.5\"} ",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -9897,7 +9897,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.9\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"find canonical header\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9910,7 +9910,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.95\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"find canonical header\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9923,7 +9923,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.99\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"find canonical header\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -9937,7 +9937,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"find canonical header\", quantile=\"0.999\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"find canonical header\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10034,7 +10034,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.5\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain\", quantile=\"0.5\"} ",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -10046,7 +10046,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.9\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10059,7 +10059,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.95\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10072,7 +10072,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.99\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10086,7 +10086,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain\", quantile=\"0.999\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10183,7 +10183,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.5\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain forks\", quantile=\"0.5\"} ",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -10195,7 +10195,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.9\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain forks\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10208,7 +10208,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.95\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain forks\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10221,7 +10221,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.99\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain forks\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10235,7 +10235,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"split chain forks\", quantile=\"0.999\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"split chain forks\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10332,7 +10332,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.5\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"merge all chains\", quantile=\"0.5\"} ",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -10344,7 +10344,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.9\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"merge all chains\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10357,7 +10357,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.95\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"merge all chains\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10370,7 +10370,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.99\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"merge all chains\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10384,7 +10384,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"merge all chains\", quantile=\"0.999\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"merge all chains\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10481,7 +10481,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.5\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"update canonical index\", quantile=\"0.5\"} ",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -10493,7 +10493,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.9\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"update canonical index\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10506,7 +10506,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.95\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"update canonical index\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10519,7 +10519,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.99\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"update canonical index\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10533,7 +10533,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"update canonical index\", quantile=\"0.999\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"update canonical index\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10630,7 +10630,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.5\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"commit canonical chain to database\", quantile=\"0.5\"} ",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -10642,7 +10642,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.9\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"commit canonical chain to database\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10655,7 +10655,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.95\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"commit canonical chain to database\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10668,7 +10668,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.99\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"commit canonical chain to database\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10682,7 +10682,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"commit canonical chain to database\", quantile=\"0.999\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"commit canonical chain to database\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10779,7 +10779,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.5\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"revert canonical chain from database\", quantile=\"0.5\"} ",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -10791,7 +10791,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.9\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"revert canonical chain from database\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10804,7 +10804,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.95\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"revert canonical chain from database\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10817,7 +10817,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.99\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"revert canonical chain from database\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10831,7 +10831,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"revert canonical chain from database\", quantile=\"0.999\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"revert canonical chain from database\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10928,7 +10928,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.5\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"insert old canonical chain\", quantile=\"0.5\"} ",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -10940,7 +10940,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.9\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"insert old canonical chain\", quantile=\"0.9\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10953,7 +10953,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.95\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"insert old canonical chain\", quantile=\"0.95\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10966,7 +10966,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.99\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"insert old canonical chain\", quantile=\"0.99\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
@@ -10980,7 +10980,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_blockchain_tree_make_canonical_duration{action=\"insert old canonical chain\", quantile=\"0.999\"} ",
+          "expr": "reth_blockchain_tree_make_canonical_duration{instance=~\"$instance\", action=\"insert old canonical chain\", quantile=\"0.999\"} ",
           "hide": false,
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
