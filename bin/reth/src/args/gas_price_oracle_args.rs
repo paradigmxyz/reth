@@ -8,19 +8,19 @@ use reth_rpc_builder::constants::{
 #[clap(next_help_heading = "Gas Price Oracle")]
 pub struct GasPriceOracleArgs {
     /// Number of recent blocks to check for gas price
-    #[arg(long = "gpo.blocks", default_value = "20")]
+    #[arg(long = "gpo.blocks", default_value_t = DEFAULT_GAS_PRICE_BLOCKS)]
     pub blocks: u32,
 
     /// Gas Price below which gpo will ignore transactions
-    #[arg(long = "gpo.ignoreprice", default_value = "2")]
+    #[arg(long = "gpo.ignoreprice", default_value_t = DEFAULT_GAS_PRICE_IGNORE)]
     pub ignore_price: u64,
 
     /// Maximum transaction priority fee(or gasprice before London Fork) to be recommended by gpo
-    #[arg(long = "gpo.maxprice", default_value = "500000000000")]
+    #[arg(long = "gpo.maxprice", default_value_t = DEFAULT_GAS_PRICE_MAX)]
     pub max_price: u64,
 
     /// The percentile of gas prices to use for the estimate
-    #[arg(long = "gpo.percentile", default_value = "60")]
+    #[arg(long = "gpo.percentile", default_value_t = DEFAULT_GAS_PRICE_PERCENTILE)]
     pub percentile: u32,
 }
 

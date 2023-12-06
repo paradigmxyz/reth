@@ -18,6 +18,7 @@ use clap::{
 };
 use futures::TryFutureExt;
 use reth_network_api::{NetworkInfo, Peers};
+use reth_primitives::U256;
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -358,7 +359,10 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
-        GasPriceOracleConfig::default()
+        GasPriceOracleConfig {
+            max_price: Some(U256::from(self.gas_price_oracle.max_price)),
+            ..Default::default()
+        }
     }
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
