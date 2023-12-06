@@ -53,6 +53,7 @@ const APPROX_HEADER_SIZE: usize = 500;
 /// Manages eth related requests on top of the p2p network.
 ///
 /// This can be spawned to another task and is supposed to be run as background service.
+#[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
 pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.

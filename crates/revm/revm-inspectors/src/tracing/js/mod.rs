@@ -3,21 +3,21 @@
 use crate::tracing::{
     js::{
         bindings::{
-            CallFrame, Contract, EvmContext, EvmDb, FrameResult, MemoryObj, StackObj, StepLog,
+            CallFrame, Contract, EvmContext, EvmDbRef, FrameResult, MemoryRef, StackRef, StepLog,
         },
         builtins::{register_builtins, PrecompileList},
     },
     types::CallKind,
     utils::get_create_address,
 };
+use alloy_primitives::{Address, Bytes, B256, U256};
 use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, Source};
-use reth_primitives::{bytes::Bytes, Account, Address, H256, U256};
 use revm::{
     interpreter::{
         return_revert, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult, Interpreter,
     },
     precompile::Precompiles,
-    primitives::{Env, ExecutionResult, Output, ResultAndState, TransactTo, B160, B256},
+    primitives::{AccountInfo, Env, ExecutionResult, Output, ResultAndState, TransactTo},
     Database, EVMData, Inspector,
 };
 use tokio::sync::mpsc;
@@ -40,8 +40,16 @@ pub struct JsInspector {
     result_fn: JsObject,
     fault_fn: JsObject,
 
-    /// EVM inspector hook functions
+    // EVM inspector hook functions
+    /// Invoked when the EVM enters a new call that is _NOT_ the top level call.
+    ///
+    /// Corresponds to [Inspector::call] and [Inspector::create_end] but is also invoked on
+    /// [Inspector::selfdestruct].
     enter_fn: Option<JsObject>,
+    /// Invoked when the EVM exits a call that is _NOT_ the top level call.
+    ///
+    /// Corresponds to [Inspector::call_end] and [Inspector::create_end] but also invoked after
+    /// selfdestruct.
     exit_fn: Option<JsObject>,
     /// Executed before each instruction is executed.
     step_fn: Option<JsObject>,
@@ -62,6 +70,7 @@ impl JsInspector {
     ///  - `fault`: a function that will be called when the transaction fails.
     ///
     /// Optional functions are invoked during inspection:
+    /// - `setup`: a function that will be called before the inspection starts.
     /// - `enter`: a function that will be called when the execution enters a new call.
     /// - `exit`: a function that will be called when the execution exits a call.
     /// - `step`: a function that will be called when the execution steps to the next instruction.
@@ -99,9 +108,9 @@ impl JsInspector {
             .get("fault", &mut ctx)?
             .as_object()
             .cloned()
-            .ok_or(JsInspectorError::ResultFunctionMissing)?;
+            .ok_or(JsInspectorError::FaultFunctionMissing)?;
         if !result_fn.is_callable() {
-            return Err(JsInspectorError::ResultFunctionMissing)
+            return Err(JsInspectorError::FaultFunctionMissing)
         }
 
         let enter_fn = obj.get("enter", &mut ctx)?.as_object().cloned().filter(|o| o.is_callable());
@@ -151,7 +160,7 @@ impl JsInspector {
     /// Calls the result function and returns the result.
     pub fn result(&mut self, res: ResultAndState, env: &Env) -> Result<JsValue, JsInspectorError> {
         let ResultAndState { result, state } = res;
-        let db = EvmDb::new(state, self.to_db_service.clone());
+        let (db, _db_guard) = EvmDbRef::new(&state, self.to_db_service.clone());
 
         let gas_used = result.gas_used();
         let mut to = None;
@@ -206,14 +215,14 @@ impl JsInspector {
         )?)
     }
 
-    fn try_fault(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
+    fn try_fault(&mut self, step: StepLog, db: EvmDbRef) -> JsResult<()> {
         let step = step.into_js_object(&mut self.ctx)?;
         let db = db.into_js_object(&mut self.ctx)?;
         self.fault_fn.call(&(self.obj.clone().into()), &[step.into(), db.into()], &mut self.ctx)?;
         Ok(())
     }
 
-    fn try_step(&mut self, step: StepLog, db: EvmDb) -> JsResult<()> {
+    fn try_step(&mut self, step: StepLog, db: EvmDbRef) -> JsResult<()> {
         if let Some(step_fn) = &self.step_fn {
             let step = step.into_js_object(&mut self.ctx)?;
             let db = db.into_js_object(&mut self.ctx)?;
@@ -246,6 +255,29 @@ impl JsInspector {
         self.call_stack.last().expect("call stack is empty")
     }
 
+    #[inline]
+    fn pop_call(&mut self) {
+        self.call_stack.pop();
+    }
+
+    /// Returns true whether the active call is the root call.
+    #[inline]
+    fn is_root_call_active(&self) -> bool {
+        self.call_stack.len() == 1
+    }
+
+    /// Returns true if there's an enter function and the active call is not the root call.
+    #[inline]
+    fn can_call_enter(&self) -> bool {
+        self.enter_fn.is_some() && !self.is_root_call_active()
+    }
+
+    /// Returns true if there's an exit function and the active call is not the root call.
+    #[inline]
+    fn can_call_exit(&mut self) -> bool {
+        self.enter_fn.is_some() && !self.is_root_call_active()
+    }
+
     /// Pushes a new call to the stack
     fn push_call(
         &mut self,
@@ -265,17 +297,12 @@ impl JsInspector {
         self.active_call()
     }
 
-    fn pop_call(&mut self) {
-        self.call_stack.pop();
-    }
-
     /// Registers the precompiles in the JS context
     fn register_precompiles(&mut self, precompiles: &Precompiles) {
         if !self.precompiles_registered {
             return
         }
-        let precompiles =
-            PrecompileList(precompiles.addresses().into_iter().map(Into::into).collect());
+        let precompiles = PrecompileList(precompiles.addresses().into_iter().copied().collect());
 
         let _ = precompiles.register_callable(&mut self.ctx);
 
@@ -287,24 +314,21 @@ impl<DB> Inspector<DB> for JsInspector
 where
     DB: Database,
 {
-    fn step(
-        &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        _is_static: bool,
-    ) -> InstructionResult {
+    fn step(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         if self.step_fn.is_none() {
-            return InstructionResult::Continue
+            return
         }
 
-        let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+        let (db, _db_guard) =
+            EvmDbRef::new(&data.journaled_state.state, self.to_db_service.clone());
 
-        let pc = interp.program_counter();
+        let (stack, _stack_guard) = StackRef::new(&interp.stack);
+        let (memory, _memory_guard) = MemoryRef::new(interp.shared_memory);
         let step = StepLog {
-            stack: StackObj(interp.stack.clone()),
-            op: interp.contract.bytecode.bytecode()[pc].into(),
-            memory: MemoryObj(interp.memory.clone()),
-            pc: pc as u64,
+            stack,
+            op: interp.current_opcode().into(),
+            memory,
+            pc: interp.program_counter() as u64,
             gas_remaining: interp.gas.remaining(),
             cost: interp.gas.spend(),
             depth: data.journaled_state.depth(),
@@ -314,59 +338,51 @@ where
         };
 
         if self.try_step(step, db).is_err() {
-            return InstructionResult::Revert
+            interp.instruction_result = InstructionResult::Revert;
         }
-        InstructionResult::Continue
     }
 
     fn log(
         &mut self,
         _evm_data: &mut EVMData<'_, DB>,
-        _address: &B160,
+        _address: &Address,
         _topics: &[B256],
         _data: &Bytes,
     ) {
     }
 
-    fn step_end(
-        &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        _is_static: bool,
-        eval: InstructionResult,
-    ) -> InstructionResult {
+    fn step_end(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         if self.step_fn.is_none() {
-            return InstructionResult::Continue
+            return
         }
 
-        if matches!(eval, return_revert!()) {
-            let db = EvmDb::new(data.journaled_state.state.clone(), self.to_db_service.clone());
+        if matches!(interp.instruction_result, return_revert!()) {
+            let (db, _db_guard) =
+                EvmDbRef::new(&data.journaled_state.state, self.to_db_service.clone());
 
-            let pc = interp.program_counter();
+            let (stack, _stack_guard) = StackRef::new(&interp.stack);
+            let (memory, _memory_guard) = MemoryRef::new(interp.shared_memory);
             let step = StepLog {
-                stack: StackObj(interp.stack.clone()),
-                op: interp.contract.bytecode.bytecode()[pc].into(),
-                memory: MemoryObj(interp.memory.clone()),
-                pc: pc as u64,
+                stack,
+                op: interp.current_opcode().into(),
+                memory,
+                pc: interp.program_counter() as u64,
                 gas_remaining: interp.gas.remaining(),
                 cost: interp.gas.spend(),
                 depth: data.journaled_state.depth(),
                 refund: interp.gas.refunded() as u64,
-                error: Some(format!("{:?}", eval)),
+                error: Some(format!("{:?}", interp.instruction_result)),
                 contract: self.active_call().contract.clone(),
             };
 
             let _ = self.try_fault(step, db);
         }
-
-        InstructionResult::Continue
     }
 
     fn call(
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
-        _is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
         self.register_precompiles(&data.precompiles);
 
@@ -388,7 +404,7 @@ where
             inputs.gas_limit,
         );
 
-        if self.enter_fn.is_some() {
+        if self.can_call_enter() {
             let call = self.active_call();
             let frame = CallFrame {
                 contract: call.contract.clone(),
@@ -410,9 +426,8 @@ where
         remaining_gas: Gas,
         ret: InstructionResult,
         out: Bytes,
-        _is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        if self.exit_fn.is_some() {
+        if self.can_call_exit() {
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
             if let Err(err) = self.try_exit(frame_result) {
@@ -429,7 +444,7 @@ where
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CreateInputs,
-    ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
+    ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
         self.register_precompiles(&data.precompiles);
 
         let _ = data.journaled_state.load_account(inputs.caller, data.db);
@@ -444,7 +459,7 @@ where
             inputs.gas_limit,
         );
 
-        if self.enter_fn.is_some() {
+        if self.can_call_enter() {
             let call = self.active_call();
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
@@ -461,11 +476,11 @@ where
         _data: &mut EVMData<'_, DB>,
         _inputs: &CreateInputs,
         ret: InstructionResult,
-        address: Option<B160>,
+        address: Option<Address>,
         remaining_gas: Gas,
         out: Bytes,
-    ) -> (InstructionResult, Option<B160>, Gas, Bytes) {
-        if self.exit_fn.is_some() {
+    ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
+        if self.can_call_exit() {
             let frame_result =
                 FrameResult { gas_used: remaining_gas.spend(), output: out.clone(), error: None };
             if let Err(err) = self.try_exit(frame_result) {
@@ -478,12 +493,20 @@ where
         (ret, address, remaining_gas, out)
     }
 
-    fn selfdestruct(&mut self, _contract: B160, _target: B160) {
+    fn selfdestruct(&mut self, _contract: Address, _target: Address, _value: U256) {
+        // This is exempt from the root call constraint, because selfdestruct is treated as a
+        // new scope that is entered and immediately exited.
         if self.enter_fn.is_some() {
             let call = self.active_call();
             let frame =
                 CallFrame { contract: call.contract.clone(), kind: call.kind, gas: call.gas_limit };
             let _ = self.try_enter(frame);
+        }
+
+        // exit with empty frame result ref <https://github.com/ethereum/go-ethereum/blob/0004c6b229b787281760b14fb9460ffd9c2496f1/core/vm/instructions.go#L829-L829>
+        if self.exit_fn.is_some() {
+            let frame_result = FrameResult { gas_used: 0, output: Bytes::new(), error: None };
+            let _ = self.try_exit(frame_result);
         }
     }
 }
@@ -496,12 +519,12 @@ pub enum JsDbRequest {
         /// The address of the account to be loaded
         address: Address,
         /// The response channel
-        resp: std::sync::mpsc::Sender<Result<Option<Account>, String>>,
+        resp: std::sync::mpsc::Sender<Result<Option<AccountInfo>, String>>,
     },
     /// Bindings for [Database::code_by_hash]
     Code {
         /// The code hash of the code to be loaded
-        code_hash: H256,
+        code_hash: B256,
         /// The response channel
         resp: std::sync::mpsc::Sender<Result<Bytes, String>>,
     },
@@ -529,9 +552,9 @@ struct CallStackItem {
 pub enum JsInspectorError {
     #[error(transparent)]
     JsError(#[from] JsError),
-    #[error("Failed to eval js code: {0}")]
+    #[error("failed to evaluate JS code: {0}")]
     EvalCode(JsError),
-    #[error("The evaluated code is not a JS object")]
+    #[error("the evaluated code is not a JS object")]
     ExpectedJsObject,
     #[error("trace object must expose a function result()")]
     ResultFunctionMissing,
@@ -539,8 +562,8 @@ pub enum JsInspectorError {
     FaultFunctionMissing,
     #[error("setup object must be a function")]
     SetupFunctionNotCallable,
-    #[error("Failed to call setup(): {0}")]
+    #[error("failed to call setup(): {0}")]
     SetupCallFailed(JsError),
-    #[error("Invalid JSON config: {0}")]
+    #[error("invalid JSON config: {0}")]
     InvalidJsonConfig(JsError),
 }

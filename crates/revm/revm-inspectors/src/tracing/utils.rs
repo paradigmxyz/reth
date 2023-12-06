@@ -1,12 +1,10 @@
 //! Util functions for revm related ops
 
-use reth_primitives::{
-    contract::{create2_address_from_code, create_address},
-    hex, Address,
-};
+use alloy_primitives::{hex, Address, Bytes, B256};
 use revm::{
     interpreter::CreateInputs,
-    primitives::{CreateScheme, SpecId},
+    primitives::{CreateScheme, SpecId, KECCAK_EMPTY},
+    DatabaseRef,
 };
 
 /// creates the memory data in 32byte chunks
@@ -32,9 +30,31 @@ pub(crate) fn gas_used(spec: SpecId, spent: u64, refunded: u64) -> u64 {
 #[inline]
 pub(crate) fn get_create_address(call: &CreateInputs, nonce: u64) -> Address {
     match call.scheme {
-        CreateScheme::Create => create_address(call.caller, nonce),
+        CreateScheme::Create => call.caller.create(nonce),
         CreateScheme::Create2 { salt } => {
-            create2_address_from_code(call.caller, call.init_code.clone(), salt)
+            call.caller.create2_from_code(B256::from(salt), call.init_code.clone())
         }
     }
+}
+
+/// Loads the code for the given account from the account itself or the database
+///
+/// Returns None if the code hash is the KECCAK_EMPTY hash
+#[inline]
+pub(crate) fn load_account_code<DB: DatabaseRef>(
+    db: DB,
+    db_acc: &revm::primitives::AccountInfo,
+) -> Option<Bytes> {
+    db_acc
+        .code
+        .as_ref()
+        .map(|code| code.original_bytes())
+        .or_else(|| {
+            if db_acc.code_hash == KECCAK_EMPTY {
+                None
+            } else {
+                db.code_by_hash_ref(db_acc.code_hash).ok().map(|code| code.original_bytes())
+            }
+        })
+        .map(Into::into)
 }

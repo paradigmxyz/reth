@@ -10,10 +10,10 @@ use std::sync::Arc;
 
 /// Parameters for pruning and full node
 #[derive(Debug, Args, PartialEq, Default)]
-#[command(next_help_heading = "Pruning")]
+#[clap(next_help_heading = "Pruning")]
 pub struct PruningArgs {
-    /// Run full node. Only the most recent 128 block states are stored. This flag takes
-    /// priority over pruning configuration in reth.toml.
+    /// Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored.
+    /// This flag takes priority over pruning configuration in reth.toml.
     #[arg(long, default_value_t = false)]
     pub full: bool,
 }
@@ -24,7 +24,7 @@ impl PruningArgs {
         Ok(if self.full {
             Some(PruneConfig {
                 block_interval: 5,
-                parts: PruneModes {
+                segments: PruneModes {
                     sender_recovery: Some(PruneMode::Full),
                     transaction_lookup: None,
                     receipts: chain_spec
@@ -59,5 +59,25 @@ impl PruningArgs {
         } else {
             None
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{Args, Parser};
+
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[clap(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn pruning_args_sanity_check() {
+        let default_args = PruningArgs::default();
+        let args = CommandParser::<PruningArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
     }
 }

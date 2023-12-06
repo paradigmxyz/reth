@@ -10,14 +10,9 @@ use std::{
 
 /// Constructs a string to be used as a path for configuration and db paths.
 pub fn config_path_prefix(chain: Chain) -> String {
-    if chain == Chain::mainnet() {
-        "mainnet".to_string()
-    } else if chain == Chain::goerli() {
-        "goerli".to_string()
-    } else if chain == Chain::sepolia() {
-        "sepolia".to_string()
-    } else {
-        chain.id().to_string()
+    match chain {
+        Chain::Named(name) => name.to_string(),
+        Chain::Id(id) => id.to_string(),
     }
 }
 
@@ -60,7 +55,7 @@ pub fn logs_dir() -> Option<PathBuf> {
 ///
 /// The data dir should contain a subdirectory for each chain, and those chain directories will
 /// include all information for that chain, such as the p2p secret.
-#[derive(Default, Debug, Clone)]
+#[derive(Clone, Copy, Debug, Default)]
 #[non_exhaustive]
 pub struct DataDirPath;
 
@@ -73,7 +68,7 @@ impl XdgPath for DataDirPath {
 /// Returns the path to the reth logs directory.
 ///
 /// Refer to [dirs_next::cache_dir] for cross-platform behavior.
-#[derive(Default, Debug, Clone)]
+#[derive(Clone, Copy, Debug, Default)]
 #[non_exhaustive]
 pub struct LogsDir;
 
@@ -99,7 +94,7 @@ pub trait XdgPath {
 /// # Example
 ///
 /// ```
-/// use reth::dirs::{PlatformPath, DataDirPath};
+/// use reth::dirs::{DataDirPath, PlatformPath};
 /// use std::str::FromStr;
 ///
 /// // Resolves to the platform-specific database path
@@ -265,26 +260,49 @@ impl<D> ChainPath<D> {
     }
 
     /// Returns the path to the db directory for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/db`
     pub fn db_path(&self) -> PathBuf {
         self.0.join("db").into()
     }
 
+    /// Returns the path to the snapshots directory for this chain.
+    pub fn snapshots_path(&self) -> PathBuf {
+        self.0.join("snapshots").into()
+    }
+
     /// Returns the path to the reth p2p secret key for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/discovery-secret`
     pub fn p2p_secret_path(&self) -> PathBuf {
         self.0.join("discovery-secret").into()
     }
 
     /// Returns the path to the known peers file for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/known-peers.json`
     pub fn known_peers_path(&self) -> PathBuf {
         self.0.join("known-peers.json").into()
     }
 
+    /// Returns the path to the blobstore directory for this chain where blobs of unfinalized
+    /// transactions are stored.
+    ///
+    /// `<DIR>/<CHAIN_ID>/blobstore`
+    pub fn blobstore_path(&self) -> PathBuf {
+        self.0.join("blobstore").into()
+    }
+
     /// Returns the path to the config file for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/reth.toml`
     pub fn config_path(&self) -> PathBuf {
         self.0.join("reth.toml").into()
     }
 
     /// Returns the path to the jwtsecret file for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/jwt.hex`
     pub fn jwt_path(&self) -> PathBuf {
         self.0.join("jwt.hex").into()
     }
@@ -324,5 +342,20 @@ mod tests {
         let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/datadir").unwrap();
         let path = path.unwrap_or_chain_default(Chain::mainnet());
         assert!(path.as_ref().ends_with("my/path/to/datadir"), "{:?}", path);
+    }
+
+    #[test]
+    fn test_maybe_testnet_datadir_path() {
+        let path = MaybePlatformPath::<DataDirPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::goerli());
+        assert!(path.as_ref().ends_with("reth/goerli"), "{:?}", path);
+
+        let path = MaybePlatformPath::<DataDirPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::holesky());
+        assert!(path.as_ref().ends_with("reth/holesky"), "{:?}", path);
+
+        let path = MaybePlatformPath::<DataDirPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::sepolia());
+        assert!(path.as_ref().ends_with("reth/sepolia"), "{:?}", path);
     }
 }

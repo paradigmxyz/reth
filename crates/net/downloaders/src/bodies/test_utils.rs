@@ -2,12 +2,12 @@
 //! Test helper impls for generating bodies
 use reth_db::{database::Database, tables, transaction::DbTxMut, DatabaseEnv};
 use reth_interfaces::{db, p2p::bodies::response::BlockResponse};
-use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, H256};
+use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, B256};
 use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a>(
     headers: impl Iterator<Item = &'a SealedHeader>,
-    bodies: &mut HashMap<H256, BlockBody>,
+    bodies: &mut HashMap<B256, BlockBody>,
 ) -> Vec<BlockResponse> {
     headers
         .into_iter()
@@ -29,7 +29,7 @@ pub(crate) fn zip_blocks<'a>(
 
 pub(crate) fn create_raw_bodies<'a>(
     headers: impl Iterator<Item = &'a SealedHeader>,
-    bodies: &mut HashMap<H256, BlockBody>,
+    bodies: &mut HashMap<B256, BlockBody>,
 ) -> Vec<Block> {
     headers
         .into_iter()

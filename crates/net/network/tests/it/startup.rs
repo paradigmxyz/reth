@@ -35,12 +35,15 @@ async fn test_is_default_syncing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_listener_addr_in_use() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let config =
-        NetworkConfigBuilder::new(secret_key).listener_port(0).build(NoopProvider::default());
+    let config = NetworkConfigBuilder::new(secret_key)
+        .disable_discovery()
+        .listener_port(0)
+        .build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
     let listener_port = network.local_addr().port();
     let config = NetworkConfigBuilder::new(secret_key)
         .listener_port(listener_port)
+        .disable_discovery()
         .build(NoopProvider::default());
     let addr = config.listener_addr;
     let result = NetworkManager::new(config).await;

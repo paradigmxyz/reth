@@ -11,10 +11,8 @@ use reth_interfaces::{
 };
 use reth_net_common::ban_list::BanList;
 use reth_network::{
-    test_utils::{
-        enr_to_peer_id, unused_tcp_udp, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT,
-    },
-    NetworkConfigBuilder, NetworkEvent, NetworkManager, PeersConfig,
+    test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
+    NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
 use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId};
@@ -158,7 +156,7 @@ async fn test_get_peer() {
     handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
 
-    let peers = handle0.get_peers().await.unwrap();
+    let peers = handle0.get_all_peers().await.unwrap();
     assert_eq!(handle0.num_connected_peers(), peers.len());
 }
 
@@ -310,7 +308,7 @@ async fn test_connect_to_trusted_peer() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-#[ignore] // TODO: Re-enable once we figure out why this test is flakey
+#[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_node_id_blacklist() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -328,10 +326,9 @@ async fn test_incoming_node_id_blacklist() {
         let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
-        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfigBuilder::new(secret_key)
-            .listener_addr(reth_p2p)
-            .discovery_addr(reth_disc)
+            .listener_port(0)
+            .disable_discovery()
             .peer_config(peer_config)
             .build(NoopProvider::default());
 
@@ -343,7 +340,7 @@ async fn test_incoming_node_id_blacklist() {
         tokio::task::spawn(network);
 
         // make geth connect to us
-        let our_enode = NodeRecord::new(reth_p2p, *handle.peer_id());
+        let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
 
         provider.add_peer(our_enode.to_string()).await.unwrap();
 
@@ -363,8 +360,7 @@ async fn test_incoming_node_id_blacklist() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-// #[cfg_attr(not(feature = "geth-tests"), ignore)]
-#[ignore] // TODO: Re-enable once we figure out why this test is flakey
+#[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_connect_with_single_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -379,10 +375,9 @@ async fn test_incoming_connect_with_single_geth() {
         // get the peer id we should be expecting
         let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
 
-        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfigBuilder::new(secret_key)
-            .listener_addr(reth_p2p)
-            .discovery_addr(reth_disc)
+            .listener_port(0)
+            .disable_discovery()
             .build(NoopProvider::default());
 
         let network = NetworkManager::new(config).await.unwrap();
@@ -394,7 +389,7 @@ async fn test_incoming_connect_with_single_geth() {
         let mut event_stream = NetworkEventStream::new(events);
 
         // make geth connect to us
-        let our_enode = NodeRecord::new(reth_p2p, *handle.peer_id());
+        let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
 
         provider.add_peer(our_enode.to_string()).await.unwrap();
 
@@ -409,16 +404,14 @@ async fn test_incoming_connect_with_single_geth() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
-#[ignore] // TODO: Re-enable once we figure out why this test is flakey
 async fn test_outgoing_connect_with_single_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfigBuilder::new(secret_key)
-            .listener_addr(reth_p2p)
-            .discovery_addr(reth_disc)
+            .listener_port(0)
+            .disable_discovery()
             .build(NoopProvider::default());
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -456,16 +449,14 @@ async fn test_outgoing_connect_with_single_geth() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 #[cfg_attr(not(feature = "geth-tests"), ignore)]
-#[ignore] // TODO: Re-enable once we figure out why this test is flakey
 async fn test_geth_disconnect() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let (reth_p2p, reth_disc) = unused_tcp_udp();
         let config = NetworkConfigBuilder::new(secret_key)
-            .listener_addr(reth_p2p)
-            .discovery_addr(reth_disc)
+            .listener_port(0)
+            .disable_discovery()
             .build(NoopProvider::default());
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -566,15 +557,15 @@ async fn test_shutdown() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     let net = Testnet::create(1).await;
-    let (reth_p2p, reth_disc) = unused_tcp_udp();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config = PeersConfig::default().with_max_inbound(0);
 
     let config = NetworkConfigBuilder::new(secret_key)
-        .listener_addr(reth_p2p)
-        .discovery_addr(reth_disc)
+        .listener_port(0)
+        .disable_discovery()
         .peer_config(peers_config)
         .build(NoopProvider::default());
+
     let network = NetworkManager::new(config).await.unwrap();
 
     let other_peer_handle = net.handles().next().unwrap();
@@ -584,9 +575,11 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     other_peer_handle.add_peer(*handle.peer_id(), handle.local_addr());
 
     tokio::task::spawn(network);
-    let _handle = net.spawn();
+    let net_handle = net.spawn();
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     assert_eq!(handle.num_connected_peers(), 0);
+
+    net_handle.terminate().await;
 }

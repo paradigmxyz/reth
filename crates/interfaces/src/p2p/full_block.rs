@@ -9,7 +9,7 @@ use crate::{
 };
 use futures::Stream;
 use reth_primitives::{
-    BlockBody, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, H256,
+    BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, B256,
 };
 use std::{
     cmp::Reverse,
@@ -52,7 +52,7 @@ where
     ///
     /// Caution: This does no validation of body (transactions) response but guarantees that the
     /// [SealedHeader] matches the requested hash.
-    pub fn get_full_block(&self, hash: H256) -> FetchFullBlockFuture<Client> {
+    pub fn get_full_block(&self, hash: B256) -> FetchFullBlockFuture<Client> {
         let client = self.client.clone();
         FetchFullBlockFuture {
             hash,
@@ -77,7 +77,7 @@ where
     /// The returned future yields bodies in falling order, i.e. with descending block numbers.
     pub fn get_full_block_range(
         &self,
-        hash: H256,
+        hash: B256,
         count: u64,
     ) -> FetchFullBlockRangeFuture<Client> {
         let client = self.client.clone();
@@ -117,7 +117,7 @@ where
     Client: BodiesClient + HeadersClient,
 {
     client: Client,
-    hash: H256,
+    hash: B256,
     request: FullBlockRequest<Client>,
     header: Option<SealedHeader>,
     body: Option<BodyResponse>,
@@ -128,7 +128,7 @@ where
     Client: BodiesClient + HeadersClient,
 {
     /// Returns the hash of the block being requested.
-    pub fn hash(&self) -> &H256 {
+    pub fn hash(&self) -> &B256 {
         &self.hash
     }
 
@@ -309,27 +309,24 @@ fn ensure_valid_body_response(
     let body_roots = block.calculate_roots();
 
     if header.ommers_hash != body_roots.ommers_hash {
-        return Err(ConsensusError::BodyOmmersHashDiff {
-            got: body_roots.ommers_hash,
-            expected: header.ommers_hash,
-        })
+        return Err(ConsensusError::BodyOmmersHashDiff(
+            GotExpected { got: body_roots.ommers_hash, expected: header.ommers_hash }.into(),
+        ))
     }
 
     if header.transactions_root != body_roots.tx_root {
-        return Err(ConsensusError::BodyTransactionRootDiff {
-            got: body_roots.tx_root,
-            expected: header.transactions_root,
-        })
+        return Err(ConsensusError::BodyTransactionRootDiff(
+            GotExpected { got: body_roots.tx_root, expected: header.transactions_root }.into(),
+        ))
     }
 
     let withdrawals = block.withdrawals.as_deref().unwrap_or(&[]);
     if let Some(header_withdrawals_root) = header.withdrawals_root {
         let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
         if withdrawals_root != header_withdrawals_root {
-            return Err(ConsensusError::BodyWithdrawalsRootDiff {
-                got: withdrawals_root,
-                expected: header_withdrawals_root,
-            })
+            return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+            ))
         }
         return Ok(())
     }
@@ -354,6 +351,7 @@ fn ensure_valid_body_response(
 /// NOTE: this assumes that bodies responses are returned by the client in the same order as the
 /// hash array used to request them.
 #[must_use = "futures do nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct FetchFullBlockRangeFuture<Client>
 where
     Client: BodiesClient + HeadersClient,
@@ -363,7 +361,7 @@ where
     /// The consensus instance used to validate the blocks.
     consensus: Arc<dyn Consensus>,
     /// The block hash to start fetching from (inclusive).
-    start_hash: H256,
+    start_hash: B256,
     /// How many blocks to fetch: `len([start_hash, ..]) == count`
     count: u64,
     /// Requests for headers and bodies that are in progress.
@@ -381,7 +379,7 @@ where
     Client: BodiesClient + HeadersClient,
 {
     /// Returns the block hashes for the given range, if they are available.
-    pub fn range_block_hashes(&self) -> Option<Vec<H256>> {
+    pub fn range_block_hashes(&self) -> Option<Vec<B256>> {
         self.headers.as_ref().map(|h| h.iter().map(|h| h.hash()).collect::<Vec<_>>())
     }
 
@@ -408,7 +406,7 @@ where
 
     /// Returns the remaining hashes for the bodies request, based on the headers that still exist
     /// in the `root_map`.
-    fn remaining_bodies_hashes(&self) -> Vec<H256> {
+    fn remaining_bodies_hashes(&self) -> Vec<B256> {
         self.pending_headers.iter().map(|h| h.hash()).collect::<Vec<_>>()
     }
 
@@ -520,7 +518,7 @@ where
     }
 
     /// Returns the start hash for the request
-    pub fn start_hash(&self) -> H256 {
+    pub fn start_hash(&self) -> B256 {
         self.start_hash
     }
 
@@ -604,8 +602,8 @@ where
                         // future, and one which is a bodies range future.
                         //
                         // The headers range future should yield the bodies range future.
-                        // The bodies range future should not have an Option<Vec<H256>>, it should
-                        // have a populated Vec<H256> from the successful headers range future.
+                        // The bodies range future should not have an Option<Vec<B256>>, it should
+                        // have a populated Vec<B256> from the successful headers range future.
                         //
                         // This is optimal because we can not send a bodies request without
                         // first completing the headers request. This way we can get rid of the

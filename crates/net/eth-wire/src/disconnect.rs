@@ -1,11 +1,10 @@
 //! Disconnect
 
-use bytes::Bytes;
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use futures::{Sink, SinkExt};
 use reth_codecs::derive_arbitrary;
 use reth_ecies::stream::ECIESStream;
 use reth_primitives::bytes::{Buf, BufMut};
-use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use std::fmt::Display;
 use thiserror::Error;
 use tokio::io::AsyncWrite;
@@ -51,28 +50,27 @@ pub enum DisconnectReason {
 impl Display for DisconnectReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
-            DisconnectReason::DisconnectRequested => "Disconnect requested",
+            DisconnectReason::DisconnectRequested => "disconnect requested",
             DisconnectReason::TcpSubsystemError => "TCP sub-system error",
             DisconnectReason::ProtocolBreach => {
-                "Breach of protocol, e.g. a malformed message, bad RLP, ..."
+                "breach of protocol, e.g. a malformed message, bad RLP, etc."
             }
-            DisconnectReason::UselessPeer => "Useless peer",
-            DisconnectReason::TooManyPeers => "Too many peers",
-            DisconnectReason::AlreadyConnected => "Already connected",
-            DisconnectReason::IncompatibleP2PProtocolVersion => "Incompatible P2P protocol version",
+            DisconnectReason::UselessPeer => "useless peer",
+            DisconnectReason::TooManyPeers => "too many peers",
+            DisconnectReason::AlreadyConnected => "already connected",
+            DisconnectReason::IncompatibleP2PProtocolVersion => "incompatible P2P protocol version",
             DisconnectReason::NullNodeIdentity => {
-                "Null node identity received - this is automatically invalid"
+                "null node identity received - this is automatically invalid"
             }
-            DisconnectReason::ClientQuitting => "Client quitting",
-            DisconnectReason::UnexpectedHandshakeIdentity => "Unexpected identity in handshake",
+            DisconnectReason::ClientQuitting => "client quitting",
+            DisconnectReason::UnexpectedHandshakeIdentity => "unexpected identity in handshake",
             DisconnectReason::ConnectedToSelf => {
-                "Identity is the same as this node (i.e. connected to itself)"
+                "identity is the same as this node (i.e. connected to itself)"
             }
-            DisconnectReason::PingTimeout => "Ping timeout",
-            DisconnectReason::SubprotocolSpecific => "Some other reason specific to a subprotocol",
+            DisconnectReason::PingTimeout => "ping timeout",
+            DisconnectReason::SubprotocolSpecific => "some other reason specific to a subprotocol",
         };
-
-        write!(f, "{message}")
+        f.write_str(message)
     }
 }
 
@@ -106,8 +104,8 @@ impl TryFrom<u8> for DisconnectReason {
     }
 }
 
-/// The [`Encodable`](reth_rlp::Encodable) implementation for [`DisconnectReason`] encodes the
-/// disconnect reason in a single-element RLP list.
+/// The [`Encodable`] implementation for [`DisconnectReason`] encodes the disconnect reason in a
+/// single-element RLP list.
 impl Encodable for DisconnectReason {
     fn encode(&self, out: &mut dyn BufMut) {
         vec![*self as u8].encode(out);
@@ -117,14 +115,14 @@ impl Encodable for DisconnectReason {
     }
 }
 
-/// The [`Decodable`](reth_rlp::Decodable) implementation for [`DisconnectReason`] supports either
-/// a disconnect reason encoded a single byte or a RLP list containing the disconnect reason.
+/// The [`Decodable`] implementation for [`DisconnectReason`] supports either a disconnect reason
+/// encoded a single byte or a RLP list containing the disconnect reason.
 impl Decodable for DisconnectReason {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
-            return Err(DecodeError::InputTooShort)
+            return Err(RlpError::InputTooShort)
         } else if buf.len() > 2 {
-            return Err(DecodeError::Overflow)
+            return Err(RlpError::Overflow)
         }
 
         if buf.len() > 1 {
@@ -132,7 +130,7 @@ impl Decodable for DisconnectReason {
             // buf[0] is the first (and only) element of the list.
             let header = Header::decode(buf)?;
             if !header.list {
-                return Err(DecodeError::UnexpectedString)
+                return Err(RlpError::UnexpectedString)
             }
         }
 
@@ -143,7 +141,7 @@ impl Decodable for DisconnectReason {
             Ok(DisconnectReason::DisconnectRequested)
         } else {
             DisconnectReason::try_from(u8::decode(buf)?)
-                .map_err(|_| DecodeError::Custom("unknown disconnect reason"))
+                .map_err(|_| RlpError::Custom("unknown disconnect reason"))
         }
     }
 }
@@ -178,7 +176,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> CanDisconnect<Bytes> for ECIESStream<S>
+impl<S> CanDisconnect<bytes::Bytes> for ECIESStream<S>
 where
     S: AsyncWrite + Unpin + Send,
 {
@@ -190,8 +188,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{p2pstream::P2PMessage, DisconnectReason};
+    use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::hex;
-    use reth_rlp::{Decodable, Encodable};
 
     fn all_reasons() -> Vec<DisconnectReason> {
         vec![

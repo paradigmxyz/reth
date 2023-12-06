@@ -6,7 +6,7 @@ use crate::{
     PoolTransaction, ValidPoolTransaction,
 };
 use futures_util::Stream;
-use reth_primitives::{TxHash, H256};
+use reth_primitives::{TxHash, B256};
 use std::{
     collections::{hash_map::Entry, HashMap},
     pin::Pin,
@@ -166,7 +166,7 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
     }
 
     /// Notify listeners that the transaction was mined
-    pub(crate) fn mined(&mut self, tx: &TxHash, block_hash: H256) {
+    pub(crate) fn mined(&mut self, tx: &TxHash, block_hash: B256) {
         self.broadcast_event(
             tx,
             TransactionEvent::Mined(block_hash),

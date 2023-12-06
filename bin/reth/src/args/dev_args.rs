@@ -6,7 +6,7 @@ use humantime::parse_duration;
 
 /// Parameters for Dev testnet configuration
 #[derive(Debug, Args, PartialEq, Default, Clone, Copy)]
-#[command(next_help_heading = "Dev testnet")]
+#[clap(next_help_heading = "Dev testnet")]
 pub struct DevArgs {
     /// Start the node in dev mode
     ///
@@ -32,7 +32,7 @@ pub struct DevArgs {
     /// --dev.block_time 12s
     #[arg(
         long = "dev.block-time",
-        help_heading = "Dev testnet", 
+        help_heading = "Dev testnet",
         conflicts_with = "block_max_transactions",
         value_parser = parse_duration,
         verbatim_doc_comment
@@ -95,5 +95,12 @@ mod tests {
             "1s",
         ]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn dev_args_default_sanity_check() {
+        let default_args = DevArgs::default();
+        let args = CommandParser::<DevArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
     }
 }

@@ -2,7 +2,7 @@ use crate::result::ToRpcResult;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{keccak256, Bytes, H256};
+use reth_primitives::{keccak256, Bytes, B256};
 use reth_rpc_api::Web3ApiServer;
 
 /// `web3` API implementation.
@@ -32,7 +32,7 @@ where
     }
 
     /// Handler for `web3_sha3`
-    fn sha3(&self, input: Bytes) -> RpcResult<H256> {
+    fn sha3(&self, input: Bytes) -> RpcResult<B256> {
         Ok(keccak256(input))
     }
 }

@@ -1,14 +1,17 @@
 use crate::{
-    prune::PrunePartError, serde_helper::deserialize_opt_prune_mode_with_min_blocks, BlockNumber,
-    PruneMode, PrunePart, ReceiptsLogPruneConfig, StorageHistoryPruneConfig,
+    serde_helper::deserialize_opt_prune_mode_with_min_blocks, PruneMode, ReceiptsLogPruneConfig,
+    StorageHistoryPruneConfig,
 };
-use paste::paste;
 use serde::{Deserialize, Serialize};
 
-/// Minimum distance necessary from the tip so blockchain tree can work correctly.
-pub const MINIMUM_PRUNING_DISTANCE: u64 = 128;
+/// Minimum distance from the tip necessary for the node to work correctly:
+/// 1. Minimum 2 epochs (32 blocks per epoch) required to handle any reorg according to the
+///    consensus protocol.
+/// 2. Another 10k blocks to have a room for maneuver in case when things go wrong and a manual
+///    unwind is required.
+pub const MINIMUM_PRUNING_DISTANCE: u64 = 32 * 2 + 10_000;
 
-/// Pruning configuration for every part of the data that can be pruned.
+/// Pruning configuration for every segment of the data that can be pruned.
 #[derive(Debug, Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct PruneModes {
@@ -22,83 +25,35 @@ pub struct PruneModes {
     /// and offers improved performance.
     #[serde(
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
+        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
     )]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
     #[serde(
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
+        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
     )]
     pub account_history: Option<PruneMode>,
     /// Storage History pruning configuration. This setting overrides `storage_history_filter` and
     /// offers improved performance.
     #[serde(
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<64, _>"
+        deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
     )]
     pub storage_history: Option<PruneMode>,
     /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
     /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
     ///
-    /// The [`BlockNumber`] represents the starting block from which point onwards the receipts are
-    /// preserved.
+    /// The [BlockNumber](`crate::BlockNumber`) represents the starting block from which point
+    /// onwards the receipts are preserved.
     pub receipts_log_filter: ReceiptsLogPruneConfig,
     /// Storage history pruning configuration by retaining only the storage history of the
     /// specified contract addresses, discarding others'. This setting is overridden by
     /// `storage_history`.
     ///
-    /// The [`BlockNumber`] represents the starting block from which point onwards storage history
-    /// is preserved.
+    /// The [BlockNumber](`crate::BlockNumber`) represents the starting block from which point
+    /// onwards storage history is preserved.
     pub storage_history_filter: StorageHistoryPruneConfig,
-}
-
-macro_rules! impl_prune_parts {
-    ($(($part:ident, $variant:ident, $min_blocks:expr)),+) => {
-        $(
-            paste! {
-                #[doc = concat!(
-                    "Check if ",
-                    stringify!($variant),
-                    " should be pruned at the target block according to the provided tip."
-                )]
-                pub fn [<should_prune_ $part>](&self, block: BlockNumber, tip: BlockNumber) -> bool {
-                    if let Some(mode) = &self.$part {
-                        return mode.should_prune(block, tip)
-                    }
-                    false
-                }
-            }
-        )+
-
-        $(
-            paste! {
-                #[doc = concat!(
-                    "Returns block up to which ",
-                    stringify!($variant),
-                    " pruning needs to be done, inclusive, according to the provided tip."
-                )]
-                pub fn [<prune_target_block_ $part>](&self, tip: BlockNumber) -> Result<Option<(BlockNumber, PruneMode)>, PrunePartError> {
-                     match self.$part {
-                        Some(mode) => mode.prune_target_block(tip, $min_blocks.unwrap_or_default(), PrunePart::$variant),
-                        None => Ok(None)
-                    }
-                }
-            }
-        )+
-
-        /// Sets pruning to all targets.
-        pub fn all() -> Self {
-            Self {
-                $(
-                    $part: Some(PruneMode::Full),
-                )+
-                receipts_log_filter: Default::default(),
-                storage_history_filter: Default::default(),
-            }
-        }
-
-    };
 }
 
 impl PruneModes {
@@ -107,11 +62,16 @@ impl PruneModes {
         PruneModes::default()
     }
 
-    impl_prune_parts!(
-        (sender_recovery, SenderRecovery, None),
-        (transaction_lookup, TransactionLookup, None),
-        (receipts, Receipts, Some(64)),
-        (account_history, AccountHistory, Some(64)),
-        (storage_history, StorageHistory, Some(64))
-    );
+    /// Sets pruning to all targets.
+    pub fn all() -> Self {
+        Self {
+            sender_recovery: Some(PruneMode::Full),
+            transaction_lookup: Some(PruneMode::Full),
+            receipts: Some(PruneMode::Full),
+            account_history: Some(PruneMode::Full),
+            storage_history: Some(PruneMode::Full),
+            receipts_log_filter: Default::default(),
+            storage_history_filter: Default::default(),
+        }
+    }
 }

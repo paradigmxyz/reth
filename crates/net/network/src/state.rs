@@ -16,7 +16,7 @@ use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
 use reth_network_api::PeerKind;
-use reth_primitives::{ForkId, PeerId, H256};
+use reth_primitives::{ForkId, PeerId, B256};
 use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
@@ -29,7 +29,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: usize = 512;
@@ -44,6 +44,7 @@ const PEER_BLOCK_CACHE_LIMIT: usize = 512;
 ///     then send to the session of the peer.
 ///
 /// This type is also responsible for responding for received request.
+#[derive(Debug)]
 pub struct NetworkState<C> {
     /// All active peers and their state.
     active_peers: HashMap<PeerId, ActivePeer>,
@@ -59,7 +60,7 @@ pub struct NetworkState<C> {
     /// Network discovery.
     discovery: Discovery,
     /// The genesis hash of the network we're on
-    genesis_hash: H256,
+    genesis_hash: B256,
     /// The type that handles requests.
     ///
     /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
@@ -76,7 +77,7 @@ where
         client: C,
         discovery: Discovery,
         peers_manager: PeersManager,
-        genesis_hash: H256,
+        genesis_hash: B256,
         num_active_peers: Arc<AtomicUsize>,
     ) -> Self {
         let state_fetcher = StateFetcher::new(peers_manager.handle(), num_active_peers);
@@ -112,7 +113,7 @@ where
     }
 
     /// Configured genesis hash.
-    pub fn genesis_hash(&self) -> H256 {
+    pub fn genesis_hash(&self) -> B256 {
         self.genesis_hash
     }
 
@@ -129,7 +130,7 @@ where
         &mut self,
         peer: PeerId,
         capabilities: Arc<Capabilities>,
-        status: Status,
+        status: Arc<Status>,
         request_tx: PeerRequestSender,
         timeout: Arc<AtomicU64>,
     ) {
@@ -226,7 +227,7 @@ where
     }
 
     /// Updates the block information for the peer.
-    pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: H256, number: u64) {
+    pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: B256, number: u64) {
         if let Some(peer) = self.active_peers.get_mut(peer_id) {
             peer.best_hash = hash;
         }
@@ -241,7 +242,7 @@ where
     /// Invoked after a `NewBlock` message was received by the peer.
     ///
     /// This will keep track of blocks we know a peer has
-    pub(crate) fn on_new_block(&mut self, peer_id: PeerId, hash: H256) {
+    pub(crate) fn on_new_block(&mut self, peer_id: PeerId, hash: B256) {
         // Mark the blocks as seen
         if let Some(peer) = self.active_peers.get_mut(&peer_id) {
             peer.blocks.insert(hash);
@@ -258,13 +259,13 @@ where
 
     /// Bans the [`IpAddr`] in the discovery service.
     pub(crate) fn ban_ip_discovery(&self, ip: IpAddr) {
-        debug!(target: "net", ?ip, "Banning discovery");
+        trace!(target: "net", ?ip, "Banning discovery");
         self.discovery.ban_ip(ip)
     }
 
     /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
     pub(crate) fn ban_discovery(&self, peer_id: PeerId, ip: IpAddr) {
-        debug!(target: "net", ?peer_id, ?ip, "Banning discovery");
+        trace!(target: "net", ?peer_id, ?ip, "Banning discovery");
         self.discovery.ban(peer_id, ip)
     }
 
@@ -419,7 +420,7 @@ where
                             // check if the error is due to a closed channel to the session
                             if res.err().map(|err| err.is_channel_closed()).unwrap_or_default() {
                                 debug!(
-                                    target : "net",
+                                    target: "net",
                                     ?id,
                                     "Request canceled, response channel from session closed."
                                 );
@@ -465,9 +466,10 @@ where
 /// Tracks the state of a Peer with an active Session.
 ///
 /// For example known blocks,so we can decide what to announce.
+#[derive(Debug)]
 pub(crate) struct ActivePeer {
     /// Best block of the peer.
-    pub(crate) best_hash: H256,
+    pub(crate) best_hash: B256,
     /// The capabilities of the remote peer.
     #[allow(unused)]
     pub(crate) capabilities: Arc<Capabilities>,
@@ -476,10 +478,11 @@ pub(crate) struct ActivePeer {
     /// The response receiver for a currently active request to that peer.
     pub(crate) pending_response: Option<PeerResponse>,
     /// Blocks we know the peer has.
-    pub(crate) blocks: LruCache<H256>,
+    pub(crate) blocks: LruCache<B256>,
 }
 
 /// Message variants triggered by the [`NetworkState`]
+#[derive(Debug)]
 pub(crate) enum StateAction {
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {
@@ -524,10 +527,10 @@ mod tests {
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
-        BlockBodies, EthVersion, Status,
+        BlockBodies, EthVersion,
     };
     use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_primitives::{BlockBody, Header, PeerId, H256};
+    use reth_primitives::{BlockBody, Header, PeerId, B256};
     use reth_provider::test_utils::NoopProvider;
     use std::{
         future::poll_fn,
@@ -569,7 +572,7 @@ mod tests {
         state.on_session_activated(
             peer_id,
             capabilities(),
-            Status::default(),
+            Arc::default(),
             peer_tx,
             Arc::new(AtomicU64::new(1)),
         );
@@ -603,11 +606,11 @@ mod tests {
         });
 
         // send requests to the state via the client
-        let (peer, bodies) = client.get_block_bodies(vec![H256::random()]).await.unwrap().split();
+        let (peer, bodies) = client.get_block_bodies(vec![B256::random()]).await.unwrap().split();
         assert_eq!(peer, peer_id);
         assert_eq!(bodies, vec![body]);
 
-        let resp = client.get_block_bodies(vec![H256::random()]).await;
+        let resp = client.get_block_bodies(vec![B256::random()]).await;
         assert!(resp.is_err());
         assert_eq!(resp.unwrap_err(), RequestError::ConnectionDropped);
     }

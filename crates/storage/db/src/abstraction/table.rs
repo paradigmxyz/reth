@@ -35,12 +35,17 @@ pub trait Compress: Send + Sync + Sized + Debug {
 pub trait Decompress: Send + Sync + Sized + Debug {
     /// Decompresses data coming from the database.
     fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError>;
+
+    /// Decompresses owned data coming from the database.
+    fn decompress_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
+        Self::decompress(value)
+    }
 }
 
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
     /// Encoded type.
-    type Encoded: AsRef<[u8]> + Send + Sync;
+    type Encoded: AsRef<[u8]> + Into<Vec<u8>> + Send + Sync;
 
     /// Encodes data going into the database.
     fn encode(self) -> Self::Encoded;
@@ -97,9 +102,9 @@ pub trait DupSort: Table {
 }
 
 /// Allows duplicating tables across databases
-pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
+pub trait TableImporter: DbTxMut {
     /// Imports all table data from another transaction.
-    fn import_table<T: Table, R: DbTx<'tx>>(&self, source_tx: &R) -> Result<(), DatabaseError> {
+    fn import_table<T: Table, R: DbTx>(&self, source_tx: &R) -> Result<(), DatabaseError> {
         let mut destination_cursor = self.cursor_write::<T>()?;
 
         for kv in source_tx.cursor_read::<T>()?.walk(None)? {
@@ -111,7 +116,7 @@ pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
     }
 
     /// Imports table data from another transaction within a range.
-    fn import_table_with_range<T: Table, R: DbTx<'tx>>(
+    fn import_table_with_range<T: Table, R: DbTx>(
         &self,
         source_tx: &R,
         from: Option<<T as Table>::Key>,
@@ -136,7 +141,7 @@ pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
     }
 
     /// Imports all dupsort data from another transaction.
-    fn import_dupsort<T: DupSort, R: DbTx<'tx>>(&self, source_tx: &R) -> Result<(), DatabaseError> {
+    fn import_dupsort<T: DupSort, R: DbTx>(&self, source_tx: &R) -> Result<(), DatabaseError> {
         let mut destination_cursor = self.cursor_dup_write::<T>()?;
         let mut cursor = source_tx.cursor_dup_read::<T>()?;
 

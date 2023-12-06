@@ -1,19 +1,21 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc = include_str!("../README.md")]
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![allow(clippy::type_complexity)]
-#![doc = include_str!("../README.md")]
+// TODO(danipopes): add these warnings
+// #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub use crate::{
     codec::*,
     cursor::{Cursor, Iter, IterDup},
     database::Database,
     environment::{
-        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, Info, NoWriteMap, PageSize,
-        Stat, WriteMap,
+        Environment, EnvironmentBuilder, EnvironmentKind, Geometry, Info, PageSize, Stat,
     },
     error::{Error, Result},
     flags::*,
@@ -37,8 +39,6 @@ mod test_utils {
     use byteorder::{ByteOrder, LittleEndian};
     use tempfile::tempdir;
 
-    type Environment = crate::Environment<NoWriteMap>;
-
     /// Regression test for https://github.com/danburkert/lmdb-rs/issues/21.
     /// This test reliably segfaults when run against lmbdb compiled with opt level -O3 and newer
     /// GCC compilers.
@@ -49,7 +49,7 @@ mod test_utils {
         let dir = tempdir().unwrap();
 
         let env = {
-            let mut builder = Environment::new();
+            let mut builder = Environment::builder();
             builder.set_max_dbs(2);
             builder
                 .set_geometry(Geometry { size: Some(1_000_000..1_000_000), ..Default::default() });

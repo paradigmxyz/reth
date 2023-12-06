@@ -9,13 +9,12 @@ repository.workspace = true
 description = "reth specific revm utilities"
 
 [dependencies]
-# reth 
+# reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
-reth-revm-primitives = { path = "./revm-primitives" }
-reth-revm-inspectors = { path = "./revm-inspectors" }
-reth-consensus-common = { path = "../consensus/common" }
+reth-revm-inspectors.workspace = true
+reth-consensus-common.workspace = true
 
 # revm
 revm.workspace = true
@@ -24,5 +23,12 @@ revm.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-reth-rlp.workspace = true
-once_cell = "1.17.0"
+reth-trie.workspace = true
+
+[features]
+optimism = [
+  "revm/optimism",
+  "reth-primitives/optimism",
+  "reth-consensus-common/optimism",
+  "reth-interfaces/optimism",
+]

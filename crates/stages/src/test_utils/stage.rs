@@ -40,15 +40,14 @@ impl TestStage {
     }
 }
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for TestStage {
     fn id(&self) -> StageId {
         self.id
     }
 
-    async fn execute(
+    fn execute(
         &mut self,
-        _: &DatabaseProviderRW<'_, &DB>,
+        _: &DatabaseProviderRW<DB>,
         _input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         self.exec_outputs
@@ -56,9 +55,9 @@ impl<DB: Database> Stage<DB> for TestStage {
             .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
     }
 
-    async fn unwind(
+    fn unwind(
         &mut self,
-        _: &DatabaseProviderRW<'_, &DB>,
+        _: &DatabaseProviderRW<DB>,
         _input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.unwind_outputs

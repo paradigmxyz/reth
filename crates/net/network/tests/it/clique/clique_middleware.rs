@@ -10,7 +10,7 @@ use ethers_middleware::SignerMiddleware;
 use ethers_providers::Middleware;
 use ethers_signers::Signer;
 use reth_network::test_utils::enr_to_peer_id;
-use reth_primitives::PeerId;
+use reth_primitives::{hex, PeerId};
 use thiserror::Error;
 use tracing::trace;
 

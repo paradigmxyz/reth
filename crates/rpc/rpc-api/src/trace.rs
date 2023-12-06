@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{BlockId, Bytes, H256};
+use reth_primitives::{BlockId, Bytes, B256};
 use reth_rpc_types::{
     state::StateOverride,
     trace::{filter::TraceFilter, parity::*},
@@ -55,7 +55,7 @@ pub trait TraceApi {
     #[method(name = "replayTransaction")]
     async fn replay_transaction(
         &self,
-        transaction: H256,
+        transaction: B256,
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<TraceResults>;
 
@@ -66,7 +66,9 @@ pub trait TraceApi {
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>>;
 
-    /// Returns traces matching given filter
+    /// Returns traces matching given filter.
+    ///
+    /// This is similar to `eth_getLogs` but for traces.
     #[method(name = "filter")]
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>>;
 
@@ -79,7 +81,7 @@ pub trait TraceApi {
     #[method(name = "get")]
     async fn trace_get(
         &self,
-        hash: H256,
+        hash: B256,
         indices: Vec<Index>,
     ) -> RpcResult<Option<LocalizedTransactionTrace>>;
 
@@ -87,6 +89,6 @@ pub trait TraceApi {
     #[method(name = "transaction")]
     async fn trace_transaction(
         &self,
-        hash: H256,
+        hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>>;
 }

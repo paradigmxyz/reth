@@ -2,102 +2,103 @@
 name = "reth-primitives"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
 homepage.workspace = true
+license.workspace = true
 repository.workspace = true
+rust-version.workspace = true
 description = "Commonly used types in reth."
 
 [dependencies]
 # reth
-reth-rlp = { workspace = true, features = ["std", "derive", "ethereum-types"] }
-reth-rlp-derive = { path = "../rlp/rlp-derive" }
-reth-codecs = { path = "../storage/codecs" }
+reth-codecs.workspace = true
+reth-ethereum-forks.workspace = true
+reth-rpc-types.workspace = true
+revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
-ethers-core = { workspace = true, default-features = false }
-tiny-keccak = { version = "2.0", features = ["keccak"] }
-crunchy = { version = "0.2.2", default-features = false, features = ["limit_256"] }
-ruint = { version = "1.9.0", features = ["primitive-types", "rlp"] }
-
-# Bloom
-fixed-hash = { version = "0.8", default-features = false, features = ["rustc-hex"] }
+alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
+alloy-rlp = { workspace = true, features = ["arrayvec"] }
+ethers-core = { workspace = true, default-features = false, optional = true }
 
 # crypto
-secp256k1 = { workspace = true, default-features = false, features = [
-    "global-context",
-    "alloc",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 
 # for eip-4844
-c-kzg = { workspace = true, features = ["serde"] }
-
-# used for forkid
-crc = "3"
+c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # tracing
 tracing.workspace = true
 
-# tokio
-tokio = { workspace = true, default-features = false, features = ["sync"] }
-tokio-stream.workspace = true
-
 # misc
+smallvec = { version = "1.11", features = ["arbitrary", "serde", "union", "const_new"] }
 bytes.workspace = true
+byteorder = "1"
+clap = { workspace = true, features = ["derive"], optional = true }
+derive_more = "0.99"
+itertools = "0.11"
+modular-bitfield = "0.11.2"
+num_enum = "0.7"
+once_cell.workspace = true
+rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_with = "2.1.0"
-thiserror.workspace = true
-sucds = "0.5.0"
-hex = "0.4"
-hex-literal = "0.3"
-modular-bitfield = "0.11.2"
-derive_more = "0.99"
-url = "2.3"
-impl-serde = "0.4.0"
-once_cell = "1.17.0"
-zstd = { version = "0.12", features = ["experimental"] }
-paste = "1.0"
-rayon = "1.7"
-tempfile = "3.3"
 sha2 = "0.10.7"
+sucds = "~0.6"
+tempfile.workspace = true
+thiserror.workspace = true
+zstd = { version = "0.12", features = ["experimental"] }
 
-# proof related
-triehash = "0.8"
-# See to replace hashers to simplify libraries
-plain_hasher = "0.2"
-hash-db = "0.15"
+# `test-utils` feature
+hash-db = { version = "~0.15", optional = true }
+plain_hasher = { version = "0.2", optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { version = "0.3", optional = true }
+proptest-derive = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-serde_json.workspace = true
-hex-literal = "0.3"
-test-fuzz = "4"
+arbitrary = { workspace = true, features = ["derive"] }
+assert_matches.workspace = true
+proptest.workspace = true
+proptest-derive.workspace = true
 rand.workspace = true
 revm-primitives = { workspace = true, features = ["arbitrary"] }
-arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
-proptest-derive = "0.3"
-assert_matches.workspace = true
-toml = "0.7.4"
+serde_json.workspace = true
+test-fuzz = "4"
+toml.workspace = true
+triehash = "0.8"
 
-# necessary so we don't hit a "undeclared 'std'": 
-# https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
+hash-db = "~0.15"
+plain_hasher = "0.2"
+
+# necessary so we don't hit a "undeclared 'std'":
+# https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
+criterion.workspace = true
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 secp256k1.workspace = true
-criterion = "0.5"
-pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
-default = []
-arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-test-utils = []
+default = ["c-kzg"]
+arbitrary = [
+    "revm-primitives/arbitrary",
+    "reth-rpc-types/arbitrary",
+    "reth-ethereum-forks/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-derive",
+]
+c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg"]
+clap = ["dep:clap"]
+optimism = [
+    "reth-codecs/optimism",
+    "revm-primitives/optimism",
+    "reth-ethereum-forks/optimism",
+    "revm/optimism",
+]
+test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
@@ -105,4 +106,9 @@ harness = false
 
 [[bench]]
 name = "trie_root"
+required-features = ["arbitrary", "test-utils"]
+harness = false
+
+[[bench]]
+name = "nibbles"
 harness = false

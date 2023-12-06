@@ -1,0 +1,18 @@
+[package]
+name = "beacon-api-sse"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+eyre.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+futures-util.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+mev-share-sse = {  version = "0.1.6" , default-features = false }

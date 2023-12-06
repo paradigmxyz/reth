@@ -12,8 +12,10 @@ description = "Staged syncing primitives used in reth."
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-codecs = { path = "../codecs" }
-reth-libmdbx = { path = "../libmdbx-rs", optional = true, features = ["return-borrowed"] }
+reth-codecs.workspace = true
+reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed"] }
+reth-nippy-jar.workspace = true
+reth-tracing.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }
@@ -36,32 +38,34 @@ metrics.workspace = true
 
 # misc
 bytes.workspace = true
-page_size = "0.4.2"
+page_size = "0.6.0"
 thiserror.workspace = true
-tempfile = { version = "3.3.0", optional = true }
+tempfile = { workspace = true, optional = true }
 parking_lot.workspace = true
 derive_more = "0.99"
-eyre = "0.6.8"
+eyre.workspace = true
+paste = "1.0"
+rayon.workspace = true
+itertools.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { version = "0.3", optional = true }
+proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-codecs = { path = "../codecs", features = ["arbitrary"] }
+reth-codecs.workspace = true
 reth-interfaces.workspace = true
 
-tempfile = "3.3.0"
+tempfile.workspace = true
 test-fuzz = "4"
 
-pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterion"] }
-criterion = "0.5"
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+criterion.workspace = true
 iai = "0.1.1"
 tokio = { workspace = true, features = ["full"] }
-reth-db = { path = ".", features = ["test-utils", "bench"] }
 
 # needed for test-fuzz to work properly, see https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 secp256k1.workspace = true
@@ -70,7 +74,7 @@ async-trait.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
-proptest-derive = "0.3"
+proptest-derive.workspace = true
 
 serde_json.workspace = true
 
@@ -89,7 +93,6 @@ mdbx = ["reth-libmdbx"]
 bench = []
 arbitrary = [
     "reth-primitives/arbitrary",
-    "reth-codecs/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",
@@ -97,12 +100,15 @@ arbitrary = [
 
 [[bench]]
 name = "hash_keys"
+required-features = ["test-utils"]
 harness = false
 
 [[bench]]
 name = "criterion"
+required-features = ["test-utils"]
 harness = false
 
 [[bench]]
 name = "iai"
+required-features = ["test-utils"]
 harness = false

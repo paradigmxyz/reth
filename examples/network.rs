@@ -7,7 +7,7 @@
 //! ```
 
 use futures::StreamExt;
-use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+use reth_network::{config::rng_secret_key, NetworkConfig, NetworkEvents, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 
 #[tokio::main]

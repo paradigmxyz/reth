@@ -54,7 +54,7 @@ where
     };
     let value = match kv.1 {
         Cow::Borrowed(v) => Decompress::decompress(v)?,
-        Cow::Owned(v) => Decompress::decompress(v)?,
+        Cow::Owned(v) => Decompress::decompress_owned(v)?,
     };
     Ok((key, value))
 }
@@ -68,7 +68,7 @@ where
 {
     Ok(match kv.1 {
         Cow::Borrowed(v) => Decompress::decompress(v)?,
-        Cow::Owned(v) => Decompress::decompress(v)?,
+        Cow::Owned(v) => Decompress::decompress_owned(v)?,
     })
 }
 
@@ -79,6 +79,6 @@ where
 {
     Ok(match value {
         Cow::Borrowed(v) => Decompress::decompress(v)?,
-        Cow::Owned(v) => Decompress::decompress(v)?,
+        Cow::Owned(v) => Decompress::decompress_owned(v)?,
     })
 }

@@ -1,7 +1,7 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{ReceiptWithBloom, H256};
-use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use reth_primitives::{ReceiptWithBloom, B256};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetReceipts(
     /// The block hashes to request receipts for.
-    pub Vec<H256>,
+    pub Vec<B256>,
 );
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
@@ -37,9 +37,8 @@ mod test {
         types::{message::RequestPair, GetReceipts},
         Receipts,
     };
-    use hex_literal::hex;
-    use reth_primitives::{Log, Receipt, ReceiptWithBloom, TxType};
-    use reth_rlp::{Decodable, Encodable};
+    use alloy_rlp::{Decodable, Encodable};
+    use reth_primitives::{hex, Log, Receipt, ReceiptWithBloom, TxType};
 
     #[test]
     fn roundtrip_eip1559() {
@@ -49,6 +48,10 @@ mod test {
                 success: false,
                 cumulative_gas_used: 0,
                 logs: vec![],
+                #[cfg(feature = "optimism")]
+                deposit_nonce: None,
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: None,
             },
             bloom: Default::default(),
         }]]);
@@ -102,10 +105,10 @@ mod test {
         let mut data = vec![];
         let request = RequestPair::<Receipts> {
             request_id: 1111,
-            message: Receipts(vec![
-                vec![
-                    ReceiptWithBloom {
-                        receipt: Receipt {tx_type: TxType::Legacy,
+            message: Receipts(vec![vec![
+                ReceiptWithBloom {
+                    receipt: Receipt {
+                        tx_type: TxType::Legacy,
                         cumulative_gas_used: 0x1u64,
                         logs: vec![
                             Log {
@@ -118,10 +121,14 @@ mod test {
                             },
                         ],
                         success: false,
-                    },bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
-                }
-                ],
-            ]),
+                        #[cfg(feature = "optimism")]
+                        deposit_nonce: None,
+                        #[cfg(feature = "optimism")]
+                        deposit_receipt_version: None,
+                    },
+                    bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
+                },
+            ]]),
         };
         request.encode(&mut data);
         assert_eq!(data, expected);
@@ -153,6 +160,10 @@ mod test {
                                     },
                                 ],
                                 success: false,
+                                #[cfg(feature = "optimism")]
+                                deposit_nonce: None,
+                                #[cfg(feature = "optimism")]
+                                deposit_receipt_version: None,
                             },
                             bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                         },

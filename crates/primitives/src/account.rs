@@ -1,8 +1,10 @@
-use crate::{H256, KECCAK_EMPTY, U256};
-use bytes::{Buf, Bytes};
-use fixed_hash::byteorder::{BigEndian, ReadBytesExt};
+use crate::{
+    revm_primitives::{Bytecode as RevmBytecode, BytecodeState, Bytes, JumpMap},
+    B256, KECCAK_EMPTY, U256,
+};
+use byteorder::{BigEndian, ReadBytesExt};
+use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
-use revm_primitives::{Bytecode as RevmBytecode, BytecodeState, JumpMap};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -15,7 +17,7 @@ pub struct Account {
     /// Account balance.
     pub balance: U256,
     /// Hash of the account's bytecode.
-    pub bytecode_hash: Option<H256>,
+    pub bytecode_hash: Option<B256>,
 }
 
 impl Account {
@@ -32,12 +34,12 @@ impl Account {
             Some(hash) => hash == KECCAK_EMPTY,
         };
 
-        self.nonce == 0 && self.balance == U256::ZERO && is_bytecode_empty
+        self.nonce == 0 && self.balance.is_zero() && is_bytecode_empty
     }
 
     /// Returns an account bytecode's hash.
     /// In case of no bytecode, returns [`KECCAK_EMPTY`].
-    pub fn get_bytecode_hash(&self) -> H256 {
+    pub fn get_bytecode_hash(&self) -> B256 {
         match self.bytecode_hash {
             Some(hash) => hash,
             None => KECCAK_EMPTY,
@@ -48,9 +50,6 @@ impl Account {
 /// Bytecode for an account.
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
-///
-/// Note: Upon decoding bytecode from the database, you *should* set the code hash using
-/// [`Self::with_code_hash`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bytecode(pub RevmBytecode);
 
@@ -60,18 +59,6 @@ impl Bytecode {
     /// No analysis will be performed.
     pub fn new_raw(bytes: Bytes) -> Self {
         Self(RevmBytecode::new_raw(bytes))
-    }
-
-    /// Create new bytecode from raw bytes and its hash.
-    pub fn new_raw_with_hash(bytes: Bytes, code_hash: H256) -> Self {
-        let revm_bytecode = unsafe { RevmBytecode::new_raw_with_hash(bytes, code_hash) };
-        Self(revm_bytecode)
-    }
-
-    /// Set the hash of the inner bytecode.
-    pub fn with_code_hash(mut self, code_hash: H256) -> Self {
-        self.0.hash = code_hash;
-        self
     }
 }
 
@@ -111,25 +98,17 @@ impl Compact for Bytecode {
         len + self.0.bytecode.len() + 4
     }
 
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let len = buf.read_u32::<BigEndian>().expect("could not read bytecode length");
-        let bytes = buf.copy_to_bytes(len as usize);
+        let bytes = Bytes::from(buf.copy_to_bytes(len as usize));
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
             0 => Bytecode(RevmBytecode::new_raw(bytes)),
             1 => Bytecode(unsafe {
-                RevmBytecode::new_checked(
-                    bytes,
-                    buf.read_u64::<BigEndian>().unwrap() as usize,
-                    None,
-                )
+                RevmBytecode::new_checked(bytes, buf.read_u64::<BigEndian>().unwrap() as usize)
             }),
             2 => Bytecode(RevmBytecode {
                 bytecode: bytes,
-                hash: KECCAK_EMPTY,
                 state: BytecodeState::Analysed {
                     len: buf.read_u64::<BigEndian>().unwrap() as usize,
                     jump_map: JumpMap::from_slice(buf),
@@ -144,7 +123,7 @@ impl Compact for Bytecode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
+    use crate::hex_literal::hex;
 
     #[test]
     fn test_account() {

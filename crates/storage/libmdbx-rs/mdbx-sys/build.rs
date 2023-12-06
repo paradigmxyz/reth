@@ -55,6 +55,8 @@ fn main() {
     let mut mdbx = PathBuf::from(&env::var("CARGO_MANIFEST_DIR").unwrap());
     mdbx.push("libmdbx");
 
+    println!("cargo:rerun-if-changed={}", mdbx.display());
+
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     let bindings = bindgen::Builder::default()
@@ -89,7 +91,10 @@ fn main() {
 
     // Enable debugging on debug builds
     #[cfg(debug_assertions)]
-    cc_builder.define("MDBX_DEBUG", "1");
+    {
+        cc_builder.define("MDBX_DEBUG", "1");
+        cc_builder.define("MDBX_ENABLE_PROFGC", "1");
+    }
 
     // Disables debug logging on optimized builds
     #[cfg(not(debug_assertions))]

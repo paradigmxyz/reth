@@ -1,13 +1,13 @@
 //! Test runners for `BlockchainTests` in <https://github.com/ethereum/tests>
 
 use crate::{
-    models::{BlockchainTest, ForkSpec, RootOrState},
+    models::{BlockchainTest, ForkSpec},
     Case, Error, Suite,
 };
+use alloy_rlp::Decodable;
 use reth_db::test_utils::create_test_rw_db;
 use reth_primitives::{BlockBody, SealedBlock};
-use reth_provider::{BlockWriter, ProviderFactory};
-use reth_rlp::Decodable;
+use reth_provider::{BlockWriter, HashingWriter, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
@@ -78,51 +78,53 @@ impl Case for BlockchainTestCase {
             let provider = factory.provider_rw().unwrap();
 
             // Insert test state
-            provider.insert_block(
-                SealedBlock::new(case.genesis_block_header.clone().into(), BlockBody::default()),
-                None,
-                None,
-            )?;
+            provider
+                .insert_block(
+                    SealedBlock::new(
+                        case.genesis_block_header.clone().into(),
+                        BlockBody::default(),
+                    ),
+                    None,
+                    None,
+                )
+                .map_err(|err| Error::RethError(err.into()))?;
             case.pre.write_to_db(provider.tx_ref())?;
 
             let mut last_block = None;
             for block in case.blocks.iter() {
                 let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                last_block = Some(decoded.number);
-                provider.insert_block(decoded, None, None)?;
+                provider
+                    .insert_block(decoded.clone(), None, None)
+                    .map_err(|err| Error::RethError(err.into()))?;
+                last_block = Some(decoded);
             }
 
             // Call execution stage
             {
-                let mut stage = ExecutionStage::new_with_factory(reth_revm::Factory::new(
-                    Arc::new(case.network.clone().into()),
-                ));
-
-                tokio::runtime::Builder::new_current_thread()
-                    .build()
-                    .expect("Could not build tokio RT")
-                    .block_on(async {
-                        // ignore error
-                        let _ = stage
-                            .execute(&provider, ExecInput { target: last_block, checkpoint: None })
-                            .await;
-                    });
+                let mut stage = ExecutionStage::new_with_factory(
+                    reth_revm::EvmProcessorFactory::new(Arc::new(case.network.clone().into())),
+                );
+                let target = last_block.as_ref().map(|b| b.number);
+                let _ = stage.execute(&provider, ExecInput { target, checkpoint: None });
             }
 
             // Validate post state
-            match &case.post_state {
-                Some(RootOrState::Root(root)) => {
-                    // TODO: We should really check the state root here...
-                    println!("Post-state root: #{root:?}")
+            if let Some(state) = &case.post_state {
+                for (&address, account) in state.iter() {
+                    account.assert_db(address, provider.tx_ref())?;
                 }
-                Some(RootOrState::State(state)) => {
-                    for (&address, account) in state.iter() {
-                        account.assert_db(address, provider.tx_ref())?;
-                    }
-                }
-                None => println!("No post-state"),
+            } else if let Some(expected_state_root) = case.post_state_hash {
+                // `insert_hashes` will insert hashed data, compute the state root and match it to
+                // expected internally
+                let last_block = last_block.unwrap_or_default();
+                provider
+                    .insert_hashes(0..=last_block.number, last_block.hash, expected_state_root)
+                    .map_err(|err| Error::RethError(err.into()))?;
+            } else {
+                return Err(Error::MissingPostState)
             }
 
+            // Drop provider without committing to the database.
             drop(provider);
         }
         Ok(())

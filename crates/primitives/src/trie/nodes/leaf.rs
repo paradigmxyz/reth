@@ -1,5 +1,6 @@
 use super::{super::Nibbles, rlp_node};
-use reth_rlp::{BufMut, Encodable};
+use alloy_rlp::{BufMut, Encodable};
+use smallvec::SmallVec;
 
 /// A leaf node represents the endpoint or terminal node in the trie. In other words, a leaf node is
 /// where actual values are stored.
@@ -10,9 +11,9 @@ use reth_rlp::{BufMut, Encodable};
 /// node means that the search has successfully found the value associated with that key.
 #[derive(Default)]
 pub struct LeafNode<'a> {
-    /// The key path.
-    pub key: Vec<u8>,
-    /// value: SmallVec<[u8; 36]>
+    /// The key path. See [`Nibbles::encode_path_leaf`] for more information.
+    pub key: SmallVec<[u8; 36]>,
+    /// The node value.
     pub value: &'a [u8],
 }
 
@@ -33,7 +34,7 @@ impl<'a> LeafNode<'a> {
 // Handroll because `key` must be encoded as a slice
 impl Encodable for LeafNode<'_> {
     fn encode(&self, out: &mut dyn BufMut) {
-        #[derive(reth_rlp::RlpEncodable)]
+        #[derive(alloy_rlp::RlpEncodable)]
         struct S<'a> {
             encoded_path: &'a [u8],
             value: &'a [u8],
@@ -45,8 +46,8 @@ impl Encodable for LeafNode<'_> {
 impl std::fmt::Debug for LeafNode<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LeafNode")
-            .field("key", &hex::encode(&self.key))
-            .field("value", &hex::encode(self.value))
+            .field("key", &crate::hex::encode(&self.key))
+            .field("value", &crate::hex::encode(self.value))
             .finish()
     }
 }
@@ -54,25 +55,22 @@ impl std::fmt::Debug for LeafNode<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hex_literal::hex;
+    use crate::hex;
 
     // From manual regression test
     #[test]
     fn encode_leaf_node_nibble() {
-        let nibble = Nibbles { hex_data: hex!("0604060f").into() };
+        let nibble = Nibbles::from_nibbles_unchecked(hex!("0604060f"));
         let encoded = nibble.encode_path_leaf(true);
-        let expected = hex!("20646f").to_vec();
-        assert_eq!(encoded, expected);
+        assert_eq!(encoded[..], hex!("20646f"));
     }
 
     #[test]
     fn rlp_leaf_node_roundtrip() {
-        let nibble = Nibbles { hex_data: hex!("0604060f").into() };
-        let val = hex!("76657262").to_vec();
+        let nibble = Nibbles::from_nibbles_unchecked(hex!("0604060f"));
+        let val = hex!("76657262");
         let leaf = LeafNode::new(&nibble, &val);
         let rlp = leaf.rlp(&mut vec![]);
-
-        let expected = hex!("c98320646f8476657262").to_vec();
-        assert_eq!(rlp, expected);
+        assert_eq!(rlp, hex!("c98320646f8476657262"));
     }
 }

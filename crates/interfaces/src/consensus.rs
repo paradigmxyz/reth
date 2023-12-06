@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use reth_primitives::{
-    BlockHash, BlockNumber, Header, InvalidTransactionError, SealedBlock, SealedHeader, H256, U256,
+    BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, InvalidTransactionError,
+    SealedBlock, SealedHeader, B256, U256,
 };
 use std::fmt::Debug;
 
@@ -8,7 +8,6 @@ use std::fmt::Debug;
 pub use reth_rpc_types::engine::ForkchoiceState;
 
 /// Consensus is a protocol that chooses canonical chain.
-#[async_trait]
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
@@ -38,18 +37,14 @@ pub trait Consensus: Debug + Send + Sync {
     ///
     /// Note: this expects that the headers are in natural order (ascending block number)
     fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), ConsensusError> {
-        if headers.is_empty() {
-            return Ok(())
-        }
-        let first = headers.first().expect("checked empty");
-        self.validate_header(first)?;
-        let mut parent = first;
-        for child in headers.iter().skip(1) {
+        let mut headers = headers.iter();
+        let Some(mut parent) = headers.next() else { return Ok(()) };
+        self.validate_header(parent)?;
+        for child in headers {
             self.validate_header(child)?;
             self.validate_header_against_parent(child, parent)?;
             parent = child;
         }
-
         Ok(())
     }
 
@@ -78,88 +73,208 @@ pub trait Consensus: Debug + Send + Sync {
 }
 
 /// Consensus Errors
-#[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
 pub enum ConsensusError {
-    #[error("Block used gas ({gas_used}) is greater than gas limit ({gas_limit}).")]
-    HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
-    #[error("Block ommer hash ({got:?}) is different from expected: ({expected:?})")]
-    BodyOmmersHashDiff { got: H256, expected: H256 },
-    #[error("Block state root ({got:?}) is different from expected: ({expected:?})")]
-    BodyStateRootDiff { got: H256, expected: H256 },
-    #[error("Block transaction root ({got:?}) is different from expected ({expected:?})")]
-    BodyTransactionRootDiff { got: H256, expected: H256 },
-    #[error("Block withdrawals root ({got:?}) is different from expected ({expected:?})")]
-    BodyWithdrawalsRootDiff { got: H256, expected: H256 },
-    #[error("Block with [hash:{hash:?},number: {number}] is already known.")]
-    BlockKnown { hash: BlockHash, number: BlockNumber },
-    #[error("Block parent [hash:{hash:?}] is not known.")]
-    ParentUnknown { hash: BlockHash },
+    /// Error when the gas used in the header exceeds the gas limit.
+    #[error("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
+    HeaderGasUsedExceedsGasLimit {
+        /// The gas used in the block header.
+        gas_used: u64,
+        /// The gas limit in the block header.
+        gas_limit: u64,
+    },
+
+    /// Error when the hash of block ommer is different from the expected hash.
+    #[error("mismatched block ommer hash: {0}")]
+    BodyOmmersHashDiff(GotExpectedBoxed<B256>),
+
+    /// Error when the state root in the block is different from the expected state root.
+    #[error("mismatched block state root: {0}")]
+    BodyStateRootDiff(GotExpectedBoxed<B256>),
+
+    /// Error when the transaction root in the block is different from the expected transaction
+    /// root.
+    #[error("mismatched block transaction root: {0}")]
+    BodyTransactionRootDiff(GotExpectedBoxed<B256>),
+
+    /// Error when the withdrawals root in the block is different from the expected withdrawals
+    /// root.
+    #[error("mismatched block withdrawals root: {0}")]
+    BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
+
+    /// Error when a block with a specific hash and number is already known.
+    #[error("block with [hash={hash}, number={number}] is already known")]
+    BlockKnown {
+        /// The hash of the known block.
+        hash: BlockHash,
+        /// The block number of the known block.
+        number: BlockNumber,
+    },
+
+    /// Error when the parent hash of a block is not known.
+    #[error("block parent [hash={hash}] is not known")]
+    ParentUnknown {
+        /// The hash of the unknown parent block.
+        hash: BlockHash,
+    },
+
+    /// Error when the block number does not match the parent block number.
     #[error(
-        "Block number {block_number} does not match parent block number {parent_block_number}"
+        "block number {block_number} does not match parent block number {parent_block_number}"
     )]
-    ParentBlockNumberMismatch { parent_block_number: BlockNumber, block_number: BlockNumber },
-    #[error(
-        "Parent hash {got_parent_hash:?} does not match the expected {expected_parent_hash:?}"
-    )]
-    ParentHashMismatch { expected_parent_hash: H256, got_parent_hash: H256 },
-    #[error(
-        "Block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}."
-    )]
-    TimestampIsInPast { parent_timestamp: u64, timestamp: u64 },
-    #[error("Block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}.")]
-    TimestampIsInFuture { timestamp: u64, present_timestamp: u64 },
-    #[error("Child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024.")]
-    GasLimitInvalidIncrease { parent_gas_limit: u64, child_gas_limit: u64 },
-    #[error("Child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024.")]
-    GasLimitInvalidDecrease { parent_gas_limit: u64, child_gas_limit: u64 },
-    #[error("Base fee missing.")]
+    ParentBlockNumberMismatch {
+        /// The parent block number.
+        parent_block_number: BlockNumber,
+        /// The block number.
+        block_number: BlockNumber,
+    },
+
+    /// Error when the parent hash does not match the expected parent hash.
+    #[error("mismatched parent hash: {0}")]
+    ParentHashMismatch(GotExpectedBoxed<B256>),
+
+    /// Error when the block timestamp is in the past compared to the parent timestamp.
+    #[error("block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}")]
+    TimestampIsInPast {
+        /// The parent block's timestamp.
+        parent_timestamp: u64,
+        /// The block's timestamp.
+        timestamp: u64,
+    },
+
+    /// Error when the block timestamp is in the future compared to our clock time.
+    #[error("block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}")]
+    TimestampIsInFuture {
+        /// The block's timestamp.
+        timestamp: u64,
+        /// The current timestamp.
+        present_timestamp: u64,
+    },
+
+    /// Error when the child gas limit exceeds the maximum allowed increase.
+    #[error("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
+    GasLimitInvalidIncrease {
+        /// The parent gas limit.
+        parent_gas_limit: u64,
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error when the child gas limit exceeds the maximum allowed decrease.
+    #[error("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
+    GasLimitInvalidDecrease {
+        /// The parent gas limit.
+        parent_gas_limit: u64,
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error when the base fee is missing.
+    #[error("base fee missing")]
     BaseFeeMissing,
-    #[error("Block base fee ({got}) is different than expected: ({expected}).")]
-    BaseFeeDiff { expected: u64, got: u64 },
-    #[error("Transaction signer recovery error.")]
+
+    /// Error when the block's base fee is different from the expected base fee.
+    #[error("block base fee mismatch: {0}")]
+    BaseFeeDiff(GotExpected<u64>),
+
+    /// Error when there is a transaction signer recovery error.
+    #[error("transaction signer recovery error")]
     TransactionSignerRecoveryError,
-    #[error("Extra data {len} exceeds max length: ")]
-    ExtraDataExceedsMax { len: usize },
-    #[error("Difficulty after merge is not zero")]
+
+    /// Error when the extra data length exceeds the maximum allowed.
+    #[error("extra data {len} exceeds max length")]
+    ExtraDataExceedsMax {
+        /// The length of the extra data.
+        len: usize,
+    },
+
+    /// Error when the difficulty after a merge is not zero.
+    #[error("difficulty after merge is not zero")]
     TheMergeDifficultyIsNotZero,
-    #[error("Nonce after merge is not zero")]
+
+    /// Error when the nonce after a merge is not zero.
+    #[error("nonce after merge is not zero")]
     TheMergeNonceIsNotZero,
-    #[error("Ommer root after merge is not empty")]
+
+    /// Error when the ommer root after a merge is not empty.
+    #[error("ommer root after merge is not empty")]
     TheMergeOmmerRootIsNotEmpty,
-    #[error("Missing withdrawals root")]
+
+    /// Error when the withdrawals root is missing.
+    #[error("missing withdrawals root")]
     WithdrawalsRootMissing,
-    #[error("Unexpected withdrawals root")]
+
+    /// Error when an unexpected withdrawals root is encountered.
+    #[error("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
-    #[error("Withdrawal index #{got} is invalid. Expected: #{expected}.")]
-    WithdrawalIndexInvalid { got: u64, expected: u64 },
-    #[error("Missing withdrawals")]
+
+    /// Error when withdrawals are missing.
+    #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
-    #[error("Missing blob gas used")]
+
+    /// Error when blob gas used is missing.
+    #[error("missing blob gas used")]
     BlobGasUsedMissing,
-    #[error("Unexpected blob gas used")]
+
+    /// Error when unexpected blob gas used is encountered.
+    #[error("unexpected blob gas used")]
     BlobGasUsedUnexpected,
-    #[error("Missing excess blob gas")]
+
+    /// Error when excess blob gas is missing.
+    #[error("missing excess blob gas")]
     ExcessBlobGasMissing,
-    #[error("Unexpected excess blob gas")]
+
+    /// Error when unexpected excess blob gas is encountered.
+    #[error("unexpected excess blob gas")]
     ExcessBlobGasUnexpected,
-    #[error("Missing parent beacon block root")]
+
+    /// Error when the parent beacon block root is missing.
+    #[error("missing parent beacon block root")]
     ParentBeaconBlockRootMissing,
-    #[error("Unexpected parent beacon block root")]
+
+    /// Error when an unexpected parent beacon block root is encountered.
+    #[error("unexpected parent beacon block root")]
     ParentBeaconBlockRootUnexpected,
-    #[error("Blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
-    BlobGasUsedExceedsMaxBlobGasPerBlock { blob_gas_used: u64, max_blob_gas_per_block: u64 },
+
+    /// Error when blob gas used exceeds the maximum allowed.
+    #[error("blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
+    BlobGasUsedExceedsMaxBlobGasPerBlock {
+        /// The actual blob gas used.
+        blob_gas_used: u64,
+        /// The maximum allowed blob gas per block.
+        max_blob_gas_per_block: u64,
+    },
+
+    /// Error when blob gas used is not a multiple of blob gas per blob.
     #[error(
-        "Blob gas used {blob_gas_used} is not a multiple of blob gas per blob {blob_gas_per_blob}"
+        "blob gas used {blob_gas_used} is not a multiple of blob gas per blob {blob_gas_per_blob}"
     )]
-    BlobGasUsedNotMultipleOfBlobGasPerBlob { blob_gas_used: u64, blob_gas_per_blob: u64 },
-    #[error("Invalid excess blob gas. Expected: {expected}, got: {got}. Parent excess blob gas: {parent_excess_blob_gas}, parent blob gas used: {parent_blob_gas_used}.")]
+    BlobGasUsedNotMultipleOfBlobGasPerBlob {
+        /// The actual blob gas used.
+        blob_gas_used: u64,
+        /// The blob gas per blob.
+        blob_gas_per_blob: u64,
+    },
+
+    /// Error when the blob gas used in the header does not match the expected blob gas used.
+    #[error("blob gas used mismatch: {0}")]
+    BlobGasUsedDiff(GotExpected<u64>),
+
+    /// Error when there is an invalid excess blob gas.
+    #[error(
+        "invalid excess blob gas: {diff}; \
+         parent excess blob gas: {parent_excess_blob_gas}, \
+         parent blob gas used: {parent_blob_gas_used}"
+    )]
     ExcessBlobGasDiff {
-        expected: u64,
-        got: u64,
+        /// The excess blob gas diff.
+        diff: GotExpected<u64>,
+        /// The parent excess blob gas.
         parent_excess_blob_gas: u64,
+        /// The parent blob gas used.
         parent_blob_gas_used: u64,
     },
+
     /// Error for a transaction that violates consensus.
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),

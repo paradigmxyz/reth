@@ -46,10 +46,7 @@ impl Compact for StoredSubNode {
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let key_len = buf.get_u16() as usize;
         let key = Vec::from(&buf[..key_len]);
         buf.advance(key_len);
@@ -73,7 +70,7 @@ impl Compact for StoredSubNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{trie::TrieMask, H256};
+    use crate::{trie::TrieMask, B256};
 
     #[test]
     fn subnode_roundtrip() {
@@ -84,7 +81,7 @@ mod tests {
                 state_mask: TrieMask::new(1),
                 tree_mask: TrieMask::new(0),
                 hash_mask: TrieMask::new(1),
-                hashes: vec![H256::zero()],
+                hashes: vec![B256::ZERO],
                 root_hash: None,
             }),
         };

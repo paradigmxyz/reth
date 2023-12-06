@@ -16,7 +16,7 @@ use futures::{future, Future, FutureExt, Stream, StreamExt};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
     BlockHash, BlockNumber, Head, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader,
-    WithPeerId, H256, U256,
+    WithPeerId, B256, U256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
@@ -161,7 +161,7 @@ impl Stream for TestDownload {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
                     hash: empty.hash(),
-                    error,
+                    error: Box::new(error),
                 })))
             }
 
@@ -282,7 +282,6 @@ impl TestConsensus {
     }
 }
 
-#[async_trait::async_trait]
 impl Consensus for TestConsensus {
     fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
         if self.fail_validation() {

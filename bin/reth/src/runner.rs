@@ -5,8 +5,8 @@ use reth_tasks::{TaskExecutor, TaskManager};
 use std::future::Future;
 use tracing::trace;
 
-/// Used to execute cli commands
-#[derive(Default, Debug)]
+/// Executes CLI commands.
+#[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct CliRunner;
 
@@ -33,9 +33,11 @@ impl CliRunner {
             task_manager,
             run_until_ctrl_c(command(context)),
         ))?;
-        // after the command has finished or exit signal was received we drop the task manager which
-        // fires the shutdown signal to all tasks spawned via the task executor
-        drop(task_manager);
+
+        // after the command has finished or exit signal was received we shutdown the task manager
+        // which fires the shutdown signal to all tasks spawned via the task executor and
+        // awaiting on tasks spawned with graceful shutdown
+        task_manager.graceful_shutdown_with_timeout(std::time::Duration::from_secs(10));
 
         // drop the tokio runtime on a separate thread because drop blocks until its pools
         // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
@@ -114,11 +116,7 @@ pub struct CliContext {
 /// Creates a new default tokio multi-thread [Runtime](tokio::runtime::Runtime) with all features
 /// enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        // increase stack size, mostly for RPC calls that use the evm: <https://github.com/paradigmxyz/reth/issues/3056> and  <https://github.com/bluealloy/revm/issues/305>
-        .thread_stack_size(8 * 1024 * 1024)
-        .build()
+    tokio::runtime::Builder::new_multi_thread().enable_all().build()
 }
 
 /// Runs the given future to completion or until a critical task panicked

@@ -1,19 +1,21 @@
 use super::access_list::AccessList;
 use crate::{
-    constants::eip4844::DATA_GAS_PER_BLOB,
-    keccak256,
-    kzg::{
-        self, Blob, Bytes48, KzgCommitment, KzgProof, KzgSettings, BYTES_PER_BLOB,
-        BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
-    },
-    kzg_to_versioned_hash, Bytes, ChainId, Signature, Transaction, TransactionKind,
-    TransactionSigned, TxHash, TxType, EIP4844_TX_TYPE_ID, H256,
+    constants::eip4844::DATA_GAS_PER_BLOB, keccak256, Bytes, ChainId, Signature, TransactionKind,
+    TxType, TxValue, B256,
 };
+use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header};
-use serde::{Deserialize, Serialize};
-use std::{mem, ops::Deref};
+use std::mem;
+
+#[cfg(feature = "c-kzg")]
+use crate::eip4844::kzg_to_versioned_hash;
+#[cfg(feature = "c-kzg")]
+use crate::kzg::{self, KzgCommitment, KzgProof, KzgSettings};
+#[cfg(feature = "c-kzg")]
+use crate::transaction::sidecar::*;
+#[cfg(feature = "c-kzg")]
+use std::ops::Deref;
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
@@ -58,11 +60,7 @@ pub struct TxEip4844 {
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    pub value: u128,
+    pub value: TxValue,
     /// The accessList specifies a list of addresses and storage keys;
     /// these addresses and storage keys are added into the `accessed_addresses`
     /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
@@ -71,7 +69,7 @@ pub struct TxEip4844 {
     pub access_list: AccessList,
 
     /// It contains a vector of fixed size hash(32 bytes)
-    pub blob_versioned_hashes: Vec<H256>,
+    pub blob_versioned_hashes: Vec<B256>,
 
     /// Max fee per data gas
     ///
@@ -108,7 +106,7 @@ impl TxEip4844 {
     /// Verifies that the given blob data, commitments, and proofs are all valid for this
     /// transaction.
     ///
-    /// Takes as input the [KzgSettings], which should contain the the parameters derived from the
+    /// Takes as input the [KzgSettings], which should contain the parameters derived from the
     /// KZG trusted setup.
     ///
     /// This ensures that the blob transaction payload has the same number of blob data elements,
@@ -118,6 +116,7 @@ impl TxEip4844 {
     /// Returns [BlobTransactionValidationError::InvalidProof] if any blob KZG proof in the response
     /// fails to verify, or if the versioned hashes in the transaction do not match the actual
     /// commitment versioned hashes.
+    #[cfg(feature = "c-kzg")]
     pub fn validate_blob(
         &self,
         sidecar: &BlobTransactionSidecar,
@@ -190,7 +189,7 @@ impl TxEip4844 {
     /// - `access_list`
     /// - `max_fee_per_blob_gas`
     /// - `blob_versioned_hashes`
-    pub fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+    pub fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
             chain_id: Decodable::decode(buf)?,
             nonce: Decodable::decode(buf)?,
@@ -199,7 +198,7 @@ impl TxEip4844 {
             gas_limit: Decodable::decode(buf)?,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
-            input: Bytes(Decodable::decode(buf)?),
+            input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
             max_fee_per_blob_gas: Decodable::decode(buf)?,
             blob_versioned_hashes: Decodable::decode(buf)?,
@@ -247,10 +246,10 @@ impl TxEip4844 {
         mem::size_of::<u128>() + // max_fee_per_gas
         mem::size_of::<u128>() + // max_priority_fee_per_gas
         self.to.size() + // to
-        mem::size_of::<u128>() + // value
+        mem::size_of::<TxValue>() + // value
         self.access_list.size() + // access_list
         self.input.len() +  // input
-        self.blob_versioned_hashes.capacity() * mem::size_of::<H256>() + // blob hashes size
+        self.blob_versioned_hashes.capacity() * mem::size_of::<B256>() + // blob hashes size
         mem::size_of::<u128>() // max_fee_per_data_gas
     }
 
@@ -279,10 +278,15 @@ impl TxEip4844 {
 
     /// Output the length of the RLP signed transaction encoding. This encodes with a RLP header.
     pub(crate) fn payload_len_with_signature(&self, signature: &Signature) -> usize {
+        let len = self.payload_len_with_signature_without_header(signature);
+        length_of_length(len) + len
+    }
+
+    /// Output the length of the RLP signed transaction encoding, _without_ a RLP header.
+    pub(crate) fn payload_len_with_signature_without_header(&self, signature: &Signature) -> usize {
         let payload_length = self.fields_len() + signature.payload_len();
         // 'transaction type byte length' + 'header length' + 'payload length'
-        let len = 1 + length_of_length(payload_length) + payload_length;
-        length_of_length(len) + len
+        1 + length_of_length(payload_length) + payload_length
     }
 
     /// Get transaction type
@@ -306,316 +310,9 @@ impl TxEip4844 {
 
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
-    pub(crate) fn signature_hash(&self) -> H256 {
+    pub(crate) fn signature_hash(&self) -> B256 {
         let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
-    }
-}
-
-/// An error that can occur when validating a [BlobTransaction].
-#[derive(Debug, thiserror::Error)]
-pub enum BlobTransactionValidationError {
-    /// Proof validation failed.
-    #[error("invalid kzg proof")]
-    InvalidProof,
-    /// An error returned by the [kzg] library
-    #[error("kzg error: {0:?}")]
-    KZGError(kzg::Error),
-    /// The inner transaction is not a blob transaction
-    #[error("unable to verify proof for non blob transaction: {0}")]
-    NotBlobTransaction(u8),
-}
-
-impl From<kzg::Error> for BlobTransactionValidationError {
-    fn from(value: kzg::Error) -> Self {
-        Self::KZGError(value)
-    }
-}
-
-/// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
-/// corresponding proofs.
-///
-/// This is defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#networking) as an element
-/// of a `PooledTransactions` response.
-///
-/// NOTE: This contains a [TransactionSigned], which could be a non-4844 transaction type, even
-/// though that would not make sense. This type is meant to be constructed using decoding methods,
-/// which should always construct the [TransactionSigned] with an EIP-4844 transaction.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct BlobTransaction {
-    /// The transaction hash.
-    pub hash: TxHash,
-    /// The transaction payload.
-    pub transaction: TxEip4844,
-    /// The transaction signature.
-    pub signature: Signature,
-    /// The transaction's blob sidecar.
-    pub sidecar: BlobTransactionSidecar,
-}
-
-impl BlobTransaction {
-    /// Constructs a new [BlobTransaction] from a [TransactionSigned] and a
-    /// [BlobTransactionSidecar].
-    ///
-    /// Returns an error if the signed transaction is not [TxEip4844]
-    pub fn try_from_signed(
-        tx: TransactionSigned,
-        sidecar: BlobTransactionSidecar,
-    ) -> Result<Self, (TransactionSigned, BlobTransactionSidecar)> {
-        let TransactionSigned { transaction, signature, hash } = tx;
-        match transaction {
-            Transaction::Eip4844(transaction) => Ok(Self { hash, transaction, signature, sidecar }),
-            transaction => {
-                let tx = TransactionSigned { transaction, signature, hash };
-                Err((tx, sidecar))
-            }
-        }
-    }
-
-    /// Verifies that the transaction's blob data, commitments, and proofs are all valid.
-    ///
-    /// See also [TxEip4844::validate_blob]
-    pub fn validate(
-        &self,
-        proof_settings: &KzgSettings,
-    ) -> Result<(), BlobTransactionValidationError> {
-        self.transaction.validate_blob(&self.sidecar, proof_settings)
-    }
-
-    /// Splits the [BlobTransaction] into its [TransactionSigned] and [BlobTransactionSidecar]
-    /// components.
-    pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {
-        let transaction = TransactionSigned {
-            transaction: Transaction::Eip4844(self.transaction),
-            hash: self.hash,
-            signature: self.signature,
-        };
-
-        (transaction, self.sidecar)
-    }
-
-    /// Encodes the [BlobTransaction] fields as RLP, with a tx type. If `with_header` is `false`,
-    /// the following will be encoded:
-    /// `tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// If `with_header` is `true`, the following will be encoded:
-    /// `rlp(tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs]))`
-    ///
-    /// NOTE: The header will be a byte string header, not a list header.
-    pub(crate) fn encode_with_type_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
-        // Calculate the length of:
-        // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs])`
-        //
-        // to construct and encode the string header
-        if with_header {
-            Header {
-                list: false,
-                // add one for the tx type
-                payload_length: 1 + self.payload_len(),
-            }
-            .encode(out);
-        }
-
-        out.put_u8(EIP4844_TX_TYPE_ID);
-
-        // Now we encode the inner blob transaction:
-        self.encode_inner(out);
-    }
-
-    /// Encodes the [BlobTransaction] fields as RLP, with the following format:
-    /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// where `transaction_payload_body` is a list:
-    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-    ///
-    /// Note: this should be used only when implementing other RLP encoding methods, and does not
-    /// represent the full RLP encoding of the blob transaction.
-    pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        // First we construct both required list headers.
-        //
-        // The `transaction_payload_body` length is the length of the fields, plus the length of
-        // its list header.
-        let tx_header = Header {
-            list: true,
-            payload_length: self.transaction.fields_len() + self.signature.payload_len(),
-        };
-
-        let tx_length = tx_header.length() + tx_header.payload_length;
-
-        // The payload length is the length of the `tranascation_payload_body` list, plus the
-        // length of the blobs, commitments, and proofs.
-        let payload_length = tx_length + self.sidecar.fields_len();
-
-        // First we use the payload len to construct the first list header
-        let blob_tx_header = Header { list: true, payload_length };
-
-        // Encode the blob tx header first
-        blob_tx_header.encode(out);
-
-        // Encode the inner tx list header, then its fields
-        tx_header.encode(out);
-        self.transaction.encode_fields(out);
-
-        // Encode the blobs, commitments, and proofs
-        self.sidecar.encode_inner(out);
-    }
-
-    /// Ouputs the length of the RLP encoding of the blob transaction, including the tx type byte,
-    /// optionally including the length of a wrapping string header. If `with_header` is `false`,
-    /// the length of the following will be calculated:
-    /// `tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// If `with_header` is `true`, the length of the following will be calculated:
-    /// `rlp(tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs]))`
-    pub(crate) fn payload_len_with_type(&self, with_header: bool) -> usize {
-        if with_header {
-            // Construct a header and use that to calculate the total length
-            let wrapped_header = Header {
-                list: false,
-                // add one for the tx type byte
-                payload_length: 1 + self.payload_len(),
-            };
-
-            // The total length is now the length of the header plus the length of the payload
-            // (which includes the tx type byte)
-            wrapped_header.length() + wrapped_header.payload_length
-        } else {
-            // Just add the length of the tx type to the payload length
-            1 + self.payload_len()
-        }
-    }
-
-    /// Outputs the length of the RLP encoding of the blob transaction with the following format:
-    /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// where `transaction_payload_body` is a list:
-    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-    ///
-    /// Note: this should be used only when implementing other RLP encoding length methods, and
-    /// does not represent the full RLP encoding of the blob transaction.
-    pub(crate) fn payload_len(&self) -> usize {
-        // The `transaction_payload_body` length is the length of the fields, plus the length of
-        // its list header.
-        let tx_header = Header {
-            list: true,
-            payload_length: self.transaction.fields_len() + self.signature.payload_len(),
-        };
-
-        let tx_length = tx_header.length() + tx_header.payload_length;
-
-        // The payload length is the length of the `tranascation_payload_body` list, plus the
-        // length of the blobs, commitments, and proofs.
-        tx_length + self.sidecar.fields_len()
-    }
-
-    /// Decodes a [BlobTransaction] from RLP. This expects the encoding to be:
-    /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// where `transaction_payload_body` is a list:
-    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-    ///
-    /// Note: this should be used only when implementing other RLP decoding methods, and does not
-    /// represent the full RLP decoding of the `PooledTransactionsElement` type.
-    pub(crate) fn decode_inner(data: &mut &[u8]) -> Result<Self, DecodeError> {
-        // decode the _first_ list header for the rest of the transaction
-        let header = Header::decode(data)?;
-        if !header.list {
-            return Err(DecodeError::Custom("PooledTransactions blob tx must be encoded as a list"))
-        }
-
-        // Now we need to decode the inner 4844 transaction and its signature:
-        //
-        // `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-        let header = Header::decode(data)?;
-        if !header.list {
-            return Err(DecodeError::Custom(
-                "PooledTransactions inner blob tx must be encoded as a list",
-            ))
-        }
-
-        // inner transaction
-        let transaction = TxEip4844::decode_inner(data)?;
-
-        // signature
-        let signature = Signature::decode(data)?;
-
-        // All that's left are the blobs, commitments, and proofs
-        let sidecar = BlobTransactionSidecar::decode_inner(data)?;
-
-        // # Calculating the hash
-        //
-        // The full encoding of the `PooledTransaction` response is:
-        // `tx_type (0x03) || rlp([tx_payload_body, blobs, commitments, proofs])`
-        //
-        // The transaction hash however, is:
-        // `keccak256(tx_type (0x03) || rlp(tx_payload_body))`
-        //
-        // Note that this is `tx_payload_body`, not `[tx_payload_body]`, which would be
-        // `[[chain_id, nonce, max_priority_fee_per_gas, ...]]`, i.e. a list within a list.
-        //
-        // Because the pooled transaction encoding is different than the hash encoding for
-        // EIP-4844 transactions, we do not use the original buffer to calculate the hash.
-        //
-        // Instead, we use `encode_with_signature`, which RLP encodes the transaction with a
-        // signature for hashing without a header. We then hash the result.
-        let mut buf = Vec::new();
-        transaction.encode_with_signature(&signature, &mut buf, false);
-        let hash = keccak256(&buf);
-
-        Ok(Self { transaction, hash, signature, sidecar })
-    }
-}
-
-/// This represents a set of blobs, and its corresponding commitments and proofs.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct BlobTransactionSidecar {
-    /// The blob data.
-    pub blobs: Vec<Blob>,
-    /// The blob commitments.
-    pub commitments: Vec<Bytes48>,
-    /// The blob proofs.
-    pub proofs: Vec<Bytes48>,
-}
-
-impl BlobTransactionSidecar {
-    /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
-    ///
-    /// This encodes the fields in the following order:
-    /// - `blobs`
-    /// - `commitments`
-    /// - `proofs`
-    pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        // Encode the blobs, commitments, and proofs
-        self.blobs.encode(out);
-        self.commitments.encode(out);
-        self.proofs.encode(out);
-    }
-
-    /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
-    pub(crate) fn fields_len(&self) -> usize {
-        self.blobs.len() + self.commitments.len() + self.proofs.len()
-    }
-
-    /// Decodes the inner [BlobTransactionSidecar] fields from RLP bytes, without a RLP header.
-    ///
-    /// This decodes the fields in the following order:
-    /// - `blobs`
-    /// - `commitments`
-    /// - `proofs`
-    pub(crate) fn decode_inner(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        Ok(Self {
-            blobs: Decodable::decode(buf)?,
-            commitments: Decodable::decode(buf)?,
-            proofs: Decodable::decode(buf)?,
-        })
-    }
-
-    /// Calculates a size heuristic for the in-memory size of the [BlobTransactionSidecar].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.blobs.len() * BYTES_PER_BLOB + // blobs
-        self.commitments.len() * BYTES_PER_COMMITMENT + // commitments
-        self.proofs.len() * BYTES_PER_PROOF // proofs
     }
 }

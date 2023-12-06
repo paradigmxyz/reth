@@ -1,13 +1,23 @@
 //! Reth genesis initialization utility functions.
 use reth_db::{
     cursor::DbCursorRO,
-    database::{Database, DatabaseGAT},
+    database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{stage::StageId, Account, Bytecode, ChainSpec, StorageEntry, H256, U256};
-use reth_provider::{DatabaseProviderRW, HashingWriter, HistoryWriter, PostState, ProviderFactory};
-use std::{collections::BTreeMap, sync::Arc};
+use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
+use reth_primitives::{
+    stage::StageId, Account, Bytecode, ChainSpec, Receipts, StorageEntry, B256, U256,
+};
+use reth_provider::{
+    bundle_state::{BundleStateInit, RevertsInit},
+    BundleStateWithReceipts, DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown,
+    ProviderError, ProviderFactory,
+};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 use tracing::debug;
 
 /// Database initialization error type.
@@ -15,21 +25,23 @@ use tracing::debug;
 pub enum InitDatabaseError {
     /// An existing genesis block was found in the database, and its hash did not match the hash of
     /// the chainspec.
-    #[error("Genesis hash in the database does not match the specified chainspec: chainspec is {chainspec_hash}, database is {database_hash}")]
+    #[error("genesis hash in the database does not match the specified chainspec: chainspec is {chainspec_hash}, database is {database_hash}")]
     GenesisHashMismatch {
         /// Expected genesis hash.
-        chainspec_hash: H256,
+        chainspec_hash: B256,
         /// Actual genesis hash.
-        database_hash: H256,
+        database_hash: B256,
     },
 
-    /// Low-level database error.
+    /// Provider error.
     #[error(transparent)]
-    DBError(#[from] reth_db::DatabaseError),
+    Provider(#[from] ProviderError),
+}
 
-    /// Internal error.
-    #[error(transparent)]
-    InternalError(#[from] reth_interfaces::Error),
+impl From<DatabaseError> for InitDatabaseError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Provider(ProviderError::Database(error))
+    }
 }
 
 /// Write the genesis block if it has not already been written
@@ -37,7 +49,7 @@ pub enum InitDatabaseError {
 pub fn init_genesis<DB: Database>(
     db: Arc<DB>,
     chain: Arc<ChainSpec>,
-) -> Result<H256, InitDatabaseError> {
+) -> Result<B256, InitDatabaseError> {
     let genesis = chain.genesis();
 
     let hash = chain.genesis_hash();
@@ -82,43 +94,75 @@ pub fn init_genesis<DB: Database>(
 
 /// Inserts the genesis state into the database.
 pub fn insert_genesis_state<DB: Database>(
-    tx: &<DB as DatabaseGAT<'_>>::TXMut,
+    tx: &<DB as Database>::TXMut,
     genesis: &reth_primitives::Genesis,
-) -> Result<(), InitDatabaseError> {
-    let mut state = PostState::default();
+) -> ProviderResult<()> {
+    let mut state_init: BundleStateInit = HashMap::new();
+    let mut reverts_init = HashMap::new();
+    let mut contracts: HashMap<B256, Bytecode> = HashMap::new();
 
     for (address, account) in &genesis.alloc {
-        let mut bytecode_hash = None;
-        if let Some(code) = &account.code {
-            let bytecode = Bytecode::new_raw(code.0.clone());
-            // FIXME: Can bytecode_hash be Some(Bytes::new()) here?
-            bytecode_hash = Some(bytecode.hash);
-            state.add_bytecode(bytecode.hash, bytecode);
-        }
-        state.create_account(
-            0,
+        let bytecode_hash = if let Some(code) = &account.code {
+            let bytecode = Bytecode::new_raw(code.clone());
+            let hash = bytecode.hash_slow();
+            contracts.insert(hash, bytecode);
+            Some(hash)
+        } else {
+            None
+        };
+
+        // get state
+        let storage = account
+            .storage
+            .as_ref()
+            .map(|m| {
+                m.iter()
+                    .map(|(key, value)| {
+                        let value = U256::from_be_bytes(value.0);
+                        (*key, (U256::ZERO, value))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        reverts_init.insert(
             *address,
-            Account { nonce: account.nonce.unwrap_or(0), balance: account.balance, bytecode_hash },
+            (Some(None), storage.keys().map(|k| StorageEntry::new(*k, U256::ZERO)).collect()),
         );
-        if let Some(storage) = &account.storage {
-            let mut storage_changes = reth_provider::post_state::StorageChangeset::new();
-            for (&key, &value) in storage {
-                storage_changes
-                    .insert(U256::from_be_bytes(key.0), (U256::ZERO, U256::from_be_bytes(value.0)));
-            }
-            state.change_storage(0, *address, storage_changes);
-        }
+
+        state_init.insert(
+            *address,
+            (
+                None,
+                Some(Account {
+                    nonce: account.nonce.unwrap_or_default(),
+                    balance: account.balance,
+                    bytecode_hash,
+                }),
+                storage,
+            ),
+        );
     }
-    state.write_to_db(tx, 0)?;
+    let all_reverts_init: RevertsInit = HashMap::from([(0, reverts_init)]);
+
+    let bundle = BundleStateWithReceipts::new_init(
+        state_init,
+        all_reverts_init,
+        contracts.into_iter().collect(),
+        Receipts::new(),
+        0,
+    );
+
+    bundle.write_to_db(tx, OriginalValuesKnown::Yes)?;
 
     Ok(())
 }
 
 /// Inserts hashes for the genesis state.
 pub fn insert_genesis_hashes<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<&DB>,
     genesis: &reth_primitives::Genesis,
-) -> Result<(), InitDatabaseError> {
+) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
     let alloc_accounts =
         genesis.alloc.clone().into_iter().map(|(addr, account)| (addr, Some(account.into())));
@@ -140,9 +184,9 @@ pub fn insert_genesis_hashes<DB: Database>(
 
 /// Inserts history indices for genesis accounts and storage.
 pub fn insert_genesis_history<DB: Database>(
-    provider: &DatabaseProviderRW<'_, &DB>,
+    provider: &DatabaseProviderRW<&DB>,
     genesis: &reth_primitives::Genesis,
-) -> Result<(), InitDatabaseError> {
+) -> ProviderResult<()> {
     let account_transitions =
         genesis.alloc.keys().map(|addr| (*addr, vec![0])).collect::<BTreeMap<_, _>>();
     provider.insert_account_history_index(account_transitions)?;
@@ -160,9 +204,9 @@ pub fn insert_genesis_history<DB: Database>(
 
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
-    tx: &<DB as DatabaseGAT<'_>>::TXMut,
+    tx: &<DB as Database>::TXMut,
     chain: Arc<ChainSpec>,
-) -> Result<(), InitDatabaseError> {
+) -> ProviderResult<()> {
     let header = chain.sealed_genesis_header();
 
     tx.put::<tables::CanonicalHeaders>(0, header.hash)?;
@@ -186,13 +230,13 @@ mod tests {
     };
     use reth_primitives::{
         Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
-        GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
+        GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
     use std::collections::HashMap;
 
     #[allow(clippy::type_complexity)]
     fn collect_table_entries<DB, T>(
-        tx: &<DB as DatabaseGAT<'_>>::TX,
+        tx: &<DB as Database>::TX,
     ) -> Result<Vec<TableRow<T>>, InitDatabaseError>
     where
         DB: Database,
@@ -207,7 +251,7 @@ mod tests {
         let genesis_hash = init_genesis(db, MAINNET.clone()).unwrap();
 
         // actual, expected
-        assert_eq!(genesis_hash, MAINNET_GENESIS);
+        assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
     }
 
     #[test]
@@ -216,7 +260,7 @@ mod tests {
         let genesis_hash = init_genesis(db, GOERLI.clone()).unwrap();
 
         // actual, expected
-        assert_eq!(genesis_hash, GOERLI_GENESIS);
+        assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
     }
 
     #[test]
@@ -225,7 +269,7 @@ mod tests {
         let genesis_hash = init_genesis(db, SEPOLIA.clone()).unwrap();
 
         // actual, expected
-        assert_eq!(genesis_hash, SEPOLIA_GENESIS);
+        assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
     }
 
     #[test]
@@ -239,17 +283,17 @@ mod tests {
         assert_eq!(
             genesis_hash.unwrap_err(),
             InitDatabaseError::GenesisHashMismatch {
-                chainspec_hash: MAINNET_GENESIS,
-                database_hash: SEPOLIA_GENESIS
+                chainspec_hash: MAINNET_GENESIS_HASH,
+                database_hash: SEPOLIA_GENESIS_HASH
             }
         )
     }
 
     #[test]
     fn init_genesis_history() {
-        let address_with_balance = Address::from_low_u64_be(1);
-        let address_with_storage = Address::from_low_u64_be(2);
-        let storage_key = H256::from_low_u64_be(1);
+        let address_with_balance = Address::with_last_byte(1);
+        let address_with_storage = Address::with_last_byte(2);
+        let storage_key = B256::with_last_byte(1);
         let chain_spec = Arc::new(ChainSpec {
             chain: Chain::Id(1),
             genesis: Genesis {
@@ -261,7 +305,7 @@ mod tests {
                     (
                         address_with_storage,
                         GenesisAccount {
-                            storage: Some(HashMap::from([(storage_key, H256::random())])),
+                            storage: Some(HashMap::from([(storage_key, B256::random())])),
                             ..Default::default()
                         },
                     ),

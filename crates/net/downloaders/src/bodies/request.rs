@@ -8,7 +8,9 @@ use reth_interfaces::{
         priority::Priority,
     },
 };
-use reth_primitives::{BlockBody, PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
+use reth_primitives::{
+    BlockBody, GotExpected, PeerId, SealedBlock, SealedHeader, WithPeerId, B256,
+};
 use std::{
     collections::VecDeque,
     mem,
@@ -98,14 +100,14 @@ where
     }
 
     /// Retrieve header hashes for the next request.
-    fn next_request(&self) -> Option<Vec<H256>> {
+    fn next_request(&self) -> Option<Vec<B256>> {
         let mut hashes =
             self.pending_headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).peekable();
         hashes.peek().is_some().then(|| hashes.collect())
     }
 
     /// Submit the request with the given priority.
-    fn submit_request(&mut self, req: Vec<H256>, priority: Priority) {
+    fn submit_request(&mut self, req: Vec<B256>, priority: Priority) {
         tracing::trace!(target: "downloaders::bodies", request_len = req.len(), "Requesting bodies");
         let client = Arc::clone(&self.client);
         self.last_request_len = Some(req.len());
@@ -133,10 +135,10 @@ where
         }
 
         if response_len > request_len {
-            return Err(DownloadError::TooManyBodies {
+            return Err(DownloadError::TooManyBodies(GotExpected {
+                got: response_len,
                 expected: request_len,
-                received: response_len,
-            })
+            }))
         }
 
         // Buffer block responses
@@ -185,7 +187,7 @@ where
                     // Body is invalid, put the header back and return an error
                     let hash = block.hash();
                     self.pending_headers.push_front(block.header);
-                    return Err(DownloadError::BodyValidation { hash, error })
+                    return Err(DownloadError::BodyValidation { hash, error: Box::new(error) })
                 }
 
                 self.buffer.push(BlockResponse::Full(block));
@@ -254,14 +256,14 @@ mod tests {
         p2p::bodies::response::BlockResponse,
         test_utils::{generators, generators::random_header_range, TestConsensus},
     };
-    use reth_primitives::H256;
+    use reth_primitives::B256;
     use std::sync::Arc;
 
     /// Check if future returns empty bodies without dispathing any requests.
     #[tokio::test]
     async fn request_returns_empty_bodies() {
         let mut rng = generators::rng();
-        let headers = random_header_range(&mut rng, 0..20, H256::zero());
+        let headers = random_header_range(&mut rng, 0..20, B256::ZERO);
 
         let client = Arc::new(TestBodiesClient::default());
         let fut = BodiesRequestFuture::new(

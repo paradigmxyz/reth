@@ -10,6 +10,13 @@ use std::ops::{AddAssign, SubAssign};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SizeTracker(isize);
 
+impl SizeTracker {
+    /// Reset the size tracker.
+    pub fn reset(&mut self) {
+        self.0 = 0;
+    }
+}
+
 impl AddAssign<usize> for SizeTracker {
     fn add_assign(&mut self, rhs: usize) {
         self.0 += rhs as isize

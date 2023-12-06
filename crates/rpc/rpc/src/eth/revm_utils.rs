@@ -2,9 +2,9 @@
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
 use reth_primitives::{
-    AccessList, Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, H256, U256,
+    revm::env::{fill_tx_env, fill_tx_env_with_recovered},
+    Address, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256, U256,
 };
-use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides, CallRequest,
@@ -17,7 +17,7 @@ use revm::{
 };
 use revm_primitives::{
     db::{DatabaseCommit, DatabaseRef},
-    Bytecode, ExecutionResult,
+    Bytecode,
 };
 use tracing::trace;
 
@@ -74,7 +74,15 @@ impl FillableTransaction for TransactionSignedEcRecovered {
     }
 
     fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
+        #[cfg(not(feature = "optimism"))]
         fill_tx_env_with_recovered(tx_env, self);
+
+        #[cfg(feature = "optimism")]
+        {
+            let mut envelope_buf = Vec::with_capacity(self.length_without_header());
+            self.encode_enveloped(&mut envelope_buf);
+            fill_tx_env_with_recovered(tx_env, self, envelope_buf.into());
+        }
         Ok(())
     }
 }
@@ -86,32 +94,24 @@ impl FillableTransaction for TransactionSigned {
     fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
         let signer =
             self.recover_signer().ok_or_else(|| EthApiError::InvalidTransactionSignature)?;
+        #[cfg(not(feature = "optimism"))]
         fill_tx_env(tx_env, self, signer);
+
+        #[cfg(feature = "optimism")]
+        {
+            let mut envelope_buf = Vec::with_capacity(self.length_without_header());
+            self.encode_enveloped(&mut envelope_buf);
+            fill_tx_env(tx_env, self, signer, envelope_buf.into());
+        }
         Ok(())
     }
 }
 
 /// Returns the addresses of the precompiles corresponding to the SpecId.
-pub(crate) fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
-    let spec = match spec_id {
-        SpecId::FRONTIER | SpecId::FRONTIER_THAWING => return vec![],
-        SpecId::HOMESTEAD | SpecId::DAO_FORK | SpecId::TANGERINE | SpecId::SPURIOUS_DRAGON => {
-            PrecompilesSpecId::HOMESTEAD
-        }
-        SpecId::BYZANTIUM | SpecId::CONSTANTINOPLE | SpecId::PETERSBURG => {
-            PrecompilesSpecId::BYZANTIUM
-        }
-        SpecId::ISTANBUL | SpecId::MUIR_GLACIER => PrecompilesSpecId::ISTANBUL,
-        SpecId::BERLIN |
-        SpecId::LONDON |
-        SpecId::ARROW_GLACIER |
-        SpecId::GRAY_GLACIER |
-        SpecId::MERGE |
-        SpecId::SHANGHAI |
-        SpecId::CANCUN => PrecompilesSpecId::BERLIN,
-        SpecId::LATEST => PrecompilesSpecId::LATEST,
-    };
-    Precompiles::new(spec).addresses().into_iter().map(Address::from).collect()
+#[inline]
+pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
+    let spec = PrecompilesSpecId::from_spec_id(spec_id);
+    Precompiles::new(spec).addresses().into_iter().copied().map(Address::from)
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
@@ -171,7 +171,7 @@ pub(crate) fn replay_transactions_until<DB, I, Tx>(
     cfg: CfgEnv,
     block_env: BlockEnv,
     transactions: I,
-    target_tx_hash: H256,
+    target_tx_hash: B256,
 ) -> EthResult<()>
 where
     DB: DatabaseRef,
@@ -233,7 +233,12 @@ where
     }
 
     // apply block overrides
-    if let Some(block_overrides) = overrides.block {
+    if let Some(mut block_overrides) = overrides.block {
+        if let Some(block_hashes) = block_overrides.block_hash.take() {
+            // override block hashes
+            db.block_hashes
+                .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
+        }
         apply_block_overrides(*block_overrides, &mut env.block);
     }
 
@@ -274,6 +279,11 @@ pub(crate) fn build_call_evm_env(
 /// All [TxEnv] fields are derived from the given [CallRequest], if fields are `None`, they fall
 /// back to the [BlockEnv]'s settings.
 pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthResult<TxEnv> {
+    // Ensure that if versioned hashes are set, they're not empty
+    if request.has_empty_blob_hashes() {
+        return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+    }
+
     let CallRequest {
         from,
         to,
@@ -286,18 +296,23 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         nonce,
         access_list,
         chain_id,
+        blob_versioned_hashes,
+        max_fee_per_blob_gas,
         ..
     } = request;
 
-    let CallFees { max_priority_fee_per_gas, gas_price } = CallFees::ensure_fees(
-        gas_price,
-        max_fee_per_gas,
-        max_priority_fee_per_gas,
-        block_env.basefee,
-    )?;
+    let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
+        CallFees::ensure_fees(
+            gas_price,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            block_env.basefee,
+            blob_versioned_hashes.as_deref(),
+            max_fee_per_blob_gas,
+            block_env.get_blob_gasprice().map(U256::from),
+        )?;
 
     let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
-
     let env = TxEnv {
         gas_limit: gas_limit.try_into().map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
         nonce: nonce
@@ -308,9 +323,16 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         gas_priority_fee: max_priority_fee_per_gas,
         transact_to: to.map(TransactTo::Call).unwrap_or_else(TransactTo::create),
         value: value.unwrap_or_default(),
-        data: input.try_into_unique_input()?.map(|data| data.0).unwrap_or_default(),
-        chain_id: chain_id.map(|c| c.as_u64()),
-        access_list: access_list.map(AccessList::flattened).unwrap_or_default(),
+        data: input.try_into_unique_input()?.unwrap_or_default(),
+        chain_id: chain_id.map(|c| c.to()),
+        access_list: access_list
+            .map(reth_rpc_types::AccessList::into_flattened)
+            .unwrap_or_default(),
+        // EIP-4844 fields
+        blob_hashes: blob_versioned_hashes.unwrap_or_default(),
+        max_fee_per_blob_gas,
+        #[cfg(feature = "optimism")]
+        optimism: Default::default(),
     };
 
     Ok(env)
@@ -367,6 +389,8 @@ pub(crate) struct CallFees {
     /// `gasPrice` for legacy,
     /// `maxFeePerGas` for EIP-1559
     gas_price: U256,
+    /// Max Fee per Blob gas for EIP-4844 transactions
+    max_fee_per_blob_gas: Option<U256>,
 }
 
 // === impl CallFees ===
@@ -376,43 +400,101 @@ impl CallFees {
     ///
     /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the returned `gas_price`
     /// will be `0`. See: <https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/internal/ethapi/transaction_args.go#L242-L255>
+    ///
+    /// # EIP-4844 transactions
+    ///
+    /// Blob transactions have an additional fee parameter `maxFeePerBlobGas`.
+    /// If the `maxFeePerBlobGas` or `blobVersionedHashes` are set we treat it as an EIP-4844
+    /// transaction.
+    ///
+    /// Note: Due to the `Default` impl of [BlockEnv] (Some(0)) this assumes the `block_blob_fee` is
+    /// always `Some`
     fn ensure_fees(
         call_gas_price: Option<U256>,
         call_max_fee: Option<U256>,
         call_priority_fee: Option<U256>,
-        base_fee: U256,
+        block_base_fee: U256,
+        blob_versioned_hashes: Option<&[B256]>,
+        max_fee_per_blob_gas: Option<U256>,
+        block_blob_fee: Option<U256>,
     ) -> EthResult<CallFees> {
-        match (call_gas_price, call_max_fee, call_priority_fee) {
-            (gas_price, None, None) => {
+        /// Ensures that the transaction's max fee is lower than the priority fee, if any.
+        fn ensure_valid_fee_cap(
+            max_fee: U256,
+            max_priority_fee_per_gas: Option<U256>,
+        ) -> EthResult<()> {
+            if let Some(max_priority) = max_priority_fee_per_gas {
+                if max_priority > max_fee {
+                    // Fail early
+                    return Err(
+                        // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
+                        RpcInvalidTransactionError::TipAboveFeeCap.into(),
+                    )
+                }
+            }
+            Ok(())
+        }
+
+        let has_blob_hashes =
+            blob_versioned_hashes.as_ref().map(|blobs| !blobs.is_empty()).unwrap_or(false);
+
+        match (call_gas_price, call_max_fee, call_priority_fee, max_fee_per_blob_gas) {
+            (gas_price, None, None, None) => {
                 // either legacy transaction or no fee fields are specified
                 // when no fields are specified, set gas price to zero
                 let gas_price = gas_price.unwrap_or(U256::ZERO);
-                Ok(CallFees { gas_price, max_priority_fee_per_gas: None })
+                Ok(CallFees {
+                    gas_price,
+                    max_priority_fee_per_gas: None,
+                    max_fee_per_blob_gas: has_blob_hashes.then_some(block_blob_fee).flatten(),
+                })
             }
-            (None, max_fee_per_gas, max_priority_fee_per_gas) => {
+            (None, max_fee_per_gas, max_priority_fee_per_gas, None) => {
                 // request for eip-1559 transaction
-                let max_fee = max_fee_per_gas.unwrap_or(base_fee);
+                let max_fee = max_fee_per_gas.unwrap_or(block_base_fee);
+                ensure_valid_fee_cap(max_fee, max_priority_fee_per_gas)?;
 
-                if let Some(max_priority) = max_priority_fee_per_gas {
-                    if max_priority > max_fee {
-                        // Fail early
-                        return Err(
-                            // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
-                            RpcInvalidTransactionError::TipAboveFeeCap.into(),
-                        )
-                    }
-                }
-                Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas })
+                let max_fee_per_blob_gas = has_blob_hashes.then_some(block_blob_fee).flatten();
+
+                Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas, max_fee_per_blob_gas })
             }
-            _ => Err(EthApiError::ConflictingFeeFieldsInRequest),
+            (None, max_fee_per_gas, max_priority_fee_per_gas, Some(max_fee_per_blob_gas)) => {
+                // request for eip-4844 transaction
+                let max_fee = max_fee_per_gas.unwrap_or(block_base_fee);
+                ensure_valid_fee_cap(max_fee, max_priority_fee_per_gas)?;
+
+                // Ensure blob_hashes are present
+                if !has_blob_hashes {
+                    // Blob transaction but no blob hashes
+                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+                }
+
+                Ok(CallFees {
+                    gas_price: max_fee,
+                    max_priority_fee_per_gas,
+                    max_fee_per_blob_gas: Some(max_fee_per_blob_gas),
+                })
+            }
+            _ => {
+                // this fallback covers incompatible combinations of fields
+                Err(EthApiError::ConflictingFeeFieldsInRequest)
+            }
         }
     }
 }
 
 /// Applies the given block overrides to the env
 fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
-    let BlockOverrides { number, difficulty, time, gas_limit, coinbase, random, base_fee } =
-        overrides;
+    let BlockOverrides {
+        number,
+        difficulty,
+        time,
+        gas_limit,
+        coinbase,
+        random,
+        base_fee,
+        block_hash: _,
+    } = overrides;
 
     if let Some(number) = number {
         env.number = number;
@@ -421,10 +503,10 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
         env.difficulty = difficulty;
     }
     if let Some(time) = time {
-        env.timestamp = U256::from(time.as_u64());
+        env.timestamp = U256::from(time);
     }
     if let Some(gas_limit) = gas_limit {
-        env.gas_limit = U256::from(gas_limit.as_u64());
+        env.gas_limit = U256::from(gas_limit);
     }
     if let Some(coinbase) = coinbase {
         env.coinbase = coinbase;
@@ -438,7 +520,10 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
 }
 
 /// Applies the given state overrides (a set of [AccountOverride]) to the [CacheDB].
-fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
+pub(crate) fn apply_state_overrides<DB>(
+    overrides: StateOverride,
+    db: &mut CacheDB<DB>,
+) -> EthResult<()>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -460,14 +545,14 @@ where
     EthApiError: From<<DB as DatabaseRef>::Error>,
 {
     // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
-    // which is modified via `Database::basic`
-    let mut account_info = DatabaseRef::basic(db, account)?.unwrap_or_default();
+    // which is modified via `Database::basic_ref`
+    let mut account_info = DatabaseRef::basic_ref(db, account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
-        account_info.nonce = nonce.as_u64();
+        account_info.nonce = nonce.to();
     }
     if let Some(code) = account_override.code {
-        account_info.code = Some(Bytecode::new_raw(code.0));
+        account_info.code = Some(Bytecode::new_raw(code));
     }
     if let Some(balance) = account_override.balance {
         account_info.balance = balance;
@@ -518,18 +603,6 @@ where
     }
 }
 
-/// Helper to get the output data from a result
-///
-/// TODO: Can be phased out when <https://github.com/bluealloy/revm/pull/509> is released
-#[inline]
-pub(crate) fn result_output(res: &ExecutionResult) -> Option<bytes::Bytes> {
-    match res {
-        ExecutionResult::Success { output, .. } => Some(output.clone().into_data()),
-        ExecutionResult::Revert { output, .. } => Some(output.clone()),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,7 +610,30 @@ mod tests {
     #[test]
     fn test_ensure_0_fallback() {
         let CallFees { gas_price, .. } =
-            CallFees::ensure_fees(None, None, None, U256::from(99)).unwrap();
-        assert_eq!(gas_price, U256::ZERO);
+            CallFees::ensure_fees(None, None, None, U256::from(99), None, None, Some(U256::ZERO))
+                .unwrap();
+        assert!(gas_price.is_zero());
+    }
+
+    #[test]
+    fn test_blob_fees() {
+        let CallFees { gas_price, max_fee_per_blob_gas, .. } =
+            CallFees::ensure_fees(None, None, None, U256::from(99), None, None, Some(U256::ZERO))
+                .unwrap();
+        assert!(gas_price.is_zero());
+        assert_eq!(max_fee_per_blob_gas, None);
+
+        let CallFees { gas_price, max_fee_per_blob_gas, .. } = CallFees::ensure_fees(
+            None,
+            None,
+            None,
+            U256::from(99),
+            Some(&[B256::from(U256::ZERO)]),
+            None,
+            Some(U256::from(99)),
+        )
+        .unwrap();
+        assert!(gas_price.is_zero());
+        assert_eq!(max_fee_per_blob_gas, Some(U256::from(99)));
     }
 }

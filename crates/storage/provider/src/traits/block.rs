@@ -1,16 +1,27 @@
 use crate::{
-    BlockIdReader, BlockNumReader, HeaderProvider, PostState, ReceiptProvider,
+    BlockIdReader, BlockNumReader, BundleStateWithReceipts, Chain, HeaderProvider, ReceiptProvider,
     ReceiptProviderIdExt, TransactionsProvider, WithdrawalsProvider,
 };
 use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
-use reth_interfaces::Result;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     Address, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders,
     ChainSpec, Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    H256,
+    B256,
 };
+use reth_trie::{hashed_cursor::HashedPostState, updates::TrieUpdates};
 use std::ops::RangeInclusive;
+
+/// Enum to control transaction hash inclusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TransactionVariant {
+    /// Indicates that transactions should be processed without including their hashes.
+    NoHash,
+    /// Indicates that transactions should be processed along with their hashes.
+    #[default]
+    WithHash,
+}
 
 /// A helper enum that represents the origin of the requested block.
 ///
@@ -62,50 +73,67 @@ pub trait BlockReader:
     /// Note: this only operates on the hash because the number might be ambiguous.
     ///
     /// Returns `None` if block is not found.
-    fn find_block_by_hash(&self, hash: H256, source: BlockSource) -> Result<Option<Block>>;
+    fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>>;
 
     /// Returns the block with given id from the database.
     ///
     /// Returns `None` if block is not found.
-    fn block(&self, id: BlockHashOrNumber) -> Result<Option<Block>>;
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>>;
 
     /// Returns the pending block if available
     ///
     /// Note: This returns a [SealedBlock] because it's expected that this is sealed by the provider
     /// and the caller does not know the hash.
-    fn pending_block(&self) -> Result<Option<SealedBlock>>;
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>>;
+
+    /// Returns the pending block if available
+    ///
+    /// Note: This returns a [SealedBlockWithSenders] because it's expected that this is sealed by
+    /// the provider and the caller does not know the hash.
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>>;
 
     /// Returns the pending block and receipts if available.
-    fn pending_block_and_receipts(&self) -> Result<Option<(SealedBlock, Vec<Receipt>)>>;
+    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>>;
 
     /// Returns the ommers/uncle headers of the given block from the database.
     ///
     /// Returns `None` if block is not found.
-    fn ommers(&self, id: BlockHashOrNumber) -> Result<Option<Vec<Header>>>;
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>>;
 
     /// Returns the block with matching hash from the database.
     ///
     /// Returns `None` if block is not found.
-    fn block_by_hash(&self, hash: H256) -> Result<Option<Block>> {
+    fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Block>> {
         self.block(hash.into())
     }
 
     /// Returns the block with matching number from database.
     ///
     /// Returns `None` if block is not found.
-    fn block_by_number(&self, num: u64) -> Result<Option<Block>> {
+    fn block_by_number(&self, num: u64) -> ProviderResult<Option<Block>> {
         self.block(num.into())
     }
 
     /// Returns the block body indices with matching number from database.
     ///
     /// Returns `None` if block is not found.
-    fn block_body_indices(&self, num: u64) -> Result<Option<StoredBlockBodyIndices>>;
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>>;
 
-    /// Returns the block with senders with matching number from database.
+    /// Returns the block with senders with matching number or hash from database.
+    ///
+    /// Returns the block's transactions in the requested variant.
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(&self, number: BlockNumber) -> Result<Option<BlockWithSenders>>;
+    fn block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<BlockWithSenders>>;
+
+    /// Returns all blocks in the given inclusive range.
+    ///
+    /// Note: returns only available blocks
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>>;
 }
 
 /// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.
@@ -123,7 +151,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     /// Returns the block with matching tag from the database
     ///
     /// Returns `None` if block is not found.
-    fn block_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Block>> {
+    fn block_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Block>> {
         self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.block(num.into()))
     }
 
@@ -131,7 +159,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     ///
     /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
-    fn pending_header(&self) -> Result<Option<SealedHeader>> {
+    fn pending_header(&self) -> ProviderResult<Option<SealedHeader>> {
         self.sealed_header_by_id(BlockNumberOrTag::Pending.into())
     }
 
@@ -139,7 +167,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     ///
     /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
-    fn latest_header(&self) -> Result<Option<SealedHeader>> {
+    fn latest_header(&self) -> ProviderResult<Option<SealedHeader>> {
         self.sealed_header_by_id(BlockNumberOrTag::Latest.into())
     }
 
@@ -147,7 +175,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     ///
     /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
-    fn safe_header(&self) -> Result<Option<SealedHeader>> {
+    fn safe_header(&self) -> ProviderResult<Option<SealedHeader>> {
         self.sealed_header_by_id(BlockNumberOrTag::Safe.into())
     }
 
@@ -155,19 +183,40 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     ///
     /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
-    fn finalized_header(&self) -> Result<Option<SealedHeader>> {
+    fn finalized_header(&self) -> ProviderResult<Option<SealedHeader>> {
         self.sealed_header_by_id(BlockNumberOrTag::Finalized.into())
     }
 
-    /// Returns the block with the matching `BlockId` from the database.
+    /// Returns the block with the matching [BlockId] from the database.
     ///
     /// Returns `None` if block is not found.
-    fn block_by_id(&self, id: BlockId) -> Result<Option<Block>>;
+    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>>;
+
+    /// Returns the block with senders with matching [BlockId].
+    ///
+    /// Returns the block's transactions in the requested variant.
+    ///
+    /// Returns `None` if block is not found.
+    fn block_with_senders_by_id(
+        &self,
+        id: BlockId,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<BlockWithSenders>> {
+        match id {
+            BlockId::Hash(hash) => {
+                self.block_with_senders(hash.block_hash.into(), transaction_kind)
+            }
+            BlockId::Number(num) => self.convert_block_number(num)?.map_or_else(
+                || Ok(None),
+                |num| self.block_with_senders(num.into(), transaction_kind),
+            ),
+        }
+    }
 
     /// Returns the header with matching tag from the database
     ///
     /// Returns `None` if header is not found.
-    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Header>> {
+    fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Header>> {
         self.convert_block_number(id)?
             .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))
     }
@@ -175,7 +224,10 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     /// Returns the header with matching tag from the database
     ///
     /// Returns `None` if header is not found.
-    fn sealed_header_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<SealedHeader>> {
+    fn sealed_header_by_number_or_tag(
+        &self,
+        id: BlockNumberOrTag,
+    ) -> ProviderResult<Option<SealedHeader>> {
         self.convert_block_number(id)?
             .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))?
             .map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
@@ -184,22 +236,22 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     /// Returns the sealed header with the matching `BlockId` from the database.
     ///
     /// Returns `None` if header is not found.
-    fn sealed_header_by_id(&self, id: BlockId) -> Result<Option<SealedHeader>>;
+    fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>>;
 
     /// Returns the header with the matching `BlockId` from the database.
     ///
     /// Returns `None` if header is not found.
-    fn header_by_id(&self, id: BlockId) -> Result<Option<Header>>;
+    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>>;
 
     /// Returns the ommers with the matching tag from the database.
-    fn ommers_by_number_or_tag(&self, id: BlockNumberOrTag) -> Result<Option<Vec<Header>>> {
+    fn ommers_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Vec<Header>>> {
         self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.ommers(num.into()))
     }
 
     /// Returns the ommers with the matching `BlockId` from the database.
     ///
     /// Returns `None` if block is not found.
-    fn ommers_by_id(&self, id: BlockId) -> Result<Option<Vec<Header>>>;
+    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>>;
 }
 
 /// BlockExecution Writer
@@ -210,7 +262,7 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+    ) -> ProviderResult<Chain> {
         self.get_or_take_block_and_execution_range::<false>(chain_spec, range)
     }
 
@@ -219,7 +271,7 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>> {
+    ) -> ProviderResult<Chain> {
         self.get_or_take_block_and_execution_range::<true>(chain_spec, range)
     }
 
@@ -228,7 +280,7 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
         &self,
         chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>>;
+    ) -> ProviderResult<Chain>;
 }
 
 /// Block Writer
@@ -244,13 +296,13 @@ pub trait BlockWriter: Send + Sync {
         block: SealedBlock,
         senders: Option<Vec<Address>>,
         prune_modes: Option<&PruneModes>,
-    ) -> Result<StoredBlockBodyIndices>;
+    ) -> ProviderResult<StoredBlockBodyIndices>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
     /// updates the post-state.
     ///
     /// Inserts the blocks into the database and updates the state with
-    /// provided `PostState`.
+    /// provided `BundleState`.
     ///
     /// # Parameters
     ///
@@ -261,11 +313,12 @@ pub trait BlockWriter: Send + Sync {
     /// # Returns
     ///
     /// Returns `Ok(())` on success, or an error if any operation fails.
-
-    fn append_blocks_with_post_state(
+    fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
-        state: PostState,
+        state: BundleStateWithReceipts,
+        hashed_state: HashedPostState,
+        trie_updates: TrieUpdates,
         prune_modes: Option<&PruneModes>,
-    ) -> Result<()>;
+    ) -> ProviderResult<()>;
 }

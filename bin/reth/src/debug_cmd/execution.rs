@@ -1,6 +1,10 @@
 //! Command for debugging execution.
 use crate::{
-    args::{get_secret_key, utils::genesis_value_parser, DatabaseArgs, NetworkArgs},
+    args::{
+        get_secret_key,
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::events,
@@ -12,7 +16,6 @@ use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{database::Database, init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -21,21 +24,18 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
 };
-use reth_network::NetworkHandle;
+use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, H256};
-use reth_provider::{BlockExecutionWriter, ProviderFactory, StageCheckpointReader};
+use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, B256};
+use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     sets::DefaultStages,
-    stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
-    },
-    Pipeline, PipelineError, StageSet,
+    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
+    Pipeline, StageSet,
 };
 use reth_tasks::TaskExecutor;
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
 };
@@ -58,16 +58,11 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
@@ -94,7 +89,7 @@ impl Command {
         config: &Config,
         client: Client,
         consensus: Arc<dyn Consensus>,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -107,19 +102,20 @@ impl Command {
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), db.clone())
+            .build(client, Arc::clone(&consensus), provider_factory.clone())
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
-        let factory = reth_revm::Factory::new(self.chain.clone());
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
+        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
         let pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
+                    provider_factory.clone(),
                     header_mode,
                     Arc::clone(&consensus),
                     header_downloader,
@@ -135,16 +131,20 @@ impl Command {
                 })
                 .set(ExecutionStage::new(
                     factory,
-                    ExecutionStageThresholds { max_blocks: None, max_changes: None },
+                    ExecutionStageThresholds {
+                        max_blocks: None,
+                        max_changes: None,
+                        max_cumulative_gas: None,
+                    },
                     stage_conf
                         .merkle
                         .clean_threshold
                         .max(stage_conf.account_hashing.clean_threshold)
                         .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.as_ref().map(|prune| prune.parts.clone()).unwrap_or_default(),
+                    config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
                 )),
             )
-            .build(db, self.chain.clone());
+            .build(provider_factory);
 
         Ok(pipeline)
     }
@@ -162,13 +162,10 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
-            )))
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.discovery.addr,
+                self.network.discovery.port,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
             .start_network()
@@ -182,7 +179,7 @@ impl Command {
         &self,
         client: Client,
         block: BlockNumber,
-    ) -> eyre::Result<H256> {
+    ) -> eyre::Result<B256> {
         info!(target: "reth::cli", ?block, "Fetching block from the network.");
         loop {
             match get_single_header(&client, BlockHashOrNumber::Number(block)).await {
@@ -205,6 +202,7 @@ impl Command {
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
+        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;
@@ -230,12 +228,11 @@ impl Command {
             &config,
             fetch_client.clone(),
             Arc::clone(&consensus),
-            db.clone(),
+            provider_factory.clone(),
             &ctx.task_executor,
         )?;
 
-        let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider = factory.provider().map_err(PipelineError::Interface)?;
+        let provider = provider_factory.provider()?;
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
@@ -251,7 +248,7 @@ impl Command {
         );
         ctx.task_executor.spawn_critical(
             "events task",
-            events::handle_events(Some(network.clone()), latest_block_number, events),
+            events::handle_events(Some(network.clone()), latest_block_number, events, db.clone()),
         );
 
         let mut current_max_block = latest_block_number.unwrap_or_default();
@@ -269,9 +266,8 @@ impl Command {
 
             // Unwind the pipeline without committing.
             {
-                factory
-                    .provider_rw()
-                    .map_err(PipelineError::Interface)?
+                provider_factory
+                    .provider_rw()?
                     .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
             }
 

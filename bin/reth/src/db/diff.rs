@@ -17,7 +17,7 @@ use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
     AccountChangeSet, AccountHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
-    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnvRO, HashedAccount, HashedStorage,
+    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccount, HashedStorage,
     HeaderNumbers, HeaderTD, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
     Receipts, StorageChangeSet, StorageHistory, StoragesTrie, SyncStage, SyncStageProgress, Tables,
     TransactionBlock, Transactions, TxHashNumber, TxSenders,
@@ -58,7 +58,7 @@ impl Command {
     ///
     /// The discrepancies and extra elements, along with a brief summary of the diff results are
     /// then written to a file in the output directory.
-    pub fn execute(self, tool: &DbTool<'_, DatabaseEnvRO>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<'_, DatabaseEnv>) -> eyre::Result<()> {
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
         let second_db = open_db_read_only(&second_db_path, self.second_db.log_level)?;
@@ -148,9 +148,9 @@ impl Command {
 }
 
 /// Find diffs for a table, then analyzing the result
-fn find_diffs<'a, T: Table>(
-    primary_tx: impl DbTx<'a>,
-    secondary_tx: impl DbTx<'a>,
+fn find_diffs<T: Table>(
+    primary_tx: impl DbTx,
+    secondary_tx: impl DbTx,
     output_dir: impl AsRef<Path>,
 ) -> eyre::Result<()>
 where
@@ -231,9 +231,9 @@ where
 
 /// This diff algorithm is slightly different, it will walk _each_ table, cross-checking for the
 /// element in the other table.
-fn find_diffs_advanced<'a, T: Table>(
-    primary_tx: &impl DbTx<'a>,
-    secondary_tx: &impl DbTx<'a>,
+fn find_diffs_advanced<T: Table>(
+    primary_tx: &impl DbTx,
+    secondary_tx: &impl DbTx,
 ) -> eyre::Result<TableDiffResult<T>>
 where
     T::Value: PartialEq,

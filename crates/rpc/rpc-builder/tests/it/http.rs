@@ -1,5 +1,4 @@
 //! Standalone http tests
-
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::{
     core::{
@@ -9,7 +8,7 @@ use jsonrpsee::{
     types::error::ErrorCode,
 };
 use reth_primitives::{
-    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, H256, H64,
+    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, B256, B64,
     U256,
 };
 use reth_rpc_api::{
@@ -18,7 +17,12 @@ use reth_rpc_api::{
     Web3ApiClient,
 };
 use reth_rpc_builder::RethRpcModule;
-use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Filter, Index, TransactionRequest};
+use reth_rpc_types::{
+    trace::filter::TraceFilter, CallRequest, Filter, Index, PendingTransactionFilterKind,
+    TransactionRequest,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
@@ -31,12 +35,66 @@ fn is_unimplemented(err: Error) -> bool {
     }
 }
 
+/// Represents a builder for creating JSON-RPC requests.
+#[derive(Serialize, Deserialize)]
+struct RawRpcBuilder {
+    endpoint: String,
+    method: Option<String>,
+    params: Vec<Value>,
+    id: Option<i32>,
+}
+
+impl RawRpcBuilder {
+    /// Creates a new `RawRpcBuilder` with a given endpoint.
+    fn new(endpoint: impl Into<String>) -> Self {
+        Self { endpoint: endpoint.into(), method: None, params: Vec::new(), id: None }
+    }
+
+    /// Sets the method name for the JSON-RPC request.
+    fn method(mut self, method: impl Into<String>) -> Self {
+        self.method = Some(method.into());
+        self
+    }
+
+    /// Adds a parameter to the JSON-RPC request.
+    fn add_param<S: Serialize>(mut self, param: S) -> Self {
+        self.params.push(serde_json::to_value(param).expect("Failed to serialize parameter"));
+        self
+    }
+
+    /// Sets the ID for the JSON-RPC request.
+    fn set_id(mut self, id: i32) -> Self {
+        self.id = Some(id);
+        self
+    }
+
+    /// Constructs the JSON-RPC request string based on the provided configurations.
+    fn build(self) -> String {
+        let method = self.method.unwrap_or_else(|| panic!("JSON-RPC method not set"));
+        let id = self.id.unwrap_or_else(|| panic!("JSON-RPC id not set"));
+        let params: Vec<String> = self.params.into_iter().map(|p| p.to_string()).collect();
+
+        format!(
+            r#"{{"jsonrpc":"2.0","id":{},"method":"{}","params":[{}]}}"#,
+            id,
+            method,
+            params.join(",")
+        )
+    }
+}
+
 async fn test_filter_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
     EthFilterApiClient::new_filter(client, Filter::default()).await.unwrap();
-    EthFilterApiClient::new_pending_transaction_filter(client).await.unwrap();
+    EthFilterApiClient::new_pending_transaction_filter(client, None).await.unwrap();
+    EthFilterApiClient::new_pending_transaction_filter(
+        client,
+        Some(PendingTransactionFilterKind::Full),
+    )
+    .await
+    .unwrap();
     let id = EthFilterApiClient::new_block_filter(client).await.unwrap();
     EthFilterApiClient::filter_changes(client, id.clone()).await.unwrap();
     EthFilterApiClient::logs(client, Filter::default()).await.unwrap();
@@ -65,7 +123,7 @@ where
 {
     let address = Address::default();
     let index = Index::default();
-    let hash = H256::default();
+    let hash = B256::default();
     let tx_hash = TxHash::default();
     let block_number = BlockNumberOrTag::default();
     let call_request = CallRequest::default();
@@ -102,7 +160,7 @@ where
     EthApiClient::create_access_list(client, call_request.clone(), Some(block_number.into()))
         .await
         .unwrap();
-    EthApiClient::estimate_gas(client, call_request.clone(), Some(block_number.into()))
+    EthApiClient::estimate_gas(client, call_request.clone(), Some(block_number.into()), None)
         .await
         .unwrap();
     EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None, None)
@@ -111,19 +169,17 @@ where
     EthApiClient::syncing(client).await.unwrap();
     EthApiClient::send_transaction(client, transaction_request).await.unwrap_err();
     EthApiClient::hashrate(client).await.unwrap();
-    EthApiClient::submit_hashrate(client, U256::default(), H256::default()).await.unwrap();
+    EthApiClient::submit_hashrate(client, U256::default(), B256::default()).await.unwrap();
     EthApiClient::gas_price(client).await.unwrap_err();
     EthApiClient::max_priority_fee_per_gas(client).await.unwrap_err();
+    EthApiClient::get_proof(client, address, vec![], None).await.unwrap();
 
     // Unimplemented
-    assert!(is_unimplemented(
-        EthApiClient::get_proof(client, address, vec![], None).await.err().unwrap()
-    ));
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::is_mining(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::get_work(client).await.err().unwrap()));
     assert!(is_unimplemented(
-        EthApiClient::submit_work(client, H64::default(), H256::default(), H256::default())
+        EthApiClient::submit_work(client, B64::default(), B256::default(), B256::default())
             .await
             .err()
             .unwrap()
@@ -141,7 +197,7 @@ where
 
     DebugApiClient::raw_header(client, block_id).await.unwrap();
     DebugApiClient::raw_block(client, block_id).await.unwrap();
-    DebugApiClient::raw_transaction(client, H256::default()).await.unwrap();
+    DebugApiClient::raw_transaction(client, B256::default()).await.unwrap();
     DebugApiClient::raw_receipts(client, block_id).await.unwrap();
     assert!(is_unimplemented(DebugApiClient::bad_blocks(client).await.err().unwrap()));
 }
@@ -161,10 +217,11 @@ where
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
     let trace_filter = TraceFilter {
-        from_block: None,
-        to_block: None,
-        from_address: None,
-        to_address: None,
+        from_block: Default::default(),
+        to_block: Default::default(),
+        from_address: Default::default(),
+        to_address: Default::default(),
+        mode: Default::default(),
         after: None,
         count: None,
     };
@@ -175,16 +232,14 @@ where
     TraceApiClient::trace_call_many(client, vec![], Some(BlockNumberOrTag::Latest.into()))
         .await
         .unwrap();
-    TraceApiClient::replay_transaction(client, H256::default(), HashSet::default())
+    TraceApiClient::replay_transaction(client, B256::default(), HashSet::default())
         .await
         .err()
         .unwrap();
     TraceApiClient::trace_block(client, block_id).await.unwrap();
     TraceApiClient::replay_block_transactions(client, block_id, HashSet::default()).await.unwrap();
 
-    assert!(is_unimplemented(
-        TraceApiClient::trace_filter(client, trace_filter).await.err().unwrap()
-    ));
+    TraceApiClient::trace_filter(client, trace_filter).await.unwrap();
 }
 
 async fn test_basic_web3_calls<C>(client: &C)
@@ -206,7 +261,7 @@ where
     let page_number = 1;
     let page_size = 10;
     let nonce = 1;
-    let block_hash = H256::default();
+    let block_hash = B256::default();
 
     OtterscanClient::has_code(client, address, None).await.unwrap();
 
@@ -451,4 +506,21 @@ async fn test_call_otterscan_functions_http_and_ws() {
     let handle = launch_http_ws(vec![RethRpcModule::Ots]).await;
     let client = handle.http_client().unwrap();
     test_basic_otterscan_calls(&client).await;
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rpc_builder_basic() {
+        let rpc_string = RawRpcBuilder::new("http://localhost:8545")
+            .method("eth_getBalance")
+            .add_param("0xaa00000000000000000000000000000000000000")
+            .add_param("0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2")
+            .set_id(1)
+            .build();
+
+        let expected = r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xaa00000000000000000000000000000000000000","0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2"]}"#;
+        assert_eq!(rpc_string, expected, "RPC string did not match expected format.");
+    }
 }

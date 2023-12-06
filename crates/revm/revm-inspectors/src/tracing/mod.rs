@@ -1,9 +1,9 @@
 use crate::tracing::{
-    types::{CallKind, LogCallOrder, RawLog},
+    types::{CallKind, LogCallOrder},
     utils::get_create_address,
 };
+use alloy_primitives::{Address, Bytes, Log, B256, U256};
 pub use arena::CallTraceArena;
-use reth_primitives::{bytes::Bytes, Address, H256, U256};
 use revm::{
     inspectors::GasInspector,
     interpreter::{
@@ -20,18 +20,19 @@ mod builder;
 mod config;
 mod fourbyte;
 mod opcount;
-mod types;
+pub mod types;
 mod utils;
+use self::parity::stack_push_count;
 use crate::tracing::{
     arena::PushTraceKind,
-    types::{CallTraceNode, StorageChange},
+    types::{CallTraceNode, RecordedMemory, StorageChange, StorageChangeReason},
     utils::gas_used,
 };
 pub use builder::{
     geth::{self, GethTraceBuilder},
     parity::{self, ParityTraceBuilder},
 };
-pub use config::TracingInspectorConfig;
+pub use config::{StackSnapshotType, TracingInspectorConfig};
 pub use fourbyte::FourByteInspector;
 pub use opcount::OpcodeCountInspector;
 
@@ -82,12 +83,45 @@ impl TracingInspector {
         }
     }
 
+    /// Gets a reference to the recorded call traces.
+    pub fn get_traces(&self) -> &CallTraceArena {
+        &self.traces
+    }
+
+    /// Gets a mutable reference to the recorded call traces.
+    pub fn get_traces_mut(&mut self) -> &mut CallTraceArena {
+        &mut self.traces
+    }
+
+    /// Manually the gas used of the root trace.
+    ///
+    /// This is useful if the root trace's gasUsed should mirror the actual gas used by the
+    /// transaction.
+    ///
+    /// This allows setting it manually by consuming the execution result's gas for example.
+    #[inline]
+    pub fn set_transaction_gas_used(&mut self, gas_used: u64) {
+        if let Some(node) = self.traces.arena.first_mut() {
+            node.trace.gas_used = gas_used;
+        }
+    }
+
+    /// Convenience function for [ParityTraceBuilder::set_transaction_gas_used] that consumes the
+    /// type.
+    #[inline]
+    pub fn with_transaction_gas_used(mut self, gas_used: u64) -> Self {
+        self.set_transaction_gas_used(gas_used);
+        self
+    }
+
     /// Consumes the Inspector and returns a [ParityTraceBuilder].
+    #[inline]
     pub fn into_parity_builder(self) -> ParityTraceBuilder {
         ParityTraceBuilder::new(self.traces.arena, self.spec_id, self.config)
     }
 
     /// Consumes the Inspector and returns a [GethTraceBuilder].
+    #[inline]
     pub fn into_geth_builder(self) -> GethTraceBuilder {
         GethTraceBuilder::new(self.traces.arena, self.config)
     }
@@ -110,7 +144,7 @@ impl TracingInspector {
     ) -> bool {
         if data.precompiles.contains(to) {
             // only if this is _not_ the root call
-            return self.is_deep() && value == U256::ZERO
+            return self.is_deep() && value.is_zero()
         }
         false
     }
@@ -248,38 +282,42 @@ impl TracingInspector {
     ///
     /// This expects an existing [CallTrace], in other words, this panics if not within the context
     /// of a call.
-    fn start_step<DB: Database>(&mut self, interp: &Interpreter, data: &EVMData<'_, DB>) {
+    fn start_step<DB: Database>(&mut self, interp: &Interpreter<'_>, data: &EVMData<'_, DB>) {
         let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx];
 
         self.step_stack.push(StackStep { trace_idx, step_idx: trace.trace.steps.len() });
 
-        let pc = interp.program_counter();
+        let memory = self
+            .config
+            .record_memory_snapshots
+            .then(|| RecordedMemory::new(interp.shared_memory.context_memory().to_vec()))
+            .unwrap_or_default();
+        let stack = if self.config.record_stack_snapshots.is_full() {
+            Some(interp.stack.data().clone())
+        } else {
+            None
+        };
 
-        let memory =
-            self.config.record_memory_snapshots.then(|| interp.memory.clone()).unwrap_or_default();
-        let stack =
-            self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
-
-        let op = OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+        let op = OpCode::new(interp.current_opcode())
             .or_else(|| {
                 // if the opcode is invalid, we'll use the invalid opcode to represent it because
                 // this is invoked before the opcode is executed, the evm will eventually return a
                 // `Halt` with invalid/unknown opcode as result
                 let invalid_opcode = 0xfe;
-                OpCode::try_from_u8(invalid_opcode)
+                OpCode::new(invalid_opcode)
             })
             .expect("is valid opcode;");
 
         trace.trace.steps.push(CallTraceStep {
             depth: data.journaled_state.depth(),
-            pc,
+            pc: interp.program_counter(),
             op,
             contract: interp.contract.address,
             stack,
             push_stack: None,
+            memory_size: memory.len(),
             memory,
-            memory_size: interp.memory.len(),
             gas_remaining: self.gas_inspector.gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
@@ -295,61 +333,62 @@ impl TracingInspector {
     /// Invoked on [Inspector::step_end].
     fn fill_step_on_step_end<DB: Database>(
         &mut self,
-        interp: &Interpreter,
+        interp: &Interpreter<'_>,
         data: &EVMData<'_, DB>,
-        status: InstructionResult,
     ) {
         let StackStep { trace_idx, step_idx } =
             self.step_stack.pop().expect("can't fill step without starting a step first");
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
 
-        if interp.stack.len() > step.stack.len() {
-            // if the stack grew, we need to record the new values
-            step.push_stack = Some(interp.stack.data()[step.stack.len()..].to_vec());
+        if self.config.record_stack_snapshots.is_pushes() {
+            let num_pushed = stack_push_count(step.op);
+            let start = interp.stack.len() - num_pushed;
+            step.push_stack = Some(interp.stack.data()[start..].to_vec());
         }
 
         if self.config.record_memory_snapshots {
             // resize memory so opcodes that allocated memory is correctly displayed
-            if interp.memory.len() > step.memory.len() {
-                step.memory.resize(interp.memory.len());
+            if interp.shared_memory.len() > step.memory.len() {
+                step.memory.resize(interp.shared_memory.len());
             }
         }
+        if self.config.record_state_diff {
+            let op = step.op.get();
 
-        if let Some(pc) = interp.program_counter().checked_sub(1) {
-            if self.config.record_state_diff {
-                let op = interp.contract.bytecode.bytecode()[pc];
+            let journal_entry = data
+                .journaled_state
+                .journal
+                .last()
+                // This should always work because revm initializes it as `vec![vec![]]`
+                // See [JournaledState::new](revm::JournaledState)
+                .expect("exists; initialized with vec")
+                .last();
 
-                let journal_entry = data
-                    .journaled_state
-                    .journal
-                    .last()
-                    // This should always work because revm initializes it as `vec![vec![]]`
-                    // See [JournaledState::new](revm::JournaledState)
-                    .expect("exists; initialized with vec")
-                    .last();
-
-                step.storage_change = match (op, journal_entry) {
-                    (
-                        opcode::SLOAD | opcode::SSTORE,
-                        Some(JournalEntry::StorageChange { address, key, had_value }),
-                    ) => {
-                        // SAFETY: (Address,key) exists if part if StorageChange
-                        let value =
-                            data.journaled_state.state[address].storage[key].present_value();
-                        let change = StorageChange { key: *key, value, had_value: *had_value };
-                        Some(change)
-                    }
-                    _ => None,
-                };
-            }
-
-            // The gas cost is the difference between the recorded gas remaining at the start of the
-            // step the remaining gas here, at the end of the step.
-            step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
+            step.storage_change = match (op, journal_entry) {
+                (
+                    opcode::SLOAD | opcode::SSTORE,
+                    Some(JournalEntry::StorageChange { address, key, had_value }),
+                ) => {
+                    // SAFETY: (Address,key) exists if part if StorageChange
+                    let value = data.journaled_state.state[address].storage[key].present_value();
+                    let reason = match op {
+                        opcode::SLOAD => StorageChangeReason::SLOAD,
+                        opcode::SSTORE => StorageChangeReason::SSTORE,
+                        _ => unreachable!(),
+                    };
+                    let change = StorageChange { key: *key, value, had_value: *had_value, reason };
+                    Some(change)
+                }
+                _ => None,
+            };
         }
+
+        // The gas cost is the difference between the recorded gas remaining at the start of the
+        // step the remaining gas here, at the end of the step.
+        step.gas_cost = step.gas_remaining - self.gas_inspector.gas_remaining();
 
         // set the status
-        step.status = status;
+        step.status = interp.instruction_result;
     }
 }
 
@@ -357,34 +396,22 @@ impl<DB> Inspector<DB> for TracingInspector
 where
     DB: Database,
 {
-    fn initialize_interp(
-        &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        is_static: bool,
-    ) -> InstructionResult {
-        self.gas_inspector.initialize_interp(interp, data, is_static)
+    fn initialize_interp(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
+        self.gas_inspector.initialize_interp(interp, data)
     }
 
-    fn step(
-        &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        is_static: bool,
-    ) -> InstructionResult {
+    fn step(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         if self.config.record_steps {
-            self.gas_inspector.step(interp, data, is_static);
+            self.gas_inspector.step(interp, data);
             self.start_step(interp, data);
         }
-
-        InstructionResult::Continue
     }
 
     fn log(
         &mut self,
         evm_data: &mut EVMData<'_, DB>,
         address: &Address,
-        topics: &[H256],
+        topics: &[B256],
         data: &Bytes,
     ) {
         self.gas_inspector.log(evm_data, address, topics, data);
@@ -394,31 +421,23 @@ where
 
         if self.config.record_logs {
             trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
-            trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+            trace.logs.push(Log::new_unchecked(topics.to_vec(), data.clone()));
         }
     }
 
-    fn step_end(
-        &mut self,
-        interp: &mut Interpreter,
-        data: &mut EVMData<'_, DB>,
-        is_static: bool,
-        eval: InstructionResult,
-    ) -> InstructionResult {
+    fn step_end(&mut self, interp: &mut Interpreter<'_>, data: &mut EVMData<'_, DB>) {
         if self.config.record_steps {
-            self.gas_inspector.step_end(interp, data, is_static, eval);
-            self.fill_step_on_step_end(interp, data, eval);
+            self.gas_inspector.step_end(interp, data);
+            self.fill_step_on_step_end(interp, data);
         }
-        InstructionResult::Continue
     }
 
     fn call(
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        self.gas_inspector.call(data, inputs, is_static);
+        self.gas_inspector.call(data, inputs);
 
         // determine correct `from` and `to` based on the call scheme
         let (from, to) = match inputs.context.scheme {
@@ -464,9 +483,8 @@ where
         gas: Gas,
         ret: InstructionResult,
         out: Bytes,
-        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
-        self.gas_inspector.call_end(data, inputs, gas, ret, out.clone(), is_static);
+        self.gas_inspector.call_end(data, inputs, gas, ret, out.clone());
 
         self.fill_trace_on_call_end(data, ret, &gas, out.clone(), None);
 
@@ -528,7 +546,7 @@ where
         (status, address, gas, retdata)
     }
 
-    fn selfdestruct(&mut self, _contract: Address, target: Address) {
+    fn selfdestruct(&mut self, _contract: Address, target: Address, _value: U256) {
         let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx].trace;
         trace.selfdestruct_refund_target = Some(target)

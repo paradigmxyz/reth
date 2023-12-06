@@ -4,14 +4,17 @@
     "db": {
       "stats": [],
       "list": [],
+      "diff": [],
       "get": [],
       "drop": [],
+      "clear": [],
       "version": [],
       "path": []
     },
     "debug": {
       "execution": [],
-      "merkle": []
+      "merkle": [],
+      "in-memory-merkle": []
     },
     "import": [],
     "init": [],
@@ -19,6 +22,9 @@
     "p2p": {
       "header": [],
       "body": []
+    },
+    "recover": {
+      "storage-tries": []
     },
     "stage": {
       "run": [],

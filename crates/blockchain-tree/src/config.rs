@@ -11,9 +11,13 @@ pub struct BlockchainTreeConfig {
     max_reorg_depth: u64,
     /// The number of unconnected blocks that we are buffering
     max_unconnected_blocks: usize,
-    /// For EVM's "BLOCKHASH" opcode we require last 256 block hashes. So we need to specify
-    /// at least `additional_canonical_block_hashes`+`max_reorg_depth`, for eth that would be
-    /// 256+64.
+    /// Number of additional block hashes to save in blockchain tree. For `BLOCKHASH` EVM opcode we
+    /// need last 256 block hashes.
+    ///
+    /// The total number of block hashes retained in-memory will be
+    /// `max(additional_canonical_block_hashes, max_reorg_depth)`, and for Ethereum that would
+    /// be 256. It covers both number of blocks required for reorg, and number of blocks
+    /// required for `BLOCKHASH` EVM opcode.
     num_of_additional_canonical_block_hashes: u64,
 }
 
@@ -42,7 +46,7 @@ impl BlockchainTreeConfig {
         max_unconnected_blocks: usize,
     ) -> Self {
         if max_reorg_depth > max_blocks_in_chain {
-            panic!("Side chain size should be more then finalization window");
+            panic!("Side chain size should be more than finalization window");
         }
         Self {
             max_blocks_in_chain,
@@ -66,6 +70,18 @@ impl BlockchainTreeConfig {
     /// in order to have enough information for EVM execution.
     pub fn num_of_additional_canonical_block_hashes(&self) -> u64 {
         self.num_of_additional_canonical_block_hashes
+    }
+
+    /// Return total number of canonical hashes that we need to retain in order to have enough
+    /// information for reorg and EVM execution.
+    ///
+    /// It is calculated as the maximum of `max_reorg_depth` (which is the number of blocks required
+    /// for the deepest reorg possible according to the consensus protocol) and
+    /// `num_of_additional_canonical_block_hashes` (which is the number of block hashes needed to
+    /// satisfy the `BLOCKHASH` opcode in the EVM. See [`crate::BundleStateDataRef`] and
+    /// [`crate::AppendableChain::new_canonical_head_fork`] where it's used).
+    pub fn num_of_canonical_hashes(&self) -> u64 {
+        self.max_reorg_depth.max(self.num_of_additional_canonical_block_hashes)
     }
 
     /// Return max number of unconnected blocks that we are buffering

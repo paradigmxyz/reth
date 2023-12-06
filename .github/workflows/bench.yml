@@ -1,3 +1,5 @@
+# Runs benchmarks.
+
 on:
   pull_request:
   merge_group:
@@ -20,65 +22,32 @@ jobs:
     if: github.event_name != 'pull_request'
     steps:
       - name: Checkout main sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: main
           path: main
-
       - name: Checkout PR sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           clean: false
           path: pr
-
       - name: Install Valgrind
-        run: |
-          sudo apt install valgrind
-
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
-
+        run: sudo apt update && sudo apt install valgrind
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             main -> target
             pr -> target
           cache-on-failure: true
-
       - name: Generate test vectors
         run: |
           cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
           cp -r testdata main
           mv testdata pr
-
       - name: Set main baseline
-        run: cargo bench --package reth-db --bench iai --manifest-path main/Cargo.toml
-
+        run: cargo bench --package reth-db --bench iai --features test-utils --manifest-path main/Cargo.toml
       - name: Compare PR benchmark
         shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
-        run: |
-          ./pr/.github/scripts/compare_iai.sh
-
-  # Checks that benchmarks not run in CI compile
-  bench-check:
-    name: check
-    runs-on:
-      group: Reth
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Check if benchmarks build
-        run: cargo check --workspace --benches --all-features
-
-  bench-success:
-    if: always()
-    name: bench success
-    needs: bench-check
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Decide whether the needed jobs succeeded or failed
-        uses: re-actors/alls-green@release/v1
-        with:
-          jobs: ${{ toJSON(needs) }}
+        run: .github/scripts/compare_iai.sh
+        working-directory: pr

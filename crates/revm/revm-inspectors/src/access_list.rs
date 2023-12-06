@@ -1,10 +1,10 @@
-use hashbrown::{HashMap, HashSet};
-use reth_primitives::{AccessList, AccessListItem, Address, H256};
+use alloy_primitives::{Address, B256};
+use reth_rpc_types::{AccessList, AccessListItem};
 use revm::{
-    interpreter::{opcode, InstructionResult, Interpreter},
+    interpreter::{opcode, Interpreter},
     Database, EVMData, Inspector,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// An [Inspector] that collects touched accounts and storage slots.
 ///
@@ -14,7 +14,7 @@ pub struct AccessListInspector {
     /// All addresses that should be excluded from the final accesslist
     excluded: HashSet<Address>,
     /// All addresses and touched slots
-    access_list: HashMap<Address, BTreeSet<H256>>,
+    access_list: HashMap<Address, BTreeSet<B256>>,
 }
 
 impl AccessListInspector {
@@ -25,10 +25,10 @@ impl AccessListInspector {
         access_list: AccessList,
         from: Address,
         to: Address,
-        precompiles: Vec<Address>,
+        precompiles: impl IntoIterator<Item = Address>,
     ) -> Self {
         AccessListInspector {
-            excluded: [from, to].iter().chain(precompiles.iter()).copied().collect(),
+            excluded: [from, to].into_iter().chain(precompiles).collect(),
             access_list: access_list
                 .0
                 .into_iter()
@@ -62,23 +62,15 @@ impl<DB> Inspector<DB> for AccessListInspector
 where
     DB: Database,
 {
-    fn step(
-        &mut self,
-        interpreter: &mut Interpreter,
-        _data: &mut EVMData<'_, DB>,
-        _is_static: bool,
-    ) -> InstructionResult {
-        let pc = interpreter.program_counter();
-        let op = interpreter.contract.bytecode.bytecode()[pc];
-
-        match op {
+    fn step(&mut self, interpreter: &mut Interpreter<'_>, _data: &mut EVMData<'_, DB>) {
+        match interpreter.current_opcode() {
             opcode::SLOAD | opcode::SSTORE => {
                 if let Ok(slot) = interpreter.stack().peek(0) {
                     let cur_contract = interpreter.contract.address;
                     self.access_list
                         .entry(cur_contract)
                         .or_default()
-                        .insert(H256::from(slot.to_be_bytes()));
+                        .insert(B256::from(slot.to_be_bytes()));
                 }
             }
             opcode::EXTCODECOPY |
@@ -87,7 +79,7 @@ where
             opcode::BALANCE |
             opcode::SELFDESTRUCT => {
                 if let Ok(slot) = interpreter.stack().peek(0) {
-                    let addr: Address = H256::from(slot.to_be_bytes()).into();
+                    let addr = Address::from_word(B256::from(slot.to_be_bytes()));
                     if !self.excluded.contains(&addr) {
                         self.access_list.entry(addr).or_default();
                     }
@@ -95,7 +87,7 @@ where
             }
             opcode::DELEGATECALL | opcode::CALL | opcode::STATICCALL | opcode::CALLCODE => {
                 if let Ok(slot) = interpreter.stack().peek(1) {
-                    let addr: Address = H256::from(slot.to_be_bytes()).into();
+                    let addr = Address::from_word(B256::from(slot.to_be_bytes()));
                     if !self.excluded.contains(&addr) {
                         self.access_list.entry(addr).or_default();
                     }
@@ -103,7 +95,5 @@ where
             }
             _ => (),
         }
-
-        InstructionResult::Continue
     }
 }

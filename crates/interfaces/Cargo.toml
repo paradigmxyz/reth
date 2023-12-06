@@ -8,16 +8,16 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-reth-codecs = { path = "../storage/codecs" }
+reth-codecs.workspace = true
+reth-nippy-jar.workspace = true
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 reth-network-api.workspace = true
 # TODO(onbjerg): We only need this for [BlockBody]
-reth-eth-wire = { path = "../net/eth-wire" }
+reth-eth-wire.workspace = true
 
 # eth
 revm-primitives.workspace = true
-parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 
 # async
 async-trait.workspace = true
@@ -38,20 +38,16 @@ secp256k1 = { workspace = true, default-features = false, features = [
 ], optional = true }
 modular-bitfield = "0.11.2"
 parking_lot.workspace = true
-clap = { version = "4", features = ["derive"], optional = true }
+clap = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
-reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 arbitrary = { workspace = true, features = ["derive"] }
-hex-literal = "0.3"
-secp256k1 = { workspace = true, features = [
-    "alloc",
-    "recovery",
-    "rand",
-] }
+secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
 test-utils = ["tokio-stream/sync", "secp256k1", "rand/std_rng"]
 cli = ["clap"]
+optimism = ["reth-eth-wire/optimism"]

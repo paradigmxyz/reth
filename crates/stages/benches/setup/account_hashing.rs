@@ -5,7 +5,7 @@ use reth_db::{
 use reth_primitives::stage::StageCheckpoint;
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
-    test_utils::TestTransaction,
+    test_utils::TestStageDB,
     ExecInput, UnwindInput,
 };
 use std::path::{Path, PathBuf};
@@ -31,8 +31,9 @@ pub fn prepare_account_hashing(num_blocks: u64) -> (PathBuf, AccountHashingStage
 
 fn find_stage_range(db: &Path) -> StageRange {
     let mut stage_range = None;
-    TestTransaction::new(db)
-        .tx
+    TestStageDB::new(db)
+        .factory
+        .db_ref()
         .view(|tx| {
             let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let from = cursor.first()?.unwrap().0;
@@ -62,8 +63,8 @@ fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
         // create the dirs
         std::fs::create_dir_all(&path).unwrap();
         println!("Account Hashing testdata not found, generating to {:?}", path.display());
-        let tx = TestTransaction::new(&path);
-        let provider = tx.inner_rw();
+        let db = TestStageDB::new(&path);
+        let provider = db.factory.provider_rw().unwrap();
         let _accounts = AccountHashingStage::seed(&provider, opts);
         provider.commit().expect("failed to commit");
     }

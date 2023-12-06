@@ -1,6 +1,10 @@
 //! Command for debugging in-memory merkle trie calculation.
 use crate::{
-    args::{get_secret_key, utils::genesis_value_parser, DatabaseArgs, NetworkArgs},
+    args::{
+        get_secret_key,
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
     utils::{get_single_body, get_single_header},
@@ -9,18 +13,18 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
-    AccountExtReader, BlockExecutor, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, ProviderFactory, StageCheckpointReader, StorageReader,
+    AccountExtReader, BlockWriter, ExecutorFactory, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StorageReader,
 };
 use reth_tasks::TaskExecutor;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, updates::TrieKey, StateRoot};
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{SocketAddr, SocketAddrV4},
     path::PathBuf,
     sync::Arc,
 };
@@ -45,16 +49,11 @@ pub struct Command {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
@@ -88,13 +87,10 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
-            )))
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+                self.network.discovery.addr,
+                self.network.discovery.port,
             )))
             .build(ProviderFactory::new(db, self.chain.clone()))
             .start_network()
@@ -163,24 +159,26 @@ impl Command {
             )
             .await?;
 
-        let executor_factory = reth_revm::Factory::new(self.chain.clone());
-        let mut executor = executor_factory.with_sp(LatestStateProviderRef::new(provider.tx_ref()));
+        let executor_factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
+        let mut executor =
+            executor_factory.with_state(LatestStateProviderRef::new(provider.tx_ref()));
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        let block_state = executor.execute_and_verify_receipt(
+        executor.execute_and_verify_receipt(
             &block.clone().unseal(),
             merkle_block_td + block.difficulty,
             None,
         )?;
+        let block_state = executor.take_output_state();
 
-        // Unpacked `PostState::state_root_slow` function
+        // Unpacked `BundleState::state_root_slow` function
         let hashed_post_state = block_state.hash_state_slow().sorted();
         let (account_prefix_set, storage_prefix_set) = hashed_post_state.construct_prefix_sets();
         let tx = provider.tx_ref();
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_post_state);
         let (in_memory_state_root, in_memory_updates) = StateRoot::new(tx)
-            .with_hashed_cursor_factory(&hashed_cursor_factory)
+            .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_changed_account_prefixes(account_prefix_set)
             .with_changed_storage_prefixes(storage_prefix_set)
             .root_with_updates()?;
@@ -194,9 +192,9 @@ impl Command {
 
         // Insert block, state and hashes
         provider_rw.insert_block(block.clone(), None, None)?;
-        block_state.write_to_db(provider_rw.tx_ref(), block.number)?;
+        block_state.write_to_db(provider_rw.tx_ref(), OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
-        let storages = provider_rw.plainstate_storages(storage_lists)?;
+        let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
         let account_lists = provider_rw.changed_accounts_with_range(block.number..=block.number)?;
         let accounts = provider_rw.basic_accounts(account_lists)?;
@@ -225,7 +223,7 @@ impl Command {
                 (Some(in_mem), Some(incr)) => {
                     pretty_assertions::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
                     if in_mem.1 != incr.1 &&
-                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.inner.len() > self.skip_node_depth.unwrap_or_default())
+                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.len() > self.skip_node_depth.unwrap_or_default())
                     {
                         in_mem_mismatched.push(in_mem);
                         incremental_mismatched.push(incr);

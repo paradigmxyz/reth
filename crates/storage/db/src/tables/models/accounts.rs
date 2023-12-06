@@ -7,9 +7,8 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
-use reth_primitives::{Account, Address, BlockNumber};
+use reth_primitives::{Account, Address, BlockNumber, Buf};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].
@@ -33,7 +32,7 @@ impl Compact for AccountBeforeTx {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         // for now put full bytes and later compress it.
-        buf.put_slice(&self.address.to_fixed_bytes()[..]);
+        buf.put_slice(self.address.as_slice());
 
         let mut acc_len = 0;
         if let Some(account) = self.info {
@@ -42,10 +41,7 @@ impl Compact for AccountBeforeTx {
         acc_len + 20
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         let address = Address::from_slice(&buf[..20]);
         buf.advance(20);
 
@@ -74,7 +70,7 @@ impl BlockNumberAddress {
     ///
     /// Note: End is inclusive
     pub fn range(range: RangeInclusive<BlockNumber>) -> Range<Self> {
-        (*range.start(), Address::zero()).into()..(*range.end() + 1, Address::zero()).into()
+        (*range.start(), Address::ZERO).into()..(*range.end() + 1, Address::ZERO).into()
     }
 
     /// Return the transition id
@@ -109,7 +105,7 @@ impl Encode for BlockNumberAddress {
         let mut buf = [0u8; 28];
 
         buf[..8].copy_from_slice(&tx.to_be_bytes());
-        buf[8..].copy_from_slice(address.as_bytes());
+        buf[8..].copy_from_slice(address.as_slice());
         buf
     }
 }
@@ -117,8 +113,7 @@ impl Encode for BlockNumberAddress {
 impl Decode for BlockNumberAddress {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let value = value.as_ref();
-        let num =
-            u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::DecodeError)?);
+        let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
         let hash = Address::from_slice(&value[8..]);
 
         Ok(BlockNumberAddress((num, hash)))
@@ -141,7 +136,7 @@ mod test {
 
         let mut bytes = [0u8; 28];
         bytes[..8].copy_from_slice(&num.to_be_bytes());
-        bytes[8..].copy_from_slice(&hash.0);
+        bytes[8..].copy_from_slice(hash.as_slice());
 
         let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);

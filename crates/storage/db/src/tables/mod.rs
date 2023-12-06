@@ -36,9 +36,9 @@ use crate::{
 };
 use reth_primitives::{
     stage::StageCheckpoint,
-    trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
+    trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
-    PrunePart, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, H256,
+    PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -59,7 +59,7 @@ pub const NUM_TABLES: usize = 26;
 /// # Example
 ///
 /// ```
-/// use reth_db::{ table::Table, TableViewer, Tables };
+/// use reth_db::{table::Table, TableViewer, Tables};
 /// use std::str::FromStr;
 ///
 /// let headers = Tables::from_str("Headers").unwrap();
@@ -187,27 +187,20 @@ tables!([
     (PruneCheckpoints, TableType::Table)
 ]);
 
-#[macro_export]
 /// Macro to declare key value table.
+#[macro_export]
 macro_rules! table {
     ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | $value:ty) => {
         $(#[$docs])+
         ///
-        #[doc = concat!("Takes [`", stringify!($key), "`] as a key and returns [`", stringify!($value), "`]")]
+        #[doc = concat!("Takes [`", stringify!($key), "`] as a key and returns [`", stringify!($value), "`].")]
         #[derive(Clone, Copy, Debug, Default)]
         pub struct $table_name;
 
         impl $crate::table::Table for $table_name {
-            const NAME: &'static str = $table_name::const_name();
+            const NAME: &'static str = stringify!($table_name);
             type Key = $key;
             type Value = $value;
-        }
-
-        impl $table_name {
-            #[doc=concat!("Return ", stringify!($table_name), " as it is present inside the database.")]
-            pub const fn const_name() -> &'static str {
-                stringify!($table_name)
-            }
         }
 
         impl std::fmt::Display for $table_name {
@@ -225,7 +218,7 @@ macro_rules! dupsort {
         table!(
             $(#[$docs])+
             ///
-            #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`].")]
+            #[doc = concat!("`DUPSORT` table with subkey being: [`", stringify!($subkey), "`]")]
             ( $table_name ) $key | $value
         );
         impl DupSort for $table_name {
@@ -302,7 +295,7 @@ table!(
     /// There will be multiple accounts that have same bytecode
     /// So we would need to introduce reference counter.
     /// This will be small optimization on state.
-    ( Bytecodes ) H256 | Bytecode
+    ( Bytecodes ) B256 | Bytecode
 );
 
 table!(
@@ -312,7 +305,7 @@ table!(
 
 dupsort!(
     /// Stores the current value of a storage key.
-    ( PlainStorageState ) Address | [H256] StorageEntry
+    ( PlainStorageState ) Address | [B256] StorageEntry
 );
 
 table!(
@@ -370,7 +363,7 @@ dupsort!(
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
-    ( StorageChangeSet ) BlockNumberAddress | [H256] StorageEntry
+    ( StorageChangeSet ) BlockNumberAddress | [B256] StorageEntry
 );
 
 table!(
@@ -378,7 +371,7 @@ table!(
     /// This table is in preparation for merkelization and calculation of state root.
     /// We are saving whole account data as it is needed for partial update when
     /// part of storage is changed. Benefit for merkelization is that hashed addresses are sorted.
-    ( HashedAccount ) H256 | Account
+    ( HashedAccount ) B256 | Account
 );
 
 dupsort!(
@@ -386,17 +379,17 @@ dupsort!(
     /// hash of storage key `keccak256(key)`.
     /// This table is in preparation for merkelization and calculation of state root.
     /// Benefit for merklization is that hashed addresses/keys are sorted.
-    ( HashedStorage ) H256 | [H256] StorageEntry
+    ( HashedStorage ) B256 | [B256] StorageEntry
 );
 
 table!(
     /// Stores the current state's Merkle Patricia Tree.
-    ( AccountsTrie ) StoredNibbles | BranchNodeCompact
+    ( AccountsTrie ) Nibbles | BranchNodeCompact
 );
 
 dupsort!(
     /// From HashedAddress => NibblesSubKey => Intermediate value
-    ( StoragesTrie ) H256 | [StoredNibblesSubKey] StorageTrieEntry
+    ( StoragesTrie ) B256 | [StoredNibblesSubKey] StorageTrieEntry
 );
 
 table!(
@@ -417,8 +410,8 @@ table!(
 );
 
 table!(
-    /// Stores the highest pruned block number and prune mode of each prune part.
-    ( PruneCheckpoints ) PrunePart | PruneCheckpoint
+    /// Stores the highest pruned block number and prune mode of each prune segment.
+    ( PruneCheckpoints ) PruneSegment | PruneCheckpoint
 );
 
 /// Alias Types
@@ -430,37 +423,36 @@ pub type StageId = String;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::str::FromStr;
 
-    use crate::*;
-
     const TABLES: [(TableType, &str); NUM_TABLES] = [
-        (TableType::Table, CanonicalHeaders::const_name()),
-        (TableType::Table, HeaderTD::const_name()),
-        (TableType::Table, HeaderNumbers::const_name()),
-        (TableType::Table, Headers::const_name()),
-        (TableType::Table, BlockBodyIndices::const_name()),
-        (TableType::Table, BlockOmmers::const_name()),
-        (TableType::Table, BlockWithdrawals::const_name()),
-        (TableType::Table, TransactionBlock::const_name()),
-        (TableType::Table, Transactions::const_name()),
-        (TableType::Table, TxHashNumber::const_name()),
-        (TableType::Table, Receipts::const_name()),
-        (TableType::Table, PlainAccountState::const_name()),
-        (TableType::DupSort, PlainStorageState::const_name()),
-        (TableType::Table, Bytecodes::const_name()),
-        (TableType::Table, AccountHistory::const_name()),
-        (TableType::Table, StorageHistory::const_name()),
-        (TableType::DupSort, AccountChangeSet::const_name()),
-        (TableType::DupSort, StorageChangeSet::const_name()),
-        (TableType::Table, HashedAccount::const_name()),
-        (TableType::DupSort, HashedStorage::const_name()),
-        (TableType::Table, AccountsTrie::const_name()),
-        (TableType::DupSort, StoragesTrie::const_name()),
-        (TableType::Table, TxSenders::const_name()),
-        (TableType::Table, SyncStage::const_name()),
-        (TableType::Table, SyncStageProgress::const_name()),
-        (TableType::Table, PruneCheckpoints::const_name()),
+        (TableType::Table, CanonicalHeaders::NAME),
+        (TableType::Table, HeaderTD::NAME),
+        (TableType::Table, HeaderNumbers::NAME),
+        (TableType::Table, Headers::NAME),
+        (TableType::Table, BlockBodyIndices::NAME),
+        (TableType::Table, BlockOmmers::NAME),
+        (TableType::Table, BlockWithdrawals::NAME),
+        (TableType::Table, TransactionBlock::NAME),
+        (TableType::Table, Transactions::NAME),
+        (TableType::Table, TxHashNumber::NAME),
+        (TableType::Table, Receipts::NAME),
+        (TableType::Table, PlainAccountState::NAME),
+        (TableType::DupSort, PlainStorageState::NAME),
+        (TableType::Table, Bytecodes::NAME),
+        (TableType::Table, AccountHistory::NAME),
+        (TableType::Table, StorageHistory::NAME),
+        (TableType::DupSort, AccountChangeSet::NAME),
+        (TableType::DupSort, StorageChangeSet::NAME),
+        (TableType::Table, HashedAccount::NAME),
+        (TableType::DupSort, HashedStorage::NAME),
+        (TableType::Table, AccountsTrie::NAME),
+        (TableType::DupSort, StoragesTrie::NAME),
+        (TableType::Table, TxSenders::NAME),
+        (TableType::Table, SyncStage::NAME),
+        (TableType::Table, SyncStageProgress::NAME),
+        (TableType::Table, PruneCheckpoints::NAME),
     ];
 
     #[test]

@@ -1,0 +1,111 @@
+name: lint
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  clippy:
+    name: clippy / ${{ matrix.network }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - binary: reth
+            network: ethereum
+          - binary: op-reth
+            network: optimism
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run:
+          cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}" --lib --tests --benches --examples
+        env:
+          RUSTFLAGS: -D warnings
+
+  msrv:
+    name: MSRV / ${{ matrix.network }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - binary: reth
+            network: ethereum
+          - binary: op-reth
+            network: optimism
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.70" # MSRV
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo build --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}"
+        env:
+          RUSTFLAGS: -D warnings
+
+  docs:
+    name: docs
+    # TODO: reenable when <https://github.com/rust-lang/rust/issues/118670> is resolved.
+    if: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo docs --document-private-items
+        env:
+          # Keep in sync with ./book.yml:jobs.build
+          # This should only add `-D warnings`
+          RUSTDOCFLAGS:
+            --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page
+            -Zunstable-options -D warnings
+
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  grafana:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check dashboard JSON with jq
+        uses: sergeysova/jq-action@v2
+        with:
+          cmd: jq empty etc/grafana/dashboards/overview.json
+
+  lint-success:
+    name: lint success
+    runs-on: ubuntu-latest
+    if: always()
+    # TODO: reenable when <https://github.com/rust-lang/rust/issues/118670> is resolved.
+    # needs: [clippy, docs, fmt, grafana]
+    needs: [clippy, fmt, grafana]
+    timeout-minutes: 30
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

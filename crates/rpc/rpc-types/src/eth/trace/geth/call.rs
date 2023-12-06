@@ -1,4 +1,5 @@
-use reth_primitives::{serde_helper::num::from_int_or_hex, Address, Bytes, H256, U256};
+use crate::serde_helpers::num::from_int_or_hex;
+use alloy_primitives::{Address, Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// The response object for `debug_traceTransaction` with `"tracer": "callTracer"`
@@ -6,36 +7,49 @@ use serde::{Deserialize, Serialize};
 /// <https://github.com/ethereum/go-ethereum/blob/91cb6f863a965481e51d5d9c0e5ccd54796fd967/eth/tracers/native/call.go#L44>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallFrame {
+    /// The address of that initiated the call.
     pub from: Address,
+    /// How much gas was left before the call
     #[serde(default, deserialize_with = "from_int_or_hex")]
     pub gas: U256,
+    /// How much gas was used by the call
     #[serde(default, deserialize_with = "from_int_or_hex", rename = "gasUsed")]
     pub gas_used: U256,
+    /// The address of the contract that was called.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<Address>,
+    /// Calldata input
     pub input: Bytes,
+    /// Output of the call, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<Bytes>,
+    /// Error message, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Why this call reverted, if it reverted.
     #[serde(default, rename = "revertReason", skip_serializing_if = "Option::is_none")]
     pub revert_reason: Option<String>,
+    /// Recorded child calls.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<CallFrame>,
+    /// Logs emitted by this call
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub logs: Vec<CallLogFrame>,
+    /// Value transferred
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<U256>,
+    /// The type of the call
     #[serde(rename = "type")]
     pub typ: String,
 }
 
+/// Represents a recorded call
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallLogFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<Address>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub topics: Option<Vec<H256>>,
+    pub topics: Option<Vec<B256>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<Bytes>,
 }
@@ -49,6 +63,20 @@ pub struct CallConfig {
     pub only_top_call: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub with_log: Option<bool>,
+}
+
+impl CallConfig {
+    /// Sets the only top call flag
+    pub fn only_top_call(mut self) -> Self {
+        self.only_top_call = Some(true);
+        self
+    }
+
+    /// Sets the with log flag
+    pub fn with_log(mut self) -> Self {
+        self.with_log = Some(true);
+        self
+    }
 }
 
 #[cfg(test)]

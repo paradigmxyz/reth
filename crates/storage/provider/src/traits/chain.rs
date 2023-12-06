@@ -59,8 +59,8 @@ impl Stream for CanonStateNotificationStream {
 }
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
-/// and will return all [`crate::PostState`] and [`reth_primitives::SealedBlockWithSenders`] of both
-/// reverted and committed blocks.
+/// and will return all [`crate::BundleStateWithReceipts`] and
+/// [`reth_primitives::SealedBlockWithSenders`] of both reverted and committed blocks.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub enum CanonStateNotification {

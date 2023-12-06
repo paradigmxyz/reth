@@ -25,6 +25,7 @@ It is assumed that the commit that is being considered for release has been mark
 
 - [ ] Tag the new commit on main with `vx.y.z` (`git tag vx.y.z SHA`)
 - [ ] Push the tag (`git push origin vx.y.z`)[^1]
+- [ ] Update [Homebrew Tap](https://github.com/paradigmxyz/homebrew-brew)
 - [ ] Run the release commit on testing infrastructure for 1-3 days to check for inconsistencies and bugs
   - This testing infrastructure is going to sync and keep up with a live testnet, and includes monitoring of bandwidth, CPU, disk space etc.
 

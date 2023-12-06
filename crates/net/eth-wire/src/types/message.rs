@@ -5,12 +5,16 @@ use super::{
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
 use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
+use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use reth_primitives::bytes::{Buf, BufMut};
-use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::{fmt::Debug, sync::Arc};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+/// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
+// https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
+pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 
 /// An `eth` protocol message, containing a message ID and payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -315,6 +319,13 @@ pub enum EthMessageID {
     Receipts = 0x10,
 }
 
+impl EthMessageID {
+    /// Returns the max value.
+    pub const fn max() -> u8 {
+        Self::Receipts as u8
+    }
+}
+
 impl Encodable for EthMessageID {
     fn encode(&self, out: &mut dyn BufMut) {
         out.put_u8(*self as u8);
@@ -325,8 +336,8 @@ impl Encodable for EthMessageID {
 }
 
 impl Decodable for EthMessageID {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
-        let id = buf.first().ok_or(reth_rlp::DecodeError::InputTooShort)?;
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let id = buf.first().ok_or(alloy_rlp::Error::InputTooShort)?;
         let id = match id {
             0x00 => EthMessageID::Status,
             0x01 => EthMessageID::NewBlockHashes,
@@ -343,7 +354,7 @@ impl Decodable for EthMessageID {
             0x0e => EthMessageID::NodeData,
             0x0f => EthMessageID::GetReceipts,
             0x10 => EthMessageID::Receipts,
-            _ => return Err(reth_rlp::DecodeError::Custom("Invalid message ID")),
+            _ => return Err(alloy_rlp::Error::Custom("Invalid message ID")),
         };
         buf.advance(1);
         Ok(id)
@@ -393,7 +404,7 @@ impl<T> Encodable for RequestPair<T>
 where
     T: Encodable,
 {
-    fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         let header =
             Header { list: true, payload_length: self.request_id.length() + self.message.length() };
 
@@ -416,7 +427,7 @@ impl<T> Decodable for RequestPair<T>
 where
     T: Decodable,
 {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let _header = Header::decode(buf)?;
         Ok(Self { request_id: u64::decode(buf)?, message: T::decode(buf)? })
     }
@@ -428,8 +439,8 @@ mod test {
         errors::EthStreamError, types::message::RequestPair, EthMessage, EthMessageID, GetNodeData,
         NodeData, ProtocolMessage,
     };
-    use hex_literal::hex;
-    use reth_rlp::{Decodable, Encodable};
+    use alloy_rlp::{Decodable, Encodable};
+    use reth_primitives::hex;
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
         let mut buf = vec![];

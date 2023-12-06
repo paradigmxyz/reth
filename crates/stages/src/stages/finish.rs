@@ -8,25 +8,25 @@ use reth_provider::DatabaseProviderRW;
 /// This stage does not write anything; it's checkpoint is used to denote the highest fully synced
 /// block.
 #[derive(Default, Debug, Clone)]
+#[non_exhaustive]
 pub struct FinishStage;
 
-#[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for FinishStage {
     fn id(&self) -> StageId {
         StageId::Finish
     }
 
-    async fn execute(
+    fn execute(
         &mut self,
-        _provider: &DatabaseProviderRW<'_, &DB>,
+        _provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
 
-    async fn unwind(
+    fn unwind(
         &mut self,
-        _provider: &DatabaseProviderRW<'_, &DB>,
+        _provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
@@ -38,7 +38,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestStageDB, UnwindStageTestRunner,
     };
     use reth_interfaces::test_utils::{
         generators,
@@ -50,14 +50,14 @@ mod tests {
 
     #[derive(Default)]
     struct FinishTestRunner {
-        tx: TestTransaction,
+        db: TestStageDB,
     }
 
     impl StageTestRunner for FinishTestRunner {
         type S = FinishStage;
 
-        fn tx(&self) -> &TestTransaction {
-            &self.tx
+        fn db(&self) -> &TestStageDB {
+            &self.db
         }
 
         fn stage(&self) -> Self::S {
@@ -72,7 +72,7 @@ mod tests {
             let start = input.checkpoint().block_number;
             let mut rng = generators::rng();
             let head = random_header(&mut rng, start, None);
-            self.tx.insert_headers_with_td(std::iter::once(&head))?;
+            self.db.insert_headers_with_td(std::iter::once(&head))?;
 
             // use previous progress as seed size
             let end = input.target.unwrap_or_default() + 1;
@@ -82,7 +82,7 @@ mod tests {
             }
 
             let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
-            self.tx.insert_headers_with_td(headers.iter())?;
+            self.db.insert_headers_with_td(headers.iter())?;
             headers.insert(0, head);
             Ok(headers)
         }

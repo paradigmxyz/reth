@@ -6,13 +6,12 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_primitives::{
-    Address, BlobTransactionSidecar, BlobTransactionValidationError,
+    AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, EIP1559_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, B256, EIP1559_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, U256,
 };
-use reth_rlp::Encodable;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -130,6 +129,10 @@ pub trait TransactionPool: Send + Sync + Clone {
         self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
+    /// Returns a new Stream that yields blob "sidecars" (blobs w/ assoc. kzg
+    /// commitments/proofs) for eip-4844 transactions inserted into the pool
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar>;
+
     /// Returns a new stream that yields new valid transactions added to the pool
     /// depending on the given [TransactionListenerKind] argument.
     fn new_transactions_listener_for(
@@ -231,6 +234,15 @@ pub trait TransactionPool: Send + Sync + Clone {
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
+    /// Returns an iterator that yields transactions that are ready for block production with the
+    /// given base fee and optional blob fee attributes.
+    ///
+    /// Consumer: Block production
+    fn best_transactions_with_attributes(
+        &self,
+        best_transactions_attributes: BestTransactionsAttributes,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
+
     /// Returns all transactions that can be included in the next block.
     ///
     /// This is primarily used for the `txpool_` RPC namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes between `pending` and `queued` transactions, where `pending` are transactions ready for inclusion in the next block and `queued` are transactions that are ready for inclusion in future blocks.
@@ -294,6 +306,27 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Local]
+    fn get_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Local)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Private]
+    fn get_private_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Private)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::External]
+    fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::External)
+    }
+
     /// Returns a set of all senders of transactions in the pool
     fn unique_senders(&self) -> HashSet<Address>;
 
@@ -338,10 +371,10 @@ pub trait TransactionPoolExt: TransactionPool {
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
 
     /// Deletes the blob sidecar for the given transaction from the blob store
-    fn delete_blob(&self, tx: H256);
+    fn delete_blob(&self, tx: B256);
 
     /// Deletes multiple blob sidecars from the blob store
-    fn delete_blobs(&self, txs: Vec<H256>);
+    fn delete_blobs(&self, txs: Vec<B256>);
 }
 
 /// Determines what kind of new transactions should be emitted by a stream of transactions.
@@ -448,6 +481,17 @@ impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
     }
 }
 
+/// This type represents a new blob sidecar that has been stored in the transaction pool's
+/// blobstore; it includes the TransasctionHash of the blob transaction along with the assoc.
+/// sidecar (blobs, commitments, proofs)
+#[derive(Debug, Clone)]
+pub struct NewBlobSidecar {
+    /// hash of the EIP-4844 transaction.
+    pub tx_hash: TxHash,
+    /// the blob transaction sidecar.
+    pub sidecar: BlobTransactionSidecar,
+}
+
 /// Where the transaction originates from.
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
@@ -496,11 +540,11 @@ pub struct CanonicalStateUpdate<'a> {
     /// EIP-4844 blob fee of the _next_ (pending) block
     ///
     /// Only after Cancun
-    pub pending_block_blob_fee: Option<u64>,
+    pub pending_block_blob_fee: Option<u128>,
     /// A set of changed accounts across a range of blocks.
     pub changed_accounts: Vec<ChangedAccount>,
     /// All mined transactions in the block range.
-    pub mined_transactions: Vec<H256>,
+    pub mined_transactions: Vec<B256>,
 }
 
 impl<'a> CanonicalStateUpdate<'a> {
@@ -510,7 +554,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 
     /// Returns the hash of the tip block.
-    pub fn hash(&self) -> H256 {
+    pub fn hash(&self) -> B256 {
         self.new_tip.hash
     }
 
@@ -607,6 +651,35 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
 }
 
+/// A Helper type that bundles best transactions attributes together.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct BestTransactionsAttributes {
+    /// The base fee attribute for best transactions.
+    pub basefee: u64,
+    /// The blob fee attribute for best transactions.
+    pub blob_fee: Option<u64>,
+}
+
+// === impl BestTransactionsAttributes ===
+
+impl BestTransactionsAttributes {
+    /// Creates a new `BestTransactionsAttributes` with the given basefee and blob fee.
+    pub fn new(basefee: u64, blob_fee: Option<u64>) -> Self {
+        Self { basefee, blob_fee }
+    }
+
+    /// Creates a new `BestTransactionsAttributes` with the given basefee.
+    pub fn base_fee(basefee: u64) -> Self {
+        Self::new(basefee, None)
+    }
+
+    /// Sets the given blob fee.
+    pub fn with_blob_fee(mut self, blob_fee: u64) -> Self {
+        self.blob_fee = Some(blob_fee);
+        self
+    }
+}
+
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction:
     fmt::Debug
@@ -643,6 +716,10 @@ pub trait PoolTransaction:
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128;
 
+    /// Returns the access_list for the particular transaction type.
+    /// For Legacy transactions, returns default.
+    fn access_list(&self) -> Option<&AccessList>;
+
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
     /// This will return `None` for non-EIP1559 transactions
@@ -667,6 +744,15 @@ pub trait PoolTransaction:
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind;
 
+    /// Returns the recipient of the transaction if it is not a [TransactionKind::Create]
+    /// transaction.
+    fn to(&self) -> Option<Address> {
+        (*self.kind()).to()
+    }
+
+    /// Returns the input data of this transaction.
+    fn input(&self) -> &[u8];
+
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
 
@@ -683,11 +769,17 @@ pub trait PoolTransaction:
         self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
-    /// Returns the length of the rlp encoded object
+    /// Returns the length of the rlp encoded transaction object
+    ///
+    /// Note: Implementations should cache this value.
     fn encoded_length(&self) -> usize;
 
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64>;
+
+    /// Returns whether or not the transaction is an Optimism Deposited transaction.
+    #[cfg(feature = "optimism")]
+    fn is_deposit(&self) -> bool;
 }
 
 /// An extension trait that provides additional interfaces for the
@@ -727,7 +819,11 @@ pub struct EthPooledTransaction {
     /// max_blob_fee_per_gas * blob_gas_used`.
     pub(crate) cost: U256,
 
-    /// The blob side car this transaction
+    /// This is the RLP length of the transaction, computed when the transaction is added to the
+    /// pool.
+    pub(crate) encoded_length: usize,
+
+    /// The blob side car for this transaction
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
 }
 
@@ -747,7 +843,7 @@ pub enum EthBlobTransactionSidecar {
 
 impl EthPooledTransaction {
     /// Create new instance of [Self].
-    pub fn new(transaction: TransactionSignedEcRecovered) -> Self {
+    pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
         let gas_cost = match &transaction.transaction {
             Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
@@ -757,15 +853,18 @@ impl EthPooledTransaction {
                 blob_sidecar = EthBlobTransactionSidecar::Missing;
                 U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit)
             }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => U256::ZERO,
         };
-        let mut cost = gas_cost + U256::from(transaction.value());
+        let mut cost: U256 = transaction.value().into();
+        cost += gas_cost;
 
         if let Some(blob_tx) = transaction.as_eip4844() {
             // add max blob cost
-            cost += U256::from(blob_tx.max_fee_per_gas * blob_tx.blob_gas() as u128);
+            cost += U256::from(blob_tx.max_fee_per_blob_gas * blob_tx.blob_gas() as u128);
         }
 
-        Self { transaction, cost, blob_sidecar }
+        Self { transaction, cost, encoded_length, blob_sidecar }
     }
 
     /// Return the reference to the underlying transaction.
@@ -777,19 +876,20 @@ impl EthPooledTransaction {
 /// Conversion from the network transaction type to the pool transaction type.
 impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+        let encoded_length = tx.length_without_header();
         let (tx, signer) = tx.into_components();
         match tx {
             PooledTransactionsElement::BlobTransaction(tx) => {
                 // include the blob sidecar
                 let (tx, blob) = tx.into_parts();
                 let tx = TransactionSignedEcRecovered::from_signed_transaction(tx, signer);
-                let mut pooled = EthPooledTransaction::new(tx);
+                let mut pooled = EthPooledTransaction::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
                 pooled
             }
             tx => {
                 // no blob sidecar
-                EthPooledTransaction::new(tx.into_ecrecovered_transaction(signer))
+                EthPooledTransaction::new(tx.into_ecrecovered_transaction(signer), encoded_length)
             }
         }
     }
@@ -837,7 +937,13 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
             Transaction::Eip4844(tx) => tx.max_fee_per_gas,
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => 0,
         }
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.transaction.access_list()
     }
 
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
@@ -849,6 +955,8 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => None,
         }
     }
 
@@ -861,7 +969,7 @@ impl PoolTransaction for EthPooledTransaction {
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
     /// For legacy transactions: `gas_price - base_fee`.
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(base_fee)
+        self.transaction.effective_tip_per_gas(Some(base_fee))
     }
 
     /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
@@ -876,6 +984,10 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.kind()
     }
 
+    fn input(&self) -> &[u8] {
+        self.transaction.input().as_ref()
+    }
+
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize {
         self.transaction.transaction.input().len()
@@ -888,12 +1000,18 @@ impl PoolTransaction for EthPooledTransaction {
 
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize {
-        self.transaction.length()
+        self.encoded_length
     }
 
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64> {
         self.transaction.chain_id()
+    }
+
+    /// Returns whether or not the transaction is an Optimism Deposited transaction.
+    #[cfg(feature = "optimism")]
+    fn is_deposit(&self) -> bool {
+        matches!(self.transaction.transaction, Transaction::Deposit(_))
     }
 }
 
@@ -924,12 +1042,15 @@ impl EthPoolTransaction for EthPooledTransaction {
 
 impl FromRecoveredTransaction for EthPooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        EthPooledTransaction::new(tx)
+        // CAUTION: this should not be done for EIP-4844 transactions, as the blob sidecar is
+        // missing.
+        let encoded_length = tx.length_without_header();
+        EthPooledTransaction::new(tx, encoded_length)
     }
 }
 
 impl FromRecoveredPooledTransaction for EthPooledTransaction {
-    fn from_recovered_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
         EthPooledTransaction::from(tx)
     }
 }
@@ -947,6 +1068,10 @@ pub struct PoolSize {
     pub pending: usize,
     /// Reported size of transactions in the _pending_ sub-pool.
     pub pending_size: usize,
+    /// Number of transactions in the _blob_ pool.
+    pub blob: usize,
+    /// Reported size of transactions in the _blob_ pool.
+    pub blob_size: usize,
     /// Number of transactions in the _basefee_ pool.
     pub basefee: usize,
     /// Reported size of transactions in the _basefee_ sub-pool.
@@ -961,11 +1086,21 @@ pub struct PoolSize {
     pub total: usize,
 }
 
+// === impl PoolSize ===
+
+impl PoolSize {
+    /// Asserts that the invariants of the pool size are met.
+    #[cfg(test)]
+    pub(crate) fn assert_invariants(&self) {
+        assert_eq!(self.total, self.pending + self.basefee + self.queued + self.blob);
+    }
+}
+
 /// Represents the current status of the pool.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct BlockInfo {
     /// Hash for the currently tracked block.
-    pub last_seen_block_hash: H256,
+    pub last_seen_block_hash: B256,
     /// Current the currently tracked block.
     pub last_seen_block_number: u64,
     /// Currently enforced base fee: the threshold for the basefee sub-pool.
@@ -977,7 +1112,7 @@ pub struct BlockInfo {
     ///
     /// Note: this is the derived blob fee of the _next_ block that builds on the block the pool is
     /// currently tracking
-    pub pending_blob_fee: Option<u64>,
+    pub pending_blob_fee: Option<u128>,
 }
 
 /// The limit to enforce for [TransactionPool::get_pooled_transaction_elements].
@@ -1014,6 +1149,22 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
     /// Create a new stream that yields full transactions from the subpool
     pub fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
         Self { st, subpool }
+    }
+
+    /// Tries to receive the next value for this stream.
+    pub fn try_recv(
+        &mut self,
+    ) -> Result<NewTransactionEvent<Tx>, tokio::sync::mpsc::error::TryRecvError> {
+        loop {
+            match self.st.try_recv() {
+                Ok(event) => {
+                    if event.subpool == self.subpool {
+                        return Ok(event)
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 }
 

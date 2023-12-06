@@ -1,15 +1,19 @@
-use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use rand::Rng;
-use reth_primitives::{fs, fs::FsPathError};
+use reth_primitives::{
+    fs,
+    fs::FsPathError,
+    hex::{self, encode as hex_encode},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
+    str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
-/// Errors returned by the [`JwtSecret`][crate::layers::JwtSecret]
+/// Errors returned by the [`JwtSecret`]
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum JwtError {
@@ -17,19 +21,19 @@ pub enum JwtError {
     JwtSecretHexDecodeError(#[from] hex::FromHexError),
     #[error("JWT key is expected to have a length of {0} digits. {1} digits key provided")]
     InvalidLength(usize, usize),
-    #[error("Unsupported signature algorithm. Only HS256 is supported")]
+    #[error("unsupported signature algorithm. Only HS256 is supported")]
     UnsupportedSignatureAlgorithm,
-    #[error("The provided signature is invalid")]
+    #[error("provided signature is invalid")]
     InvalidSignature,
-    #[error("The iat (issued-at) claim is not within +-60 seconds from the current time")]
+    #[error("IAT (issued-at) claim is not within ±60 seconds from the current time")]
     InvalidIssuanceTimestamp,
     #[error("Authorization header is missing or invalid")]
     MissingOrInvalidAuthorizationHeader,
-    #[error("JWT decoding error {0}")]
+    #[error("JWT decoding error: {0}")]
     JwtDecodingError(String),
     #[error(transparent)]
     JwtFsPathError(#[from] FsPathError),
-    #[error("An I/O error occurred: {0}")]
+    #[error(transparent)]
     IOError(#[from] std::io::Error),
 }
 
@@ -52,11 +56,11 @@ const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 /// for the JWT, which is included in the JWT along with its payload.
 ///
 /// See also: [Secret key - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#key-distribution)
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct JwtSecret([u8; 32]);
 
 impl JwtSecret {
-    /// Creates an instance of [`JwtSecret`][crate::layers::JwtSecret].
+    /// Creates an instance of [`JwtSecret`].
     ///
     /// Returns an error if one of the following applies:
     /// - `hex` is not a valid hexadecimal string
@@ -98,15 +102,7 @@ impl JwtSecret {
         fs::write(fpath, hex)?;
         Ok(secret)
     }
-}
 
-impl std::fmt::Debug for JwtSecret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("JwtSecretHash").field(&"{{}}").finish()
-    }
-}
-
-impl JwtSecret {
     /// Validates a JWT token along the following rules:
     /// - The JWT signature is valid.
     /// - The JWT is signed with the `HMAC + SHA256 (HS256)` algorithm.
@@ -138,8 +134,7 @@ impl JwtSecret {
         Ok(())
     }
 
-    /// Generates a random [`JwtSecret`][crate::layers::JwtSecret]
-    /// containing a hex-encoded 256 bit secret key.
+    /// Generates a random [`JwtSecret`] containing a hex-encoded 256 bit secret key.
     pub fn random() -> Self {
         let random_bytes: [u8; 32] = rand::thread_rng().gen();
         let secret = hex_encode(random_bytes);
@@ -152,10 +147,7 @@ impl JwtSecret {
     /// ```rust
     /// use reth_rpc::{Claims, JwtSecret};
     ///
-    /// let my_claims = Claims {
-    ///     iat: 0,
-    ///     exp: None
-    /// };
+    /// let my_claims = Claims { iat: 0, exp: None };
     /// let secret = JwtSecret::random();
     /// let token = secret.encode(&my_claims).unwrap();
     /// ```
@@ -164,6 +156,20 @@ impl JwtSecret {
         let key = jsonwebtoken::EncodingKey::from_secret(bytes);
         let algo = jsonwebtoken::Header::new(Algorithm::HS256);
         jsonwebtoken::encode(&algo, claims, &key)
+    }
+}
+
+impl std::fmt::Debug for JwtSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("JwtSecretHash").field(&"{{}}").finish()
+    }
+}
+
+impl FromStr for JwtSecret {
+    type Err = JwtError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        JwtSecret::from_hex(s)
     }
 }
 
@@ -196,10 +202,9 @@ impl Claims {
 
 #[cfg(test)]
 mod tests {
-    use super::{Claims, JwtError, JwtSecret};
+    use super::*;
     use crate::layers::jwt_secret::JWT_MAX_IAT_DIFF;
     use assert_matches::assert_matches;
-    use hex::encode as hex_encode;
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
     use reth_primitives::fs::FsPathError;
     use std::{

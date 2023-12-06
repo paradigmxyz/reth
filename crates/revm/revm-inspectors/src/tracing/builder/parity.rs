@@ -1,14 +1,18 @@
 use super::walker::CallTraceNodeWalkerBF;
 use crate::tracing::{
     types::{CallTraceNode, CallTraceStep},
+    utils::load_account_code,
     TracingInspectorConfig,
 };
-use reth_primitives::{Address, U64};
+use alloy_primitives::{Address, U64};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 use revm::{
     db::DatabaseRef,
-    interpreter::opcode::{self, spec_opcode_gas},
-    primitives::{AccountInfo, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
+    interpreter::{
+        opcode::{self, spec_opcode_gas},
+        OpCode,
+    },
+    primitives::{Account, ExecutionResult, ResultAndState, SpecId, KECCAK_EMPTY},
 };
 use std::collections::{HashSet, VecDeque};
 
@@ -28,7 +32,7 @@ pub struct ParityTraceBuilder {
 
 impl ParityTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(
+    pub fn new(
         nodes: Vec<CallTraceNode>,
         spec_id: Option<SpecId>,
         _config: TracingInspectorConfig,
@@ -39,6 +43,26 @@ impl ParityTraceBuilder {
     /// Returns a list of all addresses that appeared as callers.
     pub fn callers(&self) -> HashSet<Address> {
         self.nodes.iter().map(|node| node.trace.caller).collect()
+    }
+
+    /// Manually the gas used of the root trace.
+    ///
+    /// The root trace's gasUsed should mirror the actual gas used by the transaction.
+    ///
+    /// This allows setting it manually by consuming the execution result's gas for example.
+    #[inline]
+    pub fn set_transaction_gas_used(&mut self, gas_used: u64) {
+        if let Some(node) = self.nodes.first_mut() {
+            node.trace.gas_used = gas_used;
+        }
+    }
+
+    /// Convenience function for [ParityTraceBuilder::set_transaction_gas_used] that consumes the
+    /// type.
+    #[inline]
+    pub fn with_transaction_gas_used(mut self, gas_used: u64) -> Self {
+        self.set_transaction_gas_used(gas_used);
+        self
     }
 
     /// Returns the trace addresses of all call nodes in the set
@@ -115,7 +139,7 @@ impl ParityTraceBuilder {
         })
     }
 
-    /// Returns an iterator over all recorded traces  for `trace_transaction`
+    /// Returns all recorded traces for `trace_transaction`
     pub fn into_localized_transaction_traces(
         self,
         info: TransactionInfo,
@@ -126,30 +150,28 @@ impl ParityTraceBuilder {
     /// Consumes the inspector and returns the trace results according to the configured trace
     /// types.
     ///
-    /// Warning: If `trace_types` contains [TraceType::StateDiff] the returned [StateDiff] will only
-    /// contain accounts with changed state, not including their balance changes because this is not
-    /// tracked during inspection and requires the State map returned after inspection. Use
-    /// [ParityTraceBuilder::into_trace_results_with_state] to populate the balance and nonce
-    /// changes for the [StateDiff] using the [DatabaseRef].
+    /// Warning: If `trace_types` contains [TraceType::StateDiff] the returned [StateDiff] will not
+    /// be filled. Use [ParityTraceBuilder::into_trace_results_with_state] or
+    /// [populate_state_diff] to populate the balance and nonce changes for the [StateDiff]
+    /// using the [DatabaseRef].
     pub fn into_trace_results(
         self,
-        res: ExecutionResult,
+        res: &ExecutionResult,
         trace_types: &HashSet<TraceType>,
     ) -> TraceResults {
-        let output = match res {
-            ExecutionResult::Success { output, .. } => output.into_data(),
-            ExecutionResult::Revert { output, .. } => output,
-            ExecutionResult::Halt { .. } => Default::default(),
-        };
+        let gas_used = res.gas_used();
+        let output = res.output().cloned().unwrap_or_default();
 
         let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
 
-        TraceResults {
-            output: output.into(),
-            trace: trace.unwrap_or_default(),
-            vm_trace,
-            state_diff,
-        }
+        let mut trace =
+            TraceResults { output, trace: trace.unwrap_or_default(), vm_trace, state_diff };
+
+        // we're setting the gas used of the root trace explicitly to the gas used of the execution
+        // result
+        trace.set_root_trace_gas_used(gas_used);
+
+        trace
     }
 
     /// Consumes the inspector and returns the trace results according to the configured trace
@@ -161,16 +183,13 @@ impl ParityTraceBuilder {
     /// Note: this is considered a convenience method that takes the state map of
     /// [ResultAndState] after inspecting a transaction
     /// with the [TracingInspector](crate::tracing::TracingInspector).
-    pub fn into_trace_results_with_state<DB>(
+    pub fn into_trace_results_with_state<DB: DatabaseRef>(
         self,
-        res: ResultAndState,
+        res: &ResultAndState,
         trace_types: &HashSet<TraceType>,
         db: DB,
-    ) -> Result<TraceResults, DB::Error>
-    where
-        DB: DatabaseRef,
-    {
-        let ResultAndState { result, state } = res;
+    ) -> Result<TraceResults, DB::Error> {
+        let ResultAndState { ref result, ref state } = res;
 
         let breadth_first_addresses = if trace_types.contains(&TraceType::VmTrace) {
             CallTraceNodeWalkerBF::new(&self.nodes)
@@ -184,11 +203,7 @@ impl ParityTraceBuilder {
 
         // check the state diff case
         if let Some(ref mut state_diff) = trace_res.state_diff {
-            populate_account_balance_nonce_diffs(
-                state_diff,
-                &db,
-                state.into_iter().map(|(addr, acc)| (addr, acc.info)),
-            )?;
+            populate_state_diff(state_diff, &db, state.iter())?;
         }
 
         // check the vm trace case
@@ -199,7 +214,12 @@ impl ParityTraceBuilder {
         Ok(trace_res)
     }
 
-    /// Returns the tracing types that are configured in the set
+    /// Returns the tracing types that are configured in the set.
+    ///
+    /// Warning: if [TraceType::StateDiff] is provided this does __not__ fill the state diff, since
+    /// this requires access to the account diffs.
+    ///
+    /// See [Self::into_trace_results_with_state] and [populate_state_diff].
     pub fn into_trace_type_traces(
         self,
         trace_types: &HashSet<TraceType>,
@@ -215,7 +235,6 @@ impl ParityTraceBuilder {
             if trace_types.contains(&TraceType::VmTrace) { Some(self.vm_trace()) } else { None };
 
         let mut traces = Vec::with_capacity(if with_traces { self.nodes.len() } else { 0 });
-        let mut diff = StateDiff::default();
 
         for node in self.iter_traceable_nodes() {
             let trace_address = self.trace_address(node.idx);
@@ -243,13 +262,10 @@ impl ParityTraceBuilder {
                     }
                 }
             }
-            if with_diff {
-                node.parity_update_state_diff(&mut diff);
-            }
         }
 
         let traces = with_traces.then_some(traces);
-        let diff = with_diff.then_some(diff);
+        let diff = with_diff.then_some(StateDiff::default());
 
         (traces, vm_trace, diff)
     }
@@ -366,88 +382,15 @@ impl ParityTraceBuilder {
         let maybe_memory = if step.memory.is_empty() {
             None
         } else {
-            Some(MemoryDelta { off: step.memory_size, data: step.memory.data().clone().into() })
-        };
-
-        // Calculate the stack items at this step
-        let push_stack = {
-            let step_op = step.op.u8();
-            let show_stack: usize;
-            if (opcode::PUSH0..=opcode::PUSH32).contains(&step_op) {
-                show_stack = 1;
-            } else if (opcode::SWAP1..=opcode::SWAP16).contains(&step_op) {
-                show_stack = (step_op - opcode::SWAP1) as usize + 2;
-            } else if (opcode::DUP1..=opcode::DUP16).contains(&step_op) {
-                show_stack = (step_op - opcode::DUP1) as usize + 2;
-            } else {
-                show_stack = match step_op {
-                    opcode::CALLDATALOAD |
-                    opcode::SLOAD |
-                    opcode::MLOAD |
-                    opcode::CALLDATASIZE |
-                    opcode::LT |
-                    opcode::GT |
-                    opcode::DIV |
-                    opcode::SDIV |
-                    opcode::SAR |
-                    opcode::AND |
-                    opcode::EQ |
-                    opcode::CALLVALUE |
-                    opcode::ISZERO |
-                    opcode::ADD |
-                    opcode::EXP |
-                    opcode::CALLER |
-                    opcode::SHA3 |
-                    opcode::SUB |
-                    opcode::ADDRESS |
-                    opcode::GAS |
-                    opcode::MUL |
-                    opcode::RETURNDATASIZE |
-                    opcode::NOT |
-                    opcode::SHR |
-                    opcode::SHL |
-                    opcode::EXTCODESIZE |
-                    opcode::SLT |
-                    opcode::OR |
-                    opcode::NUMBER |
-                    opcode::PC |
-                    opcode::TIMESTAMP |
-                    opcode::BALANCE |
-                    opcode::SELFBALANCE |
-                    opcode::MULMOD |
-                    opcode::ADDMOD |
-                    opcode::BASEFEE |
-                    opcode::BLOCKHASH |
-                    opcode::BYTE |
-                    opcode::XOR |
-                    opcode::ORIGIN |
-                    opcode::CODESIZE |
-                    opcode::MOD |
-                    opcode::SIGNEXTEND |
-                    opcode::GASLIMIT |
-                    opcode::DIFFICULTY |
-                    opcode::SGT |
-                    opcode::GASPRICE |
-                    opcode::MSIZE |
-                    opcode::EXTCODEHASH |
-                    opcode::SMOD |
-                    opcode::CHAINID |
-                    opcode::COINBASE => 1,
-                    _ => 0,
-                }
-            };
-            let mut push_stack = step.push_stack.clone().unwrap_or_default();
-            for idx in (0..show_stack).rev() {
-                if step.stack.len() > idx {
-                    push_stack.push(step.stack.peek(idx).unwrap_or_default())
-                }
-            }
-            push_stack
+            Some(MemoryDelta {
+                off: step.memory_size,
+                data: step.memory.as_bytes().to_vec().into(),
+            })
         };
 
         let maybe_execution = Some(VmExecutedOperation {
             used: step.gas_remaining,
-            push: push_stack,
+            push: step.push_stack.clone().unwrap_or_default(),
             mem: maybe_memory,
             store: maybe_storage,
         });
@@ -455,7 +398,7 @@ impl ParityTraceBuilder {
         let cost = self
             .spec_id
             .and_then(|spec_id| {
-                spec_opcode_gas(spec_id).get(step.op.u8() as usize).map(|op| op.get_gas())
+                spec_opcode_gas(spec_id).get(step.op.get() as usize).map(|op| op.get_gas())
             })
             .unwrap_or_default();
 
@@ -471,10 +414,6 @@ impl ParityTraceBuilder {
 }
 
 /// An iterator for [TransactionTrace]s
-///
-/// This iterator handles additional selfdestruct actions based on the last emitted
-/// [TransactionTrace], since selfdestructs are not recorded as individual call traces but are
-/// derived from recorded call
 struct TransactionTraceIter<Iter> {
     iter: Iter,
     next_selfdestruct: Option<TransactionTrace>,
@@ -508,7 +447,7 @@ where
 ///
 /// iteratively fill the [VmTrace] code fields
 pub(crate) fn populate_vm_trace_bytecodes<DB, I>(
-    db: &DB,
+    db: DB,
     trace: &mut VmTrace,
     breadth_first_addresses: I,
 ) -> Result<(), DB::Error>
@@ -530,11 +469,11 @@ where
 
         let addr = addrs.next().expect("there should be an address");
 
-        let db_acc = db.basic(addr)?.unwrap_or_default();
+        let db_acc = db.basic_ref(addr)?.unwrap_or_default();
 
         let code_hash = if db_acc.code_hash != KECCAK_EMPTY { db_acc.code_hash } else { continue };
 
-        curr_ref.code = db.code_by_hash(code_hash)?.original_bytes().into();
+        curr_ref.code = db.code_by_hash_ref(code_hash)?.original_bytes();
     }
 
     Ok(())
@@ -544,34 +483,150 @@ where
 /// in the [ExecutionResult] state map and compares the balance and nonce against what's in the
 /// `db`, which should point to the beginning of the transaction.
 ///
-/// It's expected that `DB` is a [CacheDB](revm::db::CacheDB) which at this point already contains
-/// all the accounts that are in the state map and never has to fetch them from disk.
-pub fn populate_account_balance_nonce_diffs<DB, I>(
+/// It's expected that `DB` is a revm [Database](revm::db::Database) which at this point already
+/// contains all the accounts that are in the state map and never has to fetch them from disk.
+pub fn populate_state_diff<'a, DB, I>(
     state_diff: &mut StateDiff,
     db: DB,
     account_diffs: I,
 ) -> Result<(), DB::Error>
 where
-    I: IntoIterator<Item = (Address, AccountInfo)>,
+    I: IntoIterator<Item = (&'a Address, &'a Account)>,
     DB: DatabaseRef,
 {
     for (addr, changed_acc) in account_diffs.into_iter() {
+        // if the account was selfdestructed and created during the transaction, we can ignore it
+        if changed_acc.is_selfdestructed() && changed_acc.is_created() {
+            continue
+        }
+
+        let addr = *addr;
         let entry = state_diff.entry(addr).or_default();
-        let db_acc = db.basic(addr)?.unwrap_or_default();
-        entry.balance = if db_acc.balance == changed_acc.balance {
-            Delta::Unchanged
+
+        // we check if this account was created during the transaction
+        if changed_acc.is_created() || changed_acc.is_loaded_as_not_existing() {
+            entry.balance = Delta::Added(changed_acc.info.balance);
+            entry.nonce = Delta::Added(U64::from(changed_acc.info.nonce));
+
+            // accounts without code are marked as added
+            let account_code = load_account_code(&db, &changed_acc.info).unwrap_or_default();
+            entry.code = Delta::Added(account_code);
+
+            // new storage values are marked as added,
+            // however we're filtering changed here to avoid adding entries for the zero value
+            for (key, slot) in changed_acc.storage.iter().filter(|(_, slot)| slot.is_changed()) {
+                entry.storage.insert((*key).into(), Delta::Added(slot.present_value.into()));
+            }
         } else {
-            Delta::Changed(ChangedType { from: db_acc.balance, to: changed_acc.balance })
-        };
-        entry.nonce = if db_acc.nonce == changed_acc.nonce {
-            Delta::Unchanged
-        } else {
-            Delta::Changed(ChangedType {
-                from: U64::from(db_acc.nonce),
-                to: U64::from(changed_acc.nonce),
-            })
-        };
+            // account already exists, we need to fetch the account from the db
+            let db_acc = db.basic_ref(addr)?.unwrap_or_default();
+
+            // update _changed_ storage values
+            for (key, slot) in changed_acc.storage.iter().filter(|(_, slot)| slot.is_changed()) {
+                entry.storage.insert(
+                    (*key).into(),
+                    Delta::changed(
+                        slot.previous_or_original_value.into(),
+                        slot.present_value.into(),
+                    ),
+                );
+            }
+
+            // check if the account was changed at all
+            if entry.storage.is_empty() &&
+                db_acc == changed_acc.info &&
+                !changed_acc.is_selfdestructed()
+            {
+                // clear the entry if the account was not changed
+                state_diff.remove(&addr);
+                continue
+            }
+
+            entry.balance = if db_acc.balance == changed_acc.info.balance {
+                Delta::Unchanged
+            } else {
+                Delta::Changed(ChangedType { from: db_acc.balance, to: changed_acc.info.balance })
+            };
+
+            // this is relevant for the caller and contracts
+            entry.nonce = if db_acc.nonce == changed_acc.info.nonce {
+                Delta::Unchanged
+            } else {
+                Delta::Changed(ChangedType {
+                    from: U64::from(db_acc.nonce),
+                    to: U64::from(changed_acc.info.nonce),
+                })
+            };
+        }
     }
 
     Ok(())
+}
+
+/// Returns the number of items pushed on the stack by a given opcode.
+/// This used to determine how many stack etries to put in the `push` element
+/// in a parity vmTrace.
+/// The value is obvious for most opcodes, but SWAP* and DUP* are a bit weird,
+/// and we handle those as they are handled in parity vmtraces.
+/// For reference: <https://github.com/ledgerwatch/erigon/blob/9b74cf0384385817459f88250d1d9c459a18eab1/turbo/jsonrpc/trace_adhoc.go#L451>
+pub(crate) fn stack_push_count(step_op: OpCode) -> usize {
+    let step_op = step_op.get();
+    match step_op {
+        opcode::PUSH0..=opcode::PUSH32 => 1,
+        opcode::SWAP1..=opcode::SWAP16 => (step_op - opcode::SWAP1) as usize + 2,
+        opcode::DUP1..=opcode::DUP16 => (step_op - opcode::DUP1) as usize + 2,
+        opcode::CALLDATALOAD |
+        opcode::SLOAD |
+        opcode::MLOAD |
+        opcode::CALLDATASIZE |
+        opcode::LT |
+        opcode::GT |
+        opcode::DIV |
+        opcode::SDIV |
+        opcode::SAR |
+        opcode::AND |
+        opcode::EQ |
+        opcode::CALLVALUE |
+        opcode::ISZERO |
+        opcode::ADD |
+        opcode::EXP |
+        opcode::CALLER |
+        opcode::KECCAK256 |
+        opcode::SUB |
+        opcode::ADDRESS |
+        opcode::GAS |
+        opcode::MUL |
+        opcode::RETURNDATASIZE |
+        opcode::NOT |
+        opcode::SHR |
+        opcode::SHL |
+        opcode::EXTCODESIZE |
+        opcode::SLT |
+        opcode::OR |
+        opcode::NUMBER |
+        opcode::PC |
+        opcode::TIMESTAMP |
+        opcode::BALANCE |
+        opcode::SELFBALANCE |
+        opcode::MULMOD |
+        opcode::ADDMOD |
+        opcode::BASEFEE |
+        opcode::BLOCKHASH |
+        opcode::BYTE |
+        opcode::XOR |
+        opcode::ORIGIN |
+        opcode::CODESIZE |
+        opcode::MOD |
+        opcode::SIGNEXTEND |
+        opcode::GASLIMIT |
+        opcode::DIFFICULTY |
+        opcode::SGT |
+        opcode::GASPRICE |
+        opcode::MSIZE |
+        opcode::EXTCODEHASH |
+        opcode::SMOD |
+        opcode::CHAINID |
+        opcode::COINBASE => 1,
+        _ => 0,
+    }
 }

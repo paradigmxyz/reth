@@ -12,7 +12,7 @@ use reth_eth_wire::{
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{
-    BlockBody, Bytes, Header, PeerId, PooledTransactionsElement, ReceiptWithBloom, H256,
+    BlockBody, Bytes, Header, PeerId, PooledTransactionsElement, ReceiptWithBloom, B256,
 };
 use std::{
     fmt,
@@ -25,7 +25,7 @@ use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot};
 #[derive(Debug, Clone)]
 pub struct NewBlockMessage {
     /// Hash of the block
-    pub hash: H256,
+    pub hash: B256,
     /// Raw received message
     pub block: Arc<NewBlock>,
 }
@@ -144,6 +144,14 @@ impl PeerRequest {
             PeerRequest::GetReceipts { request, .. } => {
                 EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
             }
+        }
+    }
+
+    /// Consumes the type and returns the inner [`GetPooledTransactions`] variant.
+    pub fn into_get_pooled_transactions(self) -> Option<GetPooledTransactions> {
+        match self {
+            PeerRequest::GetPooledTransactions { request, .. } => Some(request),
+            _ => None,
         }
     }
 }

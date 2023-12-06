@@ -1,17 +1,17 @@
 use crate::Log;
-use reth_primitives::{Address, Bloom, H256, U128, U256, U64, U8};
+use alloy_primitives::{Address, Bloom, B256, U128, U256, U64, U8};
 use serde::{Deserialize, Serialize};
 
 /// Transaction receipt
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionReceipt {
     /// Transaction Hash.
-    pub transaction_hash: Option<H256>,
+    pub transaction_hash: Option<B256>,
     /// Index within the block.
     pub transaction_index: U64,
     /// Hash of the block this transaction was included within.
-    pub block_hash: Option<H256>,
+    pub block_hash: Option<B256>,
     /// Number of the block this transaction was included within.
     pub block_number: Option<U256>,
     /// Cumulative gas used within the block after this was executed.
@@ -44,11 +44,31 @@ pub struct TransactionReceipt {
     ///
     /// EIP98 makes this optional field, if it's missing then skip serializing it
     #[serde(skip_serializing_if = "Option::is_none", rename = "root")]
-    pub state_root: Option<H256>,
+    pub state_root: Option<B256>,
     /// Status: either 1 (success) or 0 (failure). Only present after activation of EIP-658
     #[serde(skip_serializing_if = "Option::is_none", rename = "status")]
     pub status_code: Option<U64>,
     /// EIP-2718 Transaction type, Some(1) for AccessList transaction, None for Legacy
     #[serde(rename = "type")]
     pub transaction_type: U8,
+    /// Deposit nonce for deposit transactions post-regolith
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deposit_nonce: Option<U64>,
+    /// L1 fee for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub l1_fee: Option<U256>,
+    /// L1 fee scalar for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub l1_fee_scalar: Option<U256>,
+    /// L1 gas price for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub l1_gas_price: Option<U256>,
+    /// L1 gas used for the transaction
+    #[cfg(feature = "optimism")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub l1_gas_used: Option<U256>,
 }

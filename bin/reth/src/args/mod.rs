@@ -8,6 +8,10 @@ pub use network_args::{DiscoveryArgs, NetworkArgs};
 mod rpc_server_args;
 pub use rpc_server_args::RpcServerArgs;
 
+/// RpcStateCacheArgs struct for configuring RPC state cache
+mod rpc_state_cache_args;
+pub use rpc_state_cache_args::RpcStateCacheArgs;
+
 /// DebugArgs struct for debugging purposes
 mod debug_args;
 pub use debug_args::DebugArgs;
@@ -31,7 +35,7 @@ pub use stage_args::StageEnum;
 mod gas_price_oracle_args;
 pub use gas_price_oracle_args::GasPriceOracleArgs;
 
-/// TxPoolArgs for congiguring the transaction pool
+/// TxPoolArgs for configuring the transaction pool
 mod txpool_args;
 pub use txpool_args::TxPoolArgs;
 
@@ -43,4 +47,12 @@ pub use dev_args::DevArgs;
 mod pruning_args;
 pub use pruning_args::PruningArgs;
 
+/// RollupArgs for configuring the op-reth rollup
+#[cfg(feature = "optimism")]
+mod rollup_args;
+#[cfg(feature = "optimism")]
+pub use rollup_args::RollupArgs;
+
 pub mod utils;
+
+pub mod types;

@@ -6,7 +6,7 @@ use crate::{
     },
     EthApi,
 };
-use ethers_core::types::transaction::eip712::TypedData;
+use alloy_dyn_abi::TypedData;
 use reth_primitives::{Address, Bytes};
 use serde_json::Value;
 use std::ops::Deref;
@@ -15,16 +15,15 @@ impl<Provider, Pool, Network> EthApi<Provider, Pool, Network> {
     pub(crate) async fn sign(&self, account: Address, message: Bytes) -> EthResult<Bytes> {
         let signer = self.find_signer(&account)?;
         let signature = signer.sign(account, &message).await?;
-        let bytes = hex::encode(signature.to_bytes()).as_bytes().into();
-        Ok(bytes)
+        Ok(signature.to_hex_bytes())
     }
 
     pub(crate) async fn sign_typed_data(&self, data: Value, account: Address) -> EthResult<Bytes> {
         let signer = self.find_signer(&account)?;
-        let data = serde_json::from_value::<TypedData>(data).map_err(|_| SignError::TypedData)?;
+        let data =
+            serde_json::from_value::<TypedData>(data).map_err(|_| SignError::InvalidTypedData)?;
         let signature = signer.sign_typed_data(account, &data)?;
-        let bytes = hex::encode(signature.to_bytes()).as_bytes().into();
-        Ok(bytes)
+        Ok(signature.to_hex_bytes())
     }
 
     pub(crate) fn find_signer(

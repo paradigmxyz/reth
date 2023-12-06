@@ -1,4 +1,8 @@
 use crate::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
     dirs::{DataDirPath, MaybePlatformPath},
     init::init_genesis,
     node::events::{handle_events, NodeEvent},
@@ -8,9 +12,6 @@ use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
-use reth_provider::{ProviderFactory, StageCheckpointReader};
-
-use crate::args::{utils::genesis_value_parser, DatabaseArgs};
 use reth_config::Config;
 use reth_db::{database::Database, init_db};
 use reth_downloaders::{
@@ -18,13 +19,11 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
 use reth_interfaces::consensus::Consensus;
-use reth_primitives::{stage::StageId, ChainSpec, H256};
+use reth_primitives::{stage::StageId, ChainSpec, B256};
+use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
-    stages::{
-        ExecutionStage, ExecutionStageThresholds, HeaderSyncMode, SenderRecoveryStage,
-        TotalDifficultyStage,
-    },
+    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
 };
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
@@ -50,16 +49,11 @@ pub struct ImportCommand {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    ///
-    /// Built-in chains:
-    /// - mainnet
-    /// - goerli
-    /// - sepolia
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
@@ -92,6 +86,7 @@ impl ImportCommand {
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.log_level)?);
         info!(target: "reth::cli", "Database opened");
+        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -108,19 +103,19 @@ impl ImportCommand {
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
-        let (mut pipeline, events) =
-            self.build_import_pipeline(config, Arc::clone(&db), &consensus, file_client).await?;
+        let (mut pipeline, events) = self
+            .build_import_pipeline(config, provider_factory.clone(), &consensus, file_client)
+            .await?;
 
         // override the tip
         pipeline.set_tip(tip);
         debug!(target: "reth::cli", ?tip, "Tip manually set");
 
-        let factory = ProviderFactory::new(&db, self.chain.clone());
-        let provider = factory.provider().map_err(PipelineError::Interface)?;
+        let provider = provider_factory.provider()?;
 
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(handle_events(None, latest_block_number, events));
+        tokio::spawn(handle_events(None, latest_block_number, events, db.clone()));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
@@ -136,7 +131,7 @@ impl ImportCommand {
     async fn build_import_pipeline<DB, C>(
         &self,
         config: Config,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
@@ -153,11 +148,11 @@ impl ImportCommand {
             .into_task();
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(file_client.clone(), consensus.clone(), db.clone())
+            .build(file_client.clone(), consensus.clone(), provider_factory.clone())
             .into_task();
 
-        let (tip_tx, tip_rx) = watch::channel(H256::zero());
-        let factory = reth_revm::Factory::new(self.chain.clone());
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
+        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone());
 
         let max_block = file_client.max_block().unwrap_or(0);
         let mut pipeline = Pipeline::builder()
@@ -166,6 +161,7 @@ impl ImportCommand {
             .with_max_block(max_block)
             .add_stages(
                 DefaultStages::new(
+                    provider_factory.clone(),
                     HeaderSyncMode::Tip(tip_rx),
                     consensus.clone(),
                     header_downloader,
@@ -184,6 +180,7 @@ impl ImportCommand {
                     ExecutionStageThresholds {
                         max_blocks: config.stages.execution.max_blocks,
                         max_changes: config.stages.execution.max_changes,
+                        max_cumulative_gas: config.stages.execution.max_cumulative_gas,
                     },
                     config
                         .stages
@@ -191,10 +188,10 @@ impl ImportCommand {
                         .clean_threshold
                         .max(config.stages.account_hashing.clean_threshold)
                         .max(config.stages.storage_hashing.clean_threshold),
-                    config.prune.map(|prune| prune.parts).unwrap_or_default(),
+                    config.prune.map(|prune| prune.segments).unwrap_or_default(),
                 )),
             )
-            .build(db, self.chain.clone());
+            .build(provider_factory);
 
         let events = pipeline.events().map(Into::into);
 
@@ -214,7 +211,7 @@ mod tests {
 
     #[test]
     fn parse_common_import_command_chain_args() {
-        for chain in ["mainnet", "sepolia", "goerli"] {
+        for chain in SUPPORTED_CHAINS {
             let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }

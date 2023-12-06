@@ -1,17 +1,13 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! This crate provides [Metrics] derive macro
+
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
-//! This crate provides [Metrics] derive macro
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput};
@@ -32,8 +28,8 @@ mod with_attrs;
 ///
 /// Sample usage:
 /// ```
-/// use reth_metrics_derive::Metrics;
 /// use metrics::{Counter, Gauge, Histogram};
+/// use reth_metrics_derive::Metrics;
 ///
 /// #[derive(Metrics)]
 /// #[metrics(scope = "metrics_custom")]
@@ -47,7 +43,7 @@ mod with_attrs;
 ///     counter: Counter,
 ///     /// A renamed histogram.
 ///     #[metric(rename = "histogram")]
-///     histo: Histogram
+///     histo: Histogram,
 /// }
 /// ```
 ///
@@ -60,7 +56,7 @@ mod with_attrs;
 ///     /// Some doc comment
 ///     counter: metrics::Counter,
 ///     /// A renamed histogram.
-///     histo: metrics::Histogram
+///     histo: metrics::Histogram,
 /// }
 ///
 /// impl Default for CustomMetrics {
@@ -77,9 +73,18 @@ mod with_attrs;
 /// impl CustomMetrics {
 ///     /// Describe all exposed metrics
 ///     pub fn describe() {
-///         metrics::describe_gauge!("metrics_custom_gauge", "A gauge with doc comment description.");
-///         metrics::describe_gauge!("metrics_custom_second_gauge", "A gauge with metric attribute description.");
-///         metrics::describe_counter!("metrics_custom_counter", "Metric attribute description will be preferred over doc comment.");
+///         metrics::describe_gauge!(
+///             "metrics_custom_gauge",
+///             "A gauge with doc comment description."
+///         );
+///         metrics::describe_gauge!(
+///             "metrics_custom_second_gauge",
+///             "A gauge with metric attribute description."
+///         );
+///         metrics::describe_counter!(
+///             "metrics_custom_counter",
+///             "Metric attribute description will be preferred over doc comment."
+///         );
 ///         metrics::describe_histogram!("metrics_custom_histogram", "A renamed histogram.");
 ///     }
 /// }
@@ -114,13 +119,14 @@ mod with_attrs;
 ///
 /// impl DynamicScopeMetrics {
 ///     pub fn new(scope: &str) -> Self {
-///         Self {
-///             gauge: metrics::register_gauge!(format!("{}{}{}", scope, "_", "gauge"))
-///         }
+///         Self { gauge: metrics::register_gauge!(format!("{}{}{}", scope, "_", "gauge")) }
 ///     }
 ///
 ///     pub fn describe(scope: &str) {
-///         metrics::describe_gauge!(format!("{}{}{}", scope, "_", "gauge"), "A gauge with doc comment description.");
+///         metrics::describe_gauge!(
+///             format!("{}{}{}", scope, "_", "gauge"),
+///             "A gauge with doc comment description."
+///         );
 ///     }
 /// }
 ///

@@ -335,8 +335,8 @@ nanos = 0
 
 The prune section configures the pruning configuration.
 
-You can configure the pruning of different parts of the data independently of others.
-For any unspecified parts, the default setting is no pruning.
+You can configure the pruning of different segments of the data independently of others.
+For any unspecified segments, the default setting is no pruning.
 
 ### Default config
 
@@ -346,7 +346,8 @@ No pruning, run as archive node.
 
 This configuration will:
 - Run pruning every 5 blocks
-- Continuously prune all transaction senders, account history and storage history before the block `head-128`, i.e. keep the data for the last 129 blocks
+- Continuously prune all transaction senders, account history and storage history before the block `head-100_000`,
+i.e. keep the data for the last `100_000` blocks
 - Prune all receipts before the block 1920000, i.e. keep receipts from the block 1920000
 
 ```toml
@@ -356,7 +357,7 @@ block_interval = 5
 
 [prune.parts]
 # Sender Recovery pruning configuration
-sender_recovery = { distance = 128 } # Prune all transaction senders before the block `head-128`, i.e. keep transaction senders for the last 129 blocks
+sender_recovery = { distance = 100_000 } # Prune all transaction senders before the block `head-128`, i.e. keep transaction senders for the last 129 blocks
 
 # Transaction Lookup pruning configuration
 transaction_lookup = "full" # Prune all TxNumber => TxHash mappings
@@ -365,10 +366,10 @@ transaction_lookup = "full" # Prune all TxNumber => TxHash mappings
 receipts = { before = 1920000 } # Prune all receipts from transactions before the block 1920000, i.e. keep receipts from the block 1920000
 
 # Account History pruning configuration
-account_history = { distance = 128 } # Prune all historical account states before the block `head-128`
+account_history = { distance = 100_000 } # Prune all historical account states before the block `head-128`
 
 # Storage History pruning configuration
-storage_history = { distance = 128 } # Prune all historical storage states before the block `head-128`
+storage_history = { distance = 100_000 } # Prune all historical storage states before the block `head-128`
 ```
 
 We can also prune receipts more granular, using the logs filtering:
@@ -377,9 +378,9 @@ We can also prune receipts more granular, using the logs filtering:
 # by the specified addresses, discarding all others. This setting is overridden by `receipts`.
 [prune.parts.receipts_log_filter]
 # Prune all receipts, leaving only those which:
-# - Contain logs from address `0x7ea2be2df7ba6e54b1a9c70676f668455e329d29`, starting from the block 17000000
+# - Contain logs from address `0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48`, starting from the block 17000000
 # - Contain logs from address `0xdac17f958d2ee523a2206206994597c13d831ec7` in the last 1001 blocks
-"0x7ea2be2df7ba6e54b1a9c70676f668455e329d29" = { before = 17000000 }
+"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" = { before = 17000000 }
 "0xdac17f958d2ee523a2206206994597c13d831ec7" = { distance = 1000 }
 ```
 

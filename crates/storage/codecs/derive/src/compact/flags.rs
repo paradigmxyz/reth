@@ -54,8 +54,8 @@ pub(crate) fn generate_flag_struct(
 
     // Generate the flag struct.
     quote! {
-
         pub use #mod_flags_ident::#flags_ident;
+        #[allow(non_snake_case)]
         mod #mod_flags_ident {
             use bytes::Buf;
             use modular_bitfield::prelude::*;

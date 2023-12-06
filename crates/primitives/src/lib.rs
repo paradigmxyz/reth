@@ -1,16 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub)]
-#![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
 //! Commonly used types in reth.
 //!
 //! This crate contains Ethereum primitive types and helper functions.
@@ -19,154 +6,138 @@
 //!
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
-pub mod abi;
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![allow(clippy::non_canonical_clone_impl)]
+
 mod account;
 pub mod basefee;
-mod bits;
 mod block;
-pub mod bloom;
 mod chain;
 mod compression;
 pub mod constants;
-pub mod contract;
 pub mod eip4844;
-mod forkid;
+mod error;
 pub mod fs;
 mod genesis;
-mod hardfork;
 mod header;
-mod hex_bytes;
 mod integer_list;
-pub mod listener;
 mod log;
 mod net;
 mod peer;
+pub mod proofs;
 mod prune;
 mod receipt;
+/// Helpers for working with revm
+pub mod revm;
+pub mod serde_helper;
+pub mod snapshot;
 pub mod stage;
 mod storage;
-mod transaction;
+/// Helpers for working with transactions
+pub mod transaction;
 pub mod trie;
 mod withdrawal;
 
-/// Helper function for calculating Merkle proofs and hashes
-pub mod proofs;
-
 pub use account::{Account, Bytecode};
-pub use bits::H512;
 pub use block::{
     Block, BlockBody, BlockBodyRoots, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
-    BlockWithSenders, ForkBlock, SealedBlock, SealedBlockWithSenders,
+    BlockWithSenders, ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
-pub use bloom::Bloom;
+pub use bytes::{self, Buf, BufMut, BytesMut};
 pub use chain::{
-    AllGenesisFormats, BaseFeeParams, Chain, ChainInfo, ChainSpec, ChainSpecBuilder,
-    DisplayHardforks, ForkCondition, ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
+    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainSpec,
+    ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, ForkTimestamps,
+    NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
 pub use compression::*;
 pub use constants::{
-    DEV_GENESIS, EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
+    DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
+    KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-pub use eip4844::{calculate_excess_blob_gas, kzg_to_versioned_hash};
-pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
-pub use genesis::{Genesis, GenesisAccount};
-pub use hardfork::Hardfork;
-pub use header::{Head, Header, HeadersDirection, SealedHeader};
-pub use hex_bytes::Bytes;
+pub use error::{GotExpected, GotExpectedBoxed};
+pub use genesis::{ChainConfig, Genesis, GenesisAccount};
+pub use header::{Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
-pub use log::Log;
+pub use log::{logs_bloom, Log};
 pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, GOERLI_BOOTNODES,
     HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
 pub use prune::{
-    AddressAndSlots, PruneBatchSizes, PruneCheckpoint, PruneMode, PruneModes, PrunePart,
-    PrunePartError, ReceiptsLogPruneConfig, StorageHistoryPruneConfig, MINIMUM_PRUNING_DISTANCE,
+    AddressAndSlots, PruneCheckpoint, PruneMode, PruneModes, PruneProgress, PruneSegment,
+    PruneSegmentError, ReceiptsLogPruneConfig, StorageHistoryPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
-pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
-pub use revm_primitives::JumpMap;
+pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use serde_helper::JsonU256;
+pub use snapshot::SnapshotSegment;
 pub use storage::StorageEntry;
+
+#[cfg(feature = "c-kzg")]
 pub use transaction::{
-    util::secp256k1::{public_key_to_address, recover_signer, sign_message},
-    AccessList, AccessListItem, AccessListWithGasUsed, BlobTransaction, BlobTransactionSidecar,
-    BlobTransactionValidationError, FromRecoveredPooledTransaction, FromRecoveredTransaction,
-    IntoRecoveredTransaction, InvalidTransactionError, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionKind, TransactionMeta,
+    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError,
+    FromRecoveredPooledTransaction, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered,
+};
+
+pub use transaction::{
+    util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
+    AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction,
+    InvalidTransactionError, Signature, Transaction, TransactionKind, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
-    TxEip4844, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
+    TxEip4844, TxHashOrNumber, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;
 
-/// A block hash.
-pub type BlockHash = H256;
-/// A block number.
-pub type BlockNumber = u64;
-/// An Ethereum address.
-pub type Address = H160;
-/// A transaction hash is a kecack hash of an RLP encoded signed transaction.
-pub type TxHash = H256;
-/// The sequence number of all existing transactions.
-pub type TxNumber = u64;
-/// The index of transaction in a block.
-pub type TxIndex = u64;
-/// Chain identifier type (introduced in EIP-155).
-pub type ChainId = u64;
-/// An account storage key.
-pub type StorageKey = H256;
-/// An account storage value.
-pub type StorageValue = U256;
-/// Solidity contract functions are addressed using the first four byte of the Keccak-256 hash of
-/// their signature
-pub type Selector = [u8; 4];
-
-pub use ethers_core::{
-    types::{BigEndianHash, H128, H64, U64},
-    utils as rpc_utils,
+// Re-exports
+pub use self::ruint::UintTryTo;
+pub use alloy_primitives::{
+    self, address, b256, bloom, bytes, eip191_hash_message, hex, hex_literal, keccak256, ruint,
+    Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
+    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
-pub use revm_primitives::{B160 as H160, B256 as H256, U256};
-pub use ruint::{
-    aliases::{U128, U8},
-    UintTryTo,
-};
+pub use reth_ethereum_forks::*;
+pub use revm_primitives::{self, JumpMap};
 
 #[doc(hidden)]
-mod __reexport {
-    pub use bytes;
-    pub use hex;
-    pub use hex_literal;
-    pub use tiny_keccak;
-}
-
-// Useful reexports
-pub use __reexport::*;
-
-/// Various utilities
-pub mod utils {
-    pub use ethers_core::types::serde_helpers;
-}
-
-/// EIP-4844 + KZG helpers
-pub mod kzg {
-    pub use c_kzg::*;
-}
-
-/// Helpers for working with serde
-pub mod serde_helper;
-
-/// Returns the keccak256 hash for the given data.
-#[inline]
-pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
-    use tiny_keccak::{Hasher, Keccak};
-
-    let mut buf = [0u8; 32];
-    let mut hasher = Keccak::v256();
-    hasher.update(data.as_ref());
-    hasher.finalize(&mut buf);
-    buf.into()
-}
+#[deprecated = "use B64 instead"]
+pub type H64 = B64;
+#[doc(hidden)]
+#[deprecated = "use B128 instead"]
+pub type H128 = B128;
+#[doc(hidden)]
+#[deprecated = "use Address instead"]
+pub type H160 = Address;
+#[doc(hidden)]
+#[deprecated = "use B256 instead"]
+pub type H256 = B256;
+#[doc(hidden)]
+#[deprecated = "use B512 instead"]
+pub type H512 = B512;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;
+
+#[cfg(feature = "c-kzg")]
+pub use c_kzg as kzg;
+
+/// Optimism specific re-exports
+#[cfg(feature = "optimism")]
+mod optimism {
+    pub use crate::{
+        chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI},
+        transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
+    };
+}
+
+#[cfg(feature = "optimism")]
+pub use optimism::*;

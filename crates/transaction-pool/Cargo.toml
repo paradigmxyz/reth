@@ -6,9 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = """
-Transaction pool implementation
-"""
+description = "Transaction pool implementation"
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
@@ -21,8 +19,10 @@ normal = [
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
-reth-rlp.workspace = true
 reth-tasks.workspace = true
+revm.workspace = true
+alloy-rlp.workspace = true
+reth-revm = { workspace = true, optional = true }
 
 # async/futures
 async-trait.workspace = true
@@ -39,6 +39,7 @@ metrics.workspace = true
 aquamarine.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+schnellru.workspace = true
 serde = { workspace = true, features = ["derive", "rc"], optional = true }
 fnv = "1.0.7"
 bitflags.workspace = true
@@ -51,19 +52,39 @@ proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 paste = "1.0"
 rand = "0.8"
 proptest.workspace = true
-criterion = "0.5"
+criterion.workspace = true
 assert_matches.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
 arbitrary = ["proptest", "reth-primitives/arbitrary"]
+optimism = [
+    "dep:reth-revm",
+    "reth-revm?/optimism",
+    "reth-primitives/optimism",
+    "reth-provider/test-utils",
+    "reth-provider/optimism",
+    "revm/optimism",
+]
+
+[[bench]]
+name = "truncate"
+required-features = ["test-utils", "arbitrary"]
+harness = false
 
 [[bench]]
 name = "reorder"
 required-features = ["test-utils", "arbitrary"]
+harness = false
+
+[[bench]]
+name = "priority"
+required-features = ["arbitrary"]
 harness = false

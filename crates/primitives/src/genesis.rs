@@ -1,15 +1,14 @@
 use crate::{
     keccak256,
-    proofs::{KeccakHasher, EMPTY_ROOT},
-    serde_helper::{deserialize_json_u256, deserialize_json_u256_opt, deserialize_storage_map},
-    utils::serde_helpers::{deserialize_stringified_u64, deserialize_stringified_u64_opt},
-    Account, Address, Bytes, H256, KECCAK_EMPTY, U256,
+    serde_helper::{
+        json_u256::{deserialize_json_ttd_opt, deserialize_json_u256},
+        num::{u64_hex_or_decimal, u64_hex_or_decimal_opt},
+        storage::deserialize_storage_map,
+    },
+    Account, Address, Bytes, B256, U256,
 };
-use reth_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
-use revm_primitives::B160;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use triehash::sec_trie_root;
 
 /// The genesis block specification.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -19,25 +18,40 @@ pub struct Genesis {
     #[serde(default)]
     pub config: ChainConfig,
     /// The genesis header nonce.
-    #[serde(deserialize_with = "deserialize_stringified_u64")]
+    #[serde(with = "u64_hex_or_decimal")]
     pub nonce: u64,
     /// The genesis header timestamp.
-    #[serde(deserialize_with = "deserialize_stringified_u64")]
+    #[serde(with = "u64_hex_or_decimal")]
     pub timestamp: u64,
     /// The genesis header extra data.
     pub extra_data: Bytes,
     /// The genesis header gas limit.
-    #[serde(deserialize_with = "deserialize_stringified_u64")]
+    #[serde(with = "u64_hex_or_decimal")]
     pub gas_limit: u64,
     /// The genesis header difficulty.
     #[serde(deserialize_with = "deserialize_json_u256")]
     pub difficulty: U256,
     /// The genesis header mix hash.
-    pub mix_hash: H256,
+    pub mix_hash: B256,
     /// The genesis header coinbase address.
     pub coinbase: Address,
     /// The initial state of accounts in the genesis block.
     pub alloc: HashMap<Address, GenesisAccount>,
+    // NOTE: the following fields:
+    // * base_fee_per_gas
+    // * excess_blob_gas
+    // * blob_gas_used
+    // should NOT be set in a real genesis file, but are included here for compatibility with
+    // consensus tests, which have genesis files with these fields populated.
+    /// The genesis header base fee
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
+    pub base_fee_per_gas: Option<u64>,
+    /// The genesis header excess blob gas
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
+    pub excess_blob_gas: Option<u64>,
+    /// The genesis header blob gas used
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
+    pub blob_gas_used: Option<u64>,
 }
 
 impl Genesis {
@@ -72,7 +86,7 @@ impl Genesis {
     }
 
     /// Set the mix hash of the header.
-    pub fn with_mix_hash(mut self, mix_hash: H256) -> Self {
+    pub fn with_mix_hash(mut self, mix_hash: B256) -> Self {
         self.mix_hash = mix_hash;
         self
     }
@@ -80,6 +94,24 @@ impl Genesis {
     /// Set the coinbase address.
     pub fn with_coinbase(mut self, address: Address) -> Self {
         self.coinbase = address;
+        self
+    }
+
+    /// Set the base fee.
+    pub fn with_base_fee(mut self, base_fee: Option<u64>) -> Self {
+        self.base_fee_per_gas = base_fee;
+        self
+    }
+
+    /// Set the excess blob gas.
+    pub fn with_excess_blob_gas(mut self, excess_blob_gas: Option<u64>) -> Self {
+        self.excess_blob_gas = excess_blob_gas;
+        self
+    }
+
+    /// Set the blob gas used.
+    pub fn with_blob_gas_used(mut self, blob_gas_used: Option<u64>) -> Self {
+        self.blob_gas_used = blob_gas_used;
         self
     }
 
@@ -99,11 +131,7 @@ impl Genesis {
 #[serde(deny_unknown_fields)]
 pub struct GenesisAccount {
     /// The nonce of the account at genesis.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt",
-        default
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt", default)]
     pub nonce: Option<u64>,
     /// The balance of the account at genesis.
     #[serde(deserialize_with = "deserialize_json_u256")]
@@ -117,23 +145,10 @@ pub struct GenesisAccount {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_storage_map"
     )]
-    pub storage: Option<HashMap<H256, H256>>,
+    pub storage: Option<HashMap<B256, B256>>,
 }
 
 impl GenesisAccount {
-    /// Determines the RLP payload length, without the RLP header.
-    fn payload_len(&self) -> usize {
-        let mut len = 0;
-        len += self.nonce.unwrap_or_default().length();
-        len += self.balance.length();
-        // rather than rlp-encoding the storage, we just return the length of a single hash
-        // hashes are a fixed size, so it is safe to use the empty root for this
-        len += EMPTY_ROOT.length();
-        // we are encoding a hash, so let's just use the length of the empty hash for the code hash
-        len += KECCAK_EMPTY.length();
-        len
-    }
-
     /// Set the nonce.
     pub fn with_nonce(mut self, nonce: Option<u64>) -> Self {
         self.nonce = nonce;
@@ -153,40 +168,9 @@ impl GenesisAccount {
     }
 
     /// Set the storage.
-    pub fn with_storage(mut self, storage: Option<HashMap<H256, H256>>) -> Self {
+    pub fn with_storage(mut self, storage: Option<HashMap<B256, B256>>) -> Self {
         self.storage = storage;
         self
-    }
-}
-
-impl Encodable for GenesisAccount {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        let header = RlpHeader { list: true, payload_length: self.payload_len() };
-        header.encode(out);
-
-        self.nonce.unwrap_or_default().encode(out);
-        self.balance.encode(out);
-        self.storage
-            .as_ref()
-            .map_or(EMPTY_ROOT, |storage| {
-                if storage.is_empty() {
-                    return EMPTY_ROOT
-                }
-                let storage_values =
-                    storage.iter().filter(|(_k, &v)| v != H256::zero()).map(|(&k, v)| {
-                        let value = U256::from_be_bytes(**v);
-                        (k, encode_fixed_size(&value))
-                    });
-                sec_trie_root::<KeccakHasher, _, _, _>(storage_values)
-            })
-            .encode(out);
-        self.code.as_ref().map_or(KECCAK_EMPTY, keccak256).encode(out);
-    }
-
-    fn length(&self) -> usize {
-        let len = self.payload_len();
-        // RLP header length + payload length
-        len + length_of_length(len)
     }
 }
 
@@ -214,135 +198,84 @@ pub struct ChainConfig {
     pub chain_id: u64,
 
     /// The homestead switch block (None = no fork, 0 = already homestead).
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub homestead_block: Option<u64>,
 
     /// The DAO fork switch block (None = no fork).
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub dao_fork_block: Option<u64>,
 
     /// Whether or not the node supports the DAO hard-fork.
     pub dao_fork_support: bool,
 
     /// The EIP-150 hard fork block (None = no fork).
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub eip150_block: Option<u64>,
 
     /// The EIP-150 hard fork hash.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub eip150_hash: Option<H256>,
+    pub eip150_hash: Option<B256>,
 
     /// The EIP-155 hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub eip155_block: Option<u64>,
 
     /// The EIP-158 hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub eip158_block: Option<u64>,
 
     /// The Byzantium hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub byzantium_block: Option<u64>,
 
     /// The Constantinople hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub constantinople_block: Option<u64>,
 
     /// The Petersburg hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub petersburg_block: Option<u64>,
 
     /// The Istanbul hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub istanbul_block: Option<u64>,
 
     /// The Muir Glacier hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub muir_glacier_block: Option<u64>,
 
     /// The Berlin hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub berlin_block: Option<u64>,
 
     /// The London hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub london_block: Option<u64>,
 
     /// The Arrow Glacier hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub arrow_glacier_block: Option<u64>,
 
     /// The Gray Glacier hard fork block.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub gray_glacier_block: Option<u64>,
 
     /// Virtual fork after the merge to use as a network splitter.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub merge_netsplit_block: Option<u64>,
 
     /// Shanghai switch time.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub shanghai_time: Option<u64>,
 
     /// Cancun switch time.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub cancun_time: Option<u64>,
 
     /// Total difficulty reached that triggers the merge consensus upgrade.
     #[serde(
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_json_u256_opt"
+        deserialize_with = "deserialize_json_ttd_opt"
     )]
     pub terminal_total_difficulty: Option<U256>,
 
@@ -373,22 +306,15 @@ pub struct EthashConfig {}
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CliqueConfig {
     /// Number of seconds between blocks to enforce.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub period: Option<u64>,
 
     /// Epoch length to reset votes and checkpoints.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_stringified_u64_opt"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "u64_hex_or_decimal_opt")]
     pub epoch: Option<u64>,
 }
 
+#[cfg(feature = "test-utils")]
 mod ethers_compat {
     use super::*;
     use ethers_core::utils::{
@@ -402,17 +328,21 @@ mod ethers_compat {
                 .alloc
                 .iter()
                 .map(|(addr, account)| (addr.0.into(), account.clone().into()))
-                .collect::<HashMap<B160, GenesisAccount>>();
+                .collect::<HashMap<Address, GenesisAccount>>();
 
             Genesis {
                 config: genesis.config.into(),
                 nonce: genesis.nonce.as_u64(),
                 timestamp: genesis.timestamp.as_u64(),
                 gas_limit: genesis.gas_limit.as_u64(),
-                difficulty: genesis.difficulty.into(),
+                difficulty: U256::from_limbs(genesis.difficulty.0),
                 mix_hash: genesis.mix_hash.0.into(),
                 coinbase: genesis.coinbase.0.into(),
                 extra_data: genesis.extra_data.0.into(),
+                base_fee_per_gas: genesis.base_fee_per_gas.map(|fee| fee.as_u64()),
+                // TODO: if/when ethers has cancun fields they should be added here
+                excess_blob_gas: None,
+                blob_gas_used: None,
                 alloc,
             }
         }
@@ -421,7 +351,7 @@ mod ethers_compat {
     impl From<EthersGenesisAccount> for GenesisAccount {
         fn from(genesis_account: EthersGenesisAccount) -> Self {
             Self {
-                balance: genesis_account.balance.into(),
+                balance: U256::from_limbs(genesis_account.balance.0),
                 nonce: genesis_account.nonce,
                 code: genesis_account.code.as_ref().map(|code| code.0.clone().into()),
                 storage: genesis_account.storage.as_ref().map(|storage| {
@@ -466,7 +396,7 @@ mod ethers_compat {
                 dao_fork_block,
                 dao_fork_support,
                 eip150_block,
-                eip150_hash: eip150_hash.map(Into::into),
+                eip150_hash: eip150_hash.map(|x| x.0.into()),
                 eip155_block,
                 eip158_block,
                 byzantium_block,
@@ -481,7 +411,7 @@ mod ethers_compat {
                 merge_netsplit_block,
                 shanghai_time,
                 cancun_time,
-                terminal_total_difficulty: terminal_total_difficulty.map(Into::into),
+                terminal_total_difficulty: terminal_total_difficulty.map(|x| U256::from_limbs(x.0)),
                 terminal_total_difficulty_passed,
                 ethash: ethash.map(Into::into),
                 clique: clique.map(Into::into),
@@ -506,8 +436,7 @@ mod ethers_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Address, Bytes, U256};
-    use hex_literal::hex;
+    use crate::{hex_literal::hex, Address, Bytes, U256};
     use std::{collections::HashMap, str::FromStr};
 
     #[test]
@@ -1024,21 +953,21 @@ mod tests {
         let storage = alloc_entry.storage.as_ref().expect("missing storage for parsed genesis");
         let expected_storage = HashMap::from_iter(vec![
             (
-                H256::from_str(
+                B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000000",
                 )
                 .unwrap(),
-                H256::from_str(
+                B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000001234",
                 )
                 .unwrap(),
             ),
             (
-                H256::from_str(
+                B256::from_str(
                     "0x6661e9d6d8b923d5bbaab1b96e1dd51ff6ea2a93520fdc9eb75d059238b8c5e9",
                 )
                 .unwrap(),
-                H256::from_str(
+                B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000001",
                 )
                 .unwrap(),
@@ -1118,7 +1047,7 @@ mod tests {
             Genesis {
                 nonce: 0x0000000000000042,
                 difficulty: U256::from(0x2123456),
-                mix_hash: H256::from_str(
+                mix_hash: B256::from_str(
                     "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234",
                 )
                 .unwrap(),
@@ -1126,6 +1055,9 @@ mod tests {
                 timestamp: 0x123456,
                 extra_data: Bytes::from_str("0xfafbfcfd").unwrap(),
                 gas_limit: 0x2fefd8,
+                base_fee_per_gas: None,
+                excess_blob_gas: None,
+                blob_gas_used: None,
                 alloc: HashMap::from_iter(vec![
                 (
                     Address::from_str("0xdbdbdb2cbd23b783741e8d7fcf51e459b497e4a6").unwrap(),
@@ -1155,9 +1087,9 @@ mod tests {
                         storage: Some(HashMap::from_iter(vec![
                             (
 
-    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000001").
+    B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000001").
     unwrap(),
-    H256::from_str("0x0000000000000000000000000000000000000000000000000000000000000022").
+    B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000022").
     unwrap(),                         ),
                         ])),
                     },

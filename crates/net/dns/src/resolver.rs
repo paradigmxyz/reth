@@ -5,7 +5,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use tracing::trace;
 pub use trust_dns_resolver::{error::ResolveError, TokioAsyncResolver};
-use trust_dns_resolver::{proto::DnsHandle, AsyncResolver, ConnectionProvider};
+use trust_dns_resolver::{name_server::ConnectionProvider, AsyncResolver};
 
 /// A type that can lookup DNS entries
 #[async_trait]
@@ -15,11 +15,7 @@ pub trait Resolver: Send + Sync + Unpin + 'static {
 }
 
 #[async_trait]
-impl<C, P> Resolver for AsyncResolver<C, P>
-where
-    C: DnsHandle<Error = ResolveError>,
-    P: ConnectionProvider<Conn = C>,
-{
+impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
     async fn lookup_txt(&self, query: &str) -> Option<String> {
         // See: [AsyncResolver::txt_lookup]
         // > *hint* queries that end with a '.' are fully qualified names and are cheaper lookups
@@ -40,19 +36,19 @@ where
 
 /// An asynchronous DNS resolver
 ///
-/// See also [TokioAsyncResolver](trust_dns_resolver::TokioAsyncResolver)
+/// See also [TokioAsyncResolver]
 ///
 /// ```
 /// # fn t() {
-///  use reth_dns_discovery::resolver::DnsResolver;
-///  let resolver = DnsResolver::from_system_conf().unwrap();
+/// use reth_dns_discovery::resolver::DnsResolver;
+/// let resolver = DnsResolver::from_system_conf().unwrap();
 /// # }
 /// ```
 ///
 /// Note: This [Resolver] can send multiple lookup attempts, See also
 /// [ResolverOpts](trust_dns_resolver::config::ResolverOpts) which configures 2 attempts (1 retry)
 /// by default.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DnsResolver(TokioAsyncResolver);
 
 // === impl DnsResolver ===

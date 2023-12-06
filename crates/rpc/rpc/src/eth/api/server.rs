@@ -5,6 +5,7 @@ use super::EthApiSpec;
 use crate::{
     eth::{
         api::{EthApi, EthTransactions},
+        error::EthApiError,
         revm_utils::EvmOverrides,
     },
     result::{internal_rpc_err, ToRpcResult},
@@ -13,7 +14,7 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
-    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
+    Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
@@ -21,9 +22,9 @@ use reth_provider::{
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Bundle, CallRequest, EIP1186AccountProofResponse,
-    EthCallResponse, FeeHistory, Index, RichBlock, StateContext, SyncStatus, TransactionReceipt,
-    TransactionRequest, Work,
+    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
+    SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -82,7 +83,7 @@ where
     }
 
     /// Handler for: `eth_getBlockByHash`
-    async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
+    async fn block_by_hash(&self, hash: B256, full: bool) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?hash, ?full, "Serving eth_getBlockByHash");
         Ok(EthApi::rpc_block(self, hash, full).await?)
     }
@@ -98,7 +99,7 @@ where
     }
 
     /// Handler for: `eth_getBlockTransactionCountByHash`
-    async fn block_transaction_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
+    async fn block_transaction_count_by_hash(&self, hash: B256) -> Result<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getBlockTransactionCountByHash");
         Ok(EthApi::block_transaction_count(self, hash).await?.map(U256::from))
     }
@@ -113,7 +114,7 @@ where
     }
 
     /// Handler for: `eth_getUncleCountByBlockHash`
-    async fn block_uncles_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
+    async fn block_uncles_count_by_hash(&self, hash: B256) -> Result<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getUncleCountByBlockHash");
         Ok(EthApi::ommers(self, hash)?.map(|ommers| U256::from(ommers.len())))
     }
@@ -125,18 +126,15 @@ where
     }
 
     /// Handler for: `eth_getBlockReceipts`
-    async fn block_receipts(
-        &self,
-        number: BlockNumberOrTag,
-    ) -> Result<Option<Vec<TransactionReceipt>>> {
-        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockReceipts");
-        Ok(EthApi::block_receipts(self, number).await?)
+    async fn block_receipts(&self, block_id: BlockId) -> Result<Option<Vec<TransactionReceipt>>> {
+        trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
+        Ok(EthApi::block_receipts(self, block_id).await?)
     }
 
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
     async fn uncle_by_block_hash_and_index(
         &self,
-        hash: H256,
+        hash: B256,
         index: Index,
     ) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
@@ -154,7 +152,7 @@ where
     }
 
     /// Handler for: `eth_getTransactionByHash`
-    async fn transaction_by_hash(&self, hash: H256) -> Result<Option<reth_rpc_types::Transaction>> {
+    async fn transaction_by_hash(&self, hash: B256) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
     }
@@ -162,7 +160,7 @@ where
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
     async fn transaction_by_block_hash_and_index(
         &self,
-        hash: H256,
+        hash: B256,
         index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
@@ -180,7 +178,7 @@ where
     }
 
     /// Handler for: `eth_getTransactionReceipt`
-    async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>> {
+    async fn transaction_receipt(&self, hash: B256) -> Result<Option<TransactionReceipt>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
         Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
@@ -197,7 +195,7 @@ where
         address: Address,
         index: JsonStorageKey,
         block_number: Option<BlockId>,
-    ) -> Result<H256> {
+    ) -> Result<B256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
         Ok(self
             .on_blocking_task(|this| async move { this.storage_at(address, index, block_number) })
@@ -254,15 +252,13 @@ where
     /// Handler for: `eth_createAccessList`
     async fn create_access_list(
         &self,
-        mut request: CallRequest,
+        request: CallRequest,
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let access_list = self.create_access_list_at(request.clone(), block_number).await?;
-        request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas_at(request, block_id).await?;
-        Ok(AccessListWithGasUsed { access_list, gas_used })
+        let access_list_with_gas_used = self.create_access_list_at(request, block_number).await?;
+
+        Ok(access_list_with_gas_used)
     }
 
     /// Handler for: `eth_estimateGas`
@@ -270,12 +266,14 @@ where
         &self,
         request: CallRequest,
         block_number: Option<BlockId>,
+        state_override: Option<StateOverride>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
         Ok(self
             .estimate_gas_at(
                 request,
                 block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+                state_override,
             )
             .await?)
     }
@@ -284,6 +282,12 @@ where
     async fn gas_price(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
         return Ok(EthApi::gas_price(self).await?)
+    }
+
+    /// Handler for: `eth_blobGasPrice`
+    async fn blob_gas_price(&self) -> Result<U256> {
+        trace!(target: "rpc::eth", "Serving eth_blobGasPrice");
+        return Ok(EthApi::blob_gas_price(self).await?)
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
@@ -308,8 +312,9 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
-        return Ok(EthApi::fee_history(self, block_count.as_u64(), newest_block, reward_percentiles)
-            .await?)
+        return Ok(
+            EthApi::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
+        )
     }
 
     /// Handler for: `eth_mining`
@@ -328,23 +333,23 @@ where
     }
 
     /// Handler for: `eth_submitHashrate`
-    async fn submit_hashrate(&self, _hashrate: U256, _id: H256) -> Result<bool> {
+    async fn submit_hashrate(&self, _hashrate: U256, _id: B256) -> Result<bool> {
         Ok(false)
     }
 
     /// Handler for: `eth_submitWork`
-    async fn submit_work(&self, _nonce: H64, _pow_hash: H256, _mix_digest: H256) -> Result<bool> {
+    async fn submit_work(&self, _nonce: B64, _pow_hash: B256, _mix_digest: B256) -> Result<bool> {
         Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for: `eth_sendTransaction`
-    async fn send_transaction(&self, request: TransactionRequest) -> Result<H256> {
+    async fn send_transaction(&self, request: TransactionRequest) -> Result<B256> {
         trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
         Ok(EthTransactions::send_transaction(self, request).await?)
     }
 
     /// Handler for: `eth_sendRawTransaction`
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<H256> {
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
         Ok(EthTransactions::send_raw_transaction(self, tx).await?)
     }
@@ -369,36 +374,37 @@ where
     /// Handler for: `eth_getProof`
     async fn get_proof(
         &self,
-        _address: Address,
-        _keys: Vec<JsonStorageKey>,
-        _block_number: Option<BlockId>,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        // TODO: uncomment when implemented
-        // trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
-        // let res = EthApi::get_proof(self, address, keys, block_number);
+        trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
+        let res = EthApi::get_proof(self, address, keys, block_number).await;
 
-        // Ok(res.map_err(|e| match e {
-        //     EthApiError::InvalidBlockRange => {
-        //         internal_rpc_err("eth_getProof is unimplemented for historical blocks")
-        //     }
-        //     _ => e.into(),
-        // })?)
-        Err(internal_rpc_err("unimplemented"))
+        Ok(res.map_err(|e| match e {
+            EthApiError::InvalidBlockRange => {
+                internal_rpc_err("eth_getProof is unimplemented for historical blocks")
+            }
+            _ => e.into(),
+        })?)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-        EthApi, TracingCallPool,
+        eth::{
+            cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
+            FeeHistoryCacheConfig,
+        },
+        BlockingTaskPool, EthApi,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
         basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
-        Block, BlockNumberOrTag, Header, TransactionSigned, H256, U256,
+        Block, BlockNumberOrTag, Header, TransactionSigned, B256, U256,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
@@ -421,50 +427,39 @@ mod tests {
         provider: P,
     ) -> EthApi<P, TestPool, NoopNetwork> {
         let cache = EthStateCache::spawn(provider.clone(), Default::default());
+
+        let fee_history_cache =
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
+
         EthApi::new(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
             cache.clone(),
-            GasPriceOracle::new(provider, Default::default(), cache),
+            GasPriceOracle::new(provider.clone(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
-            TracingCallPool::build().expect("failed to build tracing pool"),
+            BlockingTaskPool::build().expect("failed to build tracing pool"),
+            fee_history_cache,
         )
     }
 
-    /// Invalid block range
-    #[tokio::test]
-    async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
-            &build_test_eth_api(NoopProvider::default()),
-            1.into(),
-            BlockNumberOrTag::Latest,
-            None,
-        )
-        .await;
-        assert!(response.is_err());
-        let error_object = response.unwrap_err();
-        assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
-    }
-
-    /// Handler for: `eth_test_fee_history`
-    // TODO: Split this into multiple tests, and add tests for percentiles.
-    #[tokio::test]
-    async fn test_fee_history() {
+    // Function to prepare the EthApi with mock data
+    fn prepare_eth_api(
+        newest_block: u64,
+        mut oldest_block: Option<B256>,
+        block_count: u64,
+        mock_provider: MockEthProvider,
+    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork>, Vec<U256>, Vec<f64>) {
         let mut rng = generators::rng();
 
-        let block_count = 10;
-        let newest_block = 1337;
-
         // Build mock data
-        let mut oldest_block = None;
         let mut gas_used_ratios = Vec::new();
         let mut base_fees_per_gas = Vec::new();
         let mut last_header = None;
-        let mock_provider = MockEthProvider::default();
+        let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
-            let hash = H256::random();
+            let hash = rng.gen();
             let gas_limit: u64 = rng.gen();
             let gas_used: u64 = rng.gen();
             // Note: Generates a u32 to avoid overflows later
@@ -475,9 +470,11 @@ mod tests {
                 gas_limit,
                 gas_used,
                 base_fee_per_gas,
+                parent_hash,
                 ..Default::default()
             };
             last_header = Some(header.clone());
+            parent_hash = hash;
 
             let mut transactions = vec![];
             for _ in 0..100 {
@@ -531,7 +528,34 @@ mod tests {
 
         let eth_api = build_test_eth_api(mock_provider);
 
-        // Invalid block range (request is before genesis)
+        (eth_api, base_fees_per_gas, gas_used_ratios)
+    }
+
+    /// Invalid block range
+    #[tokio::test]
+    async fn test_fee_history_empty() {
+        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+            &build_test_eth_api(NoopProvider::default()),
+            1.into(),
+            BlockNumberOrTag::Latest,
+            None,
+        )
+        .await;
+        assert!(response.is_err());
+        let error_object = response.unwrap_err();
+        assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+    }
+
+    #[tokio::test]
+    /// Invalid block range (request is before genesis)
+    async fn test_fee_history_invalid_block_range_before_genesis() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (newest_block + 1).into(),
@@ -539,11 +563,22 @@ mod tests {
             Some(vec![10.0]),
         )
         .await;
+
         assert!(response.is_err());
         let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+    }
 
-        // Invalid block range (request is in in the future)
+    #[tokio::test]
+    /// Invalid block range (request is in in the future)
+    async fn test_fee_history_invalid_block_range_in_future() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (1).into(),
@@ -551,11 +586,22 @@ mod tests {
             Some(vec![10.0]),
         )
         .await;
+
         assert!(response.is_err());
         let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+    }
 
-        // Requesting no block should result in a default response
+    #[tokio::test]
+    /// Requesting no block should result in a default response
+    async fn test_fee_history_no_block_requested() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
             &eth_api,
             (0).into(),
@@ -569,8 +615,18 @@ mod tests {
             FeeHistory::default(),
             "none: requesting no block should yield a default response"
         );
+    }
 
-        // Requesting a single block should return 1 block (+ base fee for the next block over)
+    #[tokio::test]
+    /// Requesting a single block should return 1 block (+ base fee for the next block over)
+    async fn test_fee_history_single_block() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, base_fees_per_gas, gas_used_ratios) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let fee_history = eth_api.fee_history(1, (newest_block).into(), None).await.unwrap();
         assert_eq!(
             &fee_history.base_fee_per_gas,
@@ -596,8 +652,18 @@ mod tests {
             fee_history.reward.is_none(),
             "one: no percentiles were requested, so there should be no rewards result"
         );
+    }
 
-        // Requesting all blocks should be ok
+    #[tokio::test]
+    /// Requesting all blocks should be ok
+    async fn test_fee_history_all_blocks() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let oldest_block = None;
+
+        let (eth_api, base_fees_per_gas, gas_used_ratios) =
+            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+
         let fee_history =
             eth_api.fee_history(block_count, (newest_block).into(), None).await.unwrap();
 

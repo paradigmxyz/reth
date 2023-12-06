@@ -11,10 +11,12 @@ use futures_util::{
     FutureExt, Stream, StreamExt,
 };
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredTransaction,
+    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredPooledTransaction,
+    FromRecoveredTransaction, PooledTransactionsElementEcRecovered,
 };
 use reth_provider::{
-    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, PostState, StateProviderFactory,
+    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
+    ProviderError, StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use std::{
@@ -35,13 +37,13 @@ pub struct MaintainPoolConfig {
     pub max_update_depth: u64,
     /// Maximum number of accounts to reload from state at once when updating the transaction pool.
     ///
-    /// Default: 250
+    /// Default: 100
     pub max_reload_accounts: usize,
 }
 
 impl Default for MaintainPoolConfig {
     fn default() -> Self {
-        Self { max_update_depth: 64, max_reload_accounts: 250 }
+        Self { max_update_depth: 64, max_reload_accounts: 100 }
     }
 }
 
@@ -83,16 +85,16 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     let metrics = MaintainPoolMetrics::default();
     let MaintainPoolConfig { max_update_depth, max_reload_accounts } = config;
     // ensure the pool points to latest state
-    if let Ok(Some(latest)) = client.block_by_number_or_tag(BlockNumberOrTag::Latest) {
+    if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = latest.seal_slow();
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
             last_seen_block_hash: latest.hash,
             last_seen_block_number: latest.number,
             pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params)
+                .next_block_base_fee(chain_spec.base_fee_params(latest.timestamp + 12))
                 .unwrap_or_default(),
-            pending_blob_fee: latest.next_block_blob_fee().map(|fee| fee.saturating_to()),
+            pending_blob_fee: latest.next_block_blob_fee(),
         };
         pool.set_block_info(info);
     }
@@ -125,8 +127,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         // dirty accounts and correct if the pool drifted from current state, for example after
         // restart or a pipeline run
         if maintained_state.is_drifted() {
+            metrics.inc_drift();
             // assuming all senders are dirty
             dirty_addresses = pool.unique_senders();
+            // make sure we toggle the state back to in sync
             maintained_state = MaintainedPoolState::InSync;
         }
 
@@ -168,6 +172,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             match blob_store_tracker.on_finalized_block(finalized) {
                 BlobStoreUpdates::None => {}
                 BlobStoreUpdates::Finalized(blobs) => {
+                    metrics.inc_deleted_tracked_blobs(blobs.len());
                     // remove all finalized blobs from the blob store
                     pool.delete_blobs(blobs);
                 }
@@ -236,10 +241,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `new_tip+1`
-                let pending_block_base_fee =
-                    new_tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
-                let pending_block_blob_fee =
-                    new_tip.next_block_blob_fee().map(|fee| fee.saturating_to());
+                let pending_block_base_fee = new_tip
+                    .next_block_base_fee(chain_spec.base_fee_params(new_tip.timestamp + 12))
+                    .unwrap_or_default();
+                let pending_block_blob_fee = new_tip.next_block_blob_fee();
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -247,9 +252,8 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // find all accounts that were changed in the old chain but _not_ in the new chain
                 let missing_changed_acc = old_state
-                    .accounts()
-                    .keys()
-                    .copied()
+                    .accounts_iter()
+                    .map(|(a, _)| a)
                     .filter(|addr| !new_changed_accounts.contains(addr));
 
                 // for these we need to fetch the nonce+balance from the db at the new tip
@@ -279,16 +283,38 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 changed_accounts.extend(new_changed_accounts.into_iter().map(|entry| entry.0));
 
                 // all transactions mined in the new chain
-                let new_mined_transactions: HashSet<_> =
-                    new_blocks.transactions().map(|tx| tx.hash).collect();
+                let new_mined_transactions: HashSet<_> = new_blocks.transaction_hashes().collect();
 
                 // update the pool then re-inject the pruned transactions
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
-                    .transactions()
+                    .transactions_ecrecovered()
                     .filter(|tx| !new_mined_transactions.contains(&tx.hash))
-                    .filter_map(|tx| tx.clone().into_ecrecovered())
-                    .map(<P as TransactionPool>::Transaction::from_recovered_transaction)
+                    .filter_map(|tx| {
+                        if tx.is_eip4844() {
+                            // reorged blobs no longer include the blob, which is necessary for
+                            // validating the transaction. Even though the transaction could have
+                            // been validated previously, we still need the blob in order to
+                            // accurately set the transaction's
+                            // encoded-length which is propagated over the network.
+                            pool.get_blob(tx.hash)
+                                .ok()
+                                .flatten()
+                                .and_then(|sidecar| {
+                                    PooledTransactionsElementEcRecovered::try_from_blob_transaction(
+                                        tx, sidecar,
+                                    )
+                                    .ok()
+                                })
+                                .map(
+                                    <P as TransactionPool>::Transaction::from_recovered_pooled_transaction,
+                                )
+                        } else {
+                            Some(<P as TransactionPool>::Transaction::from_recovered_transaction(
+                                tx,
+                            ))
+                        }
+                    })
                     .collect::<Vec<_>>();
 
                 // update the pool first
@@ -306,11 +332,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // to be re-injected
                 //
                 // Note: we no longer know if the tx was local or external
+                // Because the transactions are not finalized, the corresponding blobs are still in
+                // blob store (if we previously received them from the network)
                 metrics.inc_reinserted_transactions(pruned_old_transactions.len());
                 let _ = pool.add_external_transactions(pruned_old_transactions).await;
 
-                // keep track of mined blob transactions
-                // TODO(mattsse): handle reorged transactions
+                // keep track of new mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&new_blocks);
             }
             CanonStateNotification::Commit { new } => {
@@ -319,10 +346,10 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `tip+1`
-                let pending_block_base_fee =
-                    tip.next_block_base_fee(chain_spec.base_fee_params).unwrap_or_default();
-                let pending_block_blob_fee =
-                    tip.next_block_blob_fee().map(|fee| fee.saturating_to());
+                let pending_block_base_fee = tip
+                    .next_block_base_fee(chain_spec.base_fee_params(tip.timestamp + 12))
+                    .unwrap_or_default();
+                let pending_block_blob_fee = tip.next_block_blob_fee();
 
                 let first_block = blocks.first();
                 trace!(
@@ -353,14 +380,14 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     continue
                 }
 
-                let mut changed_accounts = Vec::with_capacity(state.accounts().len());
+                let mut changed_accounts = Vec::with_capacity(state.state().len());
                 for acc in changed_accounts_iter(state) {
                     // we can always clear the dirty flag for this account
                     dirty_addresses.remove(&acc.address);
                     changed_accounts.push(acc);
                 }
 
-                let mined_transactions = blocks.transactions().map(|tx| tx.hash).collect();
+                let mined_transactions = blocks.transaction_hashes().collect();
 
                 // check if the range of the commit is canonical with the pool's block
                 if first_block.parent_hash != pool_info.last_seen_block_hash {
@@ -418,7 +445,7 @@ impl FinalizedBlockTracker {
 
 /// Keeps track of the pool's state, whether the accounts in the pool are in sync with the actual
 /// state.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 enum MaintainedPoolState {
     /// Pool is assumed to be in sync with the current state
     InSync,
@@ -428,6 +455,7 @@ enum MaintainedPoolState {
 
 impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
+    #[inline]
     fn is_drifted(&self) -> bool {
         matches!(self, MaintainedPoolState::Drifted)
     }
@@ -472,7 +500,7 @@ fn load_accounts<Client, I>(
     client: Client,
     at: BlockHash,
     addresses: I,
-) -> Result<LoadedAccounts, Box<(HashSet<Address>, reth_interfaces::Error)>>
+) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
 where
     I: Iterator<Item = Address>,
 
@@ -497,15 +525,14 @@ where
     Ok(res)
 }
 
-/// Extracts all changed accounts from the PostState
-fn changed_accounts_iter(state: &PostState) -> impl Iterator<Item = ChangedAccount> + '_ {
-    state.accounts().iter().filter_map(|(addr, acc)| acc.map(|acc| (addr, acc))).map(
-        |(address, acc)| ChangedAccount {
-            address: *address,
-            nonce: acc.nonce,
-            balance: acc.balance,
-        },
-    )
+/// Extracts all changed accounts from the BundleState
+fn changed_accounts_iter(
+    state: &BundleStateWithReceipts,
+) -> impl Iterator<Item = ChangedAccount> + '_ {
+    state
+        .accounts_iter()
+        .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))
+        .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
 }
 
 #[cfg(test)]

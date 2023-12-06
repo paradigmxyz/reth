@@ -7,7 +7,7 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{
-    BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId, WithPeerId, H256,
+    BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId, WithPeerId, B256,
 };
 use std::fmt::Debug;
 use tracing::{trace, warn};
@@ -67,7 +67,7 @@ impl AutoSealClient {
         headers
     }
 
-    async fn fetch_bodies(&self, hashes: Vec<H256>) -> Vec<BlockBody> {
+    async fn fetch_bodies(&self, hashes: Vec<B256>) -> Vec<BlockBody> {
         trace!(target: "consensus::auto", ?hashes, "received bodies request");
         let storage = self.storage.read().await;
         let mut bodies = Vec::new();
@@ -106,7 +106,7 @@ impl BodiesClient for AutoSealClient {
 
     fn get_block_bodies_with_priority(
         &self,
-        hashes: Vec<H256>,
+        hashes: Vec<B256>,
         _priority: Priority,
     ) -> Self::Output {
         let this = self.clone();

@@ -1,9 +1,15 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! Derive macros for the Compact codec traits.
+
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+// TODO(danipopes): add these warnings
+// #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use proc_macro::{self, TokenStream, TokenTree};
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, DeriveInput};
@@ -142,8 +148,8 @@ pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     let tests = arbitrary::maybe_generate_tests(args, &ast);
 
     // Avoid duplicate names
-    let prop_import = format_ident!("{}PropTestArbitratry", ast.ident);
-    let arb_import = format_ident!("{}Arbitratry", ast.ident);
+    let prop_import = format_ident!("{}PropTestArbitrary", ast.ident);
+    let arb_import = format_ident!("{}Arbitrary", ast.ident);
 
     quote! {
         #[cfg(any(test, feature = "arbitrary"))]

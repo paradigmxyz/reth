@@ -1,6 +1,6 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, FetchClient,
+    peers::PeersHandle, protocol::RlpxSubProtocol, FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -11,7 +11,7 @@ use reth_network_api::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
-use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
+use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
 use std::{
     net::SocketAddr,
@@ -46,6 +46,8 @@ impl NetworkHandle {
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
+        tx_gossip_disabled: bool,
+        #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -58,6 +60,9 @@ impl NetworkHandle {
             is_syncing: Arc::new(AtomicBool::new(false)),
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
+            tx_gossip_disabled,
+            #[cfg(feature = "optimism")]
+            sequencer_endpoint,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -78,40 +83,12 @@ impl NetworkHandle {
         &self.inner.to_manager_tx
     }
 
-    /// Creates a new [`NetworkEvent`] listener channel.
-    pub fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
-        UnboundedReceiverStream::new(rx)
-    }
-
-    /// Returns a new [`DiscoveryEvent`] stream.
-    ///
-    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
-    pub fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let _ = self.manager().send(NetworkHandleMessage::DiscoveryListener(tx));
-        UnboundedReceiverStream::new(rx)
-    }
-
     /// Returns a new [`FetchClient`] that can be cloned and shared.
     ///
     /// The [`FetchClient`] is the entrypoint for sending requests to the network.
     pub async fn fetch_client(&self) -> Result<FetchClient, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
-        rx.await
-    }
-
-    /// Returns [`PeerInfo`] for a given peer.
-    ///
-    /// Returns `None` if there's no active session to the peer.
-    pub async fn get_peer_by_id(
-        &self,
-        peer_id: PeerId,
-    ) -> Result<Option<PeerInfo>, oneshot::error::RecvError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfoById(peer_id, tx));
         rx.await
     }
 
@@ -132,8 +109,10 @@ impl NetworkHandle {
 
     /// Announce a block over devp2p
     ///
-    /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
-    pub fn announce_block(&self, block: NewBlock, hash: H256) {
+    /// Caution: in PoS this is a noop, since new block are no longer announced over devp2p, but are
+    /// instead sent to node node by the CL. However, they can still be requested over devp2p, but
+    /// broadcasting them is a considered a protocol violation..
+    pub fn announce_block(&self, block: NewBlock, hash: B256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
@@ -155,7 +134,7 @@ impl NetworkHandle {
         })
     }
 
-    /// Provides a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
+    /// Provides a shareable reference to the [`BandwidthMeter`] stored on the `NetworkInner`.
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
     }
@@ -169,9 +148,34 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::Shutdown(tx));
         rx.await
     }
+
+    /// Whether tx gossip is disabled
+    pub fn tx_gossip_disabled(&self) -> bool {
+        self.inner.tx_gossip_disabled
+    }
 }
 
 // === API Implementations ===
+
+impl NetworkEvents for NetworkHandle {
+    fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
+        UnboundedReceiverStream::new(rx)
+    }
+
+    fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = self.manager().send(NetworkHandleMessage::DiscoveryListener(tx));
+        UnboundedReceiverStream::new(rx)
+    }
+}
+
+impl NetworkProtocols for NetworkHandle {
+    fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol) {
+        self.send_message(NetworkHandleMessage::AddRlpxSubProtocol(protocol))
+    }
+}
 
 impl PeersInfo for NetworkHandle {
     fn num_connected_peers(&self) -> usize {
@@ -203,9 +207,27 @@ impl Peers for NetworkHandle {
         self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
     }
 
-    async fn get_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+    async fn get_peers_by_kind(&self, kind: PeerKind) -> Result<Vec<PeerInfo>, NetworkError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfo(tx));
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx));
+        Ok(rx.await?)
+    }
+
+    async fn get_all_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfos(tx));
+        Ok(rx.await?)
+    }
+
+    async fn get_peer_by_id(&self, peer_id: PeerId) -> Result<Option<PeerInfo>, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfoById(peer_id, tx));
+        Ok(rx.await?)
+    }
+
+    async fn get_peers_by_id(&self, peer_ids: Vec<PeerId>) -> Result<Vec<PeerInfo>, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx));
         Ok(rx.await?)
     }
 
@@ -262,6 +284,11 @@ impl NetworkInfo for NetworkHandle {
     fn is_initially_syncing(&self) -> bool {
         SyncStateProvider::is_initially_syncing(self)
     }
+
+    #[cfg(feature = "optimism")]
+    fn sequencer_endpoint(&self) -> Option<&str> {
+        self.inner.sequencer_endpoint.as_deref()
+    }
 }
 
 impl SyncStateProvider for NetworkHandle {
@@ -315,10 +342,32 @@ struct NetworkInner {
     initial_sync_done: Arc<AtomicBool>,
     /// The chain id
     chain_id: Arc<AtomicU64>,
+    /// Whether to disable transaction gossip
+    tx_gossip_disabled: bool,
+    /// The sequencer HTTP Endpoint
+    #[cfg(feature = "optimism")]
+    sequencer_endpoint: Option<String>,
+}
+
+/// Provides event subscription for the network.
+pub trait NetworkEvents: Send + Sync {
+    /// Creates a new [`NetworkEvent`] listener channel.
+    fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent>;
+    /// Returns a new [`DiscoveryEvent`] stream.
+    ///
+    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
+    fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent>;
+}
+
+/// Provides access to modify the network's additional protocol handlers.
+pub trait NetworkProtocols: Send + Sync {
+    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol);
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[allow(missing_docs)]
+#[derive(Debug)]
 pub(crate) enum NetworkHandleMessage {
     /// Adds an address for a peer.
     AddPeerAddress(PeerId, PeerKind, SocketAddr),
@@ -329,7 +378,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Add a new listener for [`NetworkEvent`].
     EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcast event to announce a new block to all nodes.
-    AnnounceBlock(NewBlock, H256),
+    AnnounceBlock(NewBlock, B256),
     /// Sends the list of transactions to the given peer.
     SendTransaction { peer_id: PeerId, msg: SharedTransactions },
     /// Sends the list of transactions hashes to the given peer.
@@ -349,14 +398,20 @@ pub(crate) enum NetworkHandleMessage {
     StatusUpdate { head: Head },
     /// Get the current status
     GetStatus(oneshot::Sender<NetworkStatus>),
+    /// Get PeerInfo for the given peerids
+    GetPeerInfosByIds(Vec<PeerId>, oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo from all the peers
-    GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
+    GetPeerInfos(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
+    /// Get PeerInfo for a specific peer
+    GetPeerInfosByPeerKind(PeerKind, oneshot::Sender<Vec<PeerInfo>>),
     /// Get the reputation for a specific peer
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Gracefully shutdown network
     Shutdown(oneshot::Sender<()>),
     /// Add a new listener for `DiscoveryEvent`.
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
+    /// Add an additional [RlpxSubProtocol].
+    AddRlpxSubProtocol(RlpxSubProtocol),
 }

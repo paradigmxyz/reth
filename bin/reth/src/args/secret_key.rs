@@ -1,6 +1,5 @@
-use hex::encode as hex_encode;
 use reth_network::config::rng_secret_key;
-use reth_primitives::{fs, fs::FsPathError};
+use reth_primitives::{fs, fs::FsPathError, hex::encode as hex_encode};
 use secp256k1::{Error as SecretKeyBaseError, SecretKey};
 use std::{
     io,
@@ -8,7 +7,7 @@ use std::{
 };
 use thiserror::Error;
 
-/// Errors returned by loading a [`SecretKey`][secp256k1::SecretKey], including IO errors.
+/// Errors returned by loading a [`SecretKey`], including IO errors.
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum SecretKeyError {
@@ -16,7 +15,7 @@ pub enum SecretKeyError {
     SecretKeyDecodeError(#[from] SecretKeyBaseError),
     #[error(transparent)]
     SecretKeyFsPathError(#[from] FsPathError),
-    #[error("Failed to access key file {secret_file:?}: {error}")]
+    #[error("failed to access key file {secret_file:?}: {error}")]
     FailedToAccessKeyFile { error: io::Error, secret_file: PathBuf },
 }
 

@@ -5,14 +5,13 @@ use crate::{
     EthApi,
 };
 use reth_primitives::{
-    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, H256, KECCAK_EMPTY,
-    U256,
+    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, U256,
 };
 use reth_provider::{
-    AccountReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider,
-    StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
-use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
+use reth_rpc_types::EIP1186AccountProofResponse;
+use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
@@ -25,7 +24,7 @@ where
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
         let state = self.state_at_block_id_or_latest(block_id)?;
         let code = state.account_code(address)?.unwrap_or_default();
-        Ok(code.original_bytes().into())
+        Ok(code.original_bytes())
     }
 
     pub(crate) fn balance(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256> {
@@ -78,14 +77,13 @@ where
         address: Address,
         index: JsonStorageKey,
         block_id: Option<BlockId>,
-    ) -> EthResult<H256> {
+    ) -> EthResult<B256> {
         let state = self.state_at_block_id_or_latest(block_id)?;
         let value = state.storage(address, index.0)?.unwrap_or_default();
-        Ok(H256(value.to_be_bytes()))
+        Ok(B256::new(value.to_be_bytes()))
     }
 
-    #[allow(unused)]
-    pub(crate) fn get_proof(
+    pub(crate) async fn get_proof(
         &self,
         address: Address,
         keys: Vec<JsonStorageKey>,
@@ -97,7 +95,7 @@ where
         // if we are trying to create a proof for the latest block, but have a BlockId as input
         // that is not BlockNumberOrTag::Latest, then we need to figure out whether or not the
         // BlockId corresponds to the latest block
-        let is_blockid_latest = match block_id {
+        let is_latest_block = match block_id {
             BlockId::Number(BlockNumberOrTag::Number(num)) => num == chain_info.best_number,
             BlockId::Hash(hash) => hash == chain_info.best_hash.into(),
             BlockId::Number(BlockNumberOrTag::Latest) => true,
@@ -105,43 +103,21 @@ where
         };
 
         // TODO: remove when HistoricalStateProviderRef::proof is implemented
-        if !is_blockid_latest {
+        if !is_latest_block {
             return Err(EthApiError::InvalidBlockRange)
         }
 
-        let state = self.state_at_block_id(block_id)?;
-
-        let hash_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
-        let (account_proof, storage_hash, stg_proofs) = state.proof(address, &hash_keys)?;
-
-        let storage_proof = keys
-            .into_iter()
-            .zip(stg_proofs)
-            .map(|(key, proof)| {
-                state.storage(address, key.0).map(|op| StorageProof {
-                    key,
-                    value: op.unwrap_or_default(),
-                    proof,
-                })
+        let this = self.clone();
+        self.inner
+            .blocking_task_pool
+            .spawn(move || {
+                let state = this.state_at_block_id(block_id)?;
+                let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
+                let proof = state.proof(address, &storage_keys)?;
+                Ok(from_primitive_account_proof(proof))
             })
-            .collect::<Result<_, _>>()?;
-
-        let mut proof = EIP1186AccountProofResponse {
-            address,
-            code_hash: KECCAK_EMPTY,
-            account_proof,
-            storage_hash,
-            storage_proof,
-            ..Default::default()
-        };
-
-        if let Some(account) = state.basic_account(proof.address)? {
-            proof.balance = account.balance;
-            proof.nonce = account.nonce.into();
-            proof.code_hash = account.get_bytecode_hash();
-        }
-
-        Ok(proof)
+            .await
+            .map_err(|_| EthApiError::InternalBlockingTaskError)?
     }
 }
 
@@ -149,8 +125,11 @@ where
 mod tests {
     use super::*;
     use crate::{
-        eth::{cache::EthStateCache, gas_oracle::GasPriceOracle},
-        TracingCallPool,
+        eth::{
+            cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
+            FeeHistoryCacheConfig,
+        },
+        BlockingTaskPool,
     };
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
@@ -168,13 +147,14 @@ mod tests {
             pool.clone(),
             (),
             cache.clone(),
-            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
+            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
-            TracingCallPool::build().expect("failed to build tracing pool"),
+            BlockingTaskPool::build().expect("failed to build tracing pool"),
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
-        assert_eq!(storage, U256::ZERO.into());
+        assert_eq!(storage, U256::ZERO.to_be_bytes());
 
         // === Mock ===
         let mock_provider = MockEthProvider::default();
@@ -190,13 +170,14 @@ mod tests {
             pool,
             (),
             cache.clone(),
-            GasPriceOracle::new(mock_provider, Default::default(), cache),
+            GasPriceOracle::new(mock_provider.clone(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
-            TracingCallPool::build().expect("failed to build tracing pool"),
+            BlockingTaskPool::build().expect("failed to build tracing pool"),
+            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
         );
 
         let storage_key: U256 = storage_key.into();
         let storage = eth_api.storage_at(address, storage_key.into(), None).unwrap();
-        assert_eq!(storage, storage_value.into());
+        assert_eq!(storage, storage_value.to_be_bytes());
     }
 }

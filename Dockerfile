@@ -26,12 +26,16 @@ RUN cargo chef cook --profile $BUILD_PROFILE --recipe-path recipe.json
 COPY . .
 RUN cargo build --profile $BUILD_PROFILE --locked --bin reth
 
+# ARG is not resolved in COPY so we have to hack around it by copying the
+# binary to a temporary location
+RUN cp /app/target/$BUILD_PROFILE/reth /app/reth
+
 # Use Ubuntu as the release image
 FROM ubuntu AS runtime
 WORKDIR /app
 
 # Copy reth over from the build stage
-COPY --from=builder /app/target/release/reth /usr/local/bin
+COPY --from=builder /app/reth /usr/local/bin
 
 # Copy licenses
 COPY LICENSE-* ./

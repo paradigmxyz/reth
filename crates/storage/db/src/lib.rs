@@ -1,9 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
 //! reth's database abstraction layer with concrete implementations.
 //!
 //! The database abstraction assumes that the underlying store is a KV store subdivided into tables.
@@ -61,17 +55,21 @@
 //! [`Decompress`]: crate::abstraction::table::Decompress
 //! [`Table`]: crate::abstraction::table::Table
 
-#![warn(missing_docs, unreachable_pub)]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Traits defining the database abstractions, such as cursors and transactions.
 pub mod abstraction;
 
 mod implementation;
+mod metrics;
+pub mod snapshot;
 pub mod tables;
 mod utils;
 pub mod version;
@@ -89,15 +87,7 @@ pub use tables::*;
 pub use utils::is_database_empty;
 
 #[cfg(feature = "mdbx")]
-use mdbx::{Env, EnvKind, NoWriteMap, WriteMap};
-
-#[cfg(feature = "mdbx")]
-/// Alias type for the database environment in use. Read/Write mode.
-pub type DatabaseEnv = Env<WriteMap>;
-
-#[cfg(feature = "mdbx")]
-/// Alias type for the database engine in use. Read only mode.
-pub type DatabaseEnvRO = Env<NoWriteMap>;
+pub use mdbx::{DatabaseEnv, DatabaseEnvKind};
 
 use eyre::WrapErr;
 use reth_interfaces::db::LogLevel;
@@ -122,7 +112,7 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
     }
     #[cfg(feature = "mdbx")]
     {
-        let db = DatabaseEnv::open(rpath, EnvKind::RW, log_level)?;
+        let db = DatabaseEnv::open(rpath, DatabaseEnvKind::RW, log_level)?;
         db.create_tables()?;
         Ok(db)
     }
@@ -133,10 +123,10 @@ pub fn init_db<P: AsRef<Path>>(path: P, log_level: Option<LogLevel>) -> eyre::Re
 }
 
 /// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
-pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnvRO> {
+pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<NoWriteMap>::open(path, EnvKind::RO, log_level)
+        DatabaseEnv::open(path, DatabaseEnvKind::RO, log_level)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -145,12 +135,12 @@ pub fn open_db_read_only(path: &Path, log_level: Option<LogLevel>) -> eyre::Resu
     }
 }
 
-/// Opens up an existing database. Read/Write mode. It doesn't create it or create tables if
-/// missing.
+/// Opens up an existing database. Read/Write mode with WriteMap enabled. It doesn't create it or
+/// create tables if missing.
 pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<DatabaseEnv> {
     #[cfg(feature = "mdbx")]
     {
-        Env::<WriteMap>::open(path, EnvKind::RW, log_level)
+        DatabaseEnv::open(path, DatabaseEnvKind::RW, log_level)
             .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
     #[cfg(not(feature = "mdbx"))]
@@ -163,7 +153,8 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use std::sync::Arc;
+    use crate::database::Database;
+    use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
@@ -174,26 +165,76 @@ pub mod test_utils {
     /// Error during tempdir creation
     pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
 
-    /// Create read/write database for testing
-    pub fn create_test_rw_db() -> Arc<DatabaseEnv> {
-        Arc::new(
-            init_db(tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(), None)
-                .expect(ERROR_DB_CREATION),
-        )
+    /// A database will delete the db dir when dropped.
+    #[derive(Debug)]
+    pub struct TempDatabase<DB> {
+        db: Option<DB>,
+        path: PathBuf,
+    }
+
+    impl<DB> Drop for TempDatabase<DB> {
+        fn drop(&mut self) {
+            if let Some(db) = self.db.take() {
+                drop(db);
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
+        }
+    }
+
+    impl<DB> TempDatabase<DB> {
+        /// Returns the reference to inner db.
+        pub fn db(&self) -> &DB {
+            self.db.as_ref().unwrap()
+        }
+
+        /// Returns the path to the database.
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
+
+        /// Convert temp database into inner.
+        pub fn into_inner_db(mut self) -> DB {
+            self.db.take().unwrap() // take out db to avoid clean path in drop fn
+        }
+    }
+
+    impl<DB: Database> Database for TempDatabase<DB> {
+        type TX = <DB as Database>::TX;
+        type TXMut = <DB as Database>::TXMut;
+        fn tx(&self) -> Result<Self::TX, DatabaseError> {
+            self.db().tx()
+        }
+
+        fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
+            self.db().tx_mut()
+        }
     }
 
     /// Create read/write database for testing
-    pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<DatabaseEnv> {
-        Arc::new(init_db(path.as_ref(), None).expect(ERROR_DB_CREATION))
+    pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
+        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
+
+        let db = init_db(&path, None).expect(&emsg);
+
+        Arc::new(TempDatabase { db: Some(db), path })
+    }
+
+    /// Create read/write database for testing
+    pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
+        let path = path.as_ref().to_path_buf();
+        let db = init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
+        Arc::new(TempDatabase { db: Some(db), path })
     }
 
     /// Create read only database for testing
-    pub fn create_test_ro_db() -> Arc<DatabaseEnvRO> {
+    pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path();
         {
             init_db(path.as_path(), None).expect(ERROR_DB_CREATION);
         }
-        Arc::new(open_db_read_only(path.as_path(), None).expect(ERROR_DB_OPEN))
+        let db = open_db_read_only(path.as_path(), None).expect(ERROR_DB_OPEN);
+        Arc::new(TempDatabase { db: Some(db), path })
     }
 }
 

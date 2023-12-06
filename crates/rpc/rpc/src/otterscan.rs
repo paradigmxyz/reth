@@ -2,7 +2,7 @@
 use crate::result::internal_rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, H256};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_types::{
     BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
@@ -64,7 +64,7 @@ where
     }
 
     /// Handler for `getBlockDetailsByHash`
-    async fn get_block_details_by_hash(&self, block_hash: H256) -> RpcResult<Option<BlockDetails>> {
+    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<Option<BlockDetails>> {
         let block = self.eth.block_by_hash(block_hash, true).await?;
         Ok(block.map(Into::into))
     }

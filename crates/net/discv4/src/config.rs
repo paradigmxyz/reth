@@ -3,13 +3,13 @@
 //! This basis of this file has been taken from the discv5 codebase:
 //! <https://github.com/sigp/discv5>
 
+use alloy_rlp::Encodable;
 use reth_net_common::ban_list::BanList;
 use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     NodeRecord,
 };
-use reth_rlp::Encodable;
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,

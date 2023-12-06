@@ -7,31 +7,26 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[dependencies]
+codecs-derive = { path = "./derive", default-features = false }
+
+alloy-primitives.workspace = true
+bytes.workspace = true
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
+serde.workspace = true
+modular-bitfield = "0.11.2"
+test-fuzz = "4"
+
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-derive.workspace = true
+
 [features]
 default = ["compact"]
 compact = ["codecs-derive/compact"]
 scale = ["codecs-derive/scale"]
 postcard = ["codecs-derive/postcard"]
 no_codec = ["codecs-derive/no_codec"]
-arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-
-[dependencies]
-bytes.workspace = true
-codecs-derive = { path = "./derive", default-features = false }
-revm-primitives = { workspace = true, features = ["serde"] }
-
-# arbitrary utils
-arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { version = "0.3", optional = true }
-
-[dev-dependencies]
-revm-primitives = { workspace = true, features = ["serde", "arbitrary"] }
-
-serde = "1.0"
-modular-bitfield = "0.11.2"
-test-fuzz = "4"
-
-arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
-proptest-derive = "0.3"
+optimism = ["codecs-derive/optimism"]

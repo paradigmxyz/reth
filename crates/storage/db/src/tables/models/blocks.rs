@@ -1,16 +1,16 @@
 //! Block related models and types.
 
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{Header, TxNumber, Withdrawal, H256};
+use reth_primitives::{Header, TxNumber, Withdrawal, B256};
 use std::ops::Range;
 
 /// Total number of transactions.
 pub type NumTransactions = u64;
 
-/// The storage of the block body indices
+/// The storage of the block body indices.
 ///
 /// It has the pointer to the transaction Number of the first
-/// transaction in the block and the total number of transactions
+/// transaction in the block and the total number of transactions.
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[main_codec]
 pub struct StoredBlockBodyIndices {
@@ -65,10 +65,9 @@ impl StoredBlockBodyIndices {
     }
 }
 
-/// The storage representation of a block ommers.
+/// The storage representation of a block's ommers.
 ///
 /// It is stored as the headers of the block's uncles.
-/// tx_amount)`.
 #[main_codec]
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct StoredBlockOmmers {
@@ -85,7 +84,7 @@ pub struct StoredBlockWithdrawals {
 }
 
 /// Hash of the block header. Value for [`CanonicalHeaders`][crate::tables::CanonicalHeaders]
-pub type HeaderHash = H256;
+pub type HeaderHash = B256;
 
 #[cfg(test)]
 mod test {

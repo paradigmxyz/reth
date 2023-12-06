@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 pub(crate) const ETH_REQUEST_CHANNEL_CAPACITY: usize = 256;
 
 /// A builder that can configure all components of the network.
+#[allow(missing_debug_implementations)]
 pub struct NetworkBuilder<C, Tx, Eth> {
     pub(crate) network: NetworkManager<C>,
     pub(crate) transactions: Tx,
@@ -25,6 +26,21 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
     pub fn split(self) -> (NetworkManager<C>, Tx, Eth) {
         let NetworkBuilder { network, transactions, request_handler } = self;
         (network, transactions, request_handler)
+    }
+
+    /// Returns the network manager.
+    pub fn network(&self) -> &NetworkManager<C> {
+        &self.network
+    }
+
+    /// Returns the mutable network manager.
+    pub fn network_mut(&mut self) -> &mut NetworkManager<C> {
+        &mut self.network
+    }
+
+    /// Returns the handle to the network.
+    pub fn handle(&self) -> NetworkHandle {
+        self.network.handle().clone()
     }
 
     /// Consumes the type and returns all fields and also return a [`NetworkHandle`].

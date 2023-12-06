@@ -1,22 +1,19 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxzy/reth/issues/"
-)]
-#![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
-#![deny(unused_must_use, rust_2018_idioms)]
-#![doc(test(
-    no_crate_inject,
-    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
-))]
-
 //! Implementation of [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) Node Discovery via DNS.
 //!
 //! ## Feature Flags
 //!
 //! - `serde` (default): Enable serde support
 //! - `test-utils`: Export utilities for testing
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
 use crate::{
     query::{QueryOutcome, QueryPool, ResolveEntryResult, ResolveRootResult},
@@ -60,7 +57,7 @@ mod sync;
 pub mod tree;
 
 /// [DnsDiscoveryService] front-end.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DnsDiscoveryHandle {
     /// Channel for sending commands to the service.
     to_service: UnboundedSender<DnsDiscoveryCommand>,
@@ -93,6 +90,7 @@ impl DnsDiscoveryHandle {
 
 /// A client that discovers nodes via DNS.
 #[must_use = "Service does nothing unless polled"]
+#[allow(missing_debug_implementations)]
 pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     /// Copy of the sender half, so new [`DnsDiscoveryHandle`] can be created on demand.
     command_tx: UnboundedSender<DnsDiscoveryCommand>,
@@ -120,11 +118,13 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     /// Creates a new instance of the [DnsDiscoveryService] using the given settings.
     ///
     /// ```
-    /// use std::sync::Arc;
     /// use reth_dns_discovery::{DnsDiscoveryService, DnsResolver};
+    /// use std::sync::Arc;
     /// # fn t() {
-    ///  let service =
-    ///             DnsDiscoveryService::new(Arc::new(DnsResolver::from_system_conf().unwrap()), Default::default());
+    /// let service = DnsDiscoveryService::new(
+    ///     Arc::new(DnsResolver::from_system_conf().unwrap()),
+    ///     Default::default(),
+    /// );
     /// # }
     /// ```
     pub fn new(resolver: Arc<R>, config: DnsDiscoveryConfig) -> Self {
@@ -158,7 +158,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             self.bootstrap();
 
             while let Some(event) = self.next().await {
-                trace!(target : "disc::dns", ?event,  "processed");
+                trace!(target: "disc::dns", ?event,  "processed");
             }
         })
     }
@@ -391,7 +391,7 @@ pub enum DnsDiscoveryEvent {
 
 /// Converts an [Enr] into a [NodeRecord]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
-    use reth_rlp::Decodable;
+    use alloy_rlp::Decodable;
 
     let node_record = NodeRecord {
         address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
@@ -411,9 +411,9 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
 mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
+    use alloy_rlp::Encodable;
     use enr::{EnrBuilder, EnrKey};
     use reth_primitives::{Chain, Hardfork, MAINNET};
-    use reth_rlp::Encodable;
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
     use tokio_stream::StreamExt;
@@ -462,7 +462,7 @@ mod tests {
 
         let mut builder = EnrBuilder::new("v4");
         let mut buf = Vec::new();
-        let fork_id = Hardfork::Frontier.fork_id(&MAINNET).unwrap();
+        let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier).unwrap();
         fork_id.encode(&mut buf);
         builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303).add_value(b"eth", &buf);
         let enr = builder.build(&secret_key).unwrap();

@@ -1,13 +1,16 @@
 use crate::{
-    BeaconConsensus, BeaconConsensusEngine, BeaconConsensusEngineError,
-    BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
-    MIN_BLOCKS_FOR_PIPELINE_RUN,
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine,
+    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
-    config::BlockchainTreeConfig, externals::TreeExternals, post_state::PostState, BlockchainTree,
-    ShareableBlockchainTree,
+    config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_db::{test_utils::create_test_rw_db, DatabaseEnv};
+use reth_db::{
+    test_utils::{create_test_rw_db, TempDatabase},
+    DatabaseEnv as DE,
+};
+type DatabaseEnv = TempDatabase<DE>;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -20,20 +23,18 @@ use reth_interfaces::{
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneBatchSizes, PruneModes, H256, U256};
+use reth_primitives::{BlockNumber, ChainSpec, PruneModes, Receipt, B256, U256};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor, ExecutorFactory,
-    ProviderFactory, StateProvider,
+    providers::BlockchainProvider, test_utils::TestExecutorFactory, BlockExecutor,
+    BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, ProviderFactory,
+    PrunableBlockExecutor,
 };
 use reth_prune::Pruner;
-use reth_revm::Factory;
+use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
-use reth_stages::{
-    sets::DefaultStages, stages::HeaderSyncMode, test_utils::TestStages, ExecOutput, Pipeline,
-    StageError,
-};
+use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipeline, StageError};
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
@@ -44,25 +45,25 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
         Arc<DatabaseEnv>,
         ShareableBlockchainTree<
             Arc<DatabaseEnv>,
-            Arc<dyn Consensus>,
-            EitherExecutorFactory<TestExecutorFactory, Factory>,
+            EitherExecutorFactory<TestExecutorFactory, EvmProcessorFactory>,
         >,
     >,
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
 >;
 
+#[derive(Debug)]
 pub struct TestEnv<DB> {
     pub db: DB,
     // Keep the tip receiver around, so it's not dropped.
     #[allow(dead_code)]
-    tip_rx: watch::Receiver<H256>,
+    tip_rx: watch::Receiver<B256>,
     engine_handle: BeaconConsensusEngineHandle,
 }
 
 impl<DB> TestEnv<DB> {
     fn new(
         db: DB,
-        tip_rx: watch::Receiver<H256>,
+        tip_rx: watch::Receiver<B256>,
         engine_handle: BeaconConsensusEngineHandle,
     ) -> Self {
         Self { db, tip_rx, engine_handle }
@@ -117,7 +118,7 @@ impl<DB> TestEnv<DB> {
 // TODO: add with_consensus in case we want to use the TestConsensus purposeful failure - this
 // would require similar patterns to how we use with_client and the EitherDownloader
 /// Represents either a real consensus engine, or a test consensus engine.
-#[derive(Default)]
+#[derive(Debug, Default)]
 enum TestConsensusConfig {
     /// Test consensus engine
     #[default]
@@ -127,6 +128,7 @@ enum TestConsensusConfig {
 }
 
 /// Represents either test pipeline outputs, or real pipeline configuration.
+#[derive(Debug)]
 enum TestPipelineConfig {
     /// Test pipeline outputs.
     Test(VecDeque<Result<ExecOutput, StageError>>),
@@ -141,9 +143,10 @@ impl Default for TestPipelineConfig {
 }
 
 /// Represents either test executor results, or real executor configuration.
+#[derive(Debug)]
 enum TestExecutorConfig {
     /// Test executor results.
-    Test(Vec<PostState>),
+    Test(Vec<BundleStateWithReceipts>),
     /// Real executor configuration.
     Real,
 }
@@ -172,18 +175,17 @@ pub enum EitherBlockExecutor<A, B> {
     Right(B),
 }
 
-impl<A, B, SP> BlockExecutor<SP> for EitherBlockExecutor<A, B>
+impl<A, B> BlockExecutor for EitherBlockExecutor<A, B>
 where
-    A: BlockExecutor<SP>,
-    B: BlockExecutor<SP>,
-    SP: StateProvider,
+    A: BlockExecutor,
+    B: BlockExecutor,
 {
     fn execute(
         &mut self,
         block: &reth_primitives::Block,
         total_difficulty: U256,
         senders: Option<Vec<reth_primitives::Address>>,
-    ) -> Result<PostState, BlockExecutionError> {
+    ) -> Result<(), BlockExecutionError> {
         match self {
             EitherBlockExecutor::Left(a) => a.execute(block, total_difficulty, senders),
             EitherBlockExecutor::Right(b) => b.execute(block, total_difficulty, senders),
@@ -195,7 +197,7 @@ where
         block: &reth_primitives::Block,
         total_difficulty: U256,
         senders: Option<Vec<reth_primitives::Address>>,
-    ) -> Result<PostState, BlockExecutionError> {
+    ) -> Result<(), BlockExecutionError> {
         match self {
             EitherBlockExecutor::Left(a) => {
                 a.execute_and_verify_receipt(block, total_difficulty, senders)
@@ -205,6 +207,63 @@ where
             }
         }
     }
+
+    fn execute_transactions(
+        &mut self,
+        block: &reth_primitives::Block,
+        total_difficulty: U256,
+        senders: Option<Vec<reth_primitives::Address>>,
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+        match self {
+            EitherBlockExecutor::Left(a) => {
+                a.execute_transactions(block, total_difficulty, senders)
+            }
+            EitherBlockExecutor::Right(b) => {
+                b.execute_transactions(block, total_difficulty, senders)
+            }
+        }
+    }
+
+    fn take_output_state(&mut self) -> BundleStateWithReceipts {
+        match self {
+            EitherBlockExecutor::Left(a) => a.take_output_state(),
+            EitherBlockExecutor::Right(b) => b.take_output_state(),
+        }
+    }
+
+    fn stats(&self) -> reth_provider::BlockExecutorStats {
+        match self {
+            EitherBlockExecutor::Left(a) => a.stats(),
+            EitherBlockExecutor::Right(b) => b.stats(),
+        }
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        match self {
+            EitherBlockExecutor::Left(a) => a.size_hint(),
+            EitherBlockExecutor::Right(b) => b.size_hint(),
+        }
+    }
+}
+
+impl<A, B> PrunableBlockExecutor for EitherBlockExecutor<A, B>
+where
+    B: PrunableBlockExecutor,
+    A: PrunableBlockExecutor,
+{
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        match self {
+            EitherBlockExecutor::Left(a) => a.set_prune_modes(prune_modes),
+            EitherBlockExecutor::Right(b) => b.set_prune_modes(prune_modes),
+        }
+    }
+
+    fn set_tip(&mut self, tip: BlockNumber) {
+        match self {
+            EitherBlockExecutor::Left(a) => a.set_tip(tip),
+            EitherBlockExecutor::Right(b) => b.set_tip(tip),
+        }
+    }
 }
 
 impl<A, B> ExecutorFactory for EitherExecutorFactory<A, B>
@@ -212,8 +271,6 @@ where
     A: ExecutorFactory,
     B: ExecutorFactory,
 {
-    type Executor<T: StateProvider> = EitherBlockExecutor<A::Executor<T>, B::Executor<T>>;
-
     fn chain_spec(&self) -> &ChainSpec {
         match self {
             EitherExecutorFactory::Left(a) => a.chain_spec(),
@@ -221,16 +278,20 @@ where
         }
     }
 
-    fn with_sp<SP: reth_provider::StateProvider>(&self, sp: SP) -> Self::Executor<SP> {
+    fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
+        &'a self,
+        sp: SP,
+    ) -> Box<dyn PrunableBlockExecutor + 'a> {
         match self {
-            EitherExecutorFactory::Left(a) => EitherBlockExecutor::Left(a.with_sp(sp)),
-            EitherExecutorFactory::Right(b) => EitherBlockExecutor::Right(b.with_sp(sp)),
+            EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
+            EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
         }
     }
 }
 
 /// The basic configuration for a `TestConsensusEngine`, without generics for the client or
 /// consensus engine.
+#[derive(Debug)]
 pub struct TestConsensusEngineBuilder {
     chain_spec: Arc<ChainSpec>,
     pipeline_config: TestPipelineConfig,
@@ -263,7 +324,7 @@ impl TestConsensusEngineBuilder {
     }
 
     /// Set the executor results to use for the test consensus engine.
-    pub fn with_executor_results(mut self, executor_results: Vec<PostState>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
         self.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }
@@ -322,6 +383,7 @@ impl TestConsensusEngineBuilder {
 /// mocked executor results.
 ///
 /// This optionally includes a client for network operations.
+#[derive(Debug)]
 pub struct NetworkedTestConsensusEngineBuilder<Client> {
     base_config: TestConsensusEngineBuilder,
     client: Option<Client>,
@@ -343,7 +405,7 @@ where
 
     /// Set the executor results to use for the test consensus engine.
     #[allow(dead_code)]
-    pub fn with_executor_results(mut self, executor_results: Vec<PostState>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
         self.base_config.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }
@@ -393,6 +455,8 @@ where
     pub fn build(self) -> (TestBeaconConsensusEngine<Client>, TestEnv<Arc<DatabaseEnv>>) {
         reth_tracing::init_test_tracing();
         let db = create_test_rw_db();
+        let provider_factory =
+            ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());
 
         let consensus: Arc<dyn Consensus> = match self.base_config.consensus {
             TestConsensusConfig::Real => {
@@ -417,13 +481,13 @@ where
                 executor_factory.extend(results);
                 EitherExecutorFactory::Left(executor_factory)
             }
-            TestExecutorConfig::Real => {
-                EitherExecutorFactory::Right(Factory::new(self.base_config.chain_spec.clone()))
-            }
+            TestExecutorConfig::Real => EitherExecutorFactory::Right(EvmProcessorFactory::new(
+                self.base_config.chain_spec.clone(),
+            )),
         };
 
         // Setup pipeline
-        let (tip_tx, tip_rx) = watch::channel(H256::default());
+        let (tip_tx, tip_rx) = watch::channel(B256::default());
         let mut pipeline = match self.base_config.pipeline_config {
             TestPipelineConfig::Test(outputs) => Pipeline::builder()
                 .add_stages(TestStages::new(outputs, Default::default()))
@@ -434,12 +498,13 @@ where
                     .into_task();
 
                 let body_downloader = BodiesDownloaderBuilder::default()
-                    .build(client.clone(), consensus.clone(), db.clone())
+                    .build(client.clone(), consensus.clone(), provider_factory.clone())
                     .into_task();
 
                 Pipeline::builder().add_stages(DefaultStages::new(
+                    ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone()),
                     HeaderSyncMode::Tip(tip_rx.clone()),
-                    Arc::clone(&consensus) as Arc<dyn Consensus>,
+                    Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
                     executor_factory.clone(),
@@ -451,32 +516,29 @@ where
             pipeline = pipeline.with_max_block(max_block);
         }
 
-        let pipeline = pipeline.build(db.clone(), self.base_config.chain_spec.clone());
+        let pipeline = pipeline.build(provider_factory.clone());
 
         // Setup blockchain tree
-        let externals = TreeExternals::new(
-            db.clone(),
-            consensus,
-            executor_factory,
-            self.base_config.chain_spec.clone(),
-        );
+        let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, canon_state_notification_sender, config, None)
-                .expect("failed to create tree"),
+            BlockchainTree::new(externals, config, None).expect("failed to create tree"),
         );
-        let shareable_db = ProviderFactory::new(db.clone(), self.base_config.chain_spec.clone());
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
-        let blockchain_provider = BlockchainProvider::with_latest(shareable_db, tree, latest);
+        let blockchain_provider = BlockchainProvider::with_latest(provider_factory, tree, latest);
 
         let pruner = Pruner::new(
             db.clone(),
             self.base_config.chain_spec.clone(),
+            vec![],
             5,
-            PruneModes::none(),
-            PruneBatchSizes::default(),
+            self.base_config.chain_spec.prune_delete_limit,
+            config.max_reorg_depth() as usize,
+            watch::channel(None).1,
         );
+
+        let mut hooks = EngineHooks::new();
+        hooks.add(PruneHook::new(pruner, Box::<TokioTaskExecutor>::default()));
 
         let (mut engine, handle) = BeaconConsensusEngine::new(
             client,
@@ -489,7 +551,7 @@ where
             payload_builder,
             None,
             self.base_config.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),
-            Some(pruner),
+            hooks,
         )
         .expect("failed to create consensus engine");
 

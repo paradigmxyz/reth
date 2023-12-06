@@ -1,8 +1,12 @@
 //! Config traits for various node components.
 
-use reth_revm::primitives::bytes::BytesMut;
-use reth_rlp::Encodable;
-use reth_rpc::{eth::gas_oracle::GasPriceOracleConfig, JwtError, JwtSecret};
+use alloy_rlp::Encodable;
+use reth_network::protocol::IntoRlpxSubProtocol;
+use reth_primitives::{Bytes, BytesMut};
+use reth_rpc::{
+    eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig},
+    JwtError, JwtSecret,
+};
 use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
     ServerBuilder, TransportRpcModuleConfig,
@@ -17,8 +21,14 @@ pub trait RethRpcConfig {
     /// Returns whether ipc is enabled.
     fn is_ipc_enabled(&self) -> bool;
 
+    /// Returns the path to the target ipc socket if enabled.
+    fn ipc_path(&self) -> &str;
+
     /// The configured ethereum RPC settings.
     fn eth_config(&self) -> EthConfig;
+
+    /// Returns state cache configuration.
+    fn state_cache_config(&self) -> EthStateCacheConfig;
 
     /// Returns the max request size in bytes.
     fn rpc_max_request_size_bytes(&self) -> u32;
@@ -60,7 +70,12 @@ pub trait RethRpcConfig {
     ///
     /// The `default_jwt_path` provided as an argument will be used as the default location for the
     /// jwt secret in case the `auth_jwtsecret` argument is not provided.
-    fn jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError>;
+    fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError>;
+
+    /// Returns the configured jwt secret key for the regular rpc servers, if any.
+    ///
+    /// Note: this is not used for the auth server (engine API).
+    fn rpc_secret_key(&self) -> Option<JwtSecret>;
 }
 
 /// A trait that provides payload builder settings.
@@ -72,10 +87,10 @@ pub trait PayloadBuilderConfig {
     fn extradata(&self) -> Cow<'_, str>;
 
     /// Returns the rlp-encoded extradata bytes.
-    fn extradata_rlp_bytes(&self) -> reth_primitives::bytes::Bytes {
+    fn extradata_rlp_bytes(&self) -> Bytes {
         let mut extradata = BytesMut::new();
         self.extradata().as_bytes().encode(&mut extradata);
-        extradata.freeze()
+        extradata.freeze().into()
     }
 
     /// The interval at which the job should build a new payload after the last.
@@ -89,4 +104,26 @@ pub trait PayloadBuilderConfig {
 
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
+
+    /// Returns whether or not to construct the pending block.
+    #[cfg(feature = "optimism")]
+    fn compute_pending_block(&self) -> bool;
+}
+
+/// A trait that can be used to apply additional configuration to the network.
+pub trait RethNetworkConfig {
+    /// Adds a new additional protocol to the RLPx sub-protocol list.
+    ///
+    /// These additional protocols are negotiated during the RLPx handshake.
+    /// If both peers share the same protocol, the corresponding handler will be included alongside
+    /// the `eth` protocol.
+    ///
+    /// See also [ProtocolHandler](reth_network::protocol::ProtocolHandler)
+    fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol);
+}
+
+impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
+    fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        reth_network::NetworkManager::add_rlpx_sub_protocol(self, protocol);
+    }
 }

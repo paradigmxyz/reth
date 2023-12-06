@@ -22,13 +22,14 @@ pub use loader::{LoadedPrefixSets, PrefixSetLoader};
 /// # Examples
 ///
 /// ```
+/// use reth_primitives::trie::Nibbles;
 /// use reth_trie::prefix_set::PrefixSetMut;
 ///
 /// let mut prefix_set = PrefixSetMut::default();
-/// prefix_set.insert(b"key1");
-/// prefix_set.insert(b"key2");
-///
-/// assert_eq!(prefix_set.contains(b"key"), true);
+/// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
+/// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb, 0xc]));
+/// assert!(prefix_set.contains(&[0xa, 0xb]));
+/// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
 /// ```
 #[derive(Debug, Default, Clone)]
 pub struct PrefixSetMut {
@@ -37,29 +38,36 @@ pub struct PrefixSetMut {
     index: usize,
 }
 
+impl<I> From<I> for PrefixSetMut
+where
+    I: IntoIterator<Item = Nibbles>,
+{
+    fn from(value: I) -> Self {
+        PrefixSetMut { keys: value.into_iter().collect(), ..Default::default() }
+    }
+}
+
 impl PrefixSetMut {
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.
-    pub fn contains<T: Into<Nibbles>>(&mut self, prefix: T) -> bool {
+    pub fn contains(&mut self, prefix: &[u8]) -> bool {
         if !self.sorted {
             self.keys.sort();
             self.keys.dedup();
             self.sorted = true;
         }
 
-        let prefix = prefix.into();
-
-        while self.index > 0 && self.keys[self.index] > prefix {
+        while self.index > 0 && self.keys[self.index] > *prefix {
             self.index -= 1;
         }
 
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
-            if key.has_prefix(&prefix) {
+            if key.has_prefix(prefix) {
                 self.index += idx;
                 return true
             }
 
-            if key > &prefix {
+            if *key > *prefix {
                 self.index += idx;
                 return false
             }
@@ -69,9 +77,9 @@ impl PrefixSetMut {
     }
 
     /// Inserts the given `nibbles` into the set.
-    pub fn insert<T: Into<Nibbles>>(&mut self, nibbles: T) {
+    pub fn insert(&mut self, nibbles: Nibbles) {
         self.sorted = false;
-        self.keys.push(nibbles.into());
+        self.keys.push(nibbles);
     }
 
     /// Returns the number of elements in the set.
@@ -150,10 +158,10 @@ mod tests {
     #[test]
     fn test_contains_with_multiple_inserts_and_duplicates() {
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(b"123");
-        prefix_set.insert(b"124");
-        prefix_set.insert(b"456");
-        prefix_set.insert(b"123"); // Duplicate
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123"));
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"124"));
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"456"));
+        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123")); // Duplicate
 
         assert!(prefix_set.contains(b"12"));
         assert!(prefix_set.contains(b"45"));

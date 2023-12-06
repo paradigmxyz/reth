@@ -3,8 +3,8 @@
 mod manager;
 mod reputation;
 
-pub(crate) use manager::{InboundConnectionError, PeerAction, PeersManager};
-pub use manager::{Peer, PeersConfig, PeersHandle};
+pub(crate) use manager::InboundConnectionError;
+pub use manager::{Peer, PeerAction, PeersConfig, PeersHandle, PeersManager};
 pub use reputation::ReputationChangeWeights;
 pub use reth_network_api::PeerKind;
 
@@ -13,3 +13,6 @@ pub(crate) const DEFAULT_MAX_PEERS_OUTBOUND: usize = 100;
 
 /// Maximum number of available slots for inbound sessions.
 pub(crate) const DEFAULT_MAX_PEERS_INBOUND: usize = 30;
+
+/// Maximum number of available slots concurrent outgoing dials.
+pub(crate) const DEFAULT_MAX_CONCURRENT_DIALS: usize = 10;

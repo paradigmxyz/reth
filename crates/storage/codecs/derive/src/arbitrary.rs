@@ -30,7 +30,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                 }
             });
         } else if arg.to_string() == "rlp" {
-            traits.push(quote! { use reth_rlp::{Encodable, Decodable}; });
+            traits.push(quote! { use alloy_rlp::{Encodable, Decodable}; });
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];
@@ -64,7 +64,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
                     // malformed rlp-header check
                     let mut decode_buf = &mut buf.as_slice();
-                    let mut header = reth_rlp::Header::decode(decode_buf).expect("failed to decode header");
+                    let mut header = alloy_rlp::Header::decode(decode_buf).expect("failed to decode header");
                     header.payload_length+=1;
                     let mut b = Vec::with_capacity(decode_buf.len());
                     header.encode(&mut b);

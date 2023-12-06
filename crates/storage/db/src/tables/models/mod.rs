@@ -5,8 +5,8 @@ use crate::{
 };
 use reth_codecs::Compact;
 use reth_primitives::{
-    trie::{StoredNibbles, StoredNibblesSubKey},
-    Address, PrunePart, H256,
+    trie::{Nibbles, StoredNibblesSubKey},
+    Address, PruneSegment, B256,
 };
 
 pub mod accounts;
@@ -23,8 +23,7 @@ pub use sharded_key::ShardedKey;
 macro_rules! impl_uints {
     ($($name:tt),+) => {
         $(
-            impl Encode for $name
-            {
+            impl Encode for $name {
                 type Encoded = [u8; std::mem::size_of::<$name>()];
 
                 fn encode(self) -> Self::Encoded {
@@ -32,12 +31,11 @@ macro_rules! impl_uints {
                 }
             }
 
-            impl Decode for $name
-            {
+            impl Decode for $name {
                 fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, $crate::DatabaseError> {
                     Ok(
                         $name::from_be_bytes(
-                            value.as_ref().try_into().map_err(|_| $crate::DatabaseError::DecodeError)?
+                            value.as_ref().try_into().map_err(|_| $crate::DatabaseError::Decode)?
                         )
                     )
                 }
@@ -50,6 +48,7 @@ impl_uints!(u64, u32, u16, u8);
 
 impl Encode for Vec<u8> {
     type Encoded = Vec<u8>;
+
     fn encode(self) -> Self::Encoded {
         self
     }
@@ -63,8 +62,9 @@ impl Decode for Vec<u8> {
 
 impl Encode for Address {
     type Encoded = [u8; 20];
+
     fn encode(self) -> Self::Encoded {
-        self.to_fixed_bytes()
+        self.0 .0
     }
 }
 
@@ -74,21 +74,23 @@ impl Decode for Address {
     }
 }
 
-impl Encode for H256 {
+impl Encode for B256 {
     type Encoded = [u8; 32];
+
     fn encode(self) -> Self::Encoded {
-        self.to_fixed_bytes()
+        self.0
     }
 }
 
-impl Decode for H256 {
+impl Decode for B256 {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Ok(H256::from_slice(value.as_ref()))
+        Ok(B256::new(value.as_ref().try_into().map_err(|_| DatabaseError::Decode)?))
     }
 }
 
 impl Encode for String {
     type Encoded = Vec<u8>;
+
     fn encode(self) -> Self::Encoded {
         self.into_bytes()
     }
@@ -96,22 +98,22 @@ impl Encode for String {
 
 impl Decode for String {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        String::from_utf8(value.as_ref().to_vec()).map_err(|_| DatabaseError::DecodeError)
+        String::from_utf8(value.as_ref().to_vec()).map_err(|_| DatabaseError::Decode)
     }
 }
 
-impl Encode for StoredNibbles {
+impl Encode for Nibbles {
     type Encoded = Vec<u8>;
 
     // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        let mut buf = Vec::with_capacity(self.inner.len());
+        let mut buf = Vec::with_capacity(self.len());
         self.to_compact(&mut buf);
         buf
     }
 }
 
-impl Decode for StoredNibbles {
+impl Decode for Nibbles {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let buf = value.as_ref();
         Ok(Self::from_compact(buf, buf.len()).0)
@@ -136,7 +138,7 @@ impl Decode for StoredNibblesSubKey {
     }
 }
 
-impl Encode for PrunePart {
+impl Encode for PruneSegment {
     type Encoded = [u8; 1];
 
     fn encode(self) -> Self::Encoded {
@@ -146,7 +148,7 @@ impl Encode for PrunePart {
     }
 }
 
-impl Decode for PrunePart {
+impl Decode for PruneSegment {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let buf = value.as_ref();
         Ok(Self::from_compact(buf, buf.len()).0)
