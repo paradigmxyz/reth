@@ -124,6 +124,7 @@ pub(crate) async fn serve(
         Box::new(db_stats),
         Box::new(move || cloned_process.collect()),
         Box::new(collect_memory_stats),
+        Box::new(collect_io_stats),
     ];
     serve_with_hooks(listen_addr, handle, hooks).await?;
 
@@ -135,6 +136,7 @@ pub(crate) async fn serve(
     describe_gauge!("db.freelist", "The number of pages on the freelist");
     process.describe();
     describe_memory_stats();
+    describe_io_stats();
 
     Ok(())
 }
@@ -225,3 +227,47 @@ fn collect_memory_stats() {}
 
 #[cfg(not(all(feature = "jemalloc", unix)))]
 fn describe_memory_stats() {}
+
+#[cfg(linux)]
+fn collect_io_stats() {
+    use metrics::counter;
+
+    let Ok(process) = procfs::process::Process::myself()
+        .map_err(|error| error!(?error, "Failed to get currently running process"))
+    else {
+        return
+    };
+
+    let Ok(io) = process.io().map_err(|error| {
+        error!(?error, "Failed to get IO stats for the currently running process")
+    }) else {
+        return
+    };
+
+    counter!("io.rchar", io.rchar);
+    counter!("io.wchar", io.wchar);
+    counter!("io.syscr", io.syscr);
+    counter!("io.syscw", io.syscw);
+    counter!("io.read_bytes", io.read_bytes);
+    counter!("io.write_bytes", io.write_bytes);
+    counter!("io.cancelled_write_bytes", io.cancelled_write_bytes);
+}
+
+#[cfg(linux)]
+fn describe_io_stats() {
+    use metrics::describe_counter;
+
+    describe_counter!("io.rchar", "Characters read");
+    describe_counter!("io.wchar", "Characters written");
+    describe_counter!("io.syscr", "Read syscalls");
+    describe_counter!("io.syscw", "Write syscalls");
+    describe_counter!("io.read_bytes", Unit::Bytes, "Bytes read");
+    describe_counter!("io.write_bytes", Unit::Bytes, "Bytes written");
+    describe_counter!("io.cancelled_write_bytes", Unit::Bytes, "Cancelled write bytes");
+}
+
+#[cfg(not(linux))]
+fn collect_io_stats() {}
+
+#[cfg(not(linux))]
+fn describe_io_stats() {}

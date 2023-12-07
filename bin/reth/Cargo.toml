@@ -109,6 +109,9 @@ rayon.workspace = true
 jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
 
+[target.'cfg(linux)'.dependencies]
+procfs = { version = "0.16.0" }
+
 [features]
 default = ["jemalloc"]
 jemalloc = ["dep:jemallocator", "dep:jemalloc-ctl"]
