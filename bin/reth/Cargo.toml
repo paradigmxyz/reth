@@ -109,7 +109,7 @@ rayon.workspace = true
 jemallocator = { version = "0.5.0", optional = true }
 jemalloc-ctl = { version = "0.5.0", optional = true }
 
-[target.'cfg(linux)'.dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.16.0" }
 
 [features]

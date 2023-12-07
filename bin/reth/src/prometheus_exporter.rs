@@ -228,7 +228,7 @@ fn collect_memory_stats() {}
 #[cfg(not(all(feature = "jemalloc", unix)))]
 fn describe_memory_stats() {}
 
-#[cfg(linux)]
+#[cfg(target_os = "linux")]
 fn collect_io_stats() {
     use metrics::counter;
 
@@ -253,7 +253,7 @@ fn collect_io_stats() {
     counter!("io.cancelled_write_bytes", io.cancelled_write_bytes);
 }
 
-#[cfg(linux)]
+#[cfg(target_os = "linux")]
 fn describe_io_stats() {
     use metrics::describe_counter;
 
@@ -266,8 +266,8 @@ fn describe_io_stats() {
     describe_counter!("io.cancelled_write_bytes", Unit::Bytes, "Cancelled write bytes");
 }
 
-#[cfg(not(linux))]
+#[cfg(not(target_os = "linux"))]
 fn collect_io_stats() {}
 
-#[cfg(not(linux))]
+#[cfg(not(target_os = "linux"))]
 fn describe_io_stats() {}
