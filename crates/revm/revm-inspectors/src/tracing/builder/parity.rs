@@ -32,7 +32,7 @@ pub struct ParityTraceBuilder {
 
 impl ParityTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(
+    pub fn new(
         nodes: Vec<CallTraceNode>,
         spec_id: Option<SpecId>,
         _config: TracingInspectorConfig,
@@ -139,7 +139,7 @@ impl ParityTraceBuilder {
         })
     }
 
-    /// Returns an iterator over all recorded traces  for `trace_transaction`
+    /// Returns all recorded traces for `trace_transaction`
     pub fn into_localized_transaction_traces(
         self,
         info: TransactionInfo,

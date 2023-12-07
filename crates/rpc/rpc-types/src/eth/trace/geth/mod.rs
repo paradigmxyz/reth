@@ -1,5 +1,5 @@
-//! Geth tracing types
 #![allow(missing_docs)]
+//! Geth tracing types
 
 use crate::{state::StateOverride, BlockOverrides};
 use alloy_primitives::{Bytes, B256, U256};
@@ -43,10 +43,14 @@ pub struct BlockTraceResult {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DefaultFrame {
+    /// Whether the transaction failed
     pub failed: bool,
+    /// How much gas was used.
     pub gas: u64,
+    /// Output of the transaction
     #[serde(serialize_with = "crate::serde_helpers::serialize_hex_string_no_prefix")]
     pub return_value: Bytes,
+    /// Recorded traces of the transaction
     pub struct_logs: Vec<StructLog>,
 }
 
@@ -250,6 +254,7 @@ impl From<serde_json::Value> for GethDebugTracerConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GethDebugTracingOptions {
+    /// The common tracing options
     #[serde(default, flatten)]
     pub config: GethDefaultTracingOptions,
     /// The custom tracer to use.
@@ -460,6 +465,7 @@ impl GethDefaultTracingOptions {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GethDebugTracingCallOptions {
+    /// All the options
     #[serde(flatten)]
     pub tracing_options: GethDebugTracingOptions,
     /// The state overrides to apply

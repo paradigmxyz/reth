@@ -5,7 +5,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
+    trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibblesSubKey},
     B256,
 };
 use std::collections::{hash_map::IntoIter, HashMap};
@@ -14,7 +14,7 @@ use std::collections::{hash_map::IntoIter, HashMap};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TrieKey {
     /// A node in the account trie.
-    AccountNode(StoredNibbles),
+    AccountNode(Nibbles),
     /// A node in the storage trie.
     StorageNode(B256, StoredNibblesSubKey),
     /// Storage trie of an account.
@@ -78,9 +78,11 @@ impl TrieUpdates {
 
     /// Extend the updates with account trie updates.
     pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
-        self.extend(updates.into_iter().map(|(nibbles, node)| {
-            (TrieKey::AccountNode(nibbles.hex_data.to_vec().into()), TrieOp::Update(node))
-        }));
+        self.extend(
+            updates
+                .into_iter()
+                .map(|(nibbles, node)| (TrieKey::AccountNode(nibbles), TrieOp::Update(node))),
+        );
     }
 
     /// Extend the updates with storage trie updates.
@@ -90,10 +92,7 @@ impl TrieUpdates {
         updates: HashMap<Nibbles, BranchNodeCompact>,
     ) {
         self.extend(updates.into_iter().map(|(nibbles, node)| {
-            (
-                TrieKey::StorageNode(hashed_address, nibbles.hex_data.to_vec().into()),
-                TrieOp::Update(node),
-            )
+            (TrieKey::StorageNode(hashed_address, nibbles.into()), TrieOp::Update(node))
         }));
     }
 
@@ -122,7 +121,7 @@ impl TrieUpdates {
                         }
                     }
                     TrieOp::Update(node) => {
-                        if !nibbles.inner.is_empty() {
+                        if !nibbles.is_empty() {
                             account_trie_cursor.upsert(nibbles, node)?;
                         }
                     }
@@ -136,7 +135,7 @@ impl TrieUpdates {
                     TrieOp::Update(..) => unreachable!("Cannot update full storage trie."),
                 },
                 TrieKey::StorageNode(hashed_address, nibbles) => {
-                    if !nibbles.inner.is_empty() {
+                    if !nibbles.is_empty() {
                         // Delete the old entry if it exists.
                         if storage_trie_cursor
                             .seek_by_key_subkey(hashed_address, nibbles.clone())?

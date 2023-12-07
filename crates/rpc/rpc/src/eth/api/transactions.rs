@@ -530,6 +530,7 @@ where
                     max_fee_per_blob_gas: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
+                None,
             )
             .await?;
         let gas_limit = estimated_gas;
@@ -1037,19 +1038,16 @@ where
         block_id: impl Into<BlockId>,
         index: Index,
     ) -> EthResult<Option<Transaction>> {
-        let block_id = block_id.into();
-
-        if let Some(block) = self.block(block_id).await? {
+        if let Some(block) = self.block_with_senders(block_id.into()).await? {
             let block_hash = block.hash;
-            let block = block.unseal();
-            if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
-                let tx =
-                    tx_signed.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+            let block_number = block.number;
+            let base_fee_per_gas = block.base_fee_per_gas;
+            if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
                 return Ok(Some(from_recovered_with_block_context(
                     tx,
                     block_hash,
-                    block.header.number,
-                    block.header.base_fee_per_gas,
+                    block_number,
+                    base_fee_per_gas,
                     index.into(),
                 )))
             }

@@ -351,6 +351,22 @@ impl BundleStateWithReceipts {
         self.receipts.extend(other.receipts.receipt_vec);
     }
 
+    /// Prepends present the state with the given BundleState.
+    /// It adds changes from the given state but does not override any existing changes.
+    ///
+    /// Reverts  and receipts are not updated.
+    pub fn prepend_state(&mut self, mut other: BundleState) {
+        let other_len = other.reverts.len();
+        // take this bundle
+        let this_bundle = std::mem::take(&mut self.bundle);
+        // extend other bundle with this
+        other.extend(this_bundle);
+        // discard other reverts
+        other.take_n_reverts(other_len);
+        // swap bundles
+        std::mem::swap(&mut self.bundle, &mut other)
+    }
+
     /// Write bundle state to database.
     ///
     /// `omit_changed_check` should be set to true of bundle has some of it data
@@ -1354,5 +1370,43 @@ mod tests {
         )]));
         state.merge_transitions(BundleRetention::PlainState);
         assert_state_root(&state, &prestate, "recreated changed storage");
+    }
+
+    #[test]
+    fn prepend_state() {
+        let address1 = Address::random();
+        let address2 = Address::random();
+
+        let account1 = RevmAccountInfo { nonce: 1, ..Default::default() };
+        let account1_changed = RevmAccountInfo { nonce: 1, ..Default::default() };
+        let account2 = RevmAccountInfo { nonce: 1, ..Default::default() };
+
+        let present_state = BundleState::builder(2..=2)
+            .state_present_account_info(address1, account1_changed.clone())
+            .build();
+        assert_eq!(present_state.reverts.len(), 1);
+        let previous_state = BundleState::builder(1..=1)
+            .state_present_account_info(address1, account1)
+            .state_present_account_info(address2, account2.clone())
+            .build();
+        assert_eq!(previous_state.reverts.len(), 1);
+
+        let mut test = BundleStateWithReceipts {
+            bundle: present_state,
+            receipts: Receipts::from_vec(vec![vec![Some(Receipt::default()); 2]; 1]),
+            first_block: 2,
+        };
+
+        test.prepend_state(previous_state);
+
+        assert_eq!(test.receipts.len(), 1);
+        let end_state = test.state();
+        assert_eq!(end_state.state.len(), 2);
+        // reverts num should stay the same.
+        assert_eq!(end_state.reverts.len(), 1);
+        // account1 is not overwritten.
+        assert_eq!(end_state.state.get(&address1).unwrap().info, Some(account1_changed));
+        // account2 got inserted
+        assert_eq!(end_state.state.get(&address2).unwrap().info, Some(account2));
     }
 }

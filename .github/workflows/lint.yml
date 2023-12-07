@@ -28,7 +28,7 @@ jobs:
         with:
           cache-on-failure: true
       - run:
-          cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}"
+          cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}" --lib --tests --benches --examples
         env:
           RUSTFLAGS: -D warnings
 
@@ -57,6 +57,8 @@ jobs:
 
   docs:
     name: docs
+    # TODO: reenable when <https://github.com/rust-lang/rust/issues/118670> is resolved.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -98,7 +100,9 @@ jobs:
     name: lint success
     runs-on: ubuntu-latest
     if: always()
-    needs: [clippy, docs, fmt, grafana]
+    # TODO: reenable when <https://github.com/rust-lang/rust/issues/118670> is resolved.
+    # needs: [clippy, docs, fmt, grafana]
+    needs: [clippy, fmt, grafana]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

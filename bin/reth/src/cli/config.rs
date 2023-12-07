@@ -3,7 +3,10 @@
 use alloy_rlp::Encodable;
 use reth_network::protocol::IntoRlpxSubProtocol;
 use reth_primitives::{Bytes, BytesMut};
-use reth_rpc::{eth::gas_oracle::GasPriceOracleConfig, JwtError, JwtSecret};
+use reth_rpc::{
+    eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig},
+    JwtError, JwtSecret,
+};
 use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
     ServerBuilder, TransportRpcModuleConfig,
@@ -23,6 +26,9 @@ pub trait RethRpcConfig {
 
     /// The configured ethereum RPC settings.
     fn eth_config(&self) -> EthConfig;
+
+    /// Returns state cache configuration.
+    fn state_cache_config(&self) -> EthStateCacheConfig;
 
     /// Returns the max request size in bytes.
     fn rpc_max_request_size_bytes(&self) -> u32;

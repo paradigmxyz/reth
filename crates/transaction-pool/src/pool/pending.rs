@@ -570,7 +570,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
 
@@ -661,31 +661,31 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
 
-        let a = address!("000000000000000000000000000000000000000a");
-        let b = address!("000000000000000000000000000000000000000b");
-        let c = address!("000000000000000000000000000000000000000c");
-        let d = address!("000000000000000000000000000000000000000d");
+        let a_sender = address!("000000000000000000000000000000000000000a");
+        let b_sender = address!("000000000000000000000000000000000000000b");
+        let c_sender = address!("000000000000000000000000000000000000000c");
+        let d_sender = address!("000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
-        let a1 = MockTransaction::eip1559().with_sender(a);
-        let a2 = a1.next();
-        let a3 = a2.next();
-        let a4 = a3.next();
+        let mut tx_set =
+            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::EIP1559);
+        let a = tx_set.clone().into_vec();
 
-        let b1 = MockTransaction::eip1559().with_sender(b);
-        let b2 = b1.next();
-        let b3 = b2.next();
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
+            .into_vec();
+        tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c1 = MockTransaction::eip1559().with_sender(c);
-        let c2 = c1.next();
-        let c3 = c2.next();
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
+            .into_vec();
+        tx_set.extend(c.clone());
 
-        let d1 = MockTransaction::eip1559().with_sender(d);
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
+            .into_vec();
+        tx_set.extend(d.clone());
 
         // add all the transactions to the pool
-        let all_txs =
-            vec![a1, a2, a3, a4.clone(), b1, b2, b3.clone(), c1, c2, c3.clone(), d1.clone()];
+        let all_txs = tx_set.into_vec();
         for tx in all_txs {
             pool.add_transaction(f.validated_arc(tx), 0);
         }
@@ -694,8 +694,10 @@ mod tests {
 
         // the independent set is the roots of each of these tx chains, these are the highest
         // nonces for each sender
-        let expected_highest_nonces =
-            vec![d1, c3, b3, a4].iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        let expected_highest_nonces = vec![d[0].clone(), c[2].clone(), b[2].clone(), a[3].clone()]
+            .iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
         let actual_highest_nonces = pool
             .highest_nonces
             .iter()

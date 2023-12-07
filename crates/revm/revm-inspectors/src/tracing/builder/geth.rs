@@ -24,7 +24,7 @@ pub struct GethTraceBuilder {
 
 impl GethTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TracingInspectorConfig) -> Self {
+    pub fn new(nodes: Vec<CallTraceNode>, _config: TracingInspectorConfig) -> Self {
         Self { nodes, _config }
     }
 

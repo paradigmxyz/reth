@@ -1,5 +1,4 @@
 use crate::{
-    account::EthAccount,
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
     prefix_set::PrefixSetMut,
@@ -12,7 +11,7 @@ use reth_db::{tables, transaction::DbTx};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
-    trie::{AccountProof, HashBuilder, Nibbles, StorageProof},
+    trie::{AccountProof, HashBuilder, Nibbles, StorageProof, TrieAccount},
     Address, B256,
 };
 
@@ -81,7 +80,7 @@ where
                     };
 
                     account_rlp.clear();
-                    let account = EthAccount::from(account).with_storage_root(storage_root);
+                    let account = TrieAccount::from((account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);

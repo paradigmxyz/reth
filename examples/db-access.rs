@@ -1,12 +1,11 @@
 use reth_db::open_db_read_only;
-use reth_primitives::{Address, ChainSpecBuilder, B256, U256};
+use reth_primitives::{Address, ChainSpecBuilder, B256};
 use reth_provider::{
     AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
     StateProvider, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
 use reth_rpc_types_compat::log::from_primitive_log;
-
 use std::path::Path;
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction

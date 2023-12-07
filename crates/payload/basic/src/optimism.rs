@@ -60,9 +60,7 @@ where
     // the above check for empty blocks will never be hit on OP chains.
     reth_revm::optimism::ensure_create2_deployer(chain_spec.clone(), attributes.timestamp, &mut db)
         .map_err(|_| {
-            PayloadBuilderError::Internal(RethError::Custom(
-                "Failed to force create2deployer account code".to_string(),
-            ))
+            PayloadBuilderError::Optimism(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
         })?;
 
     let mut receipts = Vec::new();

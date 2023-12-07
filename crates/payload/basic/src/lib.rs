@@ -13,7 +13,7 @@ use crate::metrics::PayloadBuilderMetrics;
 use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
-use reth_interfaces::{RethError, RethResult};
+use reth_interfaces::RethResult;
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive,
     PayloadBuilderAttributes, PayloadId, PayloadJob, PayloadJobGenerator,
@@ -30,7 +30,9 @@ use reth_primitives::{
     Block, BlockNumberOrTag, Bytes, ChainSpec, Header, IntoRecoveredTransaction, Receipt, Receipts,
     SealedBlock, Withdrawal, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{BlockReaderIdExt, BlockSource, BundleStateWithReceipts, StateProviderFactory};
+use reth_provider::{
+    BlockReaderIdExt, BlockSource, BundleStateWithReceipts, ProviderError, StateProviderFactory,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
@@ -1159,7 +1161,7 @@ impl WithdrawalsOutcome {
 /// Returns the withdrawals root.
 ///
 /// Returns `None` values pre shanghai
-fn commit_withdrawals<DB: Database<Error = RethError>>(
+fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     db: &mut State<DB>,
     chain_spec: &ChainSpec,
     timestamp: u64,

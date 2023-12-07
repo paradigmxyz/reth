@@ -25,10 +25,8 @@ mod compression;
 pub mod constants;
 pub mod eip4844;
 mod error;
-mod forkid;
 pub mod fs;
 mod genesis;
-mod hardfork;
 mod header;
 mod integer_list;
 mod log;
@@ -59,23 +57,19 @@ pub use chain::{
     ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, ForkTimestamps,
     NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
-#[cfg(feature = "optimism")]
-pub use chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI};
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
-pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
-pub use hardfork::Hardfork;
-pub use header::{Head, Header, HeadersDirection, SealedHeader};
+pub use header::{Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use net::{
-    goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, GOERLI_BOOTNODES,
-    HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
+    goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
+    GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
 pub use prune::{
@@ -102,8 +96,6 @@ pub use transaction::{
     TxEip4844, TxHashOrNumber, TxLegacy, TxType, TxValue, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-#[cfg(feature = "optimism")]
-pub use transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
 pub use withdrawal::Withdrawal;
 
 // Re-exports
@@ -113,6 +105,7 @@ pub use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
     StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
+pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpMap};
 
 #[doc(hidden)]
@@ -136,3 +129,15 @@ pub use arbitrary;
 
 #[cfg(feature = "c-kzg")]
 pub use c_kzg as kzg;
+
+/// Optimism specific re-exports
+#[cfg(feature = "optimism")]
+mod optimism {
+    pub use crate::{
+        chain::{BASE_GOERLI, BASE_MAINNET, OP_GOERLI},
+        transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
+    };
+}
+
+#[cfg(feature = "optimism")]
+pub use optimism::*;
