@@ -17,12 +17,12 @@
 use clap::Parser;
 use reth::cli::{
     components::RethNodeComponents,
-    ext::{NoArgsCliExt, RethNodeCommandConfig},
+    ext::{NoArgsCliExt, RethDefaultComponents, RethNodeCommandConfig},
     Cli,
 };
 
 fn main() {
-    Cli::<NoArgsCliExt<MyRethConfig>>::parse()
+    Cli::<NoArgsCliExt<MyRethConfig, RethDefaultComponents>>::parse()
         .with_node_extension(MyRethConfig::default())
         .run()
         .unwrap();
@@ -33,7 +33,7 @@ fn main() {
 #[non_exhaustive]
 struct MyRethConfig;
 
-impl RethNodeCommandConfig for MyRethConfig {
+impl RethNodeCommandConfig<RethDefaultComponents> for MyRethConfig {
     fn on_components_initialized<Reth: RethNodeComponents>(
         &mut self,
         _components: &Reth,

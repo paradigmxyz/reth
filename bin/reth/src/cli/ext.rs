@@ -1,16 +1,15 @@
 //! Support for integrating customizations into the CLI.
 
+use super::components::RethCustomComponents;
 use crate::cli::{
     components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
     config::{PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig},
 };
 use clap::Args;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_payload_builder::{BuiltPayload, PayloadBuilderHandle, PayloadBuilderService};
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
-
-use super::components::RethCustomComponents;
 
 /// A trait that allows for extending parts of the CLI with additional functionality.
 ///
@@ -24,22 +23,22 @@ pub trait RethCliExt {
     /// If no additional CLI arguments are required, the [NoArgs] wrapper type can be used.
     type Node: RethNodeCommandExt<Self::CustomComponents>;
 
+    /// Provides additional components for the node CLI command.
     type CustomComponents: RethCustomComponents;
 }
 
 /// A helper type for [RethCliExt] extension that don't require any custom components
 #[derive(Debug, Clone, Copy)]
-pub struct NoCustomComponents;
+pub struct RethDefaultComponents;
 
-impl RethCustomComponents for NoCustomComponents {
-    type Pool = ();
-    type Payload = ();
+impl RethCustomComponents for RethDefaultComponents {
+    type Payload = BuiltPayload;
 }
 
 /// The default CLI extension.
 impl RethCliExt for () {
     type Node = DefaultRethNodeCommandConfig;
-    type CustomComponents = NoCustomComponents;
+    type CustomComponents = RethDefaultComponents;
 }
 
 /// A trait that allows for extending and customizing parts of the node command
@@ -367,7 +366,7 @@ impl<T> From<T> for NoArgs<T> {
 mod tests {
     use super::*;
 
-    fn assert_ext<T: RethNodeCommandExt>() {}
+    fn assert_ext<T: RethNodeCommandExt<RethDefaultComponents>>() {}
 
     #[test]
     fn ensure_ext() {

@@ -20,7 +20,7 @@ use mev_share_sse::{client::EventStream, EventClient};
 use reth::{
     cli::{
         components::RethNodeComponents,
-        ext::{RethCliExt, RethNodeCommandConfig},
+        ext::{RethCliExt, RethDefaultComponents, RethNodeCommandConfig},
         Cli,
     },
     rpc::types::beacon::events::PayloadAttributesEvent,
@@ -41,6 +41,8 @@ struct BeaconEventsExt;
 impl RethCliExt for BeaconEventsExt {
     /// This tells the reth CLI to install additional CLI arguments
     type Node = BeaconEventsConfig;
+    /// This is to install eventual custom components
+    type CustomComponents = RethDefaultComponents;
 }
 
 /// Our custom cli args extension that adds one flag to reth default CLI.
@@ -94,7 +96,7 @@ impl BeaconEventsConfig {
     }
 }
 
-impl RethNodeCommandConfig for BeaconEventsConfig {
+impl RethNodeCommandConfig<RethDefaultComponents> for BeaconEventsConfig {
     fn on_node_started<Reth: RethNodeComponents>(&mut self, components: &Reth) -> eyre::Result<()> {
         components.task_executor().spawn(Box::pin(self.clone().run()));
         Ok(())

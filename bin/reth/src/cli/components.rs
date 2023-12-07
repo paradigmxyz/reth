@@ -43,6 +43,7 @@ impl<T> FullProvider for T where
 {
 }
 
+/// Helper trait to unify all payload types for simplicity.
 pub trait BuiltPayload:
     Into<ExecutionPayload> + PayloadInfo + Send + Sync + Clone + 'static
 {
@@ -53,11 +54,11 @@ impl<T> BuiltPayload for T where
 {
 }
 
+/// The trait that is implemented for the Node command.
 pub trait RethCustomComponents: Clone + Send + Sync + 'static {
-    /// The transaction pool type
-    type Pool: TransactionPool + Clone + Unpin + 'static;
     /// The payload type used to build CL payloads
     type Payload: BuiltPayload;
+    // add more components here if needed.
 }
 
 /// The trait that is implemented for the Node command.

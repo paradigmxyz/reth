@@ -13,7 +13,7 @@ use reth::{
     cli::{
         components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
         config::RethRpcConfig,
-        ext::{RethCliExt, RethNodeCommandConfig},
+        ext::{RethCliExt, RethDefaultComponents, RethNodeCommandConfig},
         Cli,
     },
     primitives::{Address, IntoRecoveredTransaction},
@@ -36,6 +36,9 @@ struct MyRethCliExt;
 impl RethCliExt for MyRethCliExt {
     /// This tells the reth CLI to trace addresses via `RethCliTxpoolExt`
     type Node = RethCliTxpoolExt;
+
+    /// This is to install eventual custom components
+    type CustomComponents = RethDefaultComponents;
 }
 
 /// Our custom cli args extension that adds one flag to reth default CLI.
@@ -46,7 +49,7 @@ struct RethCliTxpoolExt {
     pub recipients: Vec<Address>,
 }
 
-impl RethNodeCommandConfig for RethCliTxpoolExt {
+impl RethNodeCommandConfig<RethDefaultComponents> for RethCliTxpoolExt {
     fn on_rpc_server_started<Conf, Reth>(
         &mut self,
         _config: &Conf,

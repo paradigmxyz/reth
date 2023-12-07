@@ -6,18 +6,21 @@ use reth_primitives::{
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, SpecId},
     Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, Withdrawal, B256, U256,
 };
-use reth_rpc_types::engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
-    PayloadId,
+use reth_rpc_types::{
+    engine::{
+        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1,
+        PayloadAttributes, PayloadId,
+    },
+    ExecutionPayload,
 };
+
+#[cfg(feature = "optimism")]
+use reth_primitives::TransactionSigned;
 
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v3, convert_block_to_payload_field_v2,
     convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
 };
-
-#[cfg(feature = "optimism")]
-use reth_primitives::TransactionSigned;
 
 /// Contains the built payload.
 ///
@@ -91,6 +94,31 @@ pub trait PayloadInfo {
     /// Returns the sidecars.
     fn sidecars(&self) -> Vec<BlobTransactionSidecar>;
 }
+/// Helper trait defining common methods for building a payload.
+impl PayloadInfo for BuiltPayload {
+    fn payload_id(&self) -> PayloadId {
+        self.id
+    }
+
+    fn block(&self) -> &SealedBlock {
+        &self.block
+    }
+
+    fn fees(&self) -> U256 {
+        self.fees
+    }
+
+    fn sidecars(&self) -> Vec<BlobTransactionSidecar> {
+        self.sidecars.clone()
+    }
+}
+
+impl From<BuiltPayload> for ExecutionPayload {
+    fn from(value: BuiltPayload) -> Self {
+        ExecutionPayload::V3(block_to_payload_v3(value.block))
+    }
+}
+
 // V1 engine_getPayloadV1 response
 impl From<BuiltPayload> for ExecutionPayloadV1 {
     fn from(value: BuiltPayload) -> Self {

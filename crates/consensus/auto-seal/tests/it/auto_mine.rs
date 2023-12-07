@@ -4,7 +4,7 @@ use jsonrpsee::{core::client::ClientT, http_client::HttpClientBuilder, rpc_param
 use reth::{
     cli::{
         components::RethNodeComponents,
-        ext::{NoArgs, NoArgsCliExt, RethNodeCommandConfig},
+        ext::{NoArgs, NoArgsCliExt, RethDefaultComponents, RethNodeCommandConfig},
     },
     node::NodeCommand,
     runner::CliRunner,
@@ -19,7 +19,7 @@ use tokio::time::timeout;
 #[derive(Debug)]
 struct AutoMineConfig;
 
-impl RethNodeCommandConfig for AutoMineConfig {
+impl RethNodeCommandConfig<RethDefaultComponents> for AutoMineConfig {
     fn on_node_started<Reth: RethNodeComponents>(&mut self, components: &Reth) -> eyre::Result<()> {
         let pool = components.pool();
         let mut canon_events = components.events().subscribe_to_canonical_state();
@@ -63,16 +63,17 @@ pub fn test_auto_mine() {
 
     let no_args = NoArgs::with(AutoMineConfig);
     let chain = custom_chain();
-    let mut command = NodeCommand::<NoArgsCliExt<AutoMineConfig>>::parse_from([
-        "reth",
-        "--dev",
-        "--datadir",
-        datadir,
-        "--debug.max-block",
-        "1",
-        "--debug.terminate",
-    ])
-    .with_ext::<NoArgsCliExt<AutoMineConfig>>(no_args);
+    let mut command =
+        NodeCommand::<NoArgsCliExt<AutoMineConfig, RethDefaultComponents>>::parse_from([
+            "reth",
+            "--dev",
+            "--datadir",
+            datadir,
+            "--debug.max-block",
+            "1",
+            "--debug.terminate",
+        ])
+        .with_ext::<NoArgsCliExt<AutoMineConfig, RethDefaultComponents>>(no_args);
 
     // use custom chain spec
     command.chain = chain;
