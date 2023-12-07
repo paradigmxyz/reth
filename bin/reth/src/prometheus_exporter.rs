@@ -230,7 +230,7 @@ fn describe_memory_stats() {}
 
 #[cfg(target_os = "linux")]
 fn collect_io_stats() {
-    use metrics::counter;
+    use metrics::absolute_counter;
 
     let Ok(process) = procfs::process::Process::myself()
         .map_err(|error| error!(?error, "Failed to get currently running process"))
@@ -244,13 +244,13 @@ fn collect_io_stats() {
         return
     };
 
-    counter!("io.rchar", io.rchar);
-    counter!("io.wchar", io.wchar);
-    counter!("io.syscr", io.syscr);
-    counter!("io.syscw", io.syscw);
-    counter!("io.read_bytes", io.read_bytes);
-    counter!("io.write_bytes", io.write_bytes);
-    counter!("io.cancelled_write_bytes", io.cancelled_write_bytes);
+    absolute_counter!("io.rchar", io.rchar);
+    absolute_counter!("io.wchar", io.wchar);
+    absolute_counter!("io.syscr", io.syscr);
+    absolute_counter!("io.syscw", io.syscw);
+    absolute_counter!("io.read_bytes", io.read_bytes);
+    absolute_counter!("io.write_bytes", io.write_bytes);
+    absolute_counter!("io.cancelled_write_bytes", io.cancelled_write_bytes);
 }
 
 #[cfg(target_os = "linux")]
