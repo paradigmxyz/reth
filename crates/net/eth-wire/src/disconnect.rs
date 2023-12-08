@@ -150,7 +150,7 @@ impl Decodable for DisconnectReason {
 /// lower-level disconnect functions (such as those that exist in the `p2p` protocol) if the
 /// underlying stream supports it.
 #[async_trait::async_trait]
-pub trait CanDisconnect<T>: Sink<T> + Unpin + Sized {
+pub trait CanDisconnect<T>: Sink<T> + Unpin {
     /// Disconnects from the underlying stream, using a [`DisconnectReason`] as disconnect
     /// information if the stream implements a protocol that can carry the additional disconnect
     /// metadata.
