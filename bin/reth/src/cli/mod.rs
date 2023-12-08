@@ -234,10 +234,9 @@ impl Logs {
 
         // Function to create a new EnvFilter with base and specific directives
         let create_env_filter = |additional_directive: &str| -> eyre::Result<EnvFilter> {
-            let mut filter = EnvFilter::builder().from_env_lossy();
-            filter = filter.add_directive(DEFAULT_ENV_FILTER_DIRECTIVE.parse()?);
-            filter = filter.add_directive(additional_directive.parse()?);
-            Ok(filter)
+            Ok(EnvFilter::builder().from_env_lossy()
+                .add_directive(DEFAULT_ENV_FILTER_DIRECTIVE.parse()?)
+                .add_directive(additional_directive.parse()?))
         };
 
         // Create and add the journald layer if enabled
