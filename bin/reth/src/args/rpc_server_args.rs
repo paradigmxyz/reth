@@ -358,12 +358,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
-        GasPriceOracleConfig::new(
-            self.gas_price_oracle.blocks,
-            self.gas_price_oracle.ignore_price,
-            self.gas_price_oracle.max_price,
-            self.gas_price_oracle.percentile,
-        )
+        self.gas_price_oracle.gas_price_oracle_config()
     }
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
