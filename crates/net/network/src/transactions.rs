@@ -589,6 +589,7 @@ where
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
                 if has_blob_txs {
+                    debug!(target: "net::tx", ?peer_id, "received bad full blob transaction broadcast");
                     self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
                 }
             }
