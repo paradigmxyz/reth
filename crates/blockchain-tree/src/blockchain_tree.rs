@@ -28,7 +28,10 @@ use reth_provider::{
     ChainSpecProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider, ProviderError,
 };
 use reth_stages::{MetricEvent, MetricEventsSender};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -607,6 +610,70 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         self.state.insert_chain(chain)
     }
 
+    /// Iterate over all child chains that depend on this block and return
+    /// their ids.
+    fn find_all_dependent_chains(&self, block: &BlockHash) -> HashSet<BlockChainId> {
+        // Find all forks of given block.
+        let mut dependent_block =
+            self.block_indices().fork_to_child().get(block).cloned().unwrap_or_default();
+        let mut dependent_chains = HashSet::new();
+
+        while let Some(block) = dependent_block.pop_back() {
+            // Get chain of dependent block.
+            let chain_id =
+                self.block_indices().get_blocks_chain_id(&block).expect("Block should be in tree");
+
+            // Find all blocks that fork from this chain.
+            for chain_block in
+                self.state.chains.get(&chain_id).expect("Chain should be in tree").blocks().values()
+            {
+                if let Some(forks) = self.block_indices().fork_to_child().get(&chain_block.hash()) {
+                    // If there are sub forks append them for processing.
+                    dependent_block.extend(forks);
+                }
+            }
+            // Insert dependent chain id.
+            dependent_chains.insert(chain_id);
+        }
+        dependent_chains
+    }
+
+    /// Inserts unwound chain back into the tree and updates any dependent chains.
+    ///
+    /// This method searches for any chain that depended on this block being part of the canonical
+    /// chain. Each dependent chain's state is then updated with state entries removed from the
+    /// plain state during the unwind.
+    fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<BlockChainId> {
+        // iterate over all blocks in chain and find any fork blocks that are in tree.
+        for (number, block) in chain.blocks().iter() {
+            let hash = block.hash();
+
+            // find all chains that fork from this block.
+            let chains_to_bump = self.find_all_dependent_chains(&hash);
+            if !chains_to_bump.is_empty() {
+                // if there is such chain, revert state to this block.
+                let mut cloned_state = chain.state().clone();
+                cloned_state.revert_to(*number);
+
+                // prepend state to all chains that fork from this block.
+                for chain_id in chains_to_bump {
+                    let chain =
+                        self.state.chains.get_mut(&chain_id).expect("Chain should be in tree");
+
+                    debug!(target: "blockchain_tree",
+                        unwound_block= ?block.num_hash(),
+                        chain_id = ?chain_id,
+                        chain_tip = ?chain.tip().num_hash(),
+                        "Prepend unwound block state to blockchain tree chain");
+
+                    chain.prepend_state(cloned_state.state().clone())
+                }
+            }
+        }
+        // Insert unwound chain to the tree.
+        self.insert_chain(chain)
+    }
+
     /// Checks the block buffer for the given block.
     pub fn get_buffered_block(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
         self.state.get_buffered_block(hash)
@@ -1064,7 +1131,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 let reorg_depth = old_canon_chain.len();
 
                 // insert old canon chain
-                self.insert_chain(AppendableChain::new(old_canon_chain));
+                self.insert_unwound_chain(AppendableChain::new(old_canon_chain));
                 durations_recorder.record_relative(MakeCanonicalAction::InsertOldCanonicalChain);
 
                 self.update_reorg_metrics(reorg_depth as f64);
@@ -1156,7 +1223,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         if let Some(old_canon_chain) = old_canon_chain {
             self.block_indices_mut().unwind_canonical_chain(unwind_to);
             // insert old canonical chain to BlockchainTree.
-            self.insert_chain(AppendableChain::new(old_canon_chain));
+            self.insert_unwound_chain(AppendableChain::new(old_canon_chain));
         }
 
         Ok(())
@@ -1229,7 +1296,14 @@ mod tests {
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{
-        constants::EMPTY_ROOT_HASH, stage::StageCheckpoint, ChainSpecBuilder, B256, MAINNET,
+        constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH, ETHEREUM_BLOCK_GAS_LIMIT},
+        keccak256,
+        proofs::{calculate_receipt_root, calculate_transaction_root, state_root_unhashed},
+        revm_primitives::AccountInfo,
+        stage::StageCheckpoint,
+        Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
+        Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
+        B256, MAINNET,
     };
     use reth_provider::{
         test_utils::{
@@ -1238,6 +1312,7 @@ mod tests {
         },
         BlockWriter, BundleStateWithReceipts, ProviderFactory,
     };
+    use reth_revm::EvmProcessorFactory;
     use std::{
         collections::{HashMap, HashSet},
         sync::Arc,
@@ -1352,6 +1427,196 @@ mod tests {
                 assert_eq!(*tree.state.buffered_blocks.blocks(), buffered_blocks);
             }
         }
+    }
+
+    #[test]
+    fn consecutive_reorgs() {
+        let signer = Address::random();
+        let initial_signer_balance = U256::from(10).pow(U256::from(18));
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(Genesis {
+                    alloc: HashMap::from([(
+                        signer,
+                        GenesisAccount { balance: initial_signer_balance, ..Default::default() },
+                    )]),
+                    ..MAINNET.genesis.clone()
+                })
+                .shanghai_activated()
+                .build(),
+        );
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let consensus = Arc::new(TestConsensus::default());
+        let executor_factory = EvmProcessorFactory::new(chain_spec.clone());
+
+        {
+            let provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw
+                .insert_block(
+                    SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default()),
+                    Some(Vec::new()),
+                    None,
+                )
+                .unwrap();
+            let account = Account { balance: initial_signer_balance, ..Default::default() };
+            provider_rw.tx_ref().put::<tables::PlainAccountState>(signer, account).unwrap();
+            provider_rw.tx_ref().put::<tables::HashedAccount>(keccak256(signer), account).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let single_tx_cost = U256::from(EIP1559_INITIAL_BASE_FEE * 21_000);
+        let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
+            TransactionSigned::from_transaction_and_signature(
+                Transaction::Eip1559(TxEip1559 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce,
+                    gas_limit: 21_000,
+                    to: TransactionKind::Call(Address::ZERO),
+                    max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
+                    ..Default::default()
+                }),
+                Signature::default(),
+            )
+            .with_signer(signer)
+        };
+
+        let mock_block = |number: u64,
+                          parent: Option<B256>,
+                          body: Vec<TransactionSignedEcRecovered>,
+                          num_of_signer_txs: u64|
+         -> SealedBlockWithSenders {
+            let transactions_root = calculate_transaction_root(&body);
+            let receipts = body
+                .iter()
+                .enumerate()
+                .map(|(idx, tx)| {
+                    Receipt {
+                        tx_type: tx.tx_type(),
+                        success: true,
+                        cumulative_gas_used: (idx as u64 + 1) * 21_000,
+                        ..Default::default()
+                    }
+                    .with_bloom()
+                })
+                .collect::<Vec<_>>();
+
+            #[cfg(not(feature = "optimism"))]
+            let receipts_root = calculate_receipt_root(&receipts);
+
+            #[cfg(feature = "optimism")]
+            let receipts_root = calculate_receipt_root(&receipts, &chain_spec, 0);
+
+            SealedBlockWithSenders::new(
+                SealedBlock {
+                    header: Header {
+                        number,
+                        parent_hash: parent.unwrap_or_default(),
+                        gas_used: body.len() as u64 * 21_000,
+                        gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+                        mix_hash: B256::random(),
+                        base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
+                        transactions_root,
+                        receipts_root,
+                        state_root: state_root_unhashed(HashMap::from([(
+                            signer,
+                            (
+                                AccountInfo {
+                                    balance: initial_signer_balance -
+                                        (single_tx_cost * U256::from(num_of_signer_txs)),
+                                    nonce: num_of_signer_txs,
+                                    ..Default::default()
+                                },
+                                EMPTY_ROOT_HASH,
+                            ),
+                        )])),
+                        ..Default::default()
+                    }
+                    .seal_slow(),
+                    body: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
+                    ommers: Vec::new(),
+                    withdrawals: Some(Vec::new()),
+                },
+                body.iter().map(|tx| tx.signer()).collect(),
+            )
+            .unwrap()
+        };
+
+        let fork_block = mock_block(1, Some(chain_spec.genesis_hash()), Vec::from([mock_tx(0)]), 1);
+
+        let canonical_block_1 =
+            mock_block(2, Some(fork_block.hash), Vec::from([mock_tx(1), mock_tx(2)]), 3);
+        let canonical_block_2 = mock_block(3, Some(canonical_block_1.hash), Vec::new(), 3);
+        let canonical_block_3 =
+            mock_block(4, Some(canonical_block_2.hash), Vec::from([mock_tx(3)]), 4);
+
+        let sidechain_block_1 = mock_block(2, Some(fork_block.hash), Vec::from([mock_tx(1)]), 2);
+        let sidechain_block_2 =
+            mock_block(3, Some(sidechain_block_1.hash), Vec::from([mock_tx(2)]), 3);
+
+        let mut tree = BlockchainTree::new(
+            TreeExternals::new(provider_factory.clone(), consensus, executor_factory.clone()),
+            BlockchainTreeConfig::default(),
+            None,
+        )
+        .expect("failed to create tree");
+
+        tree.insert_block(fork_block.clone(), BlockValidationKind::Exhaustive).unwrap();
+
+        assert_eq!(
+            tree.make_canonical(&fork_block.hash).unwrap(),
+            CanonicalOutcome::Committed { head: fork_block.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(canonical_block_1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid)
+        );
+
+        assert_eq!(
+            tree.make_canonical(&canonical_block_1.hash).unwrap(),
+            CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(canonical_block_2.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid)
+        );
+
+        assert_eq!(
+            tree.insert_block(sidechain_block_1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Accepted)
+        );
+
+        assert_eq!(
+            tree.make_canonical(&sidechain_block_1.hash).unwrap(),
+            CanonicalOutcome::Committed { head: sidechain_block_1.header.clone() }
+        );
+
+        assert_eq!(
+            tree.make_canonical(&canonical_block_1.hash).unwrap(),
+            CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(sidechain_block_2.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Accepted)
+        );
+
+        assert_eq!(
+            tree.make_canonical(&sidechain_block_2.hash).unwrap(),
+            CanonicalOutcome::Committed { head: sidechain_block_2.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(canonical_block_3.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Accepted)
+        );
+
+        assert_eq!(
+            tree.make_canonical(&canonical_block_3.hash).unwrap(),
+            CanonicalOutcome::Committed { head: canonical_block_3.header.clone() }
+        );
     }
 
     #[tokio::test]
@@ -1680,7 +1945,7 @@ mod tests {
 
         // check notification.
         assert_matches!(canon_notif.try_recv(),
-            Ok(CanonStateNotification::Commit{ new})
+            Ok(CanonStateNotification::Commit{ new })
             if *new.blocks() == BTreeMap::from([(block2.number,block2.clone())]));
 
         // insert unconnected block2b

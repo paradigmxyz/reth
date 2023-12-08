@@ -289,7 +289,7 @@ where
             // start_disconnect, which would ideally be a part of the CanDisconnect trait, or at
             // least similar.
             //
-            // Other parts of reth do not need traits like CanDisconnect because they work
+            // Other parts of reth do not yet need traits like CanDisconnect because atm they work
             // exclusively with EthStream<P2PStream<S>>, where the inner P2PStream is accessible,
             // allowing for its start_disconnect method to be called.
             //

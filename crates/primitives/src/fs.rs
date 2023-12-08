@@ -108,6 +108,14 @@ pub fn read_to_string(path: impl AsRef<Path>) -> Result<String> {
     fs::read_to_string(path).map_err(|err| FsPathError::read(err, path))
 }
 
+/// Read the entire contents of a file into a bytes vector.
+///
+/// Wrapper for `std::fs::read`
+pub fn read(path: impl AsRef<Path>) -> Result<Vec<u8>> {
+    let path = path.as_ref();
+    fs::read(path).map_err(|err| FsPathError::read(err, path))
+}
+
 /// Wrapper for `std::fs::write`
 pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
     let path = path.as_ref();

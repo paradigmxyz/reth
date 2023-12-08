@@ -3,7 +3,7 @@
 use crate::{
     args::{
         types::{MaxU32, ZeroAsNoneU64},
-        GasPriceOracleArgs,
+        GasPriceOracleArgs, RpcStateCacheArgs,
     },
     cli::{
         components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
@@ -23,13 +23,7 @@ use reth_provider::{
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{
-        cache::{
-            DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_ENV_CACHE_MAX_LEN, DEFAULT_RECEIPT_CACHE_MAX_LEN,
-        },
-        gas_oracle::GasPriceOracleConfig,
-        RPC_DEFAULT_GAS_CAP,
-    },
+    eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP},
     JwtError, JwtSecret,
 };
 use reth_rpc_builder::{
@@ -175,21 +169,13 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
+    /// State cache configuration.
+    #[clap(flatten)]
+    pub rpc_state_cache: RpcStateCacheArgs,
+
     /// Gas price oracle configuration.
     #[clap(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
-
-    /// Maximum number of block cache entries.
-    #[arg(long, default_value_t = DEFAULT_BLOCK_CACHE_MAX_LEN)]
-    pub block_cache_len: u32,
-
-    /// Maximum number of receipt cache entries.
-    #[arg(long, default_value_t = DEFAULT_RECEIPT_CACHE_MAX_LEN)]
-    pub receipt_cache_len: u32,
-
-    /// Maximum number of env cache entries.
-    #[arg(long, default_value_t = DEFAULT_ENV_CACHE_MAX_LEN)]
-    pub env_cache_len: u32,
 }
 
 impl RpcServerArgs {
@@ -350,7 +336,17 @@ impl RethRpcConfig for RpcServerArgs {
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
             .rpc_gas_cap(self.rpc_gas_cap)
+            .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
+    }
+
+    fn state_cache_config(&self) -> EthStateCacheConfig {
+        EthStateCacheConfig {
+            max_blocks: self.rpc_state_cache.max_blocks,
+            max_receipts: self.rpc_state_cache.max_receipts,
+            max_envs: self.rpc_state_cache.max_envs,
+            max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
+        }
     }
 
     fn rpc_max_request_size_bytes(&self) -> u32 {
@@ -362,12 +358,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
-        GasPriceOracleConfig::new(
-            self.gas_price_oracle.blocks,
-            self.gas_price_oracle.ignore_price,
-            self.gas_price_oracle.max_price,
-            self.gas_price_oracle.percentile,
-        )
+        self.gas_price_oracle.gas_price_oracle_config()
     }
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
@@ -487,9 +478,7 @@ impl Default for RpcServerArgs {
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             gas_price_oracle: GasPriceOracleArgs::default(),
-            block_cache_len: DEFAULT_BLOCK_CACHE_MAX_LEN,
-            receipt_cache_len: DEFAULT_RECEIPT_CACHE_MAX_LEN,
-            env_cache_len: DEFAULT_ENV_CACHE_MAX_LEN,
+            rpc_state_cache: RpcStateCacheArgs::default(),
         }
     }
 }

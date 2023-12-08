@@ -3,14 +3,14 @@
 use crate::{
     constants::EMPTY_OMMER_ROOT_HASH,
     keccak256,
-    trie::{HashBuilder, Nibbles},
-    Address, GenesisAccount, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef,
-    TransactionSigned, Withdrawal, B256,
+    trie::{HashBuilder, Nibbles, TrieAccount},
+    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
+    B256,
 };
+use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
 use itertools::Itertools;
-use std::collections::HashMap;
 
 /// Adjust the index of an item for rlp encoding.
 pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
@@ -164,22 +164,73 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     keccak256(ommers_rlp)
 }
 
-/// Calculates the root hash for the state, this corresponds to [geth's
-/// `deriveHash`](https://github.com/ethereum/go-ethereum/blob/6c149fd4ad063f7c24d726a73bc0546badd1bc73/core/genesis.go#L119).
-pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> B256 {
-    let accounts_with_sorted_hashed_keys = genesis_alloc
-        .iter()
-        .map(|(address, account)| (keccak256(address), account))
-        .sorted_by_key(|(key, _)| *key);
+/// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
+/// represented as MPT.
+/// See [state_root_unsorted] for more info.
+pub fn state_root_ref_unhashed<'a, A: Into<TrieAccount> + Clone + 'a>(
+    state: impl IntoIterator<Item = (&'a Address, &'a A)>,
+) -> B256 {
+    state_root_unsorted(
+        state.into_iter().map(|(address, account)| (keccak256(address), account.clone())),
+    )
+}
 
+/// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
+/// represented as MPT.
+/// See [state_root_unsorted] for more info.
+pub fn state_root_unhashed<A: Into<TrieAccount>>(
+    state: impl IntoIterator<Item = (Address, A)>,
+) -> B256 {
+    state_root_unsorted(state.into_iter().map(|(address, account)| (keccak256(address), account)))
+}
+
+/// Sorts the hashed account keys and calculates the root hash of the state represented as MPT.
+/// See [state_root] for more info.
+pub fn state_root_unsorted<A: Into<TrieAccount>>(
+    state: impl IntoIterator<Item = (B256, A)>,
+) -> B256 {
+    state_root(state.into_iter().sorted_by_key(|(key, _)| *key))
+}
+
+/// Calculates the root hash of the state represented as MPT.
+/// Corresponds to [geth's `deriveHash`](https://github.com/ethereum/go-ethereum/blob/6c149fd4ad063f7c24d726a73bc0546badd1bc73/core/genesis.go#L119).
+///
+/// # Panics
+///
+/// If the items are not in sorted order.
+pub fn state_root<A: Into<TrieAccount>>(state: impl IntoIterator<Item = (B256, A)>) -> B256 {
     let mut hb = HashBuilder::default();
     let mut account_rlp_buf = Vec::new();
-    for (hashed_key, account) in accounts_with_sorted_hashed_keys {
+    for (hashed_key, account) in state {
         account_rlp_buf.clear();
-        account.encode(&mut account_rlp_buf);
+        account.into().encode(&mut account_rlp_buf);
         hb.add_leaf(Nibbles::unpack(hashed_key), &account_rlp_buf);
     }
+    hb.root()
+}
 
+/// Hashes storage keys, sorts them and them calculates the root hash of the storage trie.
+/// See [storage_root_unsorted] for more info.
+pub fn storage_root_unhashed(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
+    storage_root_unsorted(storage.into_iter().map(|(slot, value)| (keccak256(slot), value)))
+}
+
+/// Sorts and calculates the root hash of account storage trie.
+/// See [storage_root] for more info.
+pub fn storage_root_unsorted(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
+    storage_root(storage.into_iter().sorted_by_key(|(key, _)| *key))
+}
+
+/// Calculates the root hash of account storage trie.
+///
+/// # Panics
+///
+/// If the items are not in sorted order.
+pub fn storage_root(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
+    let mut hb = HashBuilder::default();
+    for (hashed_slot, value) in storage {
+        hb.add_leaf(Nibbles::unpack(hashed_slot), alloy_rlp::encode_fixed_size(&value).as_ref());
+    }
     hb.root()
 }
 
@@ -216,12 +267,13 @@ mod tests {
         bloom,
         constants::EMPTY_ROOT_HASH,
         hex_literal::hex,
-        proofs::{calculate_receipt_root, calculate_transaction_root, genesis_state_root},
+        proofs::{calculate_receipt_root, calculate_transaction_root},
         Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256, GOERLI,
         HOLESKY, MAINNET, SEPOLIA, U256,
     };
     use alloy_primitives::b256;
     use alloy_rlp::Decodable;
+    use std::collections::HashMap;
 
     #[test]
     fn check_transaction_root() {
@@ -549,8 +601,8 @@ mod tests {
 
     #[test]
     fn check_empty_state_root() {
-        let genesis_alloc = HashMap::new();
-        let root = genesis_state_root(&genesis_alloc);
+        let genesis_alloc = HashMap::<Address, GenesisAccount>::new();
+        let root = state_root_unhashed(genesis_alloc);
         assert_eq!(root, EMPTY_ROOT_HASH);
     }
 
@@ -577,7 +629,7 @@ mod tests {
                 test_addr,
                 GenesisAccount { nonce: None, balance: U256::MAX, code: None, storage: None },
             );
-            let root = genesis_state_root(&genesis_alloc);
+            let root = state_root_unhashed(genesis_alloc);
 
             assert_eq!(root, expected_root);
         }
@@ -587,7 +639,7 @@ mod tests {
     fn test_chain_state_roots() {
         let expected_mainnet_state_root =
             b256!("d7f8974fb5ac78d9ac099b9ad5018bedc2ce0a72dad1827a1709da30580f0544");
-        let calculated_mainnet_state_root = genesis_state_root(&MAINNET.genesis.alloc);
+        let calculated_mainnet_state_root = state_root_ref_unhashed(&MAINNET.genesis.alloc);
         assert_eq!(
             expected_mainnet_state_root, calculated_mainnet_state_root,
             "mainnet state root mismatch"
@@ -595,7 +647,7 @@ mod tests {
 
         let expected_goerli_state_root =
             b256!("5d6cded585e73c4e322c30c2f782a336316f17dd85a4863b9d838d2d4b8b3008");
-        let calculated_goerli_state_root = genesis_state_root(&GOERLI.genesis.alloc);
+        let calculated_goerli_state_root = state_root_ref_unhashed(&GOERLI.genesis.alloc);
         assert_eq!(
             expected_goerli_state_root, calculated_goerli_state_root,
             "goerli state root mismatch"
@@ -603,7 +655,7 @@ mod tests {
 
         let expected_sepolia_state_root =
             b256!("5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494");
-        let calculated_sepolia_state_root = genesis_state_root(&SEPOLIA.genesis.alloc);
+        let calculated_sepolia_state_root = state_root_ref_unhashed(&SEPOLIA.genesis.alloc);
         assert_eq!(
             expected_sepolia_state_root, calculated_sepolia_state_root,
             "sepolia state root mismatch"
@@ -611,7 +663,7 @@ mod tests {
 
         let expected_holesky_state_root =
             b256!("69d8c9d72f6fa4ad42d4702b433707212f90db395eb54dc20bc85de253788783");
-        let calculated_holesky_state_root = genesis_state_root(&HOLESKY.genesis.alloc);
+        let calculated_holesky_state_root = state_root_ref_unhashed(&HOLESKY.genesis.alloc);
         assert_eq!(
             expected_holesky_state_root, calculated_holesky_state_root,
             "holesky state root mismatch"

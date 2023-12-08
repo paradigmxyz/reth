@@ -1,5 +1,6 @@
 use alloy_primitives::{BlockNumber, B256, U256};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Describes the current head block.
 ///
@@ -21,4 +22,47 @@ pub struct Head {
     pub total_difficulty: U256,
     /// The timestamp of the head block.
     pub timestamp: u64,
+}
+impl Head {
+    /// Creates a new `Head` instance.
+    pub fn new(
+        number: BlockNumber,
+        hash: B256,
+        difficulty: U256,
+        total_difficulty: U256,
+        timestamp: u64,
+    ) -> Self {
+        Self { number, hash, difficulty, total_difficulty, timestamp }
+    }
+
+    /// Updates the head block with new information.
+    pub fn update(
+        &mut self,
+        number: BlockNumber,
+        hash: B256,
+        difficulty: U256,
+        total_difficulty: U256,
+        timestamp: u64,
+    ) {
+        self.number = number;
+        self.hash = hash;
+        self.difficulty = difficulty;
+        self.total_difficulty = total_difficulty;
+        self.timestamp = timestamp;
+    }
+
+    /// Checks if the head block is an empty block (i.e., has default values).
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl fmt::Display for Head {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Head Block:\n Number: {}\n Hash: {:?}\n Difficulty: {:?}\n Total Difficulty: {:?}\n Timestamp: {}",
+            self.number, self.hash, self.difficulty, self.total_difficulty, self.timestamp
+        )
+    }
 }
