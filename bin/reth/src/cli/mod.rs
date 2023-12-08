@@ -224,15 +224,6 @@ pub struct Logs {
 const MB_TO_BYTES: u64 = 1024 * 1024;
 
 impl Logs {
-    fn combined_filter(existing_filter: &str, rust_log: &str) -> String {
-        let default_directives = DEFAULT_ENV_FILTER_DIRECTIVE;
-        if rust_log.is_empty() {
-            format!("{},{}", existing_filter, default_directives)
-        } else {
-            format!("{},{},{}", existing_filter, rust_log, default_directives)
-        }
-    }
-
     /// Builds tracing layers from the current log options.
     pub fn layers<S>(&self) -> eyre::Result<(Vec<BoxedLayer<S>>, Option<FileWorkerGuard>)>
     where
@@ -241,20 +232,27 @@ impl Logs {
     {
         let mut layers = Vec::new();
 
-        let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "".to_string());
+        // Function to create a new EnvFilter with base and specific directives
+        let create_env_filter = |additional_directive: &str| -> eyre::Result<EnvFilter> {
+            let mut filter = EnvFilter::builder().from_env_lossy();
+            filter = filter.add_directive(DEFAULT_ENV_FILTER_DIRECTIVE.parse()?);
+            filter = filter.add_directive(additional_directive.parse()?);
+            Ok(filter)
+        };
 
+        // Create and add the journald layer if enabled
         if self.journald {
-            let journald_filter_combined = Self::combined_filter(&self.journald_filter, &rust_log);
+            let journald_filter = create_env_filter(&self.journald_filter)?;
             layers.push(
-                reth_tracing::journald(EnvFilter::try_new(journald_filter_combined)?)
-                    .expect("Could not connect to journald"),
+                reth_tracing::journald(journald_filter).expect("Could not connect to journald"),
             );
         }
 
+        // Create and add the file logging layer if enabled
         let file_guard = if self.log_file_max_files > 0 {
-            let file_filter_combined = Self::combined_filter(&self.log_file_filter, &rust_log);
+            let file_filter = create_env_filter(&self.log_file_filter)?;
             let (layer, guard) = reth_tracing::file(
-                EnvFilter::try_new(file_filter_combined)?,
+                file_filter,
                 &self.log_file_directory,
                 "reth.log",
                 self.log_file_max_size * MB_TO_BYTES,
