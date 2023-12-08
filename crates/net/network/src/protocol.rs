@@ -9,7 +9,12 @@ use reth_eth_wire::{
 use reth_network_api::Direction;
 use reth_primitives::BytesMut;
 use reth_rpc_types::PeerId;
-use std::{fmt, net::SocketAddr, pin::Pin};
+use std::{
+    fmt,
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+    pin::Pin,
+};
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
@@ -150,13 +155,19 @@ impl RlpxSubProtocolHandlers {
     pub(crate) fn into_iter(self) -> impl Iterator<Item = Box<dyn DynConnectionHandler>> {
         self.0.into_iter()
     }
+}
 
-    /// Retains only the handlers for which the predicate returns `true`.
-    pub(crate) fn retain<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&dyn DynConnectionHandler) -> bool,
-    {
-        self.0.retain(|handler| f(handler.as_ref()))
+impl Deref for RlpxSubProtocolHandlers {
+    type Target = Vec<Box<dyn DynConnectionHandler>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for RlpxSubProtocolHandlers {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
