@@ -1,3 +1,9 @@
+/// GPO reexports
+pub use reth_rpc::eth::gas_oracle::{
+    DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
+    DEFAULT_MAX_GAS_PRICE,
+};
+
 /// The default port for the http server
 pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
 
@@ -15,19 +21,6 @@ pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
 /// The default maximum number of concurrently executed tracing calls
 pub const DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
-
-/// Number of recent blocks to check for gas price
-pub const DEFAULT_GAS_PRICE_BLOCKS: u32 = 20;
-
-/// Gas Price below which the gas price oracle will ignore transactions
-pub const DEFAULT_GAS_PRICE_IGNORE: u64 = 2;
-
-/// Maximum transaction priority fee (or gas price before London Fork) to be recommended by the gas
-/// price oracle
-pub const DEFAULT_GAS_PRICE_MAX: u64 = 500_000_000_000;
-
-/// The percentile of gas prices to use for the estimate
-pub const DEFAULT_GAS_PRICE_PERCENTILE: u32 = 60;
 
 /// The default IPC endpoint
 #[cfg(windows)]

@@ -1,10 +1,13 @@
+use crate::primitives::U256;
 use clap::Args;
+use reth_rpc::eth::gas_oracle::GasPriceOracleConfig;
 use reth_rpc_builder::constants::{
-    DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_IGNORE, DEFAULT_GAS_PRICE_MAX,
-    DEFAULT_GAS_PRICE_PERCENTILE,
+    DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
+    DEFAULT_MAX_GAS_PRICE,
 };
+
 /// Parameters to configure Gas Price Oracle
-#[derive(Debug, Clone, Args, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Args, PartialEq, Eq)]
 #[clap(next_help_heading = "Gas Price Oracle")]
 pub struct GasPriceOracleArgs {
     /// Number of recent blocks to check for gas price
@@ -12,11 +15,11 @@ pub struct GasPriceOracleArgs {
     pub blocks: u32,
 
     /// Gas Price below which gpo will ignore transactions
-    #[arg(long = "gpo.ignoreprice", default_value_t = DEFAULT_GAS_PRICE_IGNORE)]
+    #[arg(long = "gpo.ignoreprice", default_value_t = DEFAULT_IGNORE_GAS_PRICE.to())]
     pub ignore_price: u64,
 
     /// Maximum transaction priority fee(or gasprice before London Fork) to be recommended by gpo
-    #[arg(long = "gpo.maxprice", default_value_t = DEFAULT_GAS_PRICE_MAX)]
+    #[arg(long = "gpo.maxprice", default_value_t = DEFAULT_MAX_GAS_PRICE.to())]
     pub max_price: u64,
 
     /// The percentile of gas prices to use for the estimate
@@ -24,12 +27,26 @@ pub struct GasPriceOracleArgs {
     pub percentile: u32,
 }
 
+impl GasPriceOracleArgs {
+    /// Returns a [GasPriceOracleConfig] from the arguments.
+    pub fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
+        let Self { blocks, ignore_price, max_price, percentile } = self;
+        GasPriceOracleConfig {
+            max_price: Some(U256::from(*max_price)),
+            ignore_price: Some(U256::from(*ignore_price)),
+            percentile: *percentile,
+            blocks: *blocks,
+            ..Default::default()
+        }
+    }
+}
+
 impl Default for GasPriceOracleArgs {
     fn default() -> Self {
         Self {
             blocks: DEFAULT_GAS_PRICE_BLOCKS,
-            ignore_price: DEFAULT_GAS_PRICE_IGNORE,
-            max_price: DEFAULT_GAS_PRICE_MAX,
+            ignore_price: DEFAULT_IGNORE_GAS_PRICE.to(),
+            max_price: DEFAULT_MAX_GAS_PRICE.to(),
             percentile: DEFAULT_GAS_PRICE_PERCENTILE,
         }
     }
@@ -39,11 +56,6 @@ impl Default for GasPriceOracleArgs {
 mod tests {
     use super::*;
     use clap::Parser;
-    use reth_rpc_builder::constants::{
-        DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_IGNORE, DEFAULT_GAS_PRICE_MAX,
-        DEFAULT_GAS_PRICE_PERCENTILE,
-    };
-
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -58,8 +70,8 @@ mod tests {
             args,
             GasPriceOracleArgs {
                 blocks: DEFAULT_GAS_PRICE_BLOCKS,
-                ignore_price: DEFAULT_GAS_PRICE_IGNORE,
-                max_price: DEFAULT_GAS_PRICE_MAX,
+                ignore_price: DEFAULT_IGNORE_GAS_PRICE.to(),
+                max_price: DEFAULT_MAX_GAS_PRICE.to(),
                 percentile: DEFAULT_GAS_PRICE_PERCENTILE,
             }
         );
