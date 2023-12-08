@@ -35,7 +35,7 @@ use std::{
 };
 use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
@@ -856,7 +856,7 @@ where
                     // known that this transaction is bad. (e.g. consensus
                     // rules)
                     if err.is_bad_transaction() && !this.network.is_syncing() {
-                        trace!(target: "net::tx", ?err, "bad pool transaction import");
+                        debug!(target: "net::tx", ?err, "bad pool transaction import");
                         this.on_bad_import(err.hash);
                         continue
                     }
