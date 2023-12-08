@@ -234,7 +234,8 @@ impl Logs {
 
         // Function to create a new EnvFilter with environment, default and additional directive
         let create_env_filter = |additional_directive: &str| -> eyre::Result<EnvFilter> {
-            Ok(EnvFilter::builder().from_env_lossy()
+            Ok(EnvFilter::builder()
+                .from_env_lossy()
                 .add_directive(DEFAULT_ENV_FILTER_DIRECTIVE.parse()?)
                 .add_directive(additional_directive.parse()?))
         };
