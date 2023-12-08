@@ -232,7 +232,7 @@ impl Logs {
     {
         let mut layers = Vec::new();
 
-        // Function to create a new EnvFilter with base and specific directives
+        // Function to create a new EnvFilter with environment, default and additional directive
         let create_env_filter = |additional_directive: &str| -> eyre::Result<EnvFilter> {
             Ok(EnvFilter::builder().from_env_lossy()
                 .add_directive(DEFAULT_ENV_FILTER_DIRECTIVE.parse()?)
