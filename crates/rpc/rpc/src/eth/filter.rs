@@ -468,6 +468,9 @@ where
                     }
                 }
 
+                // TODO: remove
+                trace!(target: "rpc::eth::filter", blocks = ?log_index_filter.iter().collect::<Vec<_>>(), "querying blocks");
+
                 // loop over the range of new blocks and check logs if the filter matches the log's
                 // bloom
                 for block_number in log_index_filter.iter() {
