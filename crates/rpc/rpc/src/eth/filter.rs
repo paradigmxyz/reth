@@ -469,7 +469,7 @@ where
                 }
 
                 // TODO: remove
-                trace!(target: "rpc::eth::filter", blocks = ?log_index_filter.iter().collect::<Vec<_>>(), "querying blocks");
+                trace!(target: "rpc::eth::filter", blocks = ?log_index_filter.iter().collect::<Vec<_>>().len(), "querying blocks");
 
                 // loop over the range of new blocks and check logs if the filter matches the log's
                 // bloom
@@ -628,15 +628,20 @@ impl LogIndexFilter {
 
         let address_index = match address_filter {
             ValueOrArray::Value(address) => {
-                provider.log_address_index(*address, self.block_range())?
+                let index = provider.log_address_index(*address, self.block_range())?;
+                // TODO: remove
+                trace!(target: "rpc::eth::filter", %address, index_len = ?index.as_ref().map(|i| i.len()), "address filter");
+                index
             }
             ValueOrArray::Array(addresses) => {
                 let mut address_position_union: Option<IntegerList> = None;
                 for address in addresses {
-                    let topic_index = provider.log_address_index(*address, self.block_range())?;
-                    address_position_union = match (&address_position_union, &topic_index) {
+                    let address_index = provider.log_address_index(*address, self.block_range())?;
+                    // TODO: remove
+                    trace!(target: "rpc::eth::filter", %address, index_len = ?address_index.as_ref().map(|i| i.len()), "address filter");
+                    address_position_union = match (&address_position_union, &address_index) {
                         (Some(list1), Some(list2)) => Some(list1.union(list2)),
-                        _ => address_position_union.or(topic_index),
+                        _ => address_position_union.or(address_index),
                     };
                 }
                 address_position_union
@@ -662,12 +667,17 @@ impl LogIndexFilter {
 
             let topic_position_index = match topic_filter {
                 ValueOrArray::Value(topic) => {
-                    provider.log_topic_index(*topic, self.block_range())?
+                    let index = provider.log_topic_index(*topic, self.block_range())?;
+                    // TODO: remove
+                    trace!(target: "rpc::eth::filter", %topic, index_len = ?index.as_ref().map(|i| i.len()), "topic filter");
+                    index
                 }
                 ValueOrArray::Array(topics) => {
                     let mut topic_position_union: Option<IntegerList> = None;
                     for topic in topics {
                         let topic_index = provider.log_topic_index(*topic, self.block_range())?;
+                        // TODO: remove
+                        trace!(target: "rpc::eth::filter", %topic, index_len = ?topic_index.as_ref().map(|i| i.len()), "topic filter");
                         topic_position_union = match (&topic_position_union, &topic_index) {
                             (Some(list1), Some(list2)) => Some(list1.union(list2)),
                             _ => topic_position_union.or(topic_index),
