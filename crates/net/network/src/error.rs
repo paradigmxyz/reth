@@ -1,13 +1,13 @@
 //! Possible errors when interacting with the network.
 
 use crate::session::PendingSessionHandshakeError;
+use reth_discv5::Discv5Error;
 use reth_dns_discovery::resolver::ResolveError;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,
 };
 use std::{fmt, io, io::ErrorKind, net::SocketAddr};
-
 /// Service kind.
 #[derive(Debug, PartialEq)]
 pub enum ServiceKind {
@@ -43,6 +43,8 @@ pub enum NetworkError {
     /// IO error when creating the discovery service
     #[error("failed to launch discovery service: {0}")]
     Discovery(io::Error),
+    #[error("Discv5 error: {0}")]
+    Discv5(#[from] Discv5Error),
     /// Error when setting up the DNS resolver failed
     ///
     /// See also [DnsResolver](reth_dns_discovery::DnsResolver::from_system_conf)

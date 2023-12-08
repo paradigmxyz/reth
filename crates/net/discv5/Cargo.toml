@@ -15,3 +15,4 @@ discv5.workspace = true
 tokio-stream.workspace = true
 tokio.workspace = true
 futures-util = "*"
+thiserror.workspace = true

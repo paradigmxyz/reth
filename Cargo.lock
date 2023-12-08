@@ -5827,6 +5827,7 @@ version = "0.1.0-alpha.11"
 dependencies = [
  "discv5",
  "futures-util",
+ "thiserror",
  "tokio",
  "tokio-stream",
 ]

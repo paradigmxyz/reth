@@ -4,10 +4,10 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
-use futures::StreamExt;
+use futures::{stream::Stream, StreamExt};
 use k256::ecdsa::SigningKey;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
-use reth_discv5::{CombinedKey, Discv5, Discv5Config, Event};
+use reth_discv5::{CombinedKey, Discv5, Discv5Config, Discv5Error, Discv5Wrapper, Event};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
@@ -22,12 +22,13 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::wrappers::ReceiverStream;
 
 /// An abstraction over the configured discovery protocol.
 ///
 /// Listens for new discovered nodes and emits events for discovered nodes and their
 /// address.
+#[derive(Debug)]
 pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
@@ -38,9 +39,9 @@ pub struct Discovery {
     /// Handler to interact with the Discovery v4 service
     discv4: Option<Discv4>,
     /// Handler to interact with the Discovery v5 service
-    discv5: Option<Arc<Discv5>>,
+    discv5: Option<Discv5Wrapper>,
     /// Event stream for Receiving Event from Discovery v5
-    discv5_event_stream: Option<mpsc::Receiver<Event>>,
+    discv5_event_stream: Option<ReceiverStream<Event>>,
     /// All KAD table updates from the discv4 service.
     discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
     /// The handle to the spawned discv4 service
@@ -55,25 +56,6 @@ pub struct Discovery {
     queued_events: VecDeque<DiscoveryEvent>,
     /// List of listeners subscribed to discovery events.
     discovery_listeners: Vec<mpsc::UnboundedSender<DiscoveryEvent>>,
-}
-
-impl fmt::Debug for Discovery {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Discovery")
-            .field("discovered_nodes", &self.discovered_nodes)
-            .field("local_enr", &self.local_enr)
-            .field("discv4", &self.discv4)
-            // Use a placeholder for `discv5` since it doesn't implement Debug
-            .field("discv5", &format_args!("<Discv5>"))
-            .field("discv4_updates", &self.discv4_updates)
-            .field("_discv4_service", &self._discv4_service)
-            .field("_dns_discovery", &self._dns_discovery)
-            .field("dns_discovery_updates", &self.dns_discovery_updates)
-            .field("_dns_disc_service", &self._dns_disc_service)
-            .field("queued_events", &self.queued_events)
-            .field("discovery_listeners", &self.discovery_listeners)
-            .finish()
-    }
 }
 
 impl Discovery {
@@ -105,16 +87,32 @@ impl Discovery {
 
         // setup discv5
         let (discv5, discv5_event_stream) = if let Some(discv5_config) = discv5_config {
-            let secret_key_bytes = sk.as_ref();
-            let signing_key = SigningKey::from_slice(secret_key_bytes).unwrap();
-            let enr_key = CombinedKey::Secp256k1(signing_key);
-            let enr = enr::EnrBuilder::new("v4").build(&enr_key).unwrap();
-            // Construct the Discv5 server
-            let mut discv5 = Discv5::new(enr, enr_key, discv5_config).unwrap();
-            discv5.start().await.unwrap();
-            let discv5_event_stream = discv5.event_stream().await.unwrap();
+            let discv5 = {
+                let secret_key_bytes = sk.as_ref();
+                let signing_key = SigningKey::from_slice(secret_key_bytes)
+                    .map_err(|e| Discv5Error::SecretKeyDecode(e.to_string()))?;
 
-            (Some(Arc::new(discv5)), Some(discv5_event_stream))
+                let enr_key = CombinedKey::Secp256k1(signing_key);
+                let enr = enr::EnrBuilder::new("v4")
+                    .build(&enr_key)
+                    .map_err(|e| Discv5Error::EnrBuilderConstruct(e.to_string()))?;
+
+                Discv5Wrapper::new(
+                    Discv5::new(enr, enr_key, discv5_config)
+                        .map_err(|e| Discv5Error::Discv5Construct(e.to_string()))?,
+                )
+            };
+
+            let mut discv5_ref = discv5.get_mut().await;
+            discv5_ref.start().await.unwrap();
+            drop(discv5_ref);
+
+            let discv5_event = (discv5)
+                .create_event_stream()
+                .await
+                .map_err(|e| Discv5Error::Discv5EventStream(e.to_string()))?;
+            let discv5_event_stream = Some(ReceiverStream::new(discv5_event));
+            (Some(discv5), (discv5_event_stream))
         } else {
             (None, None)
         };
@@ -232,6 +230,17 @@ impl Discovery {
         }
     }
 
+    fn on_discv5_update(&mut self, update: Event) {
+        match update {
+            Event::Discovered(enr) => {}
+            Event::EnrAdded { enr, replaced } => {}
+            Event::NodeInserted { node_id, replaced } => {}
+            Event::SessionEstablished(enr, socket_address) => {}
+            Event::SocketUpdated(socket_address) => {}
+            Event::TalkRequest(talk_request) => {}
+        }
+    }
+
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DiscoveryEvent> {
         loop {
             // Drain all buffered events first
@@ -245,6 +254,12 @@ impl Discovery {
                 self.discv4_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
                 self.on_discv4_update(update)
+            }
+
+            while let Some(Poll::Ready(Some(update))) =
+                self.discv5_event_stream.as_mut().map(|updates| (updates).poll_next_unpin(cx))
+            {
+                self.on_discv5_update(update)
             }
 
             while let Some(Poll::Ready(Some(update))) =
