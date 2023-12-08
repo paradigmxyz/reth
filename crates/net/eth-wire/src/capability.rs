@@ -8,6 +8,7 @@ use crate::{
     EthMessage, EthMessageID, EthVersion,
 };
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use derive_more::{Deref, DerefMut};
 use reth_codecs::add_arbitrary_tests;
 use reth_primitives::bytes::{BufMut, Bytes};
 #[cfg(feature = "serde")]
@@ -249,14 +250,23 @@ pub enum SharedCapability {
         /// This represents the message ID offset for the first message of the eth capability in
         /// the message id space.
         offset: u8,
+        /// The number of messages of this capability. Needed to calculate range of message IDs in
+        /// demuxing.
+        messages: u8,
     },
 }
 
 impl SharedCapability {
-    /// Creates a new [`SharedCapability`] based on the given name, offset, and version.
+    /// Creates a new [`SharedCapability`] based on the given name, offset, version (and messages
+    /// if the capability is custom).
     ///
     /// Returns an error if the offset is equal or less than [`MAX_RESERVED_MESSAGE_ID`].
-    pub(crate) fn new(name: &str, version: u8, offset: u8) -> Result<Self, SharedCapabilityError> {
+    pub(crate) fn new(
+        name: &str,
+        version: u8,
+        offset: u8,
+        messages: u8,
+    ) -> Result<Self, SharedCapabilityError> {
         if offset <= MAX_RESERVED_MESSAGE_ID {
             return Err(SharedCapabilityError::ReservedMessageIdOffset(offset))
         }
@@ -266,6 +276,7 @@ impl SharedCapability {
             _ => Ok(Self::UnknownCapability {
                 cap: Capability::new(name.to_string(), version as usize),
                 offset,
+                messages,
             }),
         }
     }
@@ -324,10 +335,10 @@ impl SharedCapability {
     }
 
     /// Returns the number of protocol messages supported by this capability.
-    pub fn num_messages(&self) -> Result<u8, SharedCapabilityError> {
+    pub fn num_messages(&self) -> u8 {
         match self {
-            SharedCapability::Eth { version: _version, .. } => Ok(EthMessageID::max() + 1),
-            _ => Err(SharedCapabilityError::UnknownCapability),
+            SharedCapability::Eth { version: _version, .. } => EthMessageID::max() + 1,
+            SharedCapability::UnknownCapability { messages, .. } => *messages,
         }
     }
 }
@@ -335,7 +346,7 @@ impl SharedCapability {
 /// Non-empty,ordered list of recognized shared capabilities.
 ///
 /// Shared capabilities are ordered alphabetically by case sensitive name.
-#[derive(Debug)]
+#[derive(Debug, Clone, Deref, DerefMut, PartialEq, Eq)]
 pub struct SharedCapabilities(Vec<SharedCapability>);
 
 impl SharedCapabilities {
@@ -500,9 +511,14 @@ pub fn shared_capability_offsets(
     for name in shared_capability_names {
         let proto_version = shared_capabilities.get(&name).expect("shared; qed");
 
-        let shared_capability = SharedCapability::new(&name, proto_version.version as u8, offset)?;
+        let shared_capability = SharedCapability::new(
+            &name,
+            proto_version.version as u8,
+            offset,
+            proto_version.messages,
+        )?;
 
-        offset += proto_version.messages;
+        offset += shared_capability.num_messages();
         shared_with_offsets.push(shared_capability);
     }
 
@@ -519,9 +535,6 @@ pub enum SharedCapabilityError {
     /// Unsupported `eth` version.
     #[error(transparent)]
     UnsupportedVersion(#[from] ParseVersionError),
-    /// Cannot determine the number of messages for unknown capabilities.
-    #[error("cannot determine the number of messages for unknown capabilities")]
-    UnknownCapability,
     /// Thrown when the message id for a [SharedCapability] overlaps with the reserved p2p message
     /// id space [`MAX_RESERVED_MESSAGE_ID`].
     #[error("message id offset `{0}` is reserved")]
@@ -541,7 +554,7 @@ mod tests {
 
     #[test]
     fn from_eth_68() {
-        let capability = SharedCapability::new("eth", 68, MAX_RESERVED_MESSAGE_ID + 1).unwrap();
+        let capability = SharedCapability::new("eth", 68, MAX_RESERVED_MESSAGE_ID + 1, 13).unwrap();
 
         assert_eq!(capability.name(), "eth");
         assert_eq!(capability.version(), 68);
@@ -556,7 +569,7 @@ mod tests {
 
     #[test]
     fn from_eth_67() {
-        let capability = SharedCapability::new("eth", 67, MAX_RESERVED_MESSAGE_ID + 1).unwrap();
+        let capability = SharedCapability::new("eth", 67, MAX_RESERVED_MESSAGE_ID + 1, 13).unwrap();
 
         assert_eq!(capability.name(), "eth");
         assert_eq!(capability.version(), 67);
@@ -571,7 +584,7 @@ mod tests {
 
     #[test]
     fn from_eth_66() {
-        let capability = SharedCapability::new("eth", 66, MAX_RESERVED_MESSAGE_ID + 1).unwrap();
+        let capability = SharedCapability::new("eth", 66, MAX_RESERVED_MESSAGE_ID + 1, 15).unwrap();
 
         assert_eq!(capability.name(), "eth");
         assert_eq!(capability.version(), 66);
