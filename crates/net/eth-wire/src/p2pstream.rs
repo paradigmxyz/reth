@@ -323,6 +323,7 @@ impl<S> P2PStream<S> {
     }
 }
 
+/// A trait for handling disconnects of the connection.
 pub trait DisconnectP2P {
     /// Starts to gracefully disconnect.
     fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError>;
