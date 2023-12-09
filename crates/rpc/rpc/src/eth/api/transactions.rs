@@ -1146,15 +1146,20 @@ impl From<TransactionSource> for Transaction {
 }
 
 /// Helper function to construct a transaction receipt
+///
+/// Note: This requires _all_ block receipts because we need to calculate the gas used by the
+/// transaction.
 pub(crate) fn build_transaction_receipt_with_block_receipts(
-    tx: TransactionSigned,
+    transaction: TransactionSigned,
     meta: TransactionMeta,
     receipt: Receipt,
     all_receipts: &[Receipt],
     #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
 ) -> EthResult<TransactionReceipt> {
-    let transaction =
-        tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+    // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
+    // we don't need to check for pre EIP-2
+    let from =
+        transaction.recover_signer_unchecked().ok_or(EthApiError::InvalidTransactionSignature)?;
 
     // get the previous transaction cumulative gas used
     let gas_used = if meta.index == 0 {
@@ -1173,14 +1178,14 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         transaction_index: U64::from(meta.index),
         block_hash: Some(meta.block_hash),
         block_number: Some(U256::from(meta.block_number)),
-        from: transaction.signer(),
+        from,
         to: None,
         cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
         gas_used: Some(U256::from(gas_used)),
         contract_address: None,
         logs: Vec::with_capacity(receipt.logs.len()),
         effective_gas_price: U128::from(transaction.effective_gas_price(meta.base_fee)),
-        transaction_type: tx.transaction.tx_type().into(),
+        transaction_type: transaction.transaction.tx_type().into(),
         // TODO pre-byzantium receipts have a post-transaction state root
         state_root: None,
         logs_bloom: receipt.bloom_slow(),
@@ -1196,7 +1201,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     #[cfg(feature = "optimism")]
     if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
-        if !tx.is_deposit() {
+        if !transaction.is_deposit() {
             res_receipt.l1_fee = optimism_tx_meta.l1_fee;
             res_receipt.l1_gas_used =
                 optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
@@ -1206,10 +1211,9 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         }
     }
 
-    match tx.transaction.kind() {
+    match transaction.transaction.kind() {
         Create => {
-            res_receipt.contract_address =
-                Some(transaction.signer().create(tx.transaction.nonce()));
+            res_receipt.contract_address = Some(from.create(transaction.transaction.nonce()));
         }
         Call(addr) => {
             res_receipt.to = Some(*addr);
