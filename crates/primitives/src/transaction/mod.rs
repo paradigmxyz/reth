@@ -992,6 +992,22 @@ impl TransactionSigned {
         self.signature.recover_signer(signature_hash)
     }
 
+    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
+    /// value_.
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also
+    /// [Self::recover_signer_unchecked].
+    pub fn recover_signer_unchecked(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(feature = "optimism")]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
+        let signature_hash = self.signature_hash();
+        self.signature.recover_signer_unchecked(signature_hash)
+    }
+
     /// Recovers a list of signers from a transaction list iterator
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
