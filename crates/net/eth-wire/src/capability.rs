@@ -479,12 +479,8 @@ pub fn shared_capability_offsets(
         if let Some(messages) = our_capabilities.get(&peer_capability).copied() {
             // If multiple versions are shared of the same (equal name) capability, the numerically
             // highest wins, others are ignored
-
-            let version = shared_capabilities.get(&peer_capability.name).map(|v| v.version);
-
-            // TODO(mattsse): simplify
-            if version.is_none() ||
-                (version.is_some() && peer_capability.version > version.expect("is some; qed"))
+            if peer_capability.version >
+                shared_capabilities.get(&peer_capability.name).map(|v| v.version).unwrap_or(0)
             {
                 shared_capabilities.insert(
                     peer_capability.name.clone(),
