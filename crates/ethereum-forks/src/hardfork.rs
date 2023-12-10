@@ -51,6 +51,37 @@ pub enum Hardfork {
     Cancun,
 }
 
+impl Hardfork {
+    /// Returns the activation block number for each Ethereum hardfork.
+    pub fn activation_block(&self) -> Option<u64> {
+        match self {
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(1150000),
+            Hardfork::Dao => Some(1920000),
+            Hardfork::Tangerine => Some(2463000),
+            Hardfork::SpuriousDragon => Some(2675000),
+            Hardfork::Byzantium => Some(4370000),
+            Hardfork::Constantinople => Some(7280000),
+            Hardfork::Petersburg => Some(7280000),
+            Hardfork::Istanbul => Some(9069000),
+            Hardfork::MuirGlacier => Some(9200000),
+            Hardfork::Berlin => Some(12244000),
+            Hardfork::London => Some(12965000),
+            Hardfork::ArrowGlacier => Some(13773000),
+            Hardfork::GrayGlacier => Some(15050000),
+            Hardfork::Paris => Some(15537394),
+            #[cfg(feature = "optimism")]
+            Hardfork::Bedrock => None,
+            #[cfg(feature = "optimism")]
+            Hardfork::Regolith => None,
+            Hardfork::Shanghai => Some(17034870),
+            #[cfg(feature = "optimism")]
+            Hardfork::Canyon => None,
+            Hardfork::Cancun => None,
+        }
+    }
+}
+
 impl FromStr for Hardfork {
     type Err = String;
 
