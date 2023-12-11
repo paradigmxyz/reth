@@ -232,20 +232,27 @@ impl Logs {
     {
         let mut layers = Vec::new();
 
+        // Function to create a new EnvFilter with environment, default and additional directive
+        let create_env_filter = |additional_directive: &str| -> eyre::Result<EnvFilter> {
+            Ok(EnvFilter::builder()
+                .from_env_lossy()
+                .add_directive(DEFAULT_ENV_FILTER_DIRECTIVE.parse()?)
+                .add_directive(additional_directive.parse()?))
+        };
+
+        // Create and add the journald layer if enabled
         if self.journald {
+            let journald_filter = create_env_filter(&self.journald_filter)?;
             layers.push(
-                reth_tracing::journald(
-                    EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
-                        .add_directive(self.journald_filter.parse()?),
-                )
-                .expect("Could not connect to journald"),
+                reth_tracing::journald(journald_filter).expect("Could not connect to journald"),
             );
         }
 
+        // Create and add the file logging layer if enabled
         let file_guard = if self.log_file_max_files > 0 {
+            let file_filter = create_env_filter(&self.log_file_filter)?;
             let (layer, guard) = reth_tracing::file(
-                EnvFilter::try_new(DEFAULT_ENV_FILTER_DIRECTIVE)?
-                    .add_directive(self.log_file_filter.parse()?),
+                file_filter,
                 &self.log_file_directory,
                 "reth.log",
                 self.log_file_max_size * MB_TO_BYTES,
