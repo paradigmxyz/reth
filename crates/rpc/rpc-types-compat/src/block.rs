@@ -135,7 +135,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         logs_bloom,
         timestamp: U256::from(timestamp),
         difficulty,
-        mix_hash,
+        mix_hash: Some(mix_hash),
         nonce: Some(nonce.to_be_bytes().into()),
         base_fee_per_gas: base_fee_per_gas.map(U256::from),
         blob_gas_used: blob_gas_used.map(U64::from),
