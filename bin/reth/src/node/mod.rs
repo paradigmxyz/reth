@@ -10,7 +10,7 @@ use crate::{
     },
     cli::{
         components::RethNodeComponentsImpl,
-        config::RethRpcConfig,
+        config::{RethRpcConfig, RethTransactionPoolConfig},
         ext::{RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
