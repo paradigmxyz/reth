@@ -163,23 +163,34 @@ pub struct Header {
     /// Extra data
     pub extra_data: Bytes,
     /// Mix Hash
-    pub mix_hash: B256,
+    ///
+    /// Before the merge this proves, combined with the nonce, that a sufficient amount of
+    /// computation has been carried out on this block: the Proof-of-Work (PoF).
+    ///
+    /// After the merge this is `prevRandao`: Randomness value for the generated payload.
+    ///
+    /// This is an Option because it is not always set by non-ethereum networks.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-4399>
+    /// And <https://github.com/ethereum/execution-apis/issues/328>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mix_hash: Option<B256>,
     /// Nonce
     pub nonce: Option<B64>,
     /// Base fee per unit of gas (if past London)
-    #[serde(rename = "baseFeePerGas", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_fee_per_gas: Option<U256>,
     /// Withdrawals root hash added by EIP-4895 and is ignored in legacy headers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub withdrawals_root: Option<B256>,
     /// Blob gas used
-    #[serde(rename = "blobGasUsed", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_gas_used: Option<U64>,
     /// Excess blob gas
-    #[serde(rename = "excessBlobGas", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub excess_blob_gas: Option<U64>,
     /// Parent beacon block root
-    #[serde(rename = "parentBeaconBlockRoot", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_beacon_block_root: Option<B256>,
 }
 
@@ -837,7 +848,7 @@ mod tests {
                 logs_bloom: Bloom::default(),
                 timestamp: U256::from(12),
                 difficulty: U256::from(13),
-                mix_hash: B256::with_last_byte(14),
+                mix_hash: Some(B256::with_last_byte(14)),
                 nonce: Some(B64::with_last_byte(15)),
                 base_fee_per_gas: Some(U256::from(20)),
                 blob_gas_used: None,
@@ -878,7 +889,7 @@ mod tests {
                 logs_bloom: Bloom::default(),
                 timestamp: U256::from(12),
                 difficulty: U256::from(13),
-                mix_hash: B256::with_last_byte(14),
+                mix_hash: Some(B256::with_last_byte(14)),
                 nonce: Some(B64::with_last_byte(15)),
                 base_fee_per_gas: Some(U256::from(20)),
                 blob_gas_used: None,
