@@ -18,7 +18,7 @@ use reth_primitives::{
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
-    IntoRecoveredTransaction, Receipt, SealedBlock,
+    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U128, U256, U64,
 };
@@ -99,6 +99,14 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// Returns `None` if block does not exist.
     async fn block_by_id(&self, id: BlockId) -> EthResult<Option<SealedBlock>>;
+
+    /// Get the entire block for the given id.
+    ///
+    /// Returns `None` if block does not exist.
+    async fn block_by_id_with_senders(
+        &self,
+        id: BlockId,
+    ) -> EthResult<Option<SealedBlockWithSenders>>;
 
     /// Get all transactions in the block with the given hash.
     ///
@@ -365,6 +373,13 @@ where
         self.block(id).await
     }
 
+    async fn block_by_id_with_senders(
+        &self,
+        id: BlockId,
+    ) -> EthResult<Option<SealedBlockWithSenders>> {
+        self.block_with_senders(id).await
+    }
+
     async fn transactions_by_block_id(
         &self,
         block: BlockId,
@@ -379,8 +394,11 @@ where
                 match this.provider().transaction_by_hash_with_meta(hash)? {
                     None => Ok(None),
                     Some((tx, meta)) => {
+                        // Note: we assume this transaction is valid, because it's mined (or part of
+                        // pending block) and already. We don't need to
+                        // check for pre EIP-2 because this transaction could be pre-EIP-2.
                         let transaction = tx
-                            .into_ecrecovered()
+                            .into_ecrecovered_unchecked()
                             .ok_or(EthApiError::InvalidTransactionSignature)?;
 
                         let tx = TransactionSource::Block {
