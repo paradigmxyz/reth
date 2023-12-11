@@ -479,12 +479,9 @@ pub fn shared_capability_offsets(
         if let Some(messages) = our_capabilities.get(&peer_capability).copied() {
             // If multiple versions are shared of the same (equal name) capability, the numerically
             // highest wins, others are ignored
-
-            let version = shared_capabilities.get(&peer_capability.name).map(|v| v.version);
-
-            // TODO(mattsse): simplify
-            if version.is_none() ||
-                (version.is_some() && peer_capability.version > version.expect("is some; qed"))
+            if shared_capabilities
+                .get(&peer_capability.name)
+                .map_or(true, |v| peer_capability.version > v.version)
             {
                 shared_capabilities.insert(
                     peer_capability.name.clone(),
@@ -610,6 +607,18 @@ mod tests {
         assert!(capabilities.supports_eth_v66());
         assert!(capabilities.supports_eth_v67());
         assert!(capabilities.supports_eth_v68());
+    }
+
+    #[test]
+    fn test_peer_capability_version_zero() {
+        let cap = Capability::new_static("TestName", 0);
+        let local_capabilities: Vec<Protocol> =
+            vec![Protocol::new(cap.clone(), 0), EthVersion::Eth67.into(), EthVersion::Eth68.into()];
+        let peer_capabilities = vec![cap.clone()];
+
+        let shared = shared_capability_offsets(local_capabilities, peer_capabilities).unwrap();
+        assert_eq!(shared.len(), 1);
+        assert_eq!(shared[0], SharedCapability::UnknownCapability { cap, offset: 16, messages: 0 })
     }
 
     #[test]
