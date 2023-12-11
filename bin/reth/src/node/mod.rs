@@ -38,7 +38,7 @@ use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
 };
-use reth_db::{database::Database, database_metrics::DatabaseMetrics, init_db, DatabaseEnv};
+use reth_db::{database::Database, database_metrics::DatabaseMetrics, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
