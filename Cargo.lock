@@ -1521,6 +1521,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -6062,6 +6063,7 @@ dependencies = [
  "aquamarine",
  "async-trait",
  "auto_impl",
+ "criterion",
  "enr",
  "ethers-core",
  "ethers-middleware",
@@ -6075,6 +6077,7 @@ dependencies = [
  "metrics",
  "parking_lot 0.12.1",
  "pin-project",
+ "pprof",
  "rand 0.8.5",
  "reth-discv4",
  "reth-dns-discovery",
