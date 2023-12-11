@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use crate::database::Database;
-
-/// Extends [Database], adding a function that can be used as a hook for metric reporting.
-pub trait DatabaseMetrics: Database {
+/// Represents a type that has
+pub trait DatabaseMetrics {
     /// Reports metrics for the database.
     fn report_metrics(&self);
 }

@@ -693,11 +693,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         prometheus_exporter::install_recorder()
     }
 
-    async fn start_metrics_endpoint<DB: DatabaseMetrics + 'static>(
+    async fn start_metrics_endpoint<Metrics>(
         &self,
         prometheus_handle: PrometheusHandle,
-        db: Arc<DB>,
-    ) -> eyre::Result<()> {
+        db: Metrics,
+    ) -> eyre::Result<()>
+    where
+        Metrics: DatabaseMetrics + 'static + Send + Sync,
+    {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
             prometheus_exporter::serve(

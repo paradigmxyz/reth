@@ -74,12 +74,15 @@ async fn start_endpoint<F: Hook + 'static>(
 }
 
 /// Serves Prometheus metrics over HTTP with database and process metrics.
-pub(crate) async fn serve<DB: DatabaseMetrics + 'static>(
+pub(crate) async fn serve<Metrics>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
-    db: Arc<DB>,
+    db: Metrics,
     process: metrics_process::Collector,
-) -> eyre::Result<()> {
+) -> eyre::Result<()>
+where
+    Metrics: DatabaseMetrics + 'static + Send + Sync,
+{
     let db_metrics_hook = move || db.report_metrics();
 
     // Clone `process` to move it into the hook and use the original `process` for describe below.
