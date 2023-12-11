@@ -2,14 +2,18 @@
 
 use crate::{
     database::Database,
+    database_metrics::DatabaseMetrics,
     tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
 };
+use eyre::Context;
+use metrics::gauge;
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, PageSize, SyncMode, RO, RW,
 };
+use reth_tracing::tracing::error;
 use std::{ops::Deref, path::Path};
 use tx::Tx;
 
@@ -56,6 +60,44 @@ impl Database for DatabaseEnv {
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.with_metrics,
         ))
+    }
+}
+
+impl DatabaseMetrics for DatabaseEnv {
+    fn report_metrics(&self) {
+        let _ = self.view(|tx| {
+            for table in Tables::ALL.iter().map(|table| table.name()) {
+                let table_db =
+                    tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
+
+                let stats = tx
+                    .inner
+                    .db_stat(&table_db)
+                    .wrap_err(format!("Could not find table: {table}"))?;
+
+                let page_size = stats.page_size() as usize;
+                let leaf_pages = stats.leaf_pages();
+                let branch_pages = stats.branch_pages();
+                let overflow_pages = stats.overflow_pages();
+                let num_pages = leaf_pages + branch_pages + overflow_pages;
+                let table_size = page_size * num_pages;
+                let entries = stats.entries();
+
+                gauge!("db.table_size", table_size as f64, "table" => table);
+                gauge!("db.table_pages", leaf_pages as f64, "table" => table, "type" => "leaf");
+                gauge!("db.table_pages", branch_pages as f64, "table" => table, "type" => "branch");
+                gauge!("db.table_pages", overflow_pages as f64, "table" => table, "type" => "overflow");
+                gauge!("db.table_entries", entries as f64, "table" => table);
+            }
+
+            Ok::<(), eyre::Report>(())
+        }).map_err(|error| error!(?error, "Failed to read db table stats"));
+
+        if let Ok(freelist) =
+            self.freelist().map_err(|error| error!(?error, "Failed to read db.freelist"))
+        {
+            gauge!("db.freelist", freelist as f64);
+        }
     }
 }
 

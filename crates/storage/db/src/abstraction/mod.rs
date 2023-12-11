@@ -4,6 +4,8 @@ pub mod common;
 pub mod cursor;
 /// Database traits.
 pub mod database;
+/// Database metrics trait extensions.
+pub mod database_metrics;
 /// mock
 pub mod mock;
 /// Table traits
