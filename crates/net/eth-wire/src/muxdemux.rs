@@ -163,13 +163,11 @@ impl<S> MuxDemuxStream<S> {
     }
 
     /// Masks message id with offset relative to the message id suffix reserved for capability
-    /// message ids. The p2p stream further masks the message id (todo: mask whole message id at
-    /// once to avoid copying message to mutate id byte or sink BytesMut).
+    /// message ids. The p2p stream further masks the message id
     fn mask_msg_id(&self, msg: Bytes) -> Bytes {
-        let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0] + self.owner.relative_message_id_offset();
-        masked_bytes[1..].copy_from_slice(&msg[1..]);
-
+        let mut masked_bytes = BytesMut::with_capacity(msg.len());
+        masked_bytes.extend_from_slice(&msg);
+        masked_bytes[0] += self.owner.relative_message_id_offset();
         masked_bytes.freeze()
     }
 
@@ -310,10 +308,9 @@ pub struct StreamClone {
 
 impl StreamClone {
     fn mask_msg_id(&self, msg: Bytes) -> Bytes {
-        let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0] + self.cap.relative_message_id_offset();
-        masked_bytes[1..].copy_from_slice(&msg[1..]);
-
+        let mut masked_bytes = BytesMut::with_capacity(msg.len());
+        masked_bytes.extend_from_slice(&msg);
+        masked_bytes[0] += self.cap.relative_message_id_offset();
         masked_bytes.freeze()
     }
 }
