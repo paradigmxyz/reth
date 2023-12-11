@@ -29,10 +29,7 @@ use std::{
 
 use derive_more::{Deref, DerefMut};
 use futures::{Sink, SinkExt, StreamExt};
-use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    BufMut,
-};
+use reth_primitives::bytes::{Bytes, BytesMut};
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 
@@ -169,7 +166,7 @@ impl<S> MuxDemuxStream<S> {
     /// message ids. The p2p stream further masks the message id
     fn mask_msg_id(&self, msg: Bytes) -> Bytes {
         let mut masked_bytes = BytesMut::with_capacity(msg.len());
-        masked_bytes.put(&*msg);
+        masked_bytes.extend_from_slice(&msg);
         masked_bytes[0] += self.owner.relative_message_id_offset();
         masked_bytes.freeze()
     }
@@ -311,10 +308,9 @@ pub struct StreamClone {
 
 impl StreamClone {
     fn mask_msg_id(&self, msg: Bytes) -> Bytes {
-        let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0] + self.cap.relative_message_id_offset();
-        masked_bytes[1..].copy_from_slice(&msg[1..]);
-
+        let mut masked_bytes = BytesMut::with_capacity(msg.len());
+        masked_bytes.extend_from_slice(&msg);
+        masked_bytes[0] += self.cap.relative_message_id_offset();
         masked_bytes.freeze()
     }
 }
