@@ -479,17 +479,10 @@ pub fn shared_capability_offsets(
         if let Some(messages) = our_capabilities.get(&peer_capability).copied() {
             // If multiple versions are shared of the same (equal name) capability, the numerically
             // highest wins, others are ignored
-            if let Some(existing_version) =
-                shared_capabilities.get(&peer_capability.name).map(|v| v.version)
+            if shared_capabilities
+                .get(&peer_capability.name)
+                .map_or(true, |v| peer_capability.version > v.version)
             {
-                if peer_capability.version > existing_version {
-                    shared_capabilities.insert(
-                        peer_capability.name.clone(),
-                        ProtoVersion { version: peer_capability.version, messages },
-                    );
-                    shared_capability_names.insert(peer_capability.name);
-                }
-            } else {
                 shared_capabilities.insert(
                     peer_capability.name.clone(),
                     ProtoVersion { version: peer_capability.version, messages },
