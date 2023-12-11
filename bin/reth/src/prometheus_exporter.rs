@@ -112,7 +112,7 @@ fn collect_memory_stats() {
 
     if epoch::advance().map_err(|error| error!(?error, "Failed to advance jemalloc epoch")).is_err()
     {
-        return;
+        return
     }
 
     if let Ok(value) = stats::active::read()
