@@ -611,25 +611,14 @@ mod tests {
 
     #[test]
     fn test_peer_capability_version_zero() {
-        let local_capabilities: Vec<Protocol> = vec![
-            Protocol::new(Capability { name: Cow::Borrowed("TestName"), version: 0 }, 0),
-            EthVersion::Eth67.into(),
-            EthVersion::Eth68.into(),
-        ];
-        let peer_capabilities: Vec<Capability> =
-            vec![Capability { name: Cow::Borrowed("TestName"), version: 0 }];
+        let cap = Capability::new_static("TestName", 0);
+        let local_capabilities: Vec<Protocol> =
+            vec![Protocol::new(cap.clone(), 0), EthVersion::Eth67.into(), EthVersion::Eth68.into()];
+        let peer_capabilities = vec![cap.clone()];
 
-        let shared_capability =
-            shared_capability_offsets(local_capabilities, peer_capabilities).unwrap()[0].clone();
-
-        assert_eq!(
-            shared_capability,
-            SharedCapability::UnknownCapability {
-                cap: Capability { name: Cow::Borrowed("TestName"), version: 0 },
-                offset: 16,
-                messages: 0
-            }
-        )
+        let shared = shared_capability_offsets(local_capabilities, peer_capabilities).unwrap();
+        assert_eq!(shared.len(), 1);
+        assert_eq!(shared[0], SharedCapability::UnknownCapability { cap, offset: 16, messages: 0 })
     }
 
     #[test]
