@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-/// Represents a type that has
+/// Represents a type that can report metrics, used mainly with the database. The `report_metrics`
+/// method can be used as a prometheus hook.
 pub trait DatabaseMetrics {
     /// Reports metrics for the database.
     fn report_metrics(&self);
