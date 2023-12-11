@@ -11,9 +11,10 @@ use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
     ServerBuilder, TransportRpcModuleConfig,
 };
+use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, path::PathBuf, time::Duration};
 
-/// A trait that provides configured RPC server.
+/// A trait that provides a configured RPC server.
 ///
 /// This provides all basic config values for the RPC server and is implemented by the
 /// [RpcServerArgs](crate::args::RpcServerArgs) type.
@@ -126,4 +127,11 @@ impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         reth_network::NetworkManager::add_rlpx_sub_protocol(self, protocol);
     }
+}
+
+/// A trait that provides all basic config values for the transaction pool and is implemented by the
+/// [TxPoolArgs](crate::args::TxPoolArgs) type.
+pub trait RethTransactionPoolConfig {
+    /// Returns transaction pool configuration.
+    fn pool_config(&self) -> PoolConfig;
 }
