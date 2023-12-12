@@ -6297,6 +6297,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "rayon",
+ "reth-codecs",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",

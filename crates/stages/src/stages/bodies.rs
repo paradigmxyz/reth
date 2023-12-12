@@ -9,8 +9,11 @@ use reth_db::{
     DatabaseError,
 };
 use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
-use reth_primitives::stage::{EntitiesCheckpoint, StageCheckpoint, StageId};
-use reth_provider::DatabaseProviderRW;
+use reth_primitives::{
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
+    SnapshotSegment,
+};
+use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW};
 use std::task::{ready, Context, Poll};
 use tracing::*;
 
@@ -105,17 +108,24 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
         let (from_block, to_block) = input.next_block_range().into_inner();
+        let mut snapshotter = provider
+            .snapshot_provider
+            .as_ref()
+            .expect("should exist")
+            .writer(from_block, SnapshotSegment::Transactions)?;
 
         // Cursors used to write bodies, ommers and transactions
         let tx = provider.tx_ref();
         let mut block_indices_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
-        let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
         // Get id for the next tx_num of zero if there are no transactions.
-        let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
+        let mut next_tx_num = snapshotter
+            .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+            .map(|id| id + 1)
+            .unwrap_or_default();
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
 
@@ -142,8 +152,12 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
                     // Write transactions
                     for transaction in block.body {
-                        // Append the transaction
-                        tx_cursor.append(next_tx_num, transaction.into())?;
+                        snapshotter.append_transaction(
+                            block_number,
+                            next_tx_num,
+                            transaction.into(),
+                        )?;
+
                         // Increment transaction id for each transaction.
                         next_tx_num += 1;
                     }
@@ -193,13 +207,15 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
-        let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
         // Cursors to unwind transitions
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
 
         let mut rev_walker = body_cursor.walk_back(None)?;
+        let mut tx_count = 0;
+        let mut from_block = None;
+
         while let Some((number, block_meta)) = rev_walker.next().transpose()? {
             if number <= input.unwind_to {
                 break
@@ -222,16 +238,23 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 tx_block_cursor.delete_current()?;
             }
 
-            // Delete all transactions that belong to this block
-            for tx_id in block_meta.tx_num_range() {
-                // First delete the transaction
-                if transaction_cursor.seek_exact(tx_id)?.is_some() {
-                    transaction_cursor.delete_current()?;
-                }
+            if from_block.is_none() {
+                from_block = Some(number)
             }
+            tx_count += block_meta.tx_count();
 
             // Delete the current body value
             rev_walker.delete_current()?;
+        }
+
+        if let Some(from_block) = from_block {
+            let mut snapshotter = provider
+                .snapshot_provider
+                .as_ref()
+                .expect("should exist")
+                .writer(from_block, SnapshotSegment::Transactions)?;
+
+            snapshotter.prune_transactions(tx_count)?;
         }
 
         Ok(UnwindOutput {
