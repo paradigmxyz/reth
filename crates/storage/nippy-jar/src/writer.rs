@@ -240,7 +240,10 @@ where
                 let num_offsets = (length - 1) / INITIAL_OFFSET_SIZE;
 
                 if remaining_to_prune as u64 > num_offsets {
-                    return Err(NippyJarError::InvalidPruning(num_offsets, remaining_to_prune as u64))
+                    return Err(NippyJarError::InvalidPruning(
+                        num_offsets,
+                        remaining_to_prune as u64,
+                    ))
                 }
 
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
