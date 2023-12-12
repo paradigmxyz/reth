@@ -210,7 +210,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     fn get_range_with_snapshot<T, P, FS, FD>(
         &self,
         segment: SnapshotSegment,
-        block_range: Range<u64>,
+        mut block_range: Range<u64>,
         fetch_from_snapshot: FS,
         fetch_from_database: FD,
         mut predicate: P,
@@ -220,24 +220,23 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         FD: Fn(Range<u64>, P) -> ProviderResult<Vec<T>>,
         P: FnMut(&T) -> bool,
     {
-        let mut adjusted_range = to_range(block_range);
         let mut data = Vec::new();
 
         if let Some(snapshot_provider) = &self.snapshot_provider {
             if let Some(snapshot_upper_bound) = snapshot_provider.get_highest_snapshot(segment) {
-                if adjusted_range.start <= snapshot_upper_bound {
+                if block_range.start <= snapshot_upper_bound {
                     data.extend(fetch_from_snapshot(
                         snapshot_provider,
-                        adjusted_range.start..adjusted_range.end.min(snapshot_upper_bound + 1),
+                        block_range.start..block_range.end.min(snapshot_upper_bound + 1),
                         &mut predicate,
                     )?);
                 }
-                adjusted_range.start = adjusted_range.start.max(snapshot_upper_bound + 1);
+                block_range.start = block_range.start.max(snapshot_upper_bound + 1);
             }
         }
 
-        if adjusted_range.end > adjusted_range.start {
-            data.extend(fetch_from_database(adjusted_range, predicate)?)
+        if block_range.end > block_range.start {
+            data.extend(fetch_from_database(block_range, predicate)?)
         }
 
         Ok(data)
