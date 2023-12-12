@@ -1,5 +1,6 @@
 //! Types used by tracing backends
 
+use alloy_primitives::TxHash;
 use serde::{Deserialize, Serialize};
 
 /// The result of a single transaction trace.
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[allow(missing_docs)]
 pub enum TraceResult<Ok, Err> {
     /// Untagged success variant
-    Success { result: Ok },
+    Success { result: Ok, tx_hash: TxHash },
     /// Untagged error variant
     Error { error: Err },
 }
