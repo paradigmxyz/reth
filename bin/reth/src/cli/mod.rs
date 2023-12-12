@@ -23,7 +23,7 @@ pub mod components;
 pub mod config;
 pub mod ext;
 
-/// Default array of [Directive] for [EnvFilter] which disables high-frequency debug logs from
+/// Default [directives](Directive) for [EnvFilter] which disables high-frequency debug logs from
 /// `hyper` and `trust-dns`
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 3] =
     ["hyper::proto::h1=off", "trust_dns_proto=off", "atrust_dns_resolver=off"];
