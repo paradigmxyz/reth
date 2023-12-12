@@ -278,6 +278,37 @@ where
         ))
     }
 
+    /// Renames this [`NippyJar`] alongside every satellite file.
+    pub fn rename(mut self, new_path: impl AsRef<Path>) -> Result<(), NippyJarError> {
+        let previous_data: PathBuf = self.data_path().into();
+        let previous_index = self.index_path();
+        let previous_offsets = self.offsets_path();
+        let previous_config = self.config_path();
+
+        self.path = Some(new_path.as_ref().into());
+
+        // TODO(joshie): ensure consistency on unexpected shutdown
+
+        std::fs::rename(previous_data, self.data_path())?;
+        std::fs::rename(previous_index, self.index_path())?;
+        std::fs::rename(previous_offsets, self.offsets_path())?;
+        std::fs::rename(previous_config, self.config_path())?;
+
+        Ok(())
+    }
+
+    /// Deletes from disk this [`NippyJar`] alongside every satellite file.
+    pub fn delete(self) -> Result<(), NippyJarError> {
+        // TODO(joshie): ensure consistency on unexpected shutdown
+
+        std::fs::remove_file(self.data_path())?;
+        std::fs::remove_file(self.index_path())?;
+        std::fs::remove_file(self.offsets_path())?;
+        std::fs::remove_file(self.config_path())?;
+
+        Ok(())
+    }
+
     /// Returns a [`DataReader`] of the data and offset file
     pub fn open_data_reader(&self) -> Result<DataReader, NippyJarError> {
         DataReader::new(self.data_path())
@@ -354,7 +385,7 @@ where
         self.freeze_check(&columns)?;
 
         // Creates the writer, data and offsets file
-        let mut appender = NippyJarWriter::new(self)?;
+        let mut appender = NippyJarWriter::from_mut(self)?;
 
         // Append rows to file while holding offsets in memory
         appender.append_rows(columns, total_rows)?;
@@ -1020,7 +1051,7 @@ mod tests {
         assert!(initial_offset_size > 0);
 
         // Appends a third row
-        let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+        let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
 
@@ -1051,7 +1082,7 @@ mod tests {
         // Writer will execute a consistency check and verify first that the offset list on disk
         // doesn't match the nippy.rows, and prune it. Then, it will prune the data file
         // accordingly as well.
-        let _writer = NippyJarWriter::new(&mut nippy).unwrap();
+        let _writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
         assert_eq!(initial_rows, nippy.rows);
         assert_eq!(
             initial_offset_size,
@@ -1078,7 +1109,7 @@ mod tests {
 
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk,
         // while the data has been.
-        let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+        let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
 
@@ -1101,7 +1132,7 @@ mod tests {
 
         // Writer will execute a consistency check and verify that the data file has more data than
         // it should, and resets it to the last offset of the list (on disk here)
-        let _writer = NippyJarWriter::new(&mut nippy).unwrap();
+        let _writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
         assert_eq!(initial_rows, nippy.rows);
         assert_eq!(
             initial_data_size,
@@ -1118,7 +1149,7 @@ mod tests {
             assert_eq!(nippy.max_row_size, 0);
             assert_eq!(nippy.rows, 0);
 
-            let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+            let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
             assert_eq!(writer.column(), 0);
 
             writer.append_column(Some(Ok(&col1[0]))).unwrap();
@@ -1153,7 +1184,7 @@ mod tests {
             assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
             assert_eq!(nippy.rows, 1);
 
-            let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+            let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
             assert_eq!(writer.column(), 0);
 
             writer.append_column(Some(Ok(&col1[1]))).unwrap();
@@ -1184,7 +1215,7 @@ mod tests {
 
     fn prune_rows(num_columns: usize, file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
         let mut nippy = NippyJar::load_without_header(file_path).unwrap();
-        let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+        let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
 
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
@@ -1211,7 +1242,7 @@ mod tests {
         assert_eq!(data_reader.offset(2), expected_data_size as u64);
 
         // This should prune from the ondisk offset list and clear the jar.
-        let mut writer = NippyJarWriter::new(&mut nippy).unwrap();
+        let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
         writer.prune_rows(1).unwrap();
         assert_eq!(nippy.rows, 0);
         assert_eq!(nippy.max_row_size, 0);
