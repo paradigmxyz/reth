@@ -228,9 +228,7 @@ where
                 .join(format!("{}.conf", path.file_name().expect("exists").to_string_lossy())),
         )?;
 
-        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let data_reader = unsafe { memmap2::Mmap::map(&config_file)? };
-        let mut obj: Self = bincode::deserialize_from(data_reader.as_ref())?;
+        let mut obj: Self = bincode::deserialize_from(&config_file)?;
         obj.path = Some(path.to_path_buf());
         Ok(obj)
     }
@@ -238,14 +236,11 @@ where
     /// Loads filters into memory
     pub fn load_filters(mut self) -> Result<Self, NippyJarError> {
         // Read the offsets lists located at the index file.
-        let offsets_file = File::open(self.index_path())?;
+        let mut offsets_file = File::open(self.index_path())?;
 
-        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let mmap = unsafe { memmap2::Mmap::map(&offsets_file)? };
-        let mut offsets_reader = mmap.as_ref();
-        self.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_reader)?;
-        self.phf = bincode::deserialize_from(&mut offsets_reader)?;
-        self.filter = bincode::deserialize_from(&mut offsets_reader)?;
+        self.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_file)?;
+        self.phf = bincode::deserialize_from(&mut offsets_file)?;
+        self.filter = bincode::deserialize_from(&mut offsets_file)?;
         Ok(self)
     }
 
