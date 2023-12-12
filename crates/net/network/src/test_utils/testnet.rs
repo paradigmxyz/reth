@@ -4,6 +4,7 @@ use crate::{
     builder::ETH_REQUEST_CHANNEL_CAPACITY,
     error::NetworkError,
     eth_requests::EthRequestHandler,
+    protocol::IntoRlpxSubProtocol,
     transactions::{TransactionsHandle, TransactionsManager},
     NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkHandle,
     NetworkManager,
@@ -338,6 +339,11 @@ where
     /// Returns the number of connected peers.
     pub fn num_peers(&self) -> usize {
         self.network.num_connected_peers()
+    }
+
+    /// Adds an additional protocol handler to the peer.
+    pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
+        self.network.add_rlpx_sub_protocol(protocol);
     }
 
     /// Returns a handle to the peer's network.
