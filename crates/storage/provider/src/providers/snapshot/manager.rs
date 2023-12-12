@@ -471,12 +471,12 @@ impl TransactionsProvider for SnapshotProvider {
         &self,
         _hash: TxHash,
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -484,7 +484,7 @@ impl TransactionsProvider for SnapshotProvider {
         &self,
         _block_id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -492,7 +492,7 @@ impl TransactionsProvider for SnapshotProvider {
         &self,
         _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -528,22 +528,22 @@ impl TransactionsProvider for SnapshotProvider {
 
 impl BlockNumReader for SnapshotProvider {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 }
@@ -554,37 +554,37 @@ impl BlockReader for SnapshotProvider {
         _hash: B256,
         _source: BlockSource,
     ) -> ProviderResult<Option<Block>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -593,12 +593,12 @@ impl BlockReader for SnapshotProvider {
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 }
@@ -609,12 +609,12 @@ impl WithdrawalsProvider for SnapshotProvider {
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> ProviderResult<Option<Vec<Withdrawal>>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        // Requires data not present in snapshots
+        // Required data not present in snapshots
         Err(ProviderError::UnsupportedProvider)
     }
 }
