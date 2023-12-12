@@ -1,10 +1,9 @@
-# `reth node`
+# reth node
 
 Start the node
 
 ```bash
 $ reth node --help
-
 Usage: reth node [OPTIONS]
 
 Options:
@@ -94,7 +93,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.13-10a83e594/aarch64-apple-darwin]
+          [default: reth/v0.1.0-alpha.13-5062b7ea8/x86_64-unknown-linux-gnu]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -334,7 +333,7 @@ Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
           
-          [default: reth/v0.1.0-alpha.13/macos]
+          [default: reth/v0.1.0-alpha.13/linux]
 
       --builder.gaslimit <GAS_LIMIT>
           Target gas ceiling for built blocks
@@ -426,7 +425,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: /home/doni/.config/cache/reth/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

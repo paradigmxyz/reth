@@ -1,18 +1,26 @@
-# `reth config`
+# reth db clear
 
-Write config to stdout
+Deletes all table entries
 
 ```bash
-$ reth config --help
+$ reth db clear --help
+Usage: reth db clear [OPTIONS] <TABLE>
 
-Usage: reth config [OPTIONS]
+Arguments:
+  <TABLE>
+          Table name
 
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
-
-      --default
-          Show the default config
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+          
+          Defaults to the OS-specific data directory:
+          
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+          
+          [default: default]
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
@@ -41,7 +49,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: /home/doni/.config/cache/reth/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

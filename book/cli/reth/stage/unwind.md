@@ -1,11 +1,15 @@
-# `reth init`
+# reth stage unwind
 
-Initialize the database from a genesis file
+Unwinds a certain block range, deleting it from the database
 
 ```bash
-$ reth init --help
+$ reth stage unwind --help
+Usage: reth stage unwind [OPTIONS] <COMMAND>
 
-Usage: reth init [OPTIONS]
+Commands:
+  to-block    Unwinds the database until the given block number (range is inclusive)
+  num-blocks  Unwinds the given number of blocks from the database
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --datadir <DATA_DIR>
@@ -60,7 +64,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: /home/doni/.config/cache/reth/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

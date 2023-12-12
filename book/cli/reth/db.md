@@ -1,16 +1,24 @@
-# `reth import`
+# reth db
 
-This syncs RLP encoded blocks from a file
+Database debugging utilities
 
 ```bash
-$ reth import --help
+$ reth db --help
+Usage: reth db [OPTIONS] <COMMAND>
 
-Usage: reth import [OPTIONS] <IMPORT_PATH>
+Commands:
+  stats     Lists all the tables, their entry count and their size
+  list      Lists the contents of a table
+  diff      Create a diff between two database tables or two entire databases
+  get       Gets the content of a table for the given key
+  drop      Deletes all database entries
+  clear     Deletes all table entries
+  snapshot  Snapshots tables from database
+  version   Lists current and local database versions
+  path      Returns the full database path
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
-
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
           
@@ -59,17 +67,11 @@ Database:
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
 
-  <IMPORT_PATH>
-          The path to a block file for import.
-          
-          The online stages (headers and bodies) are replaced by a file import, after which the
-          remaining stages are executed.
-
 Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: /home/doni/.config/cache/reth/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
