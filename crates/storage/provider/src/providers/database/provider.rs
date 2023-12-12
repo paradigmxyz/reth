@@ -225,13 +225,14 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         if let Some(snapshot_provider) = &self.snapshot_provider {
             if let Some(snapshot_upper_bound) = snapshot_provider.get_highest_snapshot(segment) {
                 if block_range.start <= snapshot_upper_bound {
+                    let end = block_range.end.min(snapshot_upper_bound + 1);
                     data.extend(fetch_from_snapshot(
                         snapshot_provider,
-                        block_range.start..block_range.end.min(snapshot_upper_bound + 1),
+                        block_range.start..end,
                         &mut predicate,
                     )?);
+                    block_range.start = end;
                 }
-                block_range.start = block_range.start.max(snapshot_upper_bound + 1);
             }
         }
 
