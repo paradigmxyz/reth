@@ -4,7 +4,7 @@ use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_db::{database::Database, open_db_read_only, DatabaseEnv};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::NippyJar;
+use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
     BlockNumber, ChainSpec, SnapshotSegment,
@@ -214,6 +214,7 @@ impl Command {
         for snap in &snapshots {
             let start_time = Instant::now();
             let jar = NippyJar::<SegmentHeader>::load(snap.as_ref())?;
+            let _cursor = NippyJarCursor::new(&jar)?;
             let duration = start_time.elapsed();
             let file_size = snap.as_ref().metadata()?.len();
 

@@ -13,20 +13,14 @@
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::{
-    clone::Clone,
     error::Error as StdError,
     fs::File,
     io::{Seek, Write},
     marker::Sync,
-    ops::Deref,
+    ops::Range,
     path::{Path, PathBuf},
-    sync::Arc,
 };
-use sucds::{
-    int_vectors::PrefixSummedEliasFano,
-    mii_sequences::{EliasFano, EliasFanoBuilder},
-    Serializable,
-};
+use sucds::{int_vectors::PrefixSummedEliasFano, Serializable};
 use tracing::*;
 
 pub mod filter;
@@ -88,10 +82,14 @@ pub struct NippyJar<H = ()> {
     user_header: H,
     /// Number of data columns in the jar.
     columns: usize,
+    /// Number of data rows in the jar.
+    rows: usize,
     /// Optional compression algorithm applied to the data.
     compressor: Option<Compressors>,
+    #[serde(skip)]
     /// Optional filter function for data membership checks.
     filter: Option<InclusionFilters>,
+    #[serde(skip)]
     /// Optional Perfect Hashing Function (PHF) for unique offset mapping.
     phf: Option<Functions>,
     /// Index mapping PHF output to value offsets in `offsets`.
@@ -99,7 +97,7 @@ pub struct NippyJar<H = ()> {
     offsets_index: PrefixSummedEliasFano,
     /// Offsets within the file for each column value, arranged by row and column.
     #[serde(skip)]
-    offsets: EliasFano,
+    offsets: Vec<u64>,
     /// Maximum uncompressed row size of the set. This will enable decompression without any
     /// resizing of the output buffer.
     #[serde(skip)]
@@ -155,11 +153,12 @@ where
             version: NIPPY_JAR_VERSION,
             user_header,
             columns,
+            rows: 0,
             max_row_size: 0,
             compressor: None,
             filter: None,
             phf: None,
-            offsets: EliasFano::default(),
+            offsets: vec![],
             offsets_index: PrefixSummedEliasFano::default(),
             path: Some(path.to_path_buf()),
         }
@@ -226,7 +225,8 @@ where
         self.compressor.as_mut()
     }
 
-    /// Loads the file configuration and returns [`Self`].
+    /// Loads the file configuration and returns [`Self`] without deserializing filters related
+    /// structures or the offset list.
     ///
     /// **The user must ensure the header type matches the one used during the jar's creation.**
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
@@ -235,39 +235,61 @@ where
 
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let data_reader = unsafe { memmap2::Mmap::map(&data_file)? };
-        let mut obj: Self = bincode::deserialize_from(data_reader.as_ref())?;
-        obj.path = Some(path.to_path_buf());
+        let max_row_size: [u8; 8] =
+            data_reader.as_ref()[0..8].try_into().expect("slice with incorrect length");
+        let max_row_size = u64::from_le_bytes(max_row_size);
 
+        let mut obj: Self = bincode::deserialize_from(&data_reader.as_ref()[8..])?;
+        obj.path = Some(path.to_path_buf());
+        obj.max_row_size = max_row_size as usize;
+        Ok(obj)
+    }
+
+    /// Loads filters into memory
+    pub fn load_filters(mut self) -> Result<Self, NippyJarError> {
         // Read the offsets lists located at the index file.
-        let offsets_file = File::open(obj.index_path())?;
+        let offsets_file = File::open(self.index_path())?;
 
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let mmap = unsafe { memmap2::Mmap::map(&offsets_file)? };
         let mut offsets_reader = mmap.as_ref();
-        obj.offsets = EliasFano::deserialize_from(&mut offsets_reader)?;
-        obj.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_reader)?;
-        obj.max_row_size = bincode::deserialize_from(offsets_reader)?;
+        self.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_reader)?;
+        self.phf = bincode::deserialize_from(&mut offsets_reader)?;
+        self.filter = bincode::deserialize_from(&mut offsets_reader)?;
+        Ok(self)
+    }
 
-        Ok(obj)
+    /// Loads the offset list into memory
+    pub fn load_offsets(mut self) -> Result<Self, NippyJarError> {
+        let handle = DataReader::new(self.data_path())?;
+        self.offsets = (0..self.rows * self.columns).map(|i| handle.offset(i)).collect();
+        Ok(self)
     }
 
     /// Returns the path from the data file
-    pub fn data_path(&self) -> PathBuf {
-        self.path.clone().expect("exists")
+    pub fn data_path(&self) -> &Path {
+        self.path.as_ref().expect("exists")
     }
 
     /// Returns the path from the index file
     pub fn index_path(&self) -> PathBuf {
-        let data_path = self.data_path();
-        data_path
-            .parent()
-            .expect("exists")
-            .join(format!("{}.idx", data_path.file_name().expect("exists").to_string_lossy()))
+        self.data_path().parent().expect("exists").join(format!(
+            "{}.idx",
+            self.data_path().file_name().expect("exists").to_string_lossy()
+        ))
     }
 
-    /// Returns a [`MmapHandle`] of the data file
-    pub fn open_data(&self) -> Result<MmapHandle, NippyJarError> {
-        MmapHandle::new(self.data_path())
+    /// Returns the path from the offsets file
+    pub fn offsets_path(&self) -> PathBuf {
+        self.data_path().parent().expect("exists").join(format!(
+            "{}.off",
+            self.data_path().file_name().expect("exists").to_string_lossy()
+        ))
+    }
+
+    /// Returns a [`DataReader`] of the data and offset file
+    pub fn open_data(&self) -> Result<DataReader, NippyJarError> {
+        DataReader::new(self.data_path())
     }
 
     /// If required, prepares any compression algorithm to an early pass of the data.
@@ -338,6 +360,8 @@ where
         columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
         total_rows: u64,
     ) -> Result<(), NippyJarError> {
+        self.rows = total_rows as usize;
+
         let mut file = self.freeze_check(&columns)?;
         self.freeze_config(&mut file)?;
 
@@ -368,7 +392,7 @@ where
             // TODO: iter_mut if we remove the IntoIterator interface.
             let mut uncompressed_row_size = 0;
             for (column_number, mut column_iter) in column_iterators.enumerate() {
-                offsets.push(file.stream_position()? as usize);
+                offsets.push(file.stream_position()?);
 
                 match column_iter.next() {
                     Some(Ok(value)) => {
@@ -421,6 +445,8 @@ where
         drop(maybe_zstd_compressors);
 
         // Write offsets and offset index to file
+        file.rewind()?;
+        file.write_all(&self.max_row_size.to_le_bytes())?;
         self.freeze_offsets(offsets)?;
 
         debug!(target: "nippy-jar", jar=?self, "Finished.");
@@ -429,25 +455,30 @@ where
     }
 
     /// Freezes offsets and its own index.
-    fn freeze_offsets(&mut self, offsets: Vec<usize>) -> Result<(), NippyJarError> {
+    fn freeze_offsets(&mut self, offsets: Vec<u64>) -> Result<(), NippyJarError> {
         if !offsets.is_empty() {
             debug!(target: "nippy-jar", "Encoding offsets list.");
 
-            let mut builder =
-                EliasFanoBuilder::new(*offsets.last().expect("qed") + 1, offsets.len())?;
-
-            for offset in offsets {
-                builder.push(offset)?;
-            }
-            self.offsets = builder.build().enable_rank();
+            self.offsets.extend(offsets);
         }
 
         debug!(target: "nippy-jar", path=?self.index_path(), "Writing offsets and offsets index to file.");
 
         let mut file = File::create(self.index_path())?;
-        self.offsets.serialize_into(&mut file)?;
         self.offsets_index.serialize_into(&mut file)?;
-        self.max_row_size.serialize_into(file)?;
+        bincode::serialize_into(&mut file, &self.phf)?;
+        bincode::serialize_into(&mut file, &self.filter)?;
+
+        let mut file = File::create(self.offsets_path())?;
+        let bytes_needed = (std::mem::size_of::<u64>() * 8 -
+            self.offsets.iter().max().expect("should exist.").leading_zeros() as usize +
+            7) /
+            8;
+        file.write_all(&[bytes_needed as u8])?;
+        for offset in &self.offsets {
+            file.write_all(&offset.to_le_bytes()[..bytes_needed])?;
+        }
+
         Ok(())
     }
 
@@ -480,6 +511,10 @@ where
     fn freeze_config(&mut self, handle: &mut File) -> Result<(), NippyJarError> {
         // TODO Split Dictionaries and Bloomfilters Configuration so we dont have to load everything
         // at once
+
+        // Placeholder for max_row_size
+        handle.write_all(&[0; 8])?;
+
         Ok(bincode::serialize_into(handle, &self)?)
     }
 }
@@ -514,31 +549,66 @@ where
     }
 }
 
-/// Holds an `Arc` over a file and its associated mmap handle.
-#[derive(Debug, Clone)]
-pub struct MmapHandle {
-    /// File descriptor. Needs to be kept alive as long as the mmap handle.
+/// Manages reading snapshot data using memory-mapped files.
+///
+/// Holds file and mmap descriptors of the data and offsets files of a snapshot.
+#[derive(Debug)]
+pub struct DataReader {
+    /// Data file descriptor. Needs to be kept alive as long as the respective mmap handle.
     #[allow(unused)]
-    file: Arc<File>,
-    /// Mmap handle.
-    mmap: Arc<Mmap>,
+    data_file: File,
+    /// Mmap handle for data.
+    data_mmap: Mmap,
+    /// Offset file descriptor. Needs to be kept alive as long as the respective mmap handle.
+    #[allow(unused)]
+    offset_file: File,
+    /// Mmap handle for offsets.
+    offset_mmap: Mmap,
+    /// Number of bytes that represents one offset.
+    offset_len: usize,
 }
 
-impl MmapHandle {
+impl DataReader {
+    /// Reads the respective data and offsets file and returns [`DataReader`].
     pub fn new(path: impl AsRef<Path>) -> Result<Self, NippyJarError> {
-        let file = File::open(path)?;
-
+        let data_file = File::open(path.as_ref())?;
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let mmap = unsafe { Mmap::map(&file)? };
+        let data_mmap = unsafe { Mmap::map(&data_file)? };
 
-        Ok(Self { file: Arc::new(file), mmap: Arc::new(mmap) })
+        let offset_file = File::open(PathBuf::from(format!("{}.off", path.as_ref().display())))?;
+        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
+        let offset_mmap = unsafe { Mmap::map(&offset_file)? };
+
+        Ok(Self {
+            data_file,
+            data_mmap,
+            offset_file,
+            // First byte indicates how many bytes represent each offset
+            offset_len: offset_mmap[0] as usize,
+            offset_mmap,
+        })
     }
-}
 
-impl Deref for MmapHandle {
-    type Target = Mmap;
-    fn deref(&self) -> &Self::Target {
-        &self.mmap
+    /// Returns the offset for the requested data index
+    pub fn offset(&self, index: usize) -> u64 {
+        let mut buffer: [u8; 8] = [0; 8];
+
+        // + 1 represents the offset_len u8 which is in the beginning of the file
+        let from = index * self.offset_len + 1;
+        let to = from + self.offset_len;
+
+        buffer[..self.offset_len].copy_from_slice(&self.offset_mmap[from..to]);
+        u64::from_le_bytes(buffer)
+    }
+
+    /// Provides the underlying data as a slice on the provided offset range.
+    pub fn data(&self, range: Range<usize>) -> &[u8] {
+        &self.data_mmap[range]
+    }
+
+    /// Returns total size of data
+    pub fn size(&self) -> usize {
+        self.data_mmap.len()
     }
 }
 
@@ -610,7 +680,12 @@ mod tests {
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
                 .unwrap();
-            let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+            let loaded_nippy = NippyJar::load_without_header(file_path.path())
+                .unwrap()
+                .load_filters()
+                .unwrap()
+                .load_offsets()
+                .unwrap();
             assert_eq!(indexes, collect_indexes(&loaded_nippy));
         };
 
@@ -654,7 +729,12 @@ mod tests {
         assert!(InclusionFilter::add(&mut nippy, &col1[3]).is_ok());
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
-        let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        let loaded_nippy = NippyJar::load_without_header(file_path.path())
+            .unwrap()
+            .load_filters()
+            .unwrap()
+            .load_offsets()
+            .unwrap();
 
         assert_eq!(nippy, loaded_nippy);
 
@@ -707,7 +787,12 @@ mod tests {
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
-        let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        let loaded_nippy = NippyJar::load_without_header(file_path.path())
+            .unwrap()
+            .load_filters()
+            .unwrap()
+            .load_offsets()
+            .unwrap();
         assert_eq!(nippy.version, loaded_nippy.version);
         assert_eq!(nippy.columns, loaded_nippy.columns);
         assert_eq!(nippy.filter, loaded_nippy.filter);
@@ -751,6 +836,7 @@ mod tests {
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        let loaded_nippy = loaded_nippy.load_filters().unwrap().load_offsets().unwrap();
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Lz4(_)) = loaded_nippy.compressor() {
@@ -786,7 +872,12 @@ mod tests {
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
-        let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        let loaded_nippy = NippyJar::load_without_header(file_path.path())
+            .unwrap()
+            .load_filters()
+            .unwrap()
+            .load_offsets()
+            .unwrap();
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
@@ -841,7 +932,8 @@ mod tests {
 
         // Read file
         {
-            let loaded_nippy = NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap();
+            let loaded_nippy =
+                NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap().load_filters().unwrap();
 
             assert!(loaded_nippy.compressor().is_some());
             assert!(loaded_nippy.filter.is_some());
@@ -911,7 +1003,12 @@ mod tests {
 
         // Read file
         {
-            let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+            let loaded_nippy = NippyJar::load_without_header(file_path.path())
+                .unwrap()
+                .load_filters()
+                .unwrap()
+                .load_offsets()
+                .unwrap();
 
             if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
                 let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();
