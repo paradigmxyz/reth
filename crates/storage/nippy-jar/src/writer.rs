@@ -238,6 +238,11 @@ where
             if length > 1 {
                 // first byte is reserved for `bytes_per_offset`, which is 8 initially.
                 let num_offsets = (length - 1) / INITIAL_OFFSET_SIZE;
+
+                if remaining_to_prune as u64 > num_offsets {
+                    return Err(NippyJarError::InvalidPruning(num_offsets, remaining_to_prune as u64))
+                }
+
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
 
                 // If all rows are to be pruned
@@ -261,9 +266,7 @@ where
                     self.data_file.set_len(last_offset)?;
                 }
             } else {
-                // If the offsets file only contains the byte representation
-                self.offsets_file.set_len(1)?;
-                self.data_file.set_len(0)?;
+                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
             }
         }
 
