@@ -24,15 +24,10 @@ Options:
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
-          
           Possible values are either a built-in chain or the path to a chain specification file.
           
           Built-in chains:
-          - mainnet
-          - goerli
-          - sepolia
-          - holesky
-          - dev
+              mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
 
@@ -69,17 +64,26 @@ Networking:
       --disable-discv4-discovery
           Disable Discv4 discovery
 
+      --discovery.addr <DISCOVERY_ADDR>
+          The UDP address to use for P2P discovery/networking
+          
+          [default: 0.0.0.0]
+
       --discovery.port <DISCOVERY_PORT>
-          The UDP port to use for P2P discovery/networking. default: 30303
+          The UDP port to use for P2P discovery/networking
+          
+          [default: 30303]
 
       --trusted-peers <TRUSTED_PEERS>
-          Target trusted peer enodes --trusted-peers enode://abcd@192.168.0.1:30303
+          Comma separated enode URLs of trusted peers for P2P connections.
+          
+          --trusted-peers enode://abcd@192.168.0.1:30303
 
       --trusted-only
           Connect only to trusted peers
 
       --bootnodes <BOOTNODES>
-          Bootnodes to connect to initially.
+          Comma separated enode URLs for P2P discovery bootstrap.
           
           Will fall back to a network-specific default if not specified.
 
@@ -90,7 +94,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/VERSION/PLATFORM]
+          [default: reth/v0.1.0-alpha.13-10a83e594/aarch64-apple-darwin]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -105,8 +109,15 @@ Networking:
           
           [default: any]
 
+      --addr <ADDR>
+          Network listening address
+          
+          [default: 0.0.0.0]
+
       --port <PORT>
-          Network listening port. default: 30303
+          Network listening port
+          
+          [default: 30303]
 
       --max-outbound-peers <MAX_OUTBOUND_PEERS>
           Maximum number of outbound requests. default: 100
@@ -131,7 +142,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
           
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -155,7 +166,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
           
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
 
       --ipcdisable
           Disable the IPC-RPC  server
@@ -176,7 +187,16 @@ RPC:
           [default: 8551]
 
       --authrpc.jwtsecret <PATH>
-          Path to a JWT secret to use for authenticated RPC endpoints
+          Path to a JWT secret to use for the authenticated engine-API RPC server.
+          
+          This will enforce JWT authentication for all requests coming from the consensus layer.
+          
+          If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
+
+      --rpc.jwtsecret <HEX>
+          Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and `--ws.api`.
+          
+          This is __not__ used for the authenticated engine-API RPC server, see `--authrpc.jwtsecret`.
 
       --rpc-max-request-size <RPC_MAX_REQUEST_SIZE>
           Set the maximum RPC request payload size for both HTTP and WS in megabytes
@@ -186,7 +206,7 @@ RPC:
       --rpc-max-response-size <RPC_MAX_RESPONSE_SIZE>
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
           
-          [default: 115]
+          [default: 150]
           [aliases: --rpc.returndata.limit]
 
       --rpc-max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
@@ -204,8 +224,13 @@ RPC:
           
           [default: 25]
 
+      --rpc-max-blocks-per-filter <COUNT>
+          Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
+          
+          [default: 100000]
+
       --rpc-max-logs-per-response <COUNT>
-          Maximum number of logs that can be returned in a single response
+          Maximum number of logs that can be returned in a single response. (0 = no limit)
           
           [default: 20000]
 
@@ -213,6 +238,27 @@ RPC:
           Maximum gas limit for `eth_call` and call tracing RPC methods
           
           [default: 50000000]
+
+RPC State Cache:
+      --rpc-cache.max-blocks <MAX_BLOCKS>
+          Max number of blocks in cache
+          
+          [default: 5000]
+
+      --rpc-cache.max-receipts <MAX_RECEIPTS>
+          Max number receipts in cache
+          
+          [default: 2000]
+
+      --rpc-cache.max-envs <MAX_ENVS>
+          Max number of bytes for cached env data
+          
+          [default: 1000]
+
+      --rpc-cache.max-concurrent-db-requests <MAX_CONCURRENT_DB_REQUESTS>
+          Max number of concurrent database requests
+          
+          [default: 512]
 
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
@@ -234,21 +280,6 @@ Gas Price Oracle:
           The percentile of gas prices to use for the estimate
           
           [default: 60]
-
-      --block-cache-len <BLOCK_CACHE_LEN>
-          Maximum number of block cache entries
-          
-          [default: 5000]
-
-      --receipt-cache-len <RECEIPT_CACHE_LEN>
-          Maximum number of receipt cache entries
-          
-          [default: 2000]
-
-      --env-cache-len <ENV_CACHE_LEN>
-          Maximum number of env cache entries
-          
-          [default: 1000]
 
 TxPool:
       --txpool.pending_max_count <PENDING_MAX_COUNT>
@@ -296,11 +327,14 @@ TxPool:
           
           [default: 100]
 
+      --txpool.nolocals
+          Flag to disable local transaction exemptions
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
           
-          [default: reth/VERSION/OS]
+          [default: reth/v0.1.0-alpha.13/macos]
 
       --builder.gaslimit <GAS_LIMIT>
           Target gas ceiling for built blocks
@@ -386,7 +420,7 @@ Dev testnet:
 
 Pruning:
       --full
-          Run full node. Only the most recent 10064 block states are stored. This flag takes priority over pruning configuration in reth.toml
+          Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored. This flag takes priority over pruning configuration in reth.toml
 
 Logging:
       --log.file.directory <PATH>
