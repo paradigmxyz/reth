@@ -150,27 +150,14 @@ impl TransactionMetrics {
         }
 
         if let Some(commit_latency) = commit_latency {
-            metrics
-                .commit_preparation_duration_seconds
-                .record(Duration::from_nanos(commit_latency.preparation()));
-            metrics
-                .commit_gc_wallclock_duration_seconds
-                .record(Duration::from_nanos(commit_latency.gc_wallclock()));
-            metrics
-                .commit_audit_duration_seconds
-                .record(Duration::from_nanos(commit_latency.audit()));
-            metrics
-                .commit_write_duration_seconds
-                .record(Duration::from_nanos(commit_latency.write()));
-            metrics
-                .commit_sync_duration_seconds
-                .record(Duration::from_nanos(commit_latency.ending()));
-            metrics
-                .commit_whole_duration_seconds
-                .record(Duration::from_nanos(commit_latency.whole()));
-            metrics
-                .commit_gc_cputime_duration_seconds
-                .record(Duration::from_nanos(commit_latency.gc_cputime()));
+            metrics.commit_preparation_duration_seconds.record(commit_latency.preparation());
+            metrics.commit_gc_wallclock_duration_seconds.record(commit_latency.gc_wallclock());
+            metrics.commit_audit_duration_seconds.record(commit_latency.audit());
+            metrics.commit_write_duration_seconds.record(commit_latency.write());
+            metrics.commit_sync_duration_seconds.record(commit_latency.sync());
+            metrics.commit_ending_duration_seconds.record(commit_latency.ending());
+            metrics.commit_whole_duration_seconds.record(commit_latency.whole());
+            metrics.commit_gc_cputime_duration_seconds.record(commit_latency.gc_cputime());
         }
     }
 }

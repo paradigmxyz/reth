@@ -15,6 +15,7 @@ use std::{
     mem::size_of,
     ptr, slice,
     sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
+    time::Duration,
 };
 
 mod private {
@@ -563,57 +564,57 @@ impl CommitLatency {
     /// Duration of preparation (commit child transactions, update
     /// sub-databases records and cursors destroying).
     #[inline]
-    pub fn preparation(&self) -> u64 {
-        Self::time_to_nanos(self.0.preparation)
+    pub fn preparation(&self) -> Duration {
+        Self::time_to_duration(self.0.preparation)
     }
 
     /// Duration of GC update by wall clock.
     #[inline]
-    pub fn gc_wallclock(&self) -> u64 {
-        Self::time_to_nanos(self.0.gc_wallclock)
+    pub fn gc_wallclock(&self) -> Duration {
+        Self::time_to_duration(self.0.gc_wallclock)
     }
 
     /// Duration of internal audit if enabled.
     #[inline]
-    pub fn audit(&self) -> u64 {
-        Self::time_to_nanos(self.0.audit)
+    pub fn audit(&self) -> Duration {
+        Self::time_to_duration(self.0.audit)
     }
 
     /// Duration of writing dirty/modified data pages to a filesystem,
     /// i.e. the summary duration of a `write()` syscalls during commit.
     #[inline]
-    pub fn write(&self) -> u64 {
-        Self::time_to_nanos(self.0.write)
+    pub fn write(&self) -> Duration {
+        Self::time_to_duration(self.0.write)
     }
 
     /// Duration of syncing written data to the disk/storage, i.e.
     /// the duration of a `fdatasync()` or a `msync()` syscall during commit.
     #[inline]
-    pub fn sync(&self) -> u64 {
-        Self::time_to_nanos(self.0.sync)
+    pub fn sync(&self) -> Duration {
+        Self::time_to_duration(self.0.sync)
     }
 
     /// Duration of transaction ending (releasing resources).
     #[inline]
-    pub fn ending(&self) -> u64 {
-        Self::time_to_nanos(self.0.ending)
+    pub fn ending(&self) -> Duration {
+        Self::time_to_duration(self.0.ending)
     }
 
     /// The total duration of a commit.
     #[inline]
-    pub fn whole(&self) -> u64 {
-        Self::time_to_nanos(self.0.whole)
+    pub fn whole(&self) -> Duration {
+        Self::time_to_duration(self.0.whole)
     }
 
     /// User-mode CPU time spent on GC update.
     #[inline]
-    pub fn gc_cputime(&self) -> u64 {
-        Self::time_to_nanos(self.0.gc_cputime)
+    pub fn gc_cputime(&self) -> Duration {
+        Self::time_to_duration(self.0.gc_cputime)
     }
 
     #[inline]
-    fn time_to_nanos(time: u32) -> u64 {
-        time as u64 * (1_000_000_000 / 65_536)
+    fn time_to_duration(time: u32) -> Duration {
+        Duration::from_nanos(time as u64 * (1_000_000_000 / 65_536))
     }
 }
 
