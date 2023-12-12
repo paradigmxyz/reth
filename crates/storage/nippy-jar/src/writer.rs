@@ -3,17 +3,46 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
+    ops::{Deref, DerefMut},
     path::Path,
 };
+
+#[derive(Debug)]
+/// Holds a reference or an owned [`NippyJar`].
+enum JarHolder<'a, H = ()> {
+    MutRef(&'a mut NippyJar<H>),
+    Owned(NippyJar<H>),
+}
+
+impl<'a, H> Deref for JarHolder<'a, H> {
+    type Target = NippyJar<H>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            JarHolder::MutRef(jar) => *jar,
+            JarHolder::Owned(jar) => jar,
+        }
+    }
+}
+
+impl<'a, H> DerefMut for JarHolder<'a, H> {
+    fn deref_mut(&mut self) -> &mut NippyJar<H> {
+        match self {
+            JarHolder::MutRef(j) => *j,
+            JarHolder::Owned(j) => j,
+        }
+    }
+}
 
 /// Writer of [`NippyJar`]. Handles table data and offsets only.
 ///
 /// Table data is written directly to disk, while offsets and configuration need to be flushed by
 /// calling `commit()`.
-pub struct NippyJarWriter<'a, H> {
+#[derive(Debug)]
+pub struct NippyJarWriter<'a, H = ()> {
     /// Reference to the associated [`NippyJar`], containing all necessary configurations for data
     /// handling.
-    jar: &'a mut NippyJar<H>,
+    jar: JarHolder<'a, H>,
     /// File handle to where the data is stored.
     data_file: File,
     /// File handle to where the offsets are stored.
@@ -32,7 +61,28 @@ impl<'a, H> NippyJarWriter<'a, H>
 where
     H: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug,
 {
-    pub fn new(jar: &'a mut NippyJar<H>) -> Result<Self, NippyJarError> {
+    /// Creates a [`NippyJarWriter`] from mutable refence of [`NippyJar`]
+    pub fn from_mut(jar: &'a mut NippyJar<H>) -> Result<Self, NippyJarError> {
+        Self::new(JarHolder::MutRef(jar))
+    }
+
+    /// Creates a [`NippyJarWriter`] from an owned [`NippyJar`]
+    pub fn from_owned(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
+        Self::new(JarHolder::Owned(jar))
+    }
+
+    /// Returns a reference to `H` of [`NippyJar`]
+    pub fn user_header(&self) -> &H {
+        &self.jar.user_header
+    }
+
+    /// Returns a mutable reference to `H` of [`NippyJar`]
+    pub fn user_header_mut(&mut self) -> &mut H {
+        &mut self.jar.user_header
+    }
+
+    /// Creates a [`NippyJarWriter`] from [`JarHolder`].
+    fn new(jar: JarHolder<'a, H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 
