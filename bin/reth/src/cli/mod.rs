@@ -23,6 +23,11 @@ pub mod components;
 pub mod config;
 pub mod ext;
 
+/// Default array of [Directive] for [EnvFilter] which disables high-frequency debug logs from
+/// `hyper` and `trust-dns`
+const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 3] =
+    ["hyper::proto::h1=off", "trust_dns_proto=off", "atrust_dns_resolver=off"];
+
 /// The main reth cli interface.
 ///
 /// This is the entrypoint to the executable.
@@ -227,17 +232,14 @@ impl Logs {
     {
         let mut layers = Vec::new();
 
-        // Function to create a new EnvFilter with environment (from `RUST_LOG`), default (disabled
-        // high-frequency debug logs from `hyper` and `trust-dns`) and additional directives.
+        // Function to create a new EnvFilter with environment (from `RUST_LOG` env var), default
+        // (from `DEFAULT_DIRECTIVES`) and additional directives.
         let create_env_filter = |additional_directives: &str| -> eyre::Result<EnvFilter> {
-            let env_filter = EnvFilter::builder()
-                .from_env_lossy()
-                .add_directive("hyper::proto::h1=off".parse()?)
-                .add_directive("trust_dns_proto=off".parse()?)
-                .add_directive("trust_dns_resolver=off".parse()?);
-            additional_directives
-                .split(',')
-                .filter(|s| !s.is_empty())
+            let env_filter = EnvFilter::builder().from_env_lossy();
+
+            DEFAULT_ENV_FILTER_DIRECTIVES
+                .into_iter()
+                .chain(additional_directives.split(','))
                 .try_fold(env_filter, |env_filter, directive| {
                     Ok(env_filter.add_directive(directive.parse()?))
                 })
