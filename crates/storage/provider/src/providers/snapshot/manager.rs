@@ -1,6 +1,6 @@
-use super::{LoadedJar, SnapshotJarProvider};
+use super::{LoadedJar, SnapshotJarProvider, SnapshotProviderRW};
 use crate::{BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
-use dashmap::DashMap;
+use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
@@ -18,6 +18,7 @@ use std::{
     collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tokio::sync::watch;
 
@@ -47,6 +48,8 @@ pub struct SnapshotProvider {
     /// Whether [`SnapshotJarProvider`] loads filters into memory. If not, `by_hash` queries won't
     /// be able to be queried directly.
     load_filters: bool,
+    /// Maintains a map of Snapshot writers for each [`SnapshotSegment`]
+    writers: DashMap<SnapshotSegment, SnapshotProviderRW<'static>>,
 }
 
 impl SnapshotProvider {
@@ -54,6 +57,7 @@ impl SnapshotProvider {
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             map: Default::default(),
+            writers: Default::default(),
             snapshots_block_index: Default::default(),
             snapshots_tx_index: Default::default(),
             highest_tracker: None,
@@ -220,6 +224,13 @@ impl SnapshotProvider {
             .and_then(|tracker| tracker.borrow().and_then(|highest| highest.highest(segment)))
     }
 
+    /// Gets the highest snapshotted transaction.
+    pub fn get_highest_snapshot_tx(&self, segment: SnapshotSegment) -> Option<TxNumber> {
+        let snapshots = self.snapshots_tx_index.read();
+        let segment_snapshots: &BTreeMap<u64, RangeInclusive<u64>> = snapshots.get(&segment)?;
+        segment_snapshots.last_key_value().map(|(k, _)| *k)
+    }
+
     /// Iterates through segment snapshots in reverse order, executing a function until it returns
     /// some object. Useful for finding objects by [`TxHash`] or [`BlockHash`].
     pub fn find_snapshot<T>(
@@ -250,6 +261,49 @@ impl SnapshotProvider {
         }
 
         Ok(None)
+    }
+
+    /// Returns directory where snapshots are located.
+    pub fn directory(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// Helper trait to manage different [`SnapshotProviderRW`] of an `Arc<SnapshotProvider`
+pub trait SnapshotWriter {
+    /// Returns a mutable reference to a [`SnapshotProviderRW`] of a [`SnapshotSegment`].
+    fn writer(
+        &self,
+        block: BlockNumber,
+        segment: SnapshotSegment,
+    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>>;
+
+    /// Commits all changes of all [`SnapshotProviderRW`] of all [`SnapshotSegment`].
+    fn commit(&self) -> ProviderResult<()>;
+}
+
+impl SnapshotWriter for Arc<SnapshotProvider> {
+    fn writer(
+        &self,
+        block: BlockNumber,
+        segment: SnapshotSegment,
+    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
+        if let Some(writer) = self.writers.get_mut(&segment) {
+            Ok(writer)
+        } else {
+            self.writers.insert(
+                segment,
+                SnapshotProviderRW::new(SnapshotSegment::Transactions, block, self.clone())?,
+            );
+            Ok(self.writers.get_mut(&segment).expect("qed").into())
+        }
+    }
+
+    fn commit(&self) -> ProviderResult<()> {
+        for mut writer in self.writers.iter_mut() {
+            writer.commit()?;
+        }
+        Ok(())
     }
 }
 
