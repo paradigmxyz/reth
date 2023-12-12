@@ -210,7 +210,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     fn get_range_with_snapshot<T, P, FS, FD>(
         &self,
         segment: SnapshotSegment,
-        block_range: Range<u64>,
+        mut block_or_tx_range: Range<u64>,
         fetch_from_snapshot: FS,
         mut fetch_from_database: FD,
         mut predicate: P,
@@ -220,28 +220,30 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
         P: FnMut(&T) -> bool,
     {
-        let mut adjusted_range = to_range(block_range);
         let mut data = Vec::new();
 
         if let Some(snapshot_provider) = &self.snapshot_provider {
             // If there is, check the maximum block or transaction number of the segment.
             if let Some(snapshot_upper_bound) = match segment {
                 SnapshotSegment::Headers => snapshot_provider.get_highest_snapshot_block(segment),
-                _ => snapshot_provider.get_highest_snapshot_tx(segment),
+                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                    snapshot_provider.get_highest_snapshot_tx(segment)
+                }
             } {
-                if adjusted_range.start <= snapshot_upper_bound {
+                if block_or_tx_range.start <= snapshot_upper_bound {
+                    let end = block_or_tx_range.end.min(snapshot_upper_bound + 1);
                     data.extend(fetch_from_snapshot(
                         snapshot_provider,
-                        adjusted_range.start..adjusted_range.end.min(snapshot_upper_bound + 1),
+                        block_or_tx_range.start..end,
                         &mut predicate,
                     )?);
+                    block_or_tx_range.start = end;
                 }
-                adjusted_range.start = adjusted_range.start.max(snapshot_upper_bound + 1);
             }
         }
 
-        if adjusted_range.end > adjusted_range.start {
-            data.extend(fetch_from_database(adjusted_range, predicate)?)
+        if block_or_tx_range.end > block_or_tx_range.start {
+            data.extend(fetch_from_database(block_or_tx_range, predicate)?)
         }
 
         Ok(data)

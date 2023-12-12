@@ -278,7 +278,9 @@ impl SnapshotProvider {
     {
         let get_provider = |start: u64| match segment {
             SnapshotSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
-            _ => self.get_segment_provider_from_transaction(segment, start, None),
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.get_segment_provider_from_transaction(segment, start, None)
+            }
         };
 
         let mut result = Vec::with_capacity((range.end - range.start).min(100) as usize);
