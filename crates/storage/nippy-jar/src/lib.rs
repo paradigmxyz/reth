@@ -349,13 +349,13 @@ where
         self.freeze_check(&columns)?;
 
         // Creates the writer, data and offsets file
-        let mut appender = NippyJarWriter::new(self)?;
+        let mut writer = NippyJarWriter::new(self)?;
 
         // Append rows to file while holding offsets in memory
-        appender.append_rows(columns, total_rows)?;
+        writer.append_rows(columns, total_rows)?;
 
         // Flushes configuration and offsets to disk
-        appender.commit()?;
+        writer.commit()?;
 
         // Write phf, filter and offset index to file
         self.freeze_filters()?;
