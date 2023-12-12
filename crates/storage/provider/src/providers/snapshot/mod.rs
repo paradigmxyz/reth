@@ -1,8 +1,11 @@
 mod manager;
-pub use manager::SnapshotProvider;
+pub use manager::{SnapshotProvider, SnapshotWriter};
 
 mod jar;
 pub use jar::SnapshotJarProvider;
+
+mod writer;
+pub use writer::SnapshotProviderRW;
 
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;

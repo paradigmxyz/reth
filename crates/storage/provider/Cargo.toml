@@ -15,6 +15,7 @@ reth-interfaces.workspace = true
 reth-db.workspace = true
 reth-trie.workspace = true
 reth-nippy-jar.workspace = true
+reth-codecs.workspace = true
 
 revm.workspace = true
 

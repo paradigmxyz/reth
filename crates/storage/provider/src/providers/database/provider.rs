@@ -1,6 +1,6 @@
 use crate::{
     bundle_state::{BundleStateInit, BundleStateWithReceipts, RevertsInit},
-    providers::{database::metrics, SnapshotProvider},
+    providers::{database::metrics, SnapshotProvider, SnapshotWriter},
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
@@ -81,6 +81,9 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
 impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction
     pub fn commit(self) -> ProviderResult<bool> {
+        if let Some(snapshot_provider) = &self.0.snapshot_provider {
+            snapshot_provider.commit()?;
+        }
         self.0.commit()
     }
 
@@ -100,7 +103,7 @@ pub struct DatabaseProvider<TX> {
     chain_spec: Arc<ChainSpec>,
     /// Snapshot provider
     #[allow(unused)]
-    snapshot_provider: Option<Arc<SnapshotProvider>>,
+    pub snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
