@@ -5,20 +5,31 @@ use std::ops::RangeInclusive;
 /// Client trait for fetching log history data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait LogHistoryReader: Send + Sync {
+    /// Get the list of block numbers within a block range where a given topic was emitted in a log.
+    ///
+    /// Returns `None` if no block numbers matched the topic.
+    fn log_topic_index(
+        &self,
+        topic: B256,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<IntegerList>>;
+
     /// Get the list of block numbers within a block range where a given address emitted a log.
     ///
-    /// Returns `None` of no block numbers matched the address.
+    /// Returns `None` if no block numbers matched the address.
     fn log_address_index(
         &self,
         address: Address,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Option<IntegerList>>;
 
-    /// Get the list of block numbers within a block range where a given topic was emitted in a log.
+    /// Get the list of block numbers within a block range where a given address emitted a log with
+    /// a given topic.
     ///
-    /// Returns `None` of no block numbers matched the topic.
-    fn log_topic_index(
+    /// Returns `None` if no block numbers matched the address and topic.
+    fn log_address_topic_index(
         &self,
+        address: Address,
         topic: B256,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Option<IntegerList>>;

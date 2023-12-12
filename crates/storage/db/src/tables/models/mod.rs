@@ -12,6 +12,7 @@ use reth_primitives::{
 pub mod accounts;
 pub mod blocks;
 pub mod integer_list;
+pub mod log_sharded_key;
 pub mod sharded_key;
 pub mod storage_sharded_key;
 

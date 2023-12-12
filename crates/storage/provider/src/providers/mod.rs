@@ -408,6 +408,14 @@ where
     DB: Database,
     Tree: Send + Sync,
 {
+    fn log_topic_index(
+        &self,
+        topic: B256,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<IntegerList>> {
+        self.database.provider()?.log_topic_index(topic, block_range)
+    }
+
     fn log_address_index(
         &self,
         address: Address,
@@ -416,12 +424,13 @@ where
         self.database.provider()?.log_address_index(address, block_range)
     }
 
-    fn log_topic_index(
+    fn log_address_topic_index(
         &self,
+        address: Address,
         topic: B256,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Option<IntegerList>> {
-        self.database.provider()?.log_topic_index(topic, block_range)
+        self.database.provider()?.log_address_topic_index(address, topic, block_range)
     }
 }
 

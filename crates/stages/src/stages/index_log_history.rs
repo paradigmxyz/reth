@@ -69,11 +69,16 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner,
+        TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{cursor::DbCursorRO, models::ShardedKey, tables, transaction::DbTx};
+    use reth_db::{
+        cursor::DbCursorRO,
+        models::{log_sharded_key::LogShardedKey, ShardedKey},
+        tables,
+        transaction::DbTx,
+    };
     use reth_interfaces::test_utils::generators::{random_block_range, random_log};
     use reth_primitives::{Address, BlockNumber, Receipt, SealedBlock, B256};
 
@@ -94,7 +99,7 @@ mod tests {
         let (_, seed_receipts) =
             runner.seed_execution(first_input).expect("failed to seed execution");
 
-        let total_receipts = runner.tx.table::<tables::Receipts>().unwrap().len() as u64;
+        let total_receipts = runner.db.table::<tables::Receipts>().unwrap().len() as u64;
         assert_eq!(seed_receipts.len() as u64, total_receipts);
 
         // Execute first time
@@ -122,13 +127,13 @@ mod tests {
     }
 
     struct IndexLogHistoryTestRunner {
-        tx: TestTransaction,
+        db: TestStageDB,
         threshold: u64,
     }
 
     impl Default for IndexLogHistoryTestRunner {
         fn default() -> Self {
-            Self { threshold: 1000, tx: TestTransaction::default() }
+            Self { threshold: 1000, db: TestStageDB::default() }
         }
     }
 
@@ -141,7 +146,7 @@ mod tests {
             &self,
             block: BlockNumber,
         ) -> Result<(), TestRunnerError> {
-            self.tx.query(|tx| {
+            self.db.query(|tx| {
                 for entry in tx.cursor_read::<tables::LogAddressHistory>()?.walk_range(..)? {
                     let (_, block_indices) = entry?;
                     for block_number in block_indices.iter(0) {
@@ -163,8 +168,8 @@ mod tests {
     impl StageTestRunner for IndexLogHistoryTestRunner {
         type S = IndexLogHistoryStage;
 
-        fn tx(&self) -> &TestTransaction {
-            &self.tx
+        fn db(&self) -> &TestStageDB {
+            &self.db
         }
 
         fn stage(&self) -> Self::S {
@@ -183,7 +188,7 @@ mod tests {
             let tx_offset = None;
 
             let blocks = random_block_range(&mut rng, stage_progress + 1..=end, B256::ZERO, 1..4);
-            self.tx.insert_blocks(blocks.iter(), tx_offset)?;
+            self.db.insert_blocks(blocks.iter(), tx_offset)?;
 
             let recurring_address = Address::random();
             let logs_per_receipt = 3;
@@ -203,7 +208,7 @@ mod tests {
                     }
                 }));
             }
-            self.tx.insert_receipts(receipts.iter().enumerate().map(|(idx, receipt)| {
+            self.db.insert_receipts(receipts.iter().enumerate().map(|(idx, receipt)| {
                 (idx as u64 + tx_offset.unwrap_or_default(), receipt.clone())
             }))?;
 
@@ -216,7 +221,7 @@ mod tests {
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             match output {
-                Some(output) => self.tx.query(|tx| {
+                Some(output) => self.db.query(|tx| {
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
 
@@ -232,17 +237,18 @@ mod tests {
                             let receipt =
                                 tx.get::<tables::Receipts>(tx_id)?.expect("no receipt entry");
                             for log in &receipt.logs {
-                                // Validate address index is present for this log address
-                                let address_index_entry = tx
-                                    .cursor_read::<tables::LogAddressHistory>()?
-                                    .seek(ShardedKey::new(log.address, block_number))?;
-                                assert_matches!(address_index_entry, Some(_));
-                                assert_matches!(
-                                    address_index_entry.unwrap().1.find(block_number as usize),
-                                    Some(_)
-                                );
-
                                 for topic in &log.topics {
+                                    // Validate address index is present for this log address
+                                    let address_index_entry =
+                                        tx.cursor_read::<tables::LogAddressHistory>()?.seek(
+                                            LogShardedKey::new(log.address, *topic, block_number),
+                                        )?;
+                                    assert_matches!(address_index_entry, Some(_));
+                                    assert_matches!(
+                                        address_index_entry.unwrap().1.find(block_number as usize),
+                                        Some(_)
+                                    );
+
                                     // Validate topic index is present for this log topic
                                     let topic_index_entry = tx
                                         .cursor_read::<tables::LogTopicHistory>()?

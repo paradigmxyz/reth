@@ -227,6 +227,14 @@ impl ReceiptProvider for NoopProvider {
 impl ReceiptProviderIdExt for NoopProvider {}
 
 impl LogHistoryReader for NoopProvider {
+    fn log_topic_index(
+        &self,
+        _topic: B256,
+        _block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<IntegerList>> {
+        Ok(None)
+    }
+
     fn log_address_index(
         &self,
         _address: Address,
@@ -235,8 +243,9 @@ impl LogHistoryReader for NoopProvider {
         Ok(None)
     }
 
-    fn log_topic_index(
+    fn log_address_topic_index(
         &self,
+        _address: Address,
         _topic: B256,
         _block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Option<IntegerList>> {

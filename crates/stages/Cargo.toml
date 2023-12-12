@@ -61,6 +61,7 @@ reth-downloaders.workspace = true
 reth-eth-wire.workspace = true # TODO(onbjerg): We only need this for [BlockBody]
 reth-blockchain-tree.workspace = true
 reth-revm.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 
 alloy-rlp.workspace = true

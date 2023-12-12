@@ -17,8 +17,9 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{
-        sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
+        log_sharded_key::LogShardedKey, sharded_key, storage_sharded_key::StorageShardedKey,
+        AccountBeforeTx, BlockNumberAddress, ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers,
+        StoredBlockWithdrawals,
     },
     table::{Table, TableRow},
     tables,
@@ -203,28 +204,25 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     /// Get history indices in block range.
     ///
     /// TODO: more docs
-    pub fn history_indices_in_block_range<K, T>(
+    pub fn history_indices_in_block_range<K, T, F>(
         &self,
-        key: K,
-        block_range: RangeInclusive<BlockNumber>,
+        start_at: K,
+        end_block: BlockNumber,
+        mut cmp: F,
     ) -> ProviderResult<Option<IntegerList>>
     where
-        K: PartialEq + Copy,
-        T: Table<Key = ShardedKey<K>, Value = BlockNumberList>,
+        T: Table<Key = K, Value = BlockNumberList>,
+        F: FnMut(&K) -> bool,
     {
-        if block_range.is_empty() {
-            return Ok(None)
-        }
-
         // Acquire the cursor and position it the list entry that might contain the first block.
         let mut cursor = self.tx.cursor_read::<T>()?;
-        let mut item = cursor.seek(ShardedKey::new(key, *block_range.start()))?;
+        let mut item = cursor.seek(start_at)?;
 
         let mut result = Vec::new();
-        'outer: while let Some((_, list)) = item.filter(|(sharded_key, _)| sharded_key.key == key) {
+        'outer: while let Some((_, list)) = item.filter(|(key, _)| cmp(key)) {
             for block_number in list.0.iter(0) {
                 // If a block number is higher than the end of the block range, terminate.
-                if block_number as u64 > *block_range.end() {
+                if block_number as u64 > end_block {
                     break 'outer
                 }
 
@@ -269,14 +267,16 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             for receipt_entry in receipts_cursor.walk_range(block_indices.tx_num_range())? {
                 let (_, receipt) = receipt_entry?;
                 for log in receipt.logs {
-                    block_log_addresses.insert(log.address);
-                    block_log_topics.extend(log.topics.iter());
+                    for topic in log.topics {
+                        block_log_addresses.insert((log.address, topic));
+                        block_log_topics.insert(topic);
+                    }
                 }
             }
 
             // Insert block log addresses and topics into the mappings
-            for log_address in block_log_addresses {
-                log_addresses.entry(log_address).or_default().push(block_number);
+            for (log_address, log_topic) in block_log_addresses {
+                log_addresses.entry((log_address, log_topic)).or_default().push(block_number);
             }
             for log_topic in block_log_topics {
                 log_topics.entry(log_topic).or_default().push(block_number);
@@ -1361,8 +1361,6 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
     }
 }
 
-/// Calculates the hash of the given transaction
-
 impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TxHashNumber>(tx_hash)?)
@@ -1549,26 +1547,52 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTx> LogHistoryReader for DatabaseProvider<TX> {
-    fn log_address_index(
-        &self,
-        address: Address,
-        block_range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Option<IntegerList>> {
-        self.history_indices_in_block_range::<_, tables::LogAddressHistory>(address, block_range)
-    }
-
     fn log_topic_index(
         &self,
         topic: B256,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Option<IntegerList>> {
-        self.history_indices_in_block_range::<_, tables::LogTopicHistory>(topic, block_range)
+        self.history_indices_in_block_range::<_, tables::LogTopicHistory, _>(
+            ShardedKey::new(topic, *block_range.start()),
+            *block_range.end(),
+            |sharded_key| sharded_key.key == topic,
+        )
+    }
+
+    fn log_address_index(
+        &self,
+        address: Address,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<IntegerList>> {
+        self.history_indices_in_block_range::<_, tables::LogAddressHistory, _>(
+            LogShardedKey::new(address, B256::ZERO, *block_range.start()),
+            *block_range.end(),
+            |key| key.address == address,
+        )
+    }
+
+    fn log_address_topic_index(
+        &self,
+        address: Address,
+        topic: B256,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<IntegerList>> {
+        self.history_indices_in_block_range::<_, tables::LogAddressHistory, _>(
+            LogShardedKey::new(address, topic, *block_range.start()),
+            *block_range.end(),
+            |key| key.address == address && key.sharded_key.key == topic,
+        )
     }
 }
 
 impl<TX: DbTxMut + DbTx> LogHistoryWriter for DatabaseProvider<TX> {
     fn insert_log_address_history_index(&self, index: LogAddressIndex) -> ProviderResult<()> {
-        self.append_history_index::<_, tables::LogAddressHistory>(index, ShardedKey::new)
+        self.append_history_index::<_, tables::LogAddressHistory>(
+            index,
+            |(address, topic), highest_block_number| {
+                LogShardedKey::new(address, topic, highest_block_number)
+            },
+        )
     }
 
     fn insert_log_topic_history_index(&self, index: LogTopicIndex) -> ProviderResult<()> {
@@ -1588,7 +1612,7 @@ impl<TX: DbTxMut + DbTx> LogHistoryWriter for DatabaseProvider<TX> {
             .walk_range(range)?
             .collect::<Result<Vec<_>, _>>()?;
 
-        let mut log_addresses = BTreeMap::<Address, u64>::new();
+        let mut log_addresses = BTreeMap::<(Address, B256), u64>::new();
         let mut log_topics = BTreeMap::<B256, u64>::new();
 
         // Iterate over block indices in reverse since we only need the lowest block number for
@@ -1600,8 +1624,8 @@ impl<TX: DbTxMut + DbTx> LogHistoryWriter for DatabaseProvider<TX> {
             for receipt_entry in receipts_cursor.walk_range(block_indices.tx_num_range())? {
                 let (_, receipt) = receipt_entry?;
                 for log in receipt.logs {
-                    log_addresses.insert(log.address, block_number);
                     for topic in log.topics {
+                        log_addresses.insert((log.address, topic), block_number);
                         log_topics.insert(topic, block_number);
                     }
                 }
@@ -1610,19 +1634,21 @@ impl<TX: DbTxMut + DbTx> LogHistoryWriter for DatabaseProvider<TX> {
 
         // Unwind log address history indices
         let mut log_address_history_cursor = self.tx.cursor_write::<tables::LogAddressHistory>()?;
-        for (address, rem_index) in log_addresses {
+        for ((address, topic), rem_index) in log_addresses {
             let partial_shard = unwind_history_shards(
                 &mut log_address_history_cursor,
-                ShardedKey::last(address),
+                LogShardedKey::last(address, topic),
                 rem_index,
-                |sharded_key| sharded_key.key == address,
+                |sharded_key| {
+                    sharded_key.address == address && sharded_key.sharded_key.key == topic
+                },
             )?;
 
             // Check the last returned partial shard.
             // If it's not empty, the shard needs to be reinserted.
             if !partial_shard.is_empty() {
                 log_address_history_cursor.insert(
-                    ShardedKey::last(address),
+                    LogShardedKey::last(address, topic),
                     BlockNumberList::new_pre_sorted(partial_shard),
                 )?;
             }

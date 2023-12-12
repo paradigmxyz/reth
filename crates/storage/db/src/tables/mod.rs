@@ -29,6 +29,7 @@ use crate::{
         models::{
             accounts::{AccountBeforeTx, BlockNumberAddress},
             blocks::{HeaderHash, StoredBlockOmmers},
+            log_sharded_key::LogShardedKey,
             storage_sharded_key::StorageShardedKey,
             ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
         },
@@ -361,7 +362,7 @@ table!(
     /// this allows small optimization on searching the last shard for a given address.
     ///
     /// The index allows us to only walk the blocks that contain logs emitted by a given address.
-    ( LogAddressHistory ) ShardedKey<Address> | BlockNumberList
+    ( LogAddressHistory ) LogShardedKey | BlockNumberList
 );
 
 table!(
