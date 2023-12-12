@@ -1145,8 +1145,12 @@ impl MockTransactionSet {
         Self { transactions }
     }
 
-    /// Create a list of dependent transactions with a common sender. The transactions start at the
-    /// given nonce, and the sender is incremented by the given tx_count.
+    /// Creates a series of dependent transactions for a given sender and nonce.
+    ///
+    /// This method generates a sequence of transactions starting from the provided nonce
+    /// for the given sender.
+    ///
+    /// The number of transactions created is determined by `tx_count`.
     pub fn dependent(sender: Address, from_nonce: u64, tx_count: usize, tx_type: TxType) -> Self {
         let mut txs = Vec::with_capacity(tx_count);
         let mut curr_tx = MockTransaction::new_from_type(tx_type).with_nonce(from_nonce);
@@ -1156,7 +1160,27 @@ impl MockTransactionSet {
             txs.push(curr_tx.clone());
         }
 
-        MockTransactionSet::new(txs)
+        Self::new(txs)
+    }
+
+    /// Creates a chain of transactions for a given sender with a specified count.
+    ///
+    /// This method generates a sequence of transactions starting from the specified sender
+    /// and creates a chain of transactions based on the `tx_count`.
+    pub fn sequential_transactions_by_sender(
+        sender: Address,
+        tx_count: usize,
+        tx_type: TxType,
+    ) -> Self {
+        let mut txs = Vec::with_capacity(tx_count);
+        let mut current_tx = MockTransaction::new_from_type(tx_type).with_sender(sender);
+
+        for _ in 0..tx_count {
+            txs.push(current_tx.clone());
+            current_tx = current_tx.next();
+        }
+
+        Self::new(txs)
     }
 
     /// Add transactions to the [MockTransactionSet]
