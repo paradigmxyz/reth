@@ -23,11 +23,6 @@ pub mod components;
 pub mod config;
 pub mod ext;
 
-/// Default [Directive] for [EnvFilter] which disables high-frequency debug logs from `hyper` and
-/// `trust-dns`
-const DEFAULT_ENV_FILTER_DIRECTIVE: &str =
-    "hyper::proto::h1=off,trust_dns_proto=off,trust_dns_resolver=off";
-
 /// The main reth cli interface.
 ///
 /// This is the entrypoint to the executable.
@@ -232,12 +227,20 @@ impl Logs {
     {
         let mut layers = Vec::new();
 
-        // Function to create a new EnvFilter with environment, default and additional directive
-        let create_env_filter = |additional_directive: &str| -> eyre::Result<EnvFilter> {
-            Ok(EnvFilter::builder()
+        // Function to create a new EnvFilter with environment (from `RUST_LOG`), default (disabled
+        // high-frequency debug logs from `hyper` and `trust-dns`) and additional directives.
+        let create_env_filter = |additional_directives: &str| -> eyre::Result<EnvFilter> {
+            let env_filter = EnvFilter::builder()
                 .from_env_lossy()
-                .add_directive(DEFAULT_ENV_FILTER_DIRECTIVE.parse()?)
-                .add_directive(additional_directive.parse()?))
+                .add_directive("hyper::proto::h1=off".parse()?)
+                .add_directive("trust_dns_proto=off".parse()?)
+                .add_directive("trust_dns_resolver=off".parse()?);
+            additional_directives
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .try_fold(env_filter, |env_filter, directive| {
+                    Ok(env_filter.add_directive(directive.parse()?))
+                })
         };
 
         // Create and add the journald layer if enabled
@@ -389,5 +392,22 @@ mod tests {
         let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
             .unwrap();
         assert!(reth.run().is_err());
+    }
+
+    #[test]
+    fn parse_env_filter_directives() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        std::env::set_var("RUST_LOG", "info,evm=debug");
+        let reth = Cli::<()>::try_parse_from([
+            "reth",
+            "init",
+            "--datadir",
+            temp_dir.path().to_str().unwrap(),
+            "--log.file.filter",
+            "debug,net=trace",
+        ])
+        .unwrap();
+        assert!(reth.run().is_ok());
     }
 }
