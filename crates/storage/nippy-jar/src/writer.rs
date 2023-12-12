@@ -6,6 +6,9 @@ use std::{
     path::Path,
 };
 
+/// Initial size of an offset in bytes.
+const INITIAL_OFFSET_SIZE: u64 = 8;
+
 /// Writer of [`NippyJar`]. Handles table data and offsets only.
 ///
 /// Table data is written directly to disk, while offsets and configuration need to be flushed by
@@ -71,8 +74,8 @@ where
         let mut offsets_file = if !offsets.exists() {
             let mut offsets = File::create(offsets)?;
 
-            // Initially all offsets are represented as 8 bytes.
-            offsets.write_all(&[8])?;
+            // Initially all offsets are represented as INITIAL_OFFSET_SIZE (8) bytes.
+            offsets.write_all(&[INITIAL_OFFSET_SIZE as u8])?;
 
             offsets
         } else {
@@ -95,7 +98,8 @@ where
         // 1 byte: for byte-len offset representation
         // 8 bytes * num rows * num columns
         // 8 bytes: expected size of the data file.
-        let expected_offsets_file_size = 1 + config_rows * self.jar.columns as u64 * 8 + 8;
+        let expected_offsets_file_size =
+            1 + config_rows * self.jar.columns as u64 * INITIAL_OFFSET_SIZE + INITIAL_OFFSET_SIZE;
         let offsets_file_size = self.offsets_file.metadata()?.len();
 
         if expected_offsets_file_size != offsets_file_size {
@@ -105,8 +109,10 @@ where
         }
 
         // Last offset is always the expected size of the data file.
-        let mut last_offset = [0u8; 8];
-        self.offsets_file.seek(SeekFrom::Start(1 + (config_rows * self.jar.columns as u64 * 8)))?;
+        let mut last_offset = [0u8; INITIAL_OFFSET_SIZE as usize];
+        self.offsets_file.seek(SeekFrom::Start(
+            1 + (config_rows * self.jar.columns as u64 * INITIAL_OFFSET_SIZE),
+        ))?;
         self.offsets_file.read_exact(&mut last_offset)?;
         let last_offset = u64::from_le_bytes(last_offset);
 
@@ -227,12 +233,11 @@ where
         if remaining_to_prune > 0 {
             // Get the current length of the on-disk offset file
             let length = self.offsets_file.metadata()?.len();
-            let bytes_per_offset = 8;
 
             // Handle non-empty offset file
             if length > 1 {
                 // first byte is reserved for `bytes_per_offset`, which is 8 initially.
-                let num_offsets = (length - 1) / bytes_per_offset;
+                let num_offsets = (length - 1) / INITIAL_OFFSET_SIZE;
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
 
                 // If all rows are to be pruned
@@ -242,12 +247,12 @@ where
                     self.data_file.set_len(0)?;
                 } else {
                     // Calculate the new length for the on-disk offset list
-                    let new_len = 1 + new_num_offsets * bytes_per_offset;
+                    let new_len = 1 + new_num_offsets * INITIAL_OFFSET_SIZE;
                     // Seek to the position of the last offset
                     self.offsets_file
-                        .seek(SeekFrom::Start(new_len.saturating_sub(bytes_per_offset)))?;
+                        .seek(SeekFrom::Start(new_len.saturating_sub(INITIAL_OFFSET_SIZE)))?;
                     // Read the last offset value
-                    let mut last_offset = [0u8; 8];
+                    let mut last_offset = [0u8; INITIAL_OFFSET_SIZE as usize];
                     self.offsets_file.read_exact(&mut last_offset)?;
                     let last_offset = u64::from_le_bytes(last_offset);
 
@@ -297,14 +302,14 @@ where
 
     /// Flushes offsets to disk.
     pub(crate) fn commit_offsets(&mut self) -> Result<(), NippyJarError> {
-        // The last offset on disk can be the first offset on `self.offset_list` given how
+        // The last offset on disk can be the first offset of `self.offsets` given how
         // `append_column()` works alongside commit. So we need to skip it.
         let mut last_offset_ondisk = None;
 
         if self.offsets_file.metadata()?.len() > 1 {
-            self.offsets_file.seek(SeekFrom::End(-8))?;
+            self.offsets_file.seek(SeekFrom::End(-(INITIAL_OFFSET_SIZE as i64)))?;
 
-            let mut buf = [0u8; 8];
+            let mut buf = [0u8; INITIAL_OFFSET_SIZE as usize];
             self.offsets_file.read_exact(&mut buf)?;
             last_offset_ondisk = Some(u64::from_le_bytes(buf));
         }
