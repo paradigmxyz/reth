@@ -1,4 +1,3 @@
-#![allow(missing_docs)]
 //! Types for trace module.
 //!
 //! See <https://openethereum.github.io/JSONRPC-trace-module>
@@ -58,26 +57,38 @@ impl TraceResults {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceResultsWithTransactionHash {
+    /// The recorded trace.
     #[serde(flatten)]
     pub full_trace: TraceResults,
+    /// Hash of the traced transaction.
     pub transaction_hash: B256,
 }
 
+/// A changed value
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ChangedType<T> {
+    /// Original value
     pub from: T,
+    /// New value
     pub to: T,
 }
 
+/// Represents how a value changed.
+///
+/// This is used for statediff.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Delta<T> {
+    /// Existing value didn't change.
     #[default]
     #[serde(rename = "=")]
     Unchanged,
+    /// New storage value added.
     #[serde(rename = "+")]
     Added(T),
+    /// Existing storage value removed.
     #[serde(rename = "-")]
     Removed(T),
+    /// Existing storage value changed.
     #[serde(rename = "*")]
     Changed(ChangedType<T>),
 }
@@ -111,12 +122,17 @@ impl<T> Delta<T> {
     }
 }
 
+/// The diff of an account after a transaction
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountDiff {
+    /// How the balance changed, if at all
     pub balance: Delta<U256>,
+    /// How the code changed, if at all
     pub code: Delta<Bytes>,
+    /// How the nonce changed, if at all
     pub nonce: Delta<U64>,
+    /// All touched/changed storage values
     pub storage: BTreeMap<B256, Delta<B256>>,
 }
 
@@ -139,16 +155,20 @@ impl DerefMut for StateDiff {
     }
 }
 
+/// Represents the various types of actions recorded during tracing
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type", content = "action")]
 pub enum Action {
+    /// Regular call
     Call(CallAction),
+    /// A CREATE call
     Create(CreateAction),
     /// Parity style traces never renamed suicide to selfdestruct: <https://eips.ethereum.org/EIPS/eip-6>
     ///
     /// For compatibility reasons, this is serialized as `suicide`: <https://github.com/paradigmxyz/reth/issues/3721>
     #[serde(rename = "suicide", alias = "selfdestruct")]
     Selfdestruct(SelfdestructAction),
+    /// Rewards if any (pre POS)
     Reward(RewardAction),
 }
 
@@ -249,13 +269,17 @@ pub struct CreateAction {
     pub value: U256,
 }
 
+/// What kind of reward.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RewardType {
+    /// Block rewards
     Block,
+    /// Reward for uncle block
     Uncle,
 }
 
+/// Recorded reward of a block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RewardAction {
@@ -279,18 +303,25 @@ pub struct SelfdestructAction {
     pub refund_address: Address,
 }
 
+/// Outcome of a CALL.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallOutput {
+    /// Gas used by the call.
     pub gas_used: U64,
+    /// The output data of the call.
     pub output: Bytes,
 }
 
+/// Outcome of a CREATE.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateOutput {
+    /// Address of the created contract.
     pub address: Address,
+    /// Contract code.
     pub code: Bytes,
+    /// Gas used by the call.
     pub gas_used: U64,
 }
 
@@ -328,15 +359,24 @@ impl TraceOutput {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionTrace {
+    /// Represents what kind of trace this is
     #[serde(flatten)]
     pub action: Action,
+    /// The error message if the transaction failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Output of the trace, can be CALL or CREATE
     pub result: Option<TraceOutput>,
+    /// How many subtraces this trace has.
     pub subtraces: usize,
+    /// The identifier of this transaction trace in the set.
+    ///
+    /// This gives the exact location in the call trace
+    /// [index in root CALL, index in first CALL, index in second CALL, …].
     pub trace_address: Vec<usize>,
 }
 
+/// A wrapper for [TransactionTrace] that includes additional information about the transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalizedTransactionTrace {
@@ -429,6 +469,7 @@ pub struct VmTrace {
     pub ops: Vec<VmInstruction>,
 }
 
+/// A record of a single VM instruction, opcode level.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VmInstruction {
@@ -443,6 +484,7 @@ pub struct VmInstruction {
     /// Stringified opcode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub op: Option<String>,
+    /// Index of the instruction in the set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idx: Option<String>,
 }
@@ -475,7 +517,9 @@ pub struct MemoryDelta {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageDelta {
+    /// Storage key.
     pub key: U256,
+    /// Storage value belonging to the key.
     pub val: U256,
 }
 

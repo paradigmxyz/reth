@@ -56,7 +56,7 @@ proptest-derive = { workspace = true, optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-codecs = { workspace = true, features = ["arbitrary"] }
+reth-codecs.workspace = true
 reth-interfaces.workspace = true
 
 tempfile.workspace = true
@@ -93,7 +93,6 @@ mdbx = ["reth-libmdbx"]
 bench = []
 arbitrary = [
     "reth-primitives/arbitrary",
-    "reth-codecs/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",

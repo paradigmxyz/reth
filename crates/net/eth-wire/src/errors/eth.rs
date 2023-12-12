@@ -1,6 +1,8 @@
 //! Error handling for (`EthStream`)[crate::EthStream]
 use crate::{
-    errors::P2PStreamError, version::ParseVersionError, DisconnectReason, EthMessageID, EthVersion,
+    errors::{MuxDemuxError, P2PStreamError},
+    version::ParseVersionError,
+    DisconnectReason, EthMessageID, EthVersion,
 };
 use reth_primitives::{Chain, GotExpected, GotExpectedBoxed, ValidationError, B256};
 use std::io;
@@ -12,6 +14,9 @@ pub enum EthStreamError {
     #[error(transparent)]
     /// Error of the underlying P2P connection.
     P2PStreamError(#[from] P2PStreamError),
+    #[error(transparent)]
+    /// Error of the underlying de-/muxed P2P connection.
+    MuxDemuxError(#[from] MuxDemuxError),
     #[error(transparent)]
     /// Failed to parse peer's version.
     ParseVersionError(#[from] ParseVersionError),
@@ -42,6 +47,8 @@ impl EthStreamError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
     pub fn as_disconnected(&self) -> Option<DisconnectReason> {
         if let EthStreamError::P2PStreamError(err) = self {
+            err.as_disconnected()
+        } else if let EthStreamError::MuxDemuxError(MuxDemuxError::P2PStreamError(err)) = self {
             err.as_disconnected()
         } else {
             None

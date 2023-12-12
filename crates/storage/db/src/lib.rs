@@ -153,7 +153,7 @@ pub fn open_db(path: &Path, log_level: Option<LogLevel>) -> eyre::Result<Databas
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::database::Database;
+    use crate::{database::Database, database_metrics::DatabaseMetrics};
     use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
@@ -182,12 +182,17 @@ pub mod test_utils {
     }
 
     impl<DB> TempDatabase<DB> {
-        /// returns the ref of inner db
+        /// Returns the reference to inner db.
         pub fn db(&self) -> &DB {
             self.db.as_ref().unwrap()
         }
 
-        /// returns the inner db
+        /// Returns the path to the database.
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
+
+        /// Convert temp database into inner.
         pub fn into_inner_db(mut self) -> DB {
             self.db.take().unwrap() // take out db to avoid clean path in drop fn
         }
@@ -202,6 +207,12 @@ pub mod test_utils {
 
         fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
             self.db().tx_mut()
+        }
+    }
+
+    impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
+        fn report_metrics(&self) {
+            self.db().report_metrics()
         }
     }
 

@@ -16,7 +16,7 @@ use reth_eth_wire::{
     capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    DisconnectReason, EthMessage, EthStream, P2PStream,
+    DisconnectP2P, DisconnectReason, EthMessage, EthStream, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -926,8 +926,8 @@ mod tests {
                 secret_key,
                 local_peer_id,
                 status: StatusBuilder::default().build(),
-                fork_filter: Hardfork::Frontier
-                    .fork_filter(&MAINNET)
+                fork_filter: MAINNET
+                    .hardfork_fork_filter(Hardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),
                 bandwidth_meter: BandwidthMeter::default(),
             }

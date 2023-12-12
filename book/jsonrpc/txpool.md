@@ -6,7 +6,7 @@ The `txpool` API allows you to inspect the transaction pool.
 
 Returns the details of all transactions currently pending for inclusion in the next block(s), as well as the ones that are being scheduled for future execution only.
 
-See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
+See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool-content) for more details
 
 | Client | Method invocation                            |
 |--------|----------------------------------------------|
@@ -16,7 +16,7 @@ See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more
 
 Retrieves the transactions contained within the txpool, returning pending as well as queued transactions of this address, grouped by nonce.
 
-See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_contentFrom) for more details
+See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool-contentfrom) for more details
 
 | Client | Method invocation                                       |
 |--------|---------------------------------------------------------|
@@ -26,7 +26,7 @@ See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_contentFrom) for 
 
 Returns a summary of all the transactions currently pending for inclusion in the next block(s), as well as the ones that are being scheduled for future execution only.
 
-See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_inspect) for more details
+See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool-inspect) for more details
 
 | Client | Method invocation                            |
 |--------|----------------------------------------------|
@@ -36,7 +36,7 @@ See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_inspect) for more
 
 Returns the number of transactions currently pending for inclusion in the next block(s), as well as the ones that are being scheduled for future execution only.
 
-See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_status) for more details
+See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool-status) for more details
 
 | Client | Method invocation                           |
 |--------|---------------------------------------------|

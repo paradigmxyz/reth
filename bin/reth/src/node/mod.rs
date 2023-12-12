@@ -10,7 +10,7 @@ use crate::{
     },
     cli::{
         components::RethNodeComponentsImpl,
-        config::RethRpcConfig,
+        config::{RethRpcConfig, RethTransactionPoolConfig},
         ext::{RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
@@ -34,8 +34,11 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_config::{config::PruneConfig, Config};
-use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_config::{
+    config::{PruneConfig, StageConfig},
+    Config,
+};
+use reth_db::{database::Database, database_metrics::DatabaseMetrics, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -289,9 +292,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             Arc::clone(&consensus),
             EvmProcessorFactory::new(self.chain.clone()),
         );
+        let tree_config = BlockchainTreeConfig::default();
         let tree = BlockchainTree::new(
             tree_externals,
-            BlockchainTreeConfig::default(),
+            tree_config,
             prune_config.clone().map(|config| config.segments),
         )?
         .with_sync_metrics_tx(sync_metrics_tx.clone());
@@ -418,7 +422,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
             let mut pipeline = self
                 .build_networked_pipeline(
-                    &config,
+                    &config.stages,
                     client.clone(),
                     Arc::clone(&consensus),
                     provider_factory,
@@ -438,7 +442,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         } else {
             let pipeline = self
                 .build_networked_pipeline(
-                    &config,
+                    &config.stages,
                     network_client.clone(),
                     Arc::clone(&consensus),
                     provider_factory,
@@ -473,6 +477,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             let mut pruner = self.build_pruner(
                 &prune_config,
                 db.clone(),
+                tree_config,
                 snapshotter.highest_snapshot_receiver(),
             );
 
@@ -602,7 +607,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     #[allow(clippy::too_many_arguments)]
     async fn build_networked_pipeline<DB, Client>(
         &self,
-        config: &Config,
+        config: &StageConfig,
         client: Client,
         consensus: Arc<dyn Consensus>,
         provider_factory: ProviderFactory<DB>,
@@ -616,11 +621,11 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
         // building network downloaders using the fetch client
-        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
+        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.headers)
             .build(client.clone(), Arc::clone(&consensus))
             .into_task_with(task_executor);
 
-        let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
+        let body_downloader = BodiesDownloaderBuilder::from(config.bodies)
             .build(client, Arc::clone(&consensus), provider_factory.clone())
             .into_task_with(task_executor);
 
@@ -688,11 +693,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         prometheus_exporter::install_recorder()
     }
 
-    async fn start_metrics_endpoint(
+    async fn start_metrics_endpoint<Metrics>(
         &self,
         prometheus_handle: PrometheusHandle,
-        db: Arc<DatabaseEnv>,
-    ) -> eyre::Result<()> {
+        db: Metrics,
+    ) -> eyre::Result<()>
+    where
+        Metrics: DatabaseMetrics + 'static + Send + Sync,
+    {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
             prometheus_exporter::serve(
@@ -728,9 +736,10 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         task_executor.spawn_critical("p2p eth request handler", eth);
 
         let known_peers_file = self.network.persistent_peers_file(default_peers_path);
-        task_executor.spawn_critical_with_shutdown_signal("p2p network task", |shutdown| {
-            run_network_until_shutdown(shutdown, network, known_peers_file)
-        });
+        task_executor
+            .spawn_critical_with_graceful_shutdown_signal("p2p network task", |shutdown| {
+                run_network_until_shutdown(shutdown, network, known_peers_file)
+            });
 
         handle
     }
@@ -738,7 +747,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_head(&self, db: Arc<DatabaseEnv>) -> RethResult<Head> {
+    fn lookup_head<DB: Database>(&self, db: DB) -> RethResult<Head> {
         let factory = ProviderFactory::new(db, self.chain.clone());
         let provider = factory.provider()?;
 
@@ -820,15 +829,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         }
     }
 
-    fn load_network_config(
+    fn load_network_config<DB: Database>(
         &self,
         config: &Config,
-        db: Arc<DatabaseEnv>,
+        db: DB,
         executor: TaskExecutor,
         head: Head,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
-    ) -> NetworkConfig<ProviderFactory<Arc<DatabaseEnv>>> {
+    ) -> NetworkConfig<ProviderFactory<DB>> {
         let cfg_builder = self
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
@@ -860,7 +869,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     async fn build_pipeline<DB, H, B>(
         &self,
         provider_factory: ProviderFactory<DB>,
-        config: &Config,
+        config: &StageConfig,
         header_downloader: H,
         body_downloader: B,
         consensus: Arc<dyn Consensus>,
@@ -874,8 +883,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
     {
-        let stage_config = &config.stages;
-
         let mut builder = Pipeline::builder();
 
         if let Some(max_block) = max_block {
@@ -920,47 +927,47 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 )
                 .set(
                     TotalDifficultyStage::new(consensus)
-                        .with_commit_threshold(stage_config.total_difficulty.commit_threshold),
+                        .with_commit_threshold(config.total_difficulty.commit_threshold),
                 )
                 .set(SenderRecoveryStage {
-                    commit_threshold: stage_config.sender_recovery.commit_threshold,
+                    commit_threshold: config.sender_recovery.commit_threshold,
                 })
                 .set(
                     ExecutionStage::new(
                         factory,
                         ExecutionStageThresholds {
-                            max_blocks: stage_config.execution.max_blocks,
-                            max_changes: stage_config.execution.max_changes,
-                            max_cumulative_gas: stage_config.execution.max_cumulative_gas,
+                            max_blocks: config.execution.max_blocks,
+                            max_changes: config.execution.max_changes,
+                            max_cumulative_gas: config.execution.max_cumulative_gas,
                         },
-                        stage_config
+                        config
                             .merkle
                             .clean_threshold
-                            .max(stage_config.account_hashing.clean_threshold)
-                            .max(stage_config.storage_hashing.clean_threshold),
+                            .max(config.account_hashing.clean_threshold)
+                            .max(config.storage_hashing.clean_threshold),
                         prune_modes.clone(),
                     )
                     .with_metrics_tx(metrics_tx),
                 )
                 .set(AccountHashingStage::new(
-                    stage_config.account_hashing.clean_threshold,
-                    stage_config.account_hashing.commit_threshold,
+                    config.account_hashing.clean_threshold,
+                    config.account_hashing.commit_threshold,
                 ))
                 .set(StorageHashingStage::new(
-                    stage_config.storage_hashing.clean_threshold,
-                    stage_config.storage_hashing.commit_threshold,
+                    config.storage_hashing.clean_threshold,
+                    config.storage_hashing.commit_threshold,
                 ))
-                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
+                .set(MerkleStage::new_execution(config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
-                    stage_config.transaction_lookup.commit_threshold,
+                    config.transaction_lookup.commit_threshold,
                     prune_modes.transaction_lookup,
                 ))
                 .set(IndexAccountHistoryStage::new(
-                    stage_config.index_account_history.commit_threshold,
+                    config.index_account_history.commit_threshold,
                     prune_modes.account_history,
                 ))
                 .set(IndexStorageHistoryStage::new(
-                    stage_config.index_storage_history.commit_threshold,
+                    config.index_storage_history.commit_threshold,
                     prune_modes.storage_history,
                 )),
             )
@@ -974,6 +981,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         &self,
         config: &PruneConfig,
         db: DB,
+        tree_config: BlockchainTreeConfig,
         highest_snapshots_rx: HighestSnapshotsTracker,
     ) -> Pruner<DB> {
         let segments = SegmentSet::default()
@@ -1011,6 +1019,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             segments.into_vec(),
             config.block_interval,
             self.chain.prune_delete_limit,
+            tree_config.max_reorg_depth() as usize,
             highest_snapshots_rx,
         )
     }
@@ -1029,7 +1038,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 /// Drives the [NetworkManager] future until a [Shutdown](reth_tasks::shutdown::Shutdown) signal is
 /// received. If configured, this writes known peers to `persistent_peers_file` afterwards.
 async fn run_network_until_shutdown<C>(
-    shutdown: reth_tasks::shutdown::Shutdown,
+    shutdown: reth_tasks::shutdown::GracefulShutdown,
     network: NetworkManager<C>,
     persistent_peers_file: Option<PathBuf>,
 ) where
@@ -1037,9 +1046,12 @@ async fn run_network_until_shutdown<C>(
 {
     pin_mut!(network, shutdown);
 
+    let mut graceful_guard = None;
     tokio::select! {
         _ = &mut network => {},
-        _ = shutdown => {},
+        guard = shutdown => {
+            graceful_guard = Some(guard);
+        },
     }
 
     if let Some(file_path) = persistent_peers_file {
@@ -1057,6 +1069,8 @@ async fn run_network_until_shutdown<C>(
             }
         }
     }
+
+    drop(graceful_guard)
 }
 
 #[cfg(test)]

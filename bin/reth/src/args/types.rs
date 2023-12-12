@@ -31,12 +31,19 @@ macro_rules! zero_as_none {
             }
         }
 
+        impl From<$inner_type> for $type_name {
+            #[inline]
+            fn from(value: $inner_type) -> Self {
+                Self(if value == 0 { None } else { Some(value) })
+            }
+        }
+
         impl std::str::FromStr for $type_name {
             type Err = std::num::ParseIntError;
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 let value = s.parse::<$inner_type>()?;
-                Ok(Self(if value == 0 { None } else { Some(value) }))
+                Ok(Self::from(value))
             }
         }
     };
@@ -98,5 +105,16 @@ mod tests {
         let val = "0".parse::<ZeroAsNoneU64>().unwrap();
         assert_eq!(val, ZeroAsNoneU64(None));
         assert_eq!(val.unwrap_or_max(), u64::MAX);
+    }
+
+    #[test]
+    fn test_from_u64() {
+        let original = 1u64;
+        let expected = ZeroAsNoneU64(Some(1u64));
+        assert_eq!(ZeroAsNoneU64::from(original), expected);
+
+        let original = 0u64;
+        let expected = ZeroAsNoneU64(None);
+        assert_eq!(ZeroAsNoneU64::from(original), expected);
     }
 }
