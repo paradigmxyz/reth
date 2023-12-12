@@ -38,7 +38,7 @@ use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
 };
-use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_db::{database::Database, database_metrics::DatabaseMetrics, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -693,11 +693,14 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         prometheus_exporter::install_recorder()
     }
 
-    async fn start_metrics_endpoint(
+    async fn start_metrics_endpoint<Metrics>(
         &self,
         prometheus_handle: PrometheusHandle,
-        db: Arc<DatabaseEnv>,
-    ) -> eyre::Result<()> {
+        db: Metrics,
+    ) -> eyre::Result<()>
+    where
+        Metrics: DatabaseMetrics + 'static + Send + Sync,
+    {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
             prometheus_exporter::serve(
