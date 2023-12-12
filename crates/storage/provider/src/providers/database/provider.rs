@@ -253,7 +253,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     ///
     /// # Arguments
     /// * `segment` - The segment of the snapshot to check against.
-    /// * `number` - Requested block or tx number
+    /// * `index_key` - Requested index key, usually a block or transaction number.
     /// * `fetch_from_snapshot` - A closure that defines how to fetch the data from the snapshot
     ///   provider.
     /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
