@@ -106,9 +106,12 @@ where
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (result, state_changes) =
-                        this.trace_transaction(opts.clone(), env, at, &mut db)?;
-                    results.push(TraceResult::Success { result, tx_hash });
+                        this.trace_transaction(opts.clone(), env, at, &mut db).map_err(|err| {
+                            results.push(TraceResult::Error { error: err.to_string(), tx_hash });
+                            err
+                        })?;
 
+                    results.push(TraceResult::Success { result, tx_hash });
                     if transactions.peek().is_some() {
                         // need to apply the state changes of this transaction before executing the
                         // next transaction

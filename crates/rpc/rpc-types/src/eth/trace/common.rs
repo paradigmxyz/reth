@@ -11,5 +11,5 @@ pub enum TraceResult<Ok, Err> {
     /// Untagged success variant
     Success { result: Ok, tx_hash: TxHash },
     /// Untagged error variant
-    Error { error: Err },
+    Error { error: Err, tx_hash: TxHash },
 }
