@@ -54,6 +54,20 @@ impl SnapshotSegment {
         }
     }
 
+    /// Returns the number of columns for the segment
+    pub const fn columns(&self) -> usize {
+        match self {
+            SnapshotSegment::Headers => 3,
+            SnapshotSegment::Transactions => 1,
+            SnapshotSegment::Receipts => 1,
+        }
+    }
+
+    /// Returns the default file name for the provided [`SegmentHeader`]
+    pub fn filename_from_header(&self, header: SegmentHeader) -> String {
+        self.filename(&header.block_range, &header.tx_range)
+    }
+
     /// Returns the default file name for the provided segment and range.
     pub fn filename(
         &self,
@@ -133,7 +147,7 @@ impl SnapshotSegment {
 }
 
 /// A segment header that contains information common to all segments. Used for storage.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
 pub struct SegmentHeader {
     /// Block range of the snapshot segment
     block_range: RangeInclusive<BlockNumber>,
@@ -153,6 +167,11 @@ impl SegmentHeader {
         Self { block_range, tx_range, segment }
     }
 
+    /// Returns the snapshot segment kind.
+    pub fn segment(&self) -> SnapshotSegment {
+        self.segment
+    }
+
     /// Returns the first block number of the segment.
     pub fn block_start(&self) -> BlockNumber {
         *self.block_range.start()
@@ -166,6 +185,41 @@ impl SegmentHeader {
     /// Returns the first transaction number of the segment.
     pub fn tx_start(&self) -> TxNumber {
         *self.tx_range.start()
+    }
+
+    /// Number of transactions.
+    pub fn tx_len(&self) -> u64 {
+        self.tx_range.end() + 1 - self.tx_range.start()
+    }
+
+    /// Number of blocks.
+    pub fn block_len(&self) -> u64 {
+        self.block_range.end() + 1 - self.block_range.start()
+    }
+
+    /// Increments block or tx end range depending on segment
+    pub fn increment(&mut self) {
+        match self.segment {
+            SnapshotSegment::Headers => {
+                self.block_range = *self.block_range.start()..=*self.block_range.end() + 1;
+            }
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.tx_range = *self.tx_range.start()..=*self.tx_range.end() + 1;
+            }
+        }
+    }
+
+    /// Removes `num` elements from end of  block or tx end range depending on segment.
+    pub fn prune(&mut self, num: u64) {
+        match self.segment {
+            SnapshotSegment::Headers => {
+                self.block_range =
+                    *self.block_range.start()..=self.block_range.end().saturating_sub(num);
+            }
+            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                self.tx_range = *self.tx_range.start()..=self.tx_range.end().saturating_sub(num);
+            }
+        };
     }
 
     /// Returns the row offset which depends on whether the segment is block or transaction based.
