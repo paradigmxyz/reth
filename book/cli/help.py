@@ -182,7 +182,7 @@ def help_markdown(cmd: list[str], s: str):
 
 ```bash
 $ {' '.join(cmd)} --help
-{s.strip()}
+{preprocess_help(s.strip())}
 ```"""
 
 
@@ -249,6 +249,15 @@ def eprint(*args, **kwargs):
 def command_name(cmd: str):
     """Returns the name of a command."""
     return cmd.split("/")[-1]
+
+def preprocess_help(s: str):
+    """Preprocesses the help output of a command."""
+    # Remove the user-specific paths.
+    s = re.sub(r"default: /.*/reth", "default: <CACHE_DIR>", s)
+    # Remove the commit SHA.
+    s = re.sub(r"-[0-9A-Fa-f]{7}/", "-XXXXXXX/", s)
+
+    return s
 
 
 if __name__ == "__main__":

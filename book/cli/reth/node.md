@@ -93,7 +93,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.13-5062b7ea8/x86_64-unknown-linux-gnu]
+          [default: reth/v0.1.0-alpha.13-82f7f45e/aarch64-apple-darwin]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -173,7 +173,7 @@ RPC:
       --ipcpath <IPCPATH>
           Filename for IPC socket/pipe within the datadir
           
-          [default: /tmp/reth.ipc]
+          [default: <CACHE_DIR>.ipc]
 
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
@@ -333,7 +333,7 @@ Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
           
-          [default: reth/v0.1.0-alpha.13/linux]
+          [default: reth/v0.1.0-alpha.13/macos]
 
       --builder.gaslimit <GAS_LIMIT>
           Target gas ceiling for built blocks
@@ -425,7 +425,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /home/doni/.config/cache/reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

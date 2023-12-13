@@ -109,7 +109,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.13-5062b7ea8/x86_64-unknown-linux-gnu]
+          [default: reth/v0.1.0-alpha.13-82f7f45e/aarch64-apple-darwin]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -163,7 +163,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /home/doni/.config/cache/reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
