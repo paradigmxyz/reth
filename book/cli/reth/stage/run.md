@@ -109,7 +109,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.13-82f7f45e/aarch64-apple-darwin]
+          [default: reth/v0.1.0-alpha.13-<SHA>/aarch64-apple-darwin]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.

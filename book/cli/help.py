@@ -255,7 +255,7 @@ def preprocess_help(s: str):
     # Remove the user-specific paths.
     s = re.sub(r"default: /.*/reth", "default: <CACHE_DIR>", s)
     # Remove the commit SHA.
-    s = re.sub(r"-[0-9A-Fa-f]{7}/", "-XXXXXXX/", s)
+    s = re.sub(r"-[0-9A-Fa-f]{6,10}/", "-<SHA>/", s)
 
     return s
 
