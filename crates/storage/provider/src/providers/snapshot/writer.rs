@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-const BLOCK_INTERVAL: u64 = 500_000;
+const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
 
 #[derive(Debug)]
 /// Extends `SnapshotProvider` with writing capabilities
@@ -38,7 +38,7 @@ impl<'a> SnapshotProviderRW<'a> {
         block: u64,
         reader: Arc<SnapshotProvider>,
     ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
-        let block_range = find_range(BLOCK_INTERVAL, block);
+        let block_range = find_range(BLOCKS_PER_SNAPSHOT, block);
         let (jar, path) = match reader.get_segment_provider_from_block(segment, block, None) {
             Ok(provider) => (NippyJar::load(provider.data_path())?, provider.data_path().into()),
             Err(ProviderError::MissingSnapshotBlock(_, _)) => {
@@ -220,8 +220,10 @@ impl<'a> Deref for SnapshotProviderRW<'a> {
     }
 }
 
-fn find_range(interval: u64, tip: u64) -> RangeInclusive<u64> {
-    let start = (tip / interval) * interval;
-    let end = if tip % interval == 0 { tip } else { start + interval - 1 };
+/// Each snapshot has a fixed number of blocks. This gives out the range where the requested block
+/// is positioned.
+fn find_range(interval: u64, block: u64) -> RangeInclusive<u64> {
+    let start = (block / interval) * interval;
+    let end = if block % interval == 0 { block } else { start + interval - 1 };
     start..=end
 }

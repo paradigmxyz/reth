@@ -79,7 +79,7 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
 }
 
 impl<DB: Database> DatabaseProviderRW<DB> {
-    /// Commit database transaction
+    /// Commit database transaction and snapshot if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
         if let Some(snapshot_provider) = &self.0.snapshot_provider {
             snapshot_provider.commit()?;

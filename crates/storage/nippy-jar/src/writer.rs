@@ -7,8 +7,8 @@ use std::{
     path::Path,
 };
 
-#[derive(Debug)]
 /// Holds a reference or an owned [`NippyJar`].
+#[derive(Debug)]
 enum JarHolder<'a, H = ()> {
     MutRef(&'a mut NippyJar<H>),
     Owned(NippyJar<H>),
