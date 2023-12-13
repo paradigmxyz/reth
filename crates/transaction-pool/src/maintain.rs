@@ -6,26 +6,29 @@ use crate::{
     traits::{CanonicalStateUpdate, ChangedAccount, TransactionPoolExt},
     BlockInfo, TransactionPool,
 };
+
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
-    FutureExt, Stream, StreamExt,
+    pin_mut, FutureExt, Stream, StreamExt,
 };
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredPooledTransaction,
-    FromRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    FromRecoveredTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    TransactionSigned,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
     ProviderError, StateProviderFactory,
 };
-use reth_tasks::TaskSpawner;
+use reth_tasks::{TaskSpawner, TaskSpawnerExt};
 use std::{
     borrow::Borrow,
     collections::HashSet,
     hash::{Hash, Hasher},
+    path::PathBuf,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace, warn};
 
 /// Additional settings for maintaining the transaction pool
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,22 +50,60 @@ impl Default for MaintainPoolConfig {
     }
 }
 
+/// Settings for local transaction backup task
+#[derive(Debug, Clone, Default)]
+pub struct LocalTransactionBackupConfig {
+    /// Path to transactions backup file
+    pub transactions_path: Option<PathBuf>,
+
+    /// Store local transactions to local backup on graceful shutdown
+    /// And get them from backup on boot up
+    pub with_local_txs_backup: bool,
+}
+
+/// Receive path to transactions backup and return initialized config
+pub fn with_local_txs_backup(transactions_path: PathBuf) -> LocalTransactionBackupConfig {
+    LocalTransactionBackupConfig {
+        transactions_path: Some(transactions_path),
+        with_local_txs_backup: true,
+    }
+}
+
 /// Returns a spawnable future for maintaining the state of the transaction pool.
+/// Spawns a task to handle graceful shutdown and store local transactions to file.
 pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     client: Client,
     pool: P,
     events: St,
     task_spawner: Tasks,
     config: MaintainPoolConfig,
+    transactions_backup_config: LocalTransactionBackupConfig,
 ) -> BoxFuture<'static, ()>
 where
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-    Tasks: TaskSpawner + 'static,
+    Tasks: TaskSpawner + TaskSpawnerExt + 'static + Clone,
 {
+    let pool_clone = pool.clone();
+    let task_spawner_clone = task_spawner.clone();
+    let pool_maintanance_future = async move {
+        maintain_transaction_pool(client, pool_clone, events, task_spawner_clone, config).await;
+    }
+    .boxed();
+
     async move {
-        maintain_transaction_pool(client, pool, events, task_spawner, config).await;
+        task_spawner.spawn_critical_with_graceful_shutdown_signal(
+            "maintanace pool task",
+            |shutdown| {
+                local_transactions_backup_task(
+                    shutdown,
+                    pool,
+                    transactions_backup_config.transactions_path,
+                    pool_maintanance_future,
+                )
+            },
+        );
     }
     .boxed()
 }
@@ -83,7 +124,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     Tasks: TaskSpawner + 'static,
 {
     let metrics = MaintainPoolMetrics::default();
-    let MaintainPoolConfig { max_update_depth, max_reload_accounts } = config;
+    let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = latest.seal_slow();
@@ -535,6 +576,90 @@ fn changed_accounts_iter(
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
 }
 
+async fn apply_local_txs_backup<P>(pool: P, transactions_path: Option<PathBuf>)
+where
+    P: TransactionPool + TransactionPoolExt + 'static,
+{
+    if let Some(file_path) = transactions_path.clone() {
+        trace!(target: "reth::cli", txs_file =?file_path, "Check local persistent storage for saved transactions");
+        match reth_primitives::fs::read(&file_path) {
+            Ok(data) => {
+                warn!(target: "reth::cli", txs_file = ?file_path, "We read provided local transactions file and will try to decode transactions");
+                let mut data_slice = data.as_slice();
+                let txs_signed: Vec<TransactionSigned> =
+                    alloy_rlp::Decodable::decode(&mut data_slice).unwrap();
+
+                let pool_transactions = txs_signed
+                    .into_iter()
+                    .map(|tx| {
+                        let tx = tx.try_ecrecovered().unwrap();
+                        <P::Transaction>::from_recovered_transaction(tx)
+                    })
+                    .collect::<Vec<_>>();
+                let _ =
+                    pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
+            }
+            Err(_err) => {
+                warn!(target: "reth::cli", txs_file = ?file_path, "Unable to read provided local transactions file")
+            }
+        }
+    }
+}
+
+fn save_local_txs_backup<P>(pool: P, transactions_path: Option<PathBuf>)
+where
+    P: TransactionPool + TransactionPoolExt + 'static,
+{
+    if let Some(file_path) = transactions_path {
+        let local_transactions = pool.get_local_transactions();
+        let local_transactions = local_transactions
+            .into_iter()
+            .map(|tx| tx.to_recovered_transaction().into_signed())
+            .collect::<Vec<_>>();
+
+        let num_txs = local_transactions.len();
+        let mut buf = alloy_rlp::BytesMut::new();
+        alloy_rlp::encode_list(&local_transactions, &mut buf);
+        trace!(target: "reth::cli", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
+        let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
+        match parent_dir.map(|_| reth_primitives::fs::write(&file_path, buf)) {
+            Ok(_) => {
+                info!(target: "reth::cli", txs_file=?file_path, "Wrote local transactions to file");
+            }
+            Err(err) => {
+                warn!(target: "reth::cli", ?err, txs_file=?file_path, "Failed to write local transactions to file");
+            }
+        }
+    }
+}
+
+/// Task which manages saving local transactions to the persisten file in case of shutdown.
+/// Uploads transactions from the file on the boot up.
+pub async fn local_transactions_backup_task<P>(
+    shutdown: reth_tasks::shutdown::GracefulShutdown,
+    pool: P,
+    transactions_path: Option<PathBuf>,
+    pool_maintanance_future: BoxFuture<'static, ()>,
+) where
+    P: TransactionPoolExt + Clone + 'static,
+{
+    apply_local_txs_backup(pool.clone(), transactions_path.clone()).await;
+
+    pin_mut!(pool_maintanance_future, shutdown);
+
+    let mut graceful_guard = None;
+    tokio::select! {
+        _ = &mut pool_maintanance_future => { println!("future done"); },
+        guard = shutdown => {
+            println!("shutdown triggered");
+            graceful_guard = Some(guard);
+        },
+    }
+
+    save_local_txs_backup(pool, transactions_path);
+    drop(graceful_guard)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,5 +670,94 @@ mod tests {
         let mut copy = changed_acc.0;
         copy.nonce = 10;
         assert!(changed_acc.eq(&ChangedAccountEntry(copy)));
+    }
+
+    use crate::{
+        blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
+        TransactionPool,
+    };
+    use futures_util::{future, future::BoxFuture};
+    use reth_primitives::{
+        hex, FromRecoveredPooledTransaction, PooledTransactionsElement, MAINNET, U256,
+    };
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+    use reth_tasks::TaskManager;
+
+    const EXTENSION: &str = "rlp";
+    const FILENAME: &str = "test_transactions_backup";
+
+    #[tokio::test]
+    async fn test_save_local_txs_backup() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let transactions_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
+        let tx_bytes = hex!("02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507");
+        let tx = PooledTransactionsElement::decode_enveloped(tx_bytes.into()).unwrap();
+        let provider = MockEthProvider::default();
+        let transaction = EthPooledTransaction::from_recovered_pooled_transaction(
+            tx.try_into_ecrecovered().unwrap(),
+        );
+        let tx_to_cmp = transaction.clone();
+        let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
+        provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
+            .build(provider, blob_store.clone());
+        let _outcome = validator.validate_one(TransactionOrigin::Local, transaction.clone());
+
+        let txpool = Pool::new(
+            validator.clone(),
+            CoinbaseTipOrdering::default(),
+            blob_store.clone(),
+            Default::default(),
+        );
+
+        let _ = txpool.add_transaction(TransactionOrigin::Local, transaction.clone()).await;
+
+        let transactions_backup_config = with_local_txs_backup(transactions_path);
+
+        let pool_maintanance_future: BoxFuture<'static, ()> = Box::pin(future::ready(()));
+        let handle = tokio::runtime::Handle::current();
+        let manager = TaskManager::new(handle);
+        let executor_1 = manager.executor().clone();
+        let tx_path = transactions_backup_config.transactions_path.clone();
+        let _ = executor_1
+            .spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
+                local_transactions_backup_task(
+                    shutdown,
+                    txpool.clone(),
+                    tx_path,
+                    pool_maintanance_future,
+                )
+            })
+            .await;
+
+        let pool_maintanance_future: BoxFuture<'static, ()> = Box::pin(future::ready(()));
+        let validator_clone = validator.clone();
+        let tx_path = transactions_backup_config.transactions_path.clone();
+        let txpool = Pool::new(
+            validator_clone.clone(),
+            CoinbaseTipOrdering::default(),
+            blob_store.clone(),
+            Default::default(),
+        );
+        let txpool_cloned = txpool.clone();
+        let executor_2 = manager.executor().clone();
+        let _ = executor_2
+            .spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
+                local_transactions_backup_task(
+                    shutdown,
+                    txpool.clone(),
+                    tx_path,
+                    pool_maintanance_future,
+                )
+            })
+            .await;
+
+        let mut txns = txpool_cloned.get_local_transactions();
+        let tx_on_finish = txns.pop().expect("there should be 1 transaction");
+
+        assert_eq!(*tx_to_cmp.hash(), *tx_on_finish.hash());
+        temp_dir.close().unwrap();
     }
 }

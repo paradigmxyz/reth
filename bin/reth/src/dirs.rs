@@ -293,6 +293,13 @@ impl<D> ChainPath<D> {
         self.0.join("blobstore").into()
     }
 
+    /// Returns the path to the local transactions backup file
+    ///
+    /// `<DIR>/<CHAIN_ID>/transactions-backup.rlp`
+    pub fn transactions_path(&self) -> PathBuf {
+        self.0.join("transactions-backup.rlp").into()
+    }
+
     /// Returns the path to the config file for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/reth.toml`

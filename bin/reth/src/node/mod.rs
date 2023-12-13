@@ -320,21 +320,25 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
 
+        let transactions_path = data_dir.transactions_path();
+
         // spawn txpool maintenance task
         {
-            let pool = transaction_pool.clone();
             let chain_events = blockchain_db.canonical_state_stream();
             let client = blockchain_db.clone();
-            ctx.task_executor.spawn_critical(
-                "txpool maintenance task",
-                reth_transaction_pool::maintain::maintain_transaction_pool_future(
-                    client,
-                    pool,
-                    chain_events,
-                    ctx.task_executor.clone(),
-                    Default::default(),
-                ),
+            let transactions_backup_config =
+                reth_transaction_pool::maintain::with_local_txs_backup(transactions_path);
+
+            let fut = reth_transaction_pool::maintain::maintain_transaction_pool_future(
+                client,
+                transaction_pool.clone(),
+                chain_events,
+                ctx.task_executor.clone(),
+                Default::default(),
+                transactions_backup_config,
             );
+            ctx.task_executor.spawn_critical("txpool maintenance task", fut);
+
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
         }
 
