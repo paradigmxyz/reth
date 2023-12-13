@@ -96,6 +96,14 @@ where
         &self.peers
     }
 
+    /// Remove a peer from the [`Testnet`] and return it.
+    ///
+    /// # Panics
+    /// If the index is out of bounds.
+    pub fn remove_peer(&mut self, index: usize) -> Peer<C, Pool> {
+        self.peers.remove(index)
+    }
+
     /// Return a mutable iterator over all peers.
     pub fn peers_iter_mut(&mut self) -> impl Iterator<Item = &mut Peer<C, Pool>> + '_ {
         self.peers.iter_mut()
@@ -344,6 +352,16 @@ where
     /// The address that listens for incoming connections.
     pub fn local_addr(&self) -> SocketAddr {
         self.network.local_addr()
+    }
+
+    /// The [PeerId] of this peer.
+    pub fn peer_id(&self) -> PeerId {
+        *self.network.peer_id()
+    }
+
+    /// Returns mutable access to the network.
+    pub fn network_mut(&mut self) -> &mut NetworkManager<C> {
+        &mut self.network
     }
 
     /// Returns the [`NetworkHandle`] of this peer.

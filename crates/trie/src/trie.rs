@@ -1,5 +1,4 @@
 use crate::{
-    account::EthAccount,
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
     prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut},
@@ -14,7 +13,7 @@ use reth_db::{tables, transaction::DbTx};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
-    trie::{HashBuilder, Nibbles},
+    trie::{HashBuilder, Nibbles, TrieAccount},
     Address, BlockNumber, B256,
 };
 use std::{
@@ -287,7 +286,7 @@ where
                         storage_root_calculator.root()?
                     };
 
-                    let account = EthAccount::from(account).with_storage_root(storage_root);
+                    let account = TrieAccount::from((account, storage_root));
 
                     account_rlp.clear();
                     account.encode(&mut account_rlp as &mut dyn BufMut);
@@ -769,10 +768,7 @@ mod tests {
     }
 
     fn encode_account(account: Account, storage_root: Option<B256>) -> Vec<u8> {
-        let mut account = EthAccount::from(account);
-        if let Some(storage_root) = storage_root {
-            account = account.with_storage_root(storage_root);
-        }
+        let account = TrieAccount::from((account, storage_root.unwrap_or(EMPTY_ROOT_HASH)));
         let mut account_rlp = Vec::with_capacity(account.length());
         account.encode(&mut account_rlp);
         account_rlp
@@ -937,7 +933,7 @@ mod tests {
         assert_eq!(account_updates.len(), 2);
 
         let (nibbles1a, node1a) = account_updates.first().unwrap();
-        assert_eq!(nibbles1a.inner[..], [0xB]);
+        assert_eq!(nibbles1a[..], [0xB]);
         assert_eq!(node1a.state_mask, TrieMask::new(0b1011));
         assert_eq!(node1a.tree_mask, TrieMask::new(0b0001));
         assert_eq!(node1a.hash_mask, TrieMask::new(0b1001));
@@ -945,7 +941,7 @@ mod tests {
         assert_eq!(node1a.hashes.len(), 2);
 
         let (nibbles2a, node2a) = account_updates.last().unwrap();
-        assert_eq!(nibbles2a.inner[..], [0xB, 0x0]);
+        assert_eq!(nibbles2a[..], [0xB, 0x0]);
         assert_eq!(node2a.state_mask, TrieMask::new(0b10001));
         assert_eq!(node2a.tree_mask, TrieMask::new(0b00000));
         assert_eq!(node2a.hash_mask, TrieMask::new(0b10000));
@@ -963,7 +959,7 @@ mod tests {
         assert_eq!(storage_updates.len(), 1);
 
         let (nibbles3, node3) = storage_updates.first().unwrap();
-        assert!(nibbles3.inner.is_empty());
+        assert!(nibbles3.is_empty());
         assert_eq!(node3.state_mask, TrieMask::new(0b1010));
         assert_eq!(node3.tree_mask, TrieMask::new(0b0000));
         assert_eq!(node3.hash_mask, TrieMask::new(0b0010));
@@ -1004,7 +1000,7 @@ mod tests {
         assert_eq!(account_updates.len(), 2);
 
         let (nibbles1b, node1b) = account_updates.first().unwrap();
-        assert_eq!(nibbles1b.inner[..], [0xB]);
+        assert_eq!(nibbles1b[..], [0xB]);
         assert_eq!(node1b.state_mask, TrieMask::new(0b1011));
         assert_eq!(node1b.tree_mask, TrieMask::new(0b0001));
         assert_eq!(node1b.hash_mask, TrieMask::new(0b1011));
@@ -1014,7 +1010,7 @@ mod tests {
         assert_eq!(node1a.hashes[1], node1b.hashes[2]);
 
         let (nibbles2b, node2b) = account_updates.last().unwrap();
-        assert_eq!(nibbles2b.inner[..], [0xB, 0x0]);
+        assert_eq!(nibbles2b[..], [0xB, 0x0]);
         assert_eq!(node2a, node2b);
         tx.commit().unwrap();
         let tx = factory.provider_rw().unwrap();
@@ -1057,7 +1053,7 @@ mod tests {
             assert_eq!(account_updates.len(), 1);
 
             let (nibbles1c, node1c) = account_updates.first().unwrap();
-            assert_eq!(nibbles1c.inner[..], [0xB]);
+            assert_eq!(nibbles1c[..], [0xB]);
 
             assert_eq!(node1c.state_mask, TrieMask::new(0b1011));
             assert_eq!(node1c.tree_mask, TrieMask::new(0b0000));
@@ -1114,7 +1110,7 @@ mod tests {
             assert_eq!(account_updates.len(), 1);
 
             let (nibbles1d, node1d) = account_updates.first().unwrap();
-            assert_eq!(nibbles1d.inner[..], [0xB]);
+            assert_eq!(nibbles1d[..], [0xB]);
 
             assert_eq!(node1d.state_mask, TrieMask::new(0b1011));
             assert_eq!(node1d.tree_mask, TrieMask::new(0b0000));
@@ -1143,7 +1139,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.inner[..].into(), node.clone()))
+                    Some((nibbles.clone(), node.clone()))
                 }
                 _ => None,
             })
@@ -1170,7 +1166,7 @@ mod tests {
         let mut account_updates = HashMap::new();
         for item in walker {
             let (key, node) = item.unwrap();
-            account_updates.insert(key.inner[..].into(), node);
+            account_updates.insert(key, node);
         }
 
         assert_trie_updates(&account_updates);
@@ -1231,7 +1227,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::StorageNode(_, nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.inner[..].into(), node.clone()))
+                    Some((nibbles.clone().into(), node.clone()))
                 }
                 _ => None,
             })
@@ -1296,11 +1292,11 @@ mod tests {
     fn assert_trie_updates(account_updates: &HashMap<Nibbles, BranchNodeCompact>) {
         assert_eq!(account_updates.len(), 2);
 
-        let node = account_updates.get(&vec![0x3].as_slice().into()).unwrap();
+        let node = account_updates.get(&[0x3][..]).unwrap();
         let expected = BranchNodeCompact::new(0b0011, 0b0001, 0b0000, vec![], None);
         assert_eq!(node, &expected);
 
-        let node = account_updates.get(&vec![0x3, 0x0, 0xA, 0xF].as_slice().into()).unwrap();
+        let node = account_updates.get(&[0x3, 0x0, 0xA, 0xF][..]).unwrap();
         assert_eq!(node.state_mask, TrieMask::new(0b101100000));
         assert_eq!(node.tree_mask, TrieMask::new(0b000000000));
         assert_eq!(node.hash_mask, TrieMask::new(0b001000000));

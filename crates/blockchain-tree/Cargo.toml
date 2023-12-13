@@ -40,8 +40,10 @@ reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
 
 [features]
 test-utils = []
+optimism = ["reth-primitives/optimism", "reth-interfaces/optimism", "reth-provider/optimism", "reth-revm/optimism"]

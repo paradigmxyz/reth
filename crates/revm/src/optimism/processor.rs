@@ -1,4 +1,7 @@
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use crate::processor::{verify_receipt, EVMProcessor};
+use reth_interfaces::executor::{
+    BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
+};
 use reth_primitives::{
     revm::compat::into_reth_log, revm_primitives::ResultAndState, Address, Block, Hardfork,
     Receipt, U256,
@@ -7,8 +10,6 @@ use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
 use revm::DatabaseCommit;
 use std::time::Instant;
 use tracing::{debug, trace};
-
-use crate::processor::{verify_receipt, EVMProcessor};
 
 impl<'a> BlockExecutor for EVMProcessor<'a> {
     fn execute(
@@ -36,9 +37,13 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
             let time = Instant::now();
-            if let Err(error) =
-                verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
-            {
+            if let Err(error) = verify_receipt(
+                block.header.receipts_root,
+                block.header.logs_bloom,
+                receipts.iter(),
+                self.chain_spec.as_ref(),
+                block.timestamp,
+            ) {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
@@ -65,6 +70,17 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
         let is_regolith =
             self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
+
+        // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
+        // blocks will always have at least a single transaction in them (the L1 info transaction),
+        // so we can safely assume that this will always be triggered upon the transition and that
+        // the above check for empty blocks will never be hit on OP chains.
+        super::ensure_create2_deployer(self.chain_spec().clone(), block.timestamp, self.db_mut())
+            .map_err(|_| {
+            BlockExecutionError::OptimismBlockExecution(
+                OptimismBlockExecutionError::ForceCreate2DeployerFail,
+            )
+        })?;
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
@@ -125,6 +141,14 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
                 logs: result.into_logs().into_iter().map(into_reth_log).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: depositor.map(|account| account.nonce),
+                // The deposit receipt version was introduced in Canyon to indicate an update to how
+                // receipt hashes should be computed when set. The state transition process ensures
+                // this is only set for post-Canyon deposit transactions.
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: self
+                    .chain_spec()
+                    .is_fork_active_at_timestamp(Hardfork::Canyon, block.timestamp)
+                    .then_some(1),
             });
         }
 

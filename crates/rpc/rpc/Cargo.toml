@@ -40,8 +40,10 @@ jsonrpsee.workspace = true
 http = "0.2.8"
 http-body = "0.4.5"
 hyper = "0.14.24"
-reqwest = { version = "0.11.20", optional = true }
 jsonwebtoken = "8"
+
+## required for optimism sequencer delegation
+reqwest = { version = "0.11", default-features = false, features = ["rustls"], optional = true }
 
 # async
 async-trait.workspace = true

@@ -20,7 +20,7 @@ services:
       node
       --chain mainnet
       --metrics 0.0.0.0:9001
-      --log.directory /root/rethlogs
+      --log.file.directory /root/rethlogs
       --authrpc.addr 0.0.0.0
       --authrpc.port 8551
       --authrpc.jwtsecret /root/jwt/jwt.hex

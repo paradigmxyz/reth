@@ -12,14 +12,16 @@ pub use hash_builder::HashBuilder;
 mod proofs;
 pub use proofs::{AccountProof, StorageProof};
 
+mod account;
 mod mask;
 mod nibbles;
 mod storage;
 mod subnode;
 
 pub use self::{
+    account::TrieAccount,
     mask::TrieMask,
-    nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey},
+    nibbles::{Nibbles, StoredNibblesSubKey},
     storage::StorageTrieEntry,
     subnode::StoredSubNode,
 };

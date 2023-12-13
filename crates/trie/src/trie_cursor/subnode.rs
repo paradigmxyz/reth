@@ -39,14 +39,14 @@ impl From<StoredSubNode> for CursorSubNode {
             Some(n) => n as i8,
             None => -1,
         };
-        Self { key: Nibbles::from_hex(value.key), nibble, node: value.node }
+        Self { key: Nibbles::from_nibbles_unchecked(value.key), nibble, node: value.node }
     }
 }
 
 impl From<CursorSubNode> for StoredSubNode {
     fn from(value: CursorSubNode) -> Self {
         let nibble = if value.nibble >= 0 { Some(value.nibble as u8) } else { None };
-        Self { key: value.key.hex_data.to_vec(), nibble, node: value.node }
+        Self { key: value.key.to_vec(), nibble, node: value.node }
     }
 }
 
@@ -67,7 +67,7 @@ impl CursorSubNode {
     pub fn full_key(&self) -> Nibbles {
         let mut out = self.key.clone();
         if self.nibble >= 0 {
-            out.extend([self.nibble as u8]);
+            out.push(self.nibble as u8);
         }
         out
     }

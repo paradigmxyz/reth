@@ -22,7 +22,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     ops::{RangeBounds, RangeInclusive},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::sync::watch;
@@ -44,6 +44,57 @@ pub struct ProviderFactory<DB> {
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
     snapshot_provider: Option<Arc<SnapshotProvider>>,
+}
+
+impl<DB: Clone> Clone for ProviderFactory<DB> {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            chain_spec: Arc::clone(&self.chain_spec),
+            snapshot_provider: self.snapshot_provider.clone(),
+        }
+    }
+}
+
+impl<DB: Database> ProviderFactory<DB> {}
+
+impl<DB> ProviderFactory<DB> {
+    /// Create new database provider factory.
+    pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
+        Self { db, chain_spec, snapshot_provider: None }
+    }
+
+    /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
+    /// instance.
+    pub fn new_with_database_path<P: AsRef<Path>>(
+        path: P,
+        chain_spec: Arc<ChainSpec>,
+        log_level: Option<LogLevel>,
+    ) -> RethResult<ProviderFactory<DatabaseEnv>> {
+        Ok(ProviderFactory::<DatabaseEnv> {
+            db: init_db(path, log_level).map_err(|e| RethError::Custom(e.to_string()))?,
+            chain_spec,
+            snapshot_provider: None,
+        })
+    }
+
+    /// Database provider that comes with a shared snapshot provider.
+    pub fn with_snapshots(
+        mut self,
+        snapshots_path: PathBuf,
+        highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
+    ) -> Self {
+        self.snapshot_provider = Some(Arc::new(
+            SnapshotProvider::new(snapshots_path)
+                .with_highest_tracker(Some(highest_snapshot_tracker)),
+        ));
+        self
+    }
+
+    /// Returns reference to the underlying database.
+    pub fn db_ref(&self) -> &DB {
+        &self.db
+    }
 }
 
 impl<DB: Database> ProviderFactory<DB> {
@@ -73,55 +124,7 @@ impl<DB: Database> ProviderFactory<DB> {
 
         Ok(DatabaseProviderRW(provider))
     }
-}
 
-impl<DB> ProviderFactory<DB> {
-    /// create new database provider
-    pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { db, chain_spec, snapshot_provider: None }
-    }
-
-    /// database provider comes with a shared snapshot provider
-    pub fn with_snapshots(
-        mut self,
-        snapshots_path: PathBuf,
-        highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
-    ) -> Self {
-        self.snapshot_provider = Some(Arc::new(
-            SnapshotProvider::new(snapshots_path)
-                .with_highest_tracker(Some(highest_snapshot_tracker)),
-        ));
-        self
-    }
-}
-
-impl<DB: Database> ProviderFactory<DB> {
-    /// create new database provider by passing a path. [`ProviderFactory`] will own the database
-    /// instance.
-    pub fn new_with_database_path<P: AsRef<std::path::Path>>(
-        path: P,
-        chain_spec: Arc<ChainSpec>,
-        log_level: Option<LogLevel>,
-    ) -> RethResult<ProviderFactory<DatabaseEnv>> {
-        Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path, log_level).map_err(|e| RethError::Custom(e.to_string()))?,
-            chain_spec,
-            snapshot_provider: None,
-        })
-    }
-}
-
-impl<DB: Clone> Clone for ProviderFactory<DB> {
-    fn clone(&self) -> Self {
-        Self {
-            db: self.db.clone(),
-            chain_spec: Arc::clone(&self.chain_spec),
-            snapshot_provider: self.snapshot_provider.clone(),
-        }
-    }
-}
-
-impl<DB: Database> ProviderFactory<DB> {
     /// Storage provider for latest block
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");

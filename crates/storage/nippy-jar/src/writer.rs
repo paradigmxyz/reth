@@ -7,6 +7,9 @@ use std::{
     path::Path,
 };
 
+/// Initial size of an offset in bytes.
+const INITIAL_OFFSET_SIZE: u64 = 8;
+
 /// Holds a reference or an owned [`NippyJar`].
 #[derive(Debug)]
 enum JarHolder<'a, H = ()> {
@@ -121,8 +124,8 @@ where
         let mut offsets_file = if !offsets.exists() {
             let mut offsets = File::create(offsets)?;
 
-            // Initially all offsets are represented as 8 bytes.
-            offsets.write_all(&[8])?;
+            // Initially all offsets are represented as INITIAL_OFFSET_SIZE (8) bytes.
+            offsets.write_all(&[INITIAL_OFFSET_SIZE as u8])?;
 
             offsets
         } else {
@@ -134,36 +137,74 @@ where
     }
 
     /// Performs consistency checks on the [`NippyJar`] file and acts upon any issues:
-    /// * Is the offsets file size expected? If not, truncate it.
-    /// * Is the data file size expected? If not truncate it.
+    /// * Is the offsets file size expected?
+    /// * Is the data file size expected?
     ///
     /// This is based on the assumption that [`NippyJar`] configuration is **always** the last one
     /// to be updated when something is written, as by the `commit()` function shows.
     fn consistency_check(&mut self) -> Result<(), NippyJarError> {
-        let config_rows = self.jar.rows as u64;
+        let reader = self.jar.open_data_reader()?;
+
+        // When an offset length is smaller than the initial (8), we are dealing with immutable data.
+        if reader.offset_len() as u64 != INITIAL_OFFSET_SIZE {
+            return Err(NippyJarError::FrozenJar)
+        }
 
         // 1 byte: for byte-len offset representation
         // 8 bytes * num rows * num columns
         // 8 bytes: expected size of the data file.
-        let expected_offsets_file_size = 1 + config_rows * self.jar.columns as u64 * 8 + 8;
+        let expected_offsets_file_size = 1 +
+            self.jar.rows as u64 * self.jar.columns as u64 * INITIAL_OFFSET_SIZE +
+            INITIAL_OFFSET_SIZE;
         let offsets_file_size = self.offsets_file.metadata()?.len();
 
-        if expected_offsets_file_size != offsets_file_size {
+        // Configuration wasn't properly committed,
+        if expected_offsets_file_size < offsets_file_size {
+            // Happen during an appending job
             // TODO: ideally we could truncate until the last offset of the last column of the last
             // row inserted
             self.offsets_file.set_len(expected_offsets_file_size)?;
+        } else if expected_offsets_file_size > offsets_file_size {
+            // Happened during a pruning job
+            self.jar.rows =
+                (offsets_file_size.saturating_sub(1).saturating_sub(INITIAL_OFFSET_SIZE) /
+                    (self.jar.columns as u64)) as usize /
+                    INITIAL_OFFSET_SIZE as usize;
+
+            // Freeze row count changed
+            self.jar.freeze_config()?;
         }
 
-        // Last offset is always the expected size of the data file.
-        let mut last_offset = [0u8; 8];
-        self.offsets_file.seek(SeekFrom::Start(1 + (config_rows * self.jar.columns as u64 * 8)))?;
-        self.offsets_file.read_exact(&mut last_offset)?;
-        let last_offset = u64::from_le_bytes(last_offset);
+        // last offset should match the data_file_len
+        let last_offset = reader.reverse_offset(0)?;
+        let data_file_len = self.data_file.metadata()?.len();
 
-        // Offset list wasn't properly committed, so we need to truncate the data, since there's no
-        // way to recover it.
-        if last_offset != self.data_file.metadata()?.len() {
+        // Offset list wasn't properly committed,
+        if last_offset < data_file_len {
+            // Happen during an appending job so we need to truncate the data, since there's no
+            // way to recover it.
             self.data_file.set_len(last_offset)?;
+        } else if last_offset > data_file_len {
+            // Happened during a pruning job. So we need to reverse iterate offsets until we find
+            // the matching one.
+            for index in 0..reader.offsets_count()? {
+                let offset = reader.reverse_offset(index as usize + 1)?;
+                if offset == data_file_len {
+                    self.offsets_file.set_len(
+                        self.offsets_file
+                            .metadata()?
+                            .len()
+                            .saturating_sub(INITIAL_OFFSET_SIZE * (index as u64 + 1)),
+                    )?;
+
+                    drop(reader);
+
+                    // Since we decrease the offset list, we need to reevaluate `self.jar.rows`
+                    // again
+                    self.consistency_check()?;
+                    break
+                }
+            }
         }
 
         self.offsets_file.seek(SeekFrom::End(0))?;
@@ -277,12 +318,19 @@ where
         if remaining_to_prune > 0 {
             // Get the current length of the on-disk offset file
             let length = self.offsets_file.metadata()?.len();
-            let bytes_per_offset = 8;
 
             // Handle non-empty offset file
             if length > 1 {
                 // first byte is reserved for `bytes_per_offset`, which is 8 initially.
-                let num_offsets = (length - 1) / bytes_per_offset;
+                let num_offsets = (length - 1) / INITIAL_OFFSET_SIZE;
+
+                if remaining_to_prune as u64 > num_offsets {
+                    return Err(NippyJarError::InvalidPruning(
+                        num_offsets,
+                        remaining_to_prune as u64,
+                    ))
+                }
+
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
 
                 // If all rows are to be pruned
@@ -292,12 +340,12 @@ where
                     self.data_file.set_len(0)?;
                 } else {
                     // Calculate the new length for the on-disk offset list
-                    let new_len = 1 + new_num_offsets * bytes_per_offset;
+                    let new_len = 1 + new_num_offsets * INITIAL_OFFSET_SIZE;
                     // Seek to the position of the last offset
                     self.offsets_file
-                        .seek(SeekFrom::Start(new_len.saturating_sub(bytes_per_offset)))?;
+                        .seek(SeekFrom::Start(new_len.saturating_sub(INITIAL_OFFSET_SIZE)))?;
                     // Read the last offset value
-                    let mut last_offset = [0u8; 8];
+                    let mut last_offset = [0u8; INITIAL_OFFSET_SIZE as usize];
                     self.offsets_file.read_exact(&mut last_offset)?;
                     let last_offset = u64::from_le_bytes(last_offset);
 
@@ -306,9 +354,7 @@ where
                     self.data_file.set_len(last_offset)?;
                 }
             } else {
-                // If the offsets file only contains the byte representation
-                self.offsets_file.set_len(1)?;
-                self.data_file.set_len(0)?;
+                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
             }
         }
 
@@ -347,14 +393,14 @@ where
 
     /// Flushes offsets to disk.
     pub(crate) fn commit_offsets(&mut self) -> Result<(), NippyJarError> {
-        // The last offset on disk can be the first offset on `self.offset_list` given how
+        // The last offset on disk can be the first offset of `self.offsets` given how
         // `append_column()` works alongside commit. So we need to skip it.
         let mut last_offset_ondisk = None;
 
         if self.offsets_file.metadata()?.len() > 1 {
-            self.offsets_file.seek(SeekFrom::End(-8))?;
+            self.offsets_file.seek(SeekFrom::End(-(INITIAL_OFFSET_SIZE as i64)))?;
 
-            let mut buf = [0u8; 8];
+            let mut buf = [0u8; INITIAL_OFFSET_SIZE as usize];
             self.offsets_file.read_exact(&mut buf)?;
             last_offset_ondisk = Some(u64::from_le_bytes(buf));
         }

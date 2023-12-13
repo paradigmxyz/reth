@@ -228,9 +228,7 @@ where
                 .join(format!("{}.conf", path.file_name().expect("exists").to_string_lossy())),
         )?;
 
-        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let data_reader = unsafe { memmap2::Mmap::map(&config_file)? };
-        let mut obj: Self = bincode::deserialize_from(data_reader.as_ref())?;
+        let mut obj: Self = bincode::deserialize_from(&config_file)?;
         obj.path = Some(path.to_path_buf());
         Ok(obj)
     }
@@ -238,14 +236,11 @@ where
     /// Loads filters into memory
     pub fn load_filters(mut self) -> Result<Self, NippyJarError> {
         // Read the offsets lists located at the index file.
-        let offsets_file = File::open(self.index_path())?;
+        let mut offsets_file = File::open(self.index_path())?;
 
-        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let mmap = unsafe { memmap2::Mmap::map(&offsets_file)? };
-        let mut offsets_reader = mmap.as_ref();
-        self.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_reader)?;
-        self.phf = bincode::deserialize_from(&mut offsets_reader)?;
-        self.filter = bincode::deserialize_from(&mut offsets_reader)?;
+        self.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_file)?;
+        self.phf = bincode::deserialize_from(&mut offsets_file)?;
+        self.filter = bincode::deserialize_from(&mut offsets_file)?;
         Ok(self)
     }
 
@@ -385,13 +380,13 @@ where
         self.freeze_check(&columns)?;
 
         // Creates the writer, data and offsets file
-        let mut appender = NippyJarWriter::from_mut(self)?;
+        let mut writer = NippyJarWriter::new(self)?;
 
         // Append rows to file while holding offsets in memory
-        appender.append_rows(columns, total_rows)?;
+        writer.append_rows(columns, total_rows)?;
 
         // Flushes configuration and offsets to disk
-        appender.commit()?;
+        writer.commit()?;
 
         // Write phf, filter and offset index to file
         self.freeze_filters()?;
@@ -526,6 +521,26 @@ impl DataReader {
         u64::from_le_bytes(buffer)
     }
 
+    /// Returns the offset for the requested data index starting from the end
+    pub fn reverse_offset(&self, index: usize) -> Result<u64, NippyJarError> {
+        let mut buffer: [u8; 8] = [0; 8];
+        let offsets_file_size = self.offset_file.metadata()?.len();
+
+        if offsets_file_size > 1 {
+            let from = offsets_file_size as usize - self.offset_len * (index + 1);
+            let to = from + self.offset_len;
+
+            buffer[..self.offset_len].copy_from_slice(&self.offset_mmap[from..to]);
+            Ok(u64::from_le_bytes(buffer))
+        } else {
+            Ok(0)
+        }
+    }
+
+    pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
+        Ok(self.offset_file.metadata()?.len().saturating_sub(1) as usize / self.offset_len)
+    }
+
     /// Provides the underlying data as a slice on the provided offset range.
     pub fn data(&self, range: Range<usize>) -> &[u8] {
         &self.data_mmap[range]
@@ -535,13 +550,18 @@ impl DataReader {
     pub fn size(&self) -> usize {
         self.data_mmap.len()
     }
+
+    /// Returns number of bytes necessary to read one offset.
+    pub fn offset_len(&self) -> usize {
+        self.offset_len
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
-    use std::collections::HashSet;
+    use std::{collections::HashSet, fs::OpenOptions};
 
     type ColumnResults<T> = Vec<ColumnResult<T>>;
     type ColumnValues = Vec<Vec<u8>>;
@@ -1032,13 +1052,39 @@ mod tests {
 
         // Simulate an unexpected shutdown before there's a chance to commit, and see that it
         // unwinds successfully
-        test_consistency_no_commit(file_path.path(), &col1, &col2);
+        test_append_consistency_no_commit(file_path.path(), &col1, &col2);
 
         // Simulate an unexpected shutdown during commit, and see that it unwinds successfully
-        test_consistency_partial_commit(file_path.path(), &col1, &col2);
+        test_append_consistency_partial_commit(file_path.path(), &col1, &col2);
     }
 
-    fn test_consistency_partial_commit(file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
+    #[test]
+    fn test_pruner() {
+        let (col1, col2) = test_data(None);
+        let num_columns = 2;
+        let num_rows = 2;
+
+        // (missing_offsets, expected number of rows)
+        // If a row wasnt fully pruned, then it should clear it up as well
+        let missing_offsets_scenarios = [(1, 1), (2, 1), (3, 0)];
+
+        for (missing_offsets, expected_rows) in missing_offsets_scenarios {
+            let file_path = tempfile::NamedTempFile::new().unwrap();
+
+            append_two_rows(num_columns, file_path.path(), &col1, &col2);
+
+            simulate_interrupted_prune(num_columns, file_path.path(), num_rows, missing_offsets);
+
+            let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+            assert_eq!(nippy.rows, expected_rows);
+        }
+    }
+
+    fn test_append_consistency_partial_commit(
+        file_path: &Path,
+        col1: &[Vec<u8>],
+        col2: &[Vec<u8>],
+    ) {
         let mut nippy = NippyJar::load_without_header(file_path).unwrap();
 
         // Set the baseline that should be unwinded to
@@ -1095,7 +1141,7 @@ mod tests {
         assert_eq!(initial_rows, nippy.rows);
     }
 
-    fn test_consistency_no_commit(file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
+    fn test_append_consistency_no_commit(file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
         let mut nippy = NippyJar::load_without_header(file_path).unwrap();
 
         // Set the baseline that should be unwinded to
@@ -1249,5 +1295,33 @@ mod tests {
         assert_eq!(File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
         // Only the byte that indicates how many bytes per offset should be left
         assert_eq!(File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize, 1);
+    }
+
+    fn simulate_interrupted_prune(
+        num_columns: usize,
+        file_path: &Path,
+        num_rows: u64,
+        missing_offsets: u64,
+    ) {
+        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+        let reader = nippy.open_data_reader().unwrap();
+        let offsets_file =
+            OpenOptions::new().read(true).write(true).open(nippy.offsets_path()).unwrap();
+        let offsets_len = 1 + num_rows * num_columns as u64 * 8 + 8;
+        assert_eq!(offsets_len, offsets_file.metadata().unwrap().len());
+
+        let data_file = OpenOptions::new().read(true).write(true).open(nippy.data_path()).unwrap();
+        let data_len = reader.reverse_offset(0).unwrap();
+        assert_eq!(data_len, data_file.metadata().unwrap().len());
+
+        // each data column is 32 bytes long
+        // by deleting from the data file, the `consistency_check` will go through both branches:
+        //      when the offset list wasn't updated after clearing the data (data_len > last
+        // offset).      fixing above, will lead to offset count not match the rows (*
+        // columns) of the configuration file
+        data_file.set_len(data_len - 32 * missing_offsets).unwrap();
+
+        // runs the consistency check.
+        let _ = NippyJarWriter::new(&mut nippy).unwrap();
     }
 }
