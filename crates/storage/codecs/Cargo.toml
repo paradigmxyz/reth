@@ -13,18 +13,13 @@ compact = ["codecs-derive/compact"]
 scale = ["codecs-derive/scale"]
 postcard = ["codecs-derive/postcard"]
 no_codec = ["codecs-derive/no_codec"]
-arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+arbitrary = ["revm-primitives/arbitrary"]
 optimism = ["codecs-derive/optimism"]
 
 [dependencies]
 bytes.workspace = true
 codecs-derive = { path = "./derive", default-features = false }
 revm-primitives = { workspace = true, features = ["serde"] }
-
-# arbitrary utils
-arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 revm-primitives = { workspace = true, features = ["serde", "arbitrary"] }
