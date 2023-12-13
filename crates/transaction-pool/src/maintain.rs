@@ -687,6 +687,7 @@ mod tests {
     const EXTENSION: &str = "rlp";
     const FILENAME: &str = "test_transactions_backup";
 
+    #[cfg(not(feature = "optimism"))]
     #[tokio::test]
     async fn test_save_local_txs_backup() {
         let temp_dir = tempfile::tempdir().unwrap();
