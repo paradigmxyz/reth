@@ -6,7 +6,7 @@ use crate::{
     },
     cli::{
         components::RethNodeComponentsImpl,
-        config::RethRpcConfig,
+        config::{RethRpcConfig, RethTransactionPoolConfig},
         db_type::{DatabaseBuilder, DatabaseInstance},
         ext::{RethCliExt, RethNodeCommandConfig},
     },
@@ -34,7 +34,7 @@ use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
 };
-use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_db::{database::Database, init_db, DatabaseEnv, database_metrics::DatabaseMetrics};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -806,11 +806,14 @@ impl NodeConfig {
         prometheus_exporter::install_recorder()
     }
 
-    async fn start_metrics_endpoint(
+    async fn start_metrics_endpoint<Metrics>(
         &self,
         prometheus_handle: PrometheusHandle,
-        db: Arc<DatabaseEnv>,
-    ) -> eyre::Result<()> {
+        db: Metrics,
+    ) -> eyre::Result<()>
+    where
+        Metrics: DatabaseMetrics + 'static + Send + Sync,
+    {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
             prometheus_exporter::serve(
@@ -1181,7 +1184,7 @@ pub struct NodeBuilderWithDatabase<DB> {
     pub data_dir: ChainPath<DataDirPath>,
 }
 
-impl<DB: Database> NodeBuilderWithDatabase<DB> {
+impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
     pub async fn launch<E: RethCliExt>(
         mut self,
         mut ext: E::Node,
