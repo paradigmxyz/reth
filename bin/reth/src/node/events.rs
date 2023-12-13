@@ -17,7 +17,6 @@ use std::{
     fmt::{Display, Formatter},
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -32,7 +31,7 @@ struct NodeState<DB> {
     /// Database environment.
     /// Used for freelist calculation reported in the "Status" log message.
     /// See [EventHandler::poll].
-    db: Arc<DB>,
+    db: DB,
     /// Connection to the network.
     network: Option<NetworkHandle>,
     /// The stage currently being executed.
@@ -41,8 +40,8 @@ struct NodeState<DB> {
     latest_block: Option<BlockNumber>,
 }
 
-impl<DB: Database> NodeState<DB> {
-    fn new(db: Arc<DB>, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
+impl<DB> NodeState<DB> {
+    fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
         Self { db, network, current_stage: None, latest_block }
     }
 
@@ -276,10 +275,10 @@ pub async fn handle_events<E, DB>(
     network: Option<NetworkHandle>,
     latest_block_number: Option<BlockNumber>,
     events: E,
-    db: Arc<DB>,
+    db: DB,
 ) where
     E: Stream<Item = NodeEvent> + Unpin,
-    DB: DatabaseMetadata<Metadata = usize> + 'static,
+    DB: DatabaseMetadata<Metadata = usize> + Database + 'static,
 {
     let state = NodeState::new(db, network, latest_block_number);
 
@@ -304,7 +303,7 @@ struct EventHandler<E, DB> {
 impl<E, DB> Future for EventHandler<E, DB>
 where
     E: Stream<Item = NodeEvent> + Unpin,
-    DB: DatabaseMetadata<Metadata = usize> + 'static,
+    DB: DatabaseMetadata<Metadata = usize> + Database + 'static,
 {
     type Output = ();
 

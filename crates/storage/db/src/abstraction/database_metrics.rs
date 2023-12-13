@@ -1,6 +1,5 @@
-use std::{collections::HashMap, sync::Arc};
-
 use metrics::{counter, gauge, histogram, Label};
+use std::{collections::HashMap, sync::Arc};
 
 /// Represents a type that can report metrics, used mainly with the database. The `report_metrics`
 /// method can be used as a prometheus hook.
@@ -44,7 +43,7 @@ impl<DB: DatabaseMetrics> DatabaseMetrics for Arc<DB> {
 
 /// Extends [Database] to include a [Metadata] type, which can be used by methods which need to
 /// dynamically retrieve information about the database.
-pub trait DatabaseMetadata: Database {
+pub trait DatabaseMetadata {
     /// The type used to store metadata about the database.
     type Metadata;
 
