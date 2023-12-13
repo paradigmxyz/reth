@@ -162,6 +162,13 @@ pub trait EthApi {
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<EthCallResponse>>;
 
+    #[method(name = "createBundleAccessList")]
+    async fn create_bundle_access_list(
+        &self,
+        calls: Vec<CallRequest>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<Vec<AccessListWithGasUsed>>;
+
     /// Generates an access list for a transaction.
     ///
     /// This method creates an [EIP2930](https://eips.ethereum.org/EIPS/eip-2930) type accessList based on a given Transaction.

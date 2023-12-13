@@ -249,6 +249,18 @@ where
         Ok(EthApi::call_many(self, bundle, state_context, state_override).await?)
     }
 
+    /// Handler for: `eth_createBundleAccessList`
+    async fn create_bundle_access_list(
+        &self,
+        calls: Vec<CallRequest>,
+        block_number: Option<BlockId>,
+    ) -> Result<Vec<AccessListWithGasUsed>> {
+        trace!(target: "rpc::eth", ?calls, ?block_number, "Serving eth_createBundleAccessList");
+        let bundle_access_list_with_gas_used = self.create_bundle_access_list_at(calls, block_number).await?;
+
+        Ok(bundle_access_list_with_gas_used)
+    }
+
     /// Handler for: `eth_createAccessList`
     async fn create_access_list(
         &self,
