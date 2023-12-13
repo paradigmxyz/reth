@@ -2,7 +2,7 @@
 
 use crate::{
     database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
+    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
     tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
@@ -14,7 +14,7 @@ use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, PageSize, SyncMode, RO, RW,
 };
 use reth_tracing::tracing::error;
-use std::{collections::HashMap, ops::Deref, path::Path};
+use std::{ops::Deref, path::Path};
 use tx::Tx;
 
 pub mod cursor;
@@ -133,15 +133,8 @@ impl DatabaseMetrics for DatabaseEnv {
 }
 
 impl DatabaseMetadata for DatabaseEnv {
-    type Metadata = usize;
-
-    fn metadata(&self) -> HashMap<&'static str, Self::Metadata> {
-        let mut metadata = HashMap::new();
-
-        if let Ok(freelist) = self.freelist() {
-            metadata.insert("freelist", freelist);
-        }
-        metadata
+    fn metadata(&self) -> DatabaseMetadataValue {
+        DatabaseMetadataValue::new(self.freelist().ok())
     }
 }
 
@@ -234,7 +227,7 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level))
+                return Err(DatabaseError::LogLevelUnavailable(log_level));
             }
         }
 

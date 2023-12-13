@@ -195,9 +195,9 @@ impl<DB> NodeState<DB> {
     }
 }
 
-impl<DB: DatabaseMetadata<Metadata = usize>> NodeState<DB> {
+impl<DB: DatabaseMetadata> NodeState<DB> {
     fn freelist(&self) -> Option<usize> {
-        self.db.metadata().get("freelist").copied()
+        self.db.metadata().freelist_size()
     }
 }
 
@@ -278,7 +278,7 @@ pub async fn handle_events<E, DB>(
     db: DB,
 ) where
     E: Stream<Item = NodeEvent> + Unpin,
-    DB: DatabaseMetadata<Metadata = usize> + Database + 'static,
+    DB: DatabaseMetadata + Database + 'static,
 {
     let state = NodeState::new(db, network, latest_block_number);
 
@@ -303,7 +303,7 @@ struct EventHandler<E, DB> {
 impl<E, DB> Future for EventHandler<E, DB>
 where
     E: Stream<Item = NodeEvent> + Unpin,
-    DB: DatabaseMetadata<Metadata = usize> + Database + 'static,
+    DB: DatabaseMetadata + Database + 'static,
 {
     type Output = ();
 

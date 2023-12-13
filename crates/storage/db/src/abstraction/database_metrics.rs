@@ -1,5 +1,5 @@
 use metrics::{counter, gauge, histogram, Label};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 /// Represents a type that can report metrics, used mainly with the database. The `report_metrics`
 /// method can be used as a prometheus hook.
@@ -41,20 +41,34 @@ impl<DB: DatabaseMetrics> DatabaseMetrics for Arc<DB> {
     }
 }
 
+/// The type used to store metadata about the database.
+#[derive(Debug)]
+pub struct DatabaseMetadataValue {
+    /// The freelist size
+    freelist_size: Option<usize>,
+}
+
+impl DatabaseMetadataValue {
+    /// Creates a new [DatabaseMetadataValue] with the given freelist size.
+    pub fn new(freelist_size: Option<usize>) -> Self {
+        Self { freelist_size }
+    }
+
+    /// Returns the freelist size, if available.
+    pub fn freelist_size(&self) -> Option<usize> {
+        self.freelist_size
+    }
+}
+
 /// Extends [Database] to include a [Metadata] type, which can be used by methods which need to
 /// dynamically retrieve information about the database.
 pub trait DatabaseMetadata {
-    /// The type used to store metadata about the database.
-    type Metadata;
-
-    /// Returns a [HashMap] of [&'static str]-addressable metadata about the database.
-    fn metadata(&self) -> HashMap<&'static str, Self::Metadata>;
+    /// TODO
+    fn metadata(&self) -> DatabaseMetadataValue;
 }
 
 impl<DB: DatabaseMetadata> DatabaseMetadata for Arc<DB> {
-    type Metadata = DB::Metadata;
-
-    fn metadata(&self) -> HashMap<&'static str, Self::Metadata> {
+    fn metadata(&self) -> DatabaseMetadataValue {
         <DB as DatabaseMetadata>::metadata(self)
     }
 }

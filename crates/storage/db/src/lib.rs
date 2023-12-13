@@ -155,9 +155,9 @@ pub mod test_utils {
     use super::*;
     use crate::{
         database::Database,
-        database_metrics::{DatabaseMetadata, DatabaseMetrics},
+        database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
     };
-    use std::{collections::HashMap, path::PathBuf, sync::Arc};
+    use std::{path::PathBuf, sync::Arc};
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
@@ -220,9 +220,7 @@ pub mod test_utils {
     }
 
     impl<DB: DatabaseMetadata> DatabaseMetadata for TempDatabase<DB> {
-        type Metadata = <DB as DatabaseMetadata>::Metadata;
-
-        fn metadata(&self) -> HashMap<&'static str, Self::Metadata> {
+        fn metadata(&self) -> DatabaseMetadataValue {
             self.db().metadata()
         }
     }
