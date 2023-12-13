@@ -43,4 +43,6 @@ pub enum NippyJarError {
     CompressorNotAllowed,
     #[error("number of offsets ({0}) is smaller than prune request ({1}).")]
     InvalidPruning(u64, u64),
+    #[error("jar has been frozen and cannot be modified.")]
+    FrozenJar,
 }

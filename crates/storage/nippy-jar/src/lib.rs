@@ -519,6 +519,11 @@ impl DataReader {
     pub fn size(&self) -> usize {
         self.data_mmap.len()
     }
+
+    /// Returns number of bytes necessary to read one offset.
+    pub fn offset_len(&self) -> usize {
+        self.offset_len
+    }
 }
 
 #[cfg(test)]

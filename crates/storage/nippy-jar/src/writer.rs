@@ -95,6 +95,12 @@ where
     fn consistency_check(&mut self) -> Result<(), NippyJarError> {
         let reader = self.jar.open_data_reader()?;
 
+        // When an offset length is smaller than the initial (8), it means that it is now considered
+        // immutable data, and cannot be modified.
+        if reader.offset_len() != INITIAL_OFFSET_SIZE {
+            return NippyJarError::FrozenJar
+        }
+
         // 1 byte: for byte-len offset representation
         // 8 bytes * num rows * num columns
         // 8 bytes: expected size of the data file.
