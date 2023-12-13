@@ -5826,7 +5826,11 @@ name = "reth-discv5"
 version = "0.1.0-alpha.11"
 dependencies = [
  "discv5",
+ "enr",
  "futures-util",
+ "k256",
+ "parking_lot 0.12.1",
+ "secp256k1 0.27.0",
  "thiserror",
  "tokio",
  "tokio-stream",

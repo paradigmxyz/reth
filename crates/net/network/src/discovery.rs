@@ -7,11 +7,11 @@ use crate::{
 use futures::{stream::Stream, StreamExt};
 use k256::ecdsa::SigningKey;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
-use reth_discv5::{CombinedKey, Discv5, Discv5Config, Discv5Error, Discv5Wrapper, Event};
+use reth_discv5::{CombinedKey, Discv5, Discv5Config, Discv5Error, Discv5Handle, Event};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_primitives::{ForkId, NodeRecord, PeerId, B512};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
@@ -39,7 +39,7 @@ pub struct Discovery {
     /// Handler to interact with the Discovery v4 service
     discv4: Option<Discv4>,
     /// Handler to interact with the Discovery v5 service
-    discv5: Option<Discv5Wrapper>,
+    discv5: Option<Discv5Handle>,
     /// Event stream for Receiving Event from Discovery v5
     discv5_event_stream: Option<ReceiverStream<Event>>,
     /// All KAD table updates from the discv4 service.
@@ -87,30 +87,15 @@ impl Discovery {
 
         // setup discv5
         let (discv5, discv5_event_stream) = if let Some(discv5_config) = discv5_config {
-            let discv5 = {
-                let secret_key_bytes = sk.as_ref();
-                let signing_key = SigningKey::from_slice(secret_key_bytes)
-                    .map_err(|e| Discv5Error::SecretKeyDecode(e.to_string()))?;
-
-                let enr_key = CombinedKey::Secp256k1(signing_key);
-                let enr = enr::EnrBuilder::new("v4")
-                    .build(&enr_key)
-                    .map_err(|e| Discv5Error::EnrBuilderConstruct(e.to_string()))?;
-
-                Discv5Wrapper::new(
-                    Discv5::new(enr, enr_key, discv5_config)
-                        .map_err(|e| Discv5Error::Discv5Construct(e.to_string()))?,
-                )
-            };
-
+            let discv5 = Discv5Handle::from_secret_key(sk, discv5_config)?;
             let mut discv5_ref = discv5.get_mut().await;
             discv5_ref.start().await.unwrap();
             drop(discv5_ref);
 
-            let discv5_event = (discv5)
+            let discv5_event = discv5
                 .create_event_stream()
                 .await
-                .map_err(|e| Discv5Error::Discv5EventStream(e.to_string()))?;
+                .map_err(|_e| NetworkError::Discv5(Discv5Error::SecretKeyDecode))?;
             let discv5_event_stream = Some(ReceiverStream::new(discv5_event));
             (Some(discv5), (discv5_event_stream))
         } else {
@@ -232,12 +217,75 @@ impl Discovery {
 
     fn on_discv5_update(&mut self, update: Event) {
         match update {
-            Event::Discovered(enr) => {}
-            Event::EnrAdded { enr, replaced } => {}
-            Event::NodeInserted { node_id, replaced } => {}
-            Event::SessionEstablished(enr, socket_address) => {}
-            Event::SocketUpdated(socket_address) => {}
-            Event::TalkRequest(talk_request) => {}
+            Event::Discovered(enr) => {
+                let ip_addr: Option<IpAddr> =
+                    enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from));
+                let tcp_port = enr.tcp4().or_else(|| enr.tcp6());
+                let udp_port = enr.udp4().or_else(|| enr.udp6());
+                let node_id = B512::from_slice(&enr.node_id().raw()[..]);
+                let node_record = NodeRecord {
+                    address: ip_addr.unwrap(),
+                    tcp_port: tcp_port.unwrap(),
+                    udp_port: udp_port.unwrap(),
+                    id: node_id,
+                };
+                self.on_node_record_update(node_record, None)
+            } // #5576 handle replaced variable
+            Event::EnrAdded { enr, replaced } => {
+                if let Some(discv5) = &self.discv5 {
+                    let discv5 = Discv5Handle::convert_to_discv5(discv5);
+                    let discv5_guard = discv5.lock();
+                    let _ = discv5_guard.add_enr(enr);
+                    if let Some(replaced_enr) = replaced {
+                        let node_id = replaced_enr.node_id();
+                        discv5_guard.remove_node(&node_id);
+                    }
+                }
+            } // #5576 handle replaced variable
+            Event::NodeInserted { node_id, replaced } => {
+                if let Some(discv5) = &self.discv5 {
+                    let discv5 = Discv5Handle::convert_to_discv5(discv5);
+                    let discv5_guard = discv5.lock();
+                    let enr = discv5_guard.find_enr(&node_id);
+                    discv5_guard.add_enr(enr.unwrap()).unwrap(); // TODO # 5576 handle unwrap in the
+                                                                 // end properly
+                    if let Some(replaced_enr) = replaced {
+                        discv5_guard.remove_node(&replaced_enr);
+                    }
+                }
+            }
+            Event::SessionEstablished(enr, socket_address) => {
+                let tcp_port = enr.tcp4().or_else(|| enr.tcp6());
+                let udp_port = enr.udp4().or_else(|| enr.udp6());
+                let node_id = B512::from_slice(&enr.node_id().raw()[..]);
+                let node_record = NodeRecord {
+                    address: socket_address.ip(),
+                    tcp_port: tcp_port.unwrap(),
+                    udp_port: udp_port.unwrap(),
+                    id: node_id,
+                };
+                self.on_node_record_update(node_record, None)
+            }
+            Event::SocketUpdated(socket_address) => {
+                if let Some(discv5) = &self.discv5 {
+                    let discv5 = Discv5Handle::convert_to_discv5(discv5);
+                    let discv5_guard = discv5.lock();
+                    let mut local_enr = discv5_guard.local_enr();
+                    // local_enr.set_ip(socket_address.ip(),); #5576 figure out how to get signing
+                }
+            }
+            Event::TalkRequest(talk_request) => {
+                if let Some(discv5) = &self.discv5 {
+                    let discv5 = Discv5Handle::convert_to_discv5(discv5);
+                    let discv5_guard = discv5.lock();
+                    let node_id = talk_request.node_id();
+                    let enr = discv5_guard.find_enr(&node_id);
+                    let protocol = talk_request.protocol();
+                    let request = talk_request.body();
+                    let _ =
+                        discv5_guard.talk_req(enr.unwrap(), protocol.to_vec(), request.to_vec());
+                }
+            }
         }
     }
 

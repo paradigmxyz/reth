@@ -16,3 +16,7 @@ tokio-stream.workspace = true
 tokio.workspace = true
 futures-util = "*"
 thiserror.workspace = true
+parking_lot = "0.12.1"
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+k256 = "0.13.2"
+enr = { workspace = true, features = ["rust-secp256k1"], optional = true }

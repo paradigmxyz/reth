@@ -43,6 +43,7 @@ pub enum NetworkError {
     /// IO error when creating the discovery service
     #[error("failed to launch discovery service: {0}")]
     Discovery(io::Error),
+    /// Discv5 error
     #[error("Discv5 error: {0}")]
     Discv5(#[from] Discv5Error),
     /// Error when setting up the DNS resolver failed
