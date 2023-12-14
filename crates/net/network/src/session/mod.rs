@@ -172,8 +172,8 @@ impl SessionManager {
     }
 
     /// Returns the secret key used for authenticating sessions.
-    pub fn secret_key(&self) -> &SecretKey {
-        &self.secret_key
+    pub fn secret_key(&self) -> SecretKey {
+        self.secret_key
     }
 
     /// Returns the session hello message.

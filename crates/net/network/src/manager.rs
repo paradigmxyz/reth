@@ -163,7 +163,7 @@ impl<C> NetworkManager<C> {
     }
 
     /// Returns the secret key used for authenticating sessions.
-    pub fn secret_key(&self) -> &SecretKey {
+    pub fn secret_key(&self) -> SecretKey {
         self.swarm.sessions().secret_key()
     }
 }
@@ -225,7 +225,7 @@ where
         let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
 
         let sessions = SessionManager::new(
-            secret_key.clone(),
+            secret_key,
             sessions_config,
             executor,
             status,

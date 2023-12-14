@@ -124,7 +124,7 @@ pub trait RethNetworkConfig {
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol);
 
     /// Returns the secret key used for authenticating sessions.
-    fn secret_key(&self) -> &secp256k1::SecretKey;
+    fn secret_key(&self) -> secp256k1::SecretKey;
 
     // TODO add more network config methods here
 }
@@ -134,7 +134,7 @@ impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
         reth_network::NetworkManager::add_rlpx_sub_protocol(self, protocol);
     }
 
-    fn secret_key(&self) -> &secp256k1::SecretKey {
+    fn secret_key(&self) -> secp256k1::SecretKey {
         self.secret_key()
     }
 }
