@@ -15,7 +15,7 @@ use reth_primitives::ChainSpec;
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
-    BoxedLayer, FileWorkerGuard,
+    BoxedLayer, FileWorkerGuard, LogFormat,
 };
 use std::{fmt, fmt::Display, sync::Arc};
 
@@ -179,6 +179,9 @@ impl<Ext: RethCliExt> Commands<Ext> {
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
+    /// The format to use for logs.
+    #[arg(long = "log.format", value_name = "FORMAT", global = true, default_value_t = LogFormat::Terminal)]
+    log_format: LogFormat,
     /// The path to put log files in.
     #[arg(long = "log.file.directory", value_name = "PATH", global = true, default_value_t)]
     log_file_directory: PlatformPath<LogsDir>,

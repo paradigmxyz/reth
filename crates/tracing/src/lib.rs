@@ -28,6 +28,10 @@ use tracing_subscriber::{
 pub use tracing;
 pub use tracing_subscriber;
 
+pub mod formatter;
+pub mod layers;
+pub mod tracer;
+
 /// A boxed tracing [Layer].
 pub type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
