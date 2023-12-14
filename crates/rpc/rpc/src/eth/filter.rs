@@ -14,10 +14,7 @@ use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, Receipt, SealedBlock, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
-use reth_rpc_types::{
-    Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
-    PendingTransactionFilterKind,
-};
+use reth_rpc_types::{Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log, PendingTransactionFilterKind, BlockNumHash};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -43,9 +40,9 @@ pub struct EthFilter<Provider, Pool> {
 }
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
-where
-    Provider: Send + Sync + 'static,
-    Pool: Send + Sync + 'static,
+    where
+        Provider: Send + Sync + 'static,
+        Pool: Send + Sync + 'static,
 {
     /// Creates a new, shareable instance.
     ///
@@ -123,10 +120,10 @@ where
 }
 
 impl<Provider, Pool> EthFilter<Provider, Pool>
-where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
-    <Pool as TransactionPool>::Transaction: 'static,
+    where
+        Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+        Pool: TransactionPool + 'static,
+        <Pool as TransactionPool>::Transaction: 'static,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(&self, id: FilterId) -> Result<FilterChanges, FilterError> {
@@ -141,7 +138,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
+                return Ok(FilterChanges::Empty);
             }
 
             // update filter
@@ -211,7 +208,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(FilterError::FilterNotFound(id))
+                return Err(FilterError::FilterNotFound(id));
             }
         };
 
@@ -222,9 +219,9 @@ where
 
 #[async_trait]
 impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
-where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
+    where
+        Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+        Pool: TransactionPool + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -341,9 +338,9 @@ struct EthFilterInner<Provider, Pool> {
 }
 
 impl<Provider, Pool> EthFilterInner<Provider, Pool>
-where
-    Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
+    where
+        Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
+        Pool: TransactionPool + 'static,
 {
     /// Returns logs matching given filter object.
     async fn logs_for_filter(&self, filter: Filter) -> Result<Vec<Log>, FilterError> {
@@ -429,8 +426,9 @@ where
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
         if to_block - from_block > self.max_blocks_per_filter {
-            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
+            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
         }
+
 
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
@@ -439,10 +437,30 @@ where
         let address_filter = FilteredParams::address_filter(&filter.address);
         let topics_filter = FilteredParams::topics_filter(&filter.topics);
 
+        if (to_block == from_block) && (from_block == self.provider.last_block_number()?) {
+            let mut all_logs = Vec::new();
+            // let x = self.provider.convert_block_number(BlockNumberOrTag::from(to_block));
+            let x = self.provider.block_hash(to_block);
+            if let Some((block, receipts)) =
+                self.eth_cache.get_block_and_receipts(x.unwrap().unwrap()).await?
+            {
+                let b: BlockNumHash = <BlockNumHash as From<(u64, revm_primitives::FixedBytes<32>)>>
+                ::from((to_block, block.hash));
+                logs_utils::append_matching_block_logs(
+                    &mut all_logs,
+                    &filter_params,
+                    b,
+                    block.body.into_iter().map(|tx| tx.hash()).zip(receipts),
+                    false,
+                );
+            }
+            return Ok(all_logs);
+        }
+
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
         for (from, to) in
-            BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
+        BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
         {
             let headers = self.provider.headers_range(from..=to)?;
 
@@ -477,7 +495,7 @@ where
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
-                            ))
+                            ));
                         }
                     }
                 }
@@ -587,8 +605,8 @@ struct FullTransactionsReceiver<T: PoolTransaction> {
 }
 
 impl<T> FullTransactionsReceiver<T>
-where
-    T: PoolTransaction + 'static,
+    where
+        T: PoolTransaction + 'static,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
@@ -617,8 +635,8 @@ trait FullTransactionsFilter: fmt::Debug + Send + Sync + Unpin + 'static {
 
 #[async_trait]
 impl<T> FullTransactionsFilter for FullTransactionsReceiver<T>
-where
-    T: PoolTransaction + 'static,
+    where
+        T: PoolTransaction + 'static,
 {
     async fn drain(&self) -> FilterChanges {
         FullTransactionsReceiver::drain(self).await
@@ -651,6 +669,7 @@ enum FilterKind {
     Block,
     PendingTransaction(PendingTransactionKind),
 }
+
 /// Errors that can occur in the handler implementation
 #[derive(Debug, thiserror::Error)]
 pub enum FilterError {
@@ -716,7 +735,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None
+            return None;
         }
         Some((start, end))
     }
