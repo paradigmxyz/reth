@@ -1303,7 +1303,7 @@ mod tests {
         num_rows: u64,
         missing_offsets: u64,
     ) {
-        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+        let nippy = NippyJar::load_without_header(file_path).unwrap();
         let reader = nippy.open_data_reader().unwrap();
         let offsets_file =
             OpenOptions::new().read(true).write(true).open(nippy.offsets_path()).unwrap();
@@ -1322,6 +1322,6 @@ mod tests {
         data_file.set_len(data_len - 32 * missing_offsets).unwrap();
 
         // runs the consistency check.
-        let _ = NippyJarWriter::new(&mut nippy).unwrap();
+        let _ = NippyJarWriter::from_owned(nippy).unwrap();
     }
 }

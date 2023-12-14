@@ -145,7 +145,8 @@ where
     fn consistency_check(&mut self) -> Result<(), NippyJarError> {
         let reader = self.jar.open_data_reader()?;
 
-        // When an offset length is smaller than the initial (8), we are dealing with immutable data.
+        // When an offset length is smaller than the initial (8), we are dealing with immutable
+        // data.
         if reader.offset_len() as u64 != INITIAL_OFFSET_SIZE {
             return Err(NippyJarError::FrozenJar)
         }
