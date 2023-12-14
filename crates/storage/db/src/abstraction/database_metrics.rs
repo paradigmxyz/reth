@@ -60,8 +60,8 @@ impl DatabaseMetadataValue {
     }
 }
 
-/// Extends [Database] to include a [DatabaseMetadataValue] type, which can be used by methods
-/// which need to dynamically retrieve information about the database.
+/// Includes a method to return a [DatabaseMetadataValue] type, which can be used to dynamically
+/// retrieve information about the database.
 pub trait DatabaseMetadata {
     /// Returns a metadata type, [DatabaseMetadataValue] for the database.
     fn metadata(&self) -> DatabaseMetadataValue;
