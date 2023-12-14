@@ -660,6 +660,7 @@ pub async fn local_transactions_backup_task<P>(
     drop(graceful_guard)
 }
 
+#[cfg(not(feature = "optimism"))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -672,7 +673,6 @@ mod tests {
         assert!(changed_acc.eq(&ChangedAccountEntry(copy)));
     }
 
-    #[cfg(not(feature = "optimism"))]
     use crate::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
@@ -688,7 +688,6 @@ mod tests {
     const EXTENSION: &str = "rlp";
     const FILENAME: &str = "test_transactions_backup";
 
-    #[cfg(not(feature = "optimism"))]
     #[tokio::test]
     async fn test_save_local_txs_backup() {
         let temp_dir = tempfile::tempdir().unwrap();
