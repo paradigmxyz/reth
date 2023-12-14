@@ -1,6 +1,7 @@
 use crate::{
     compression::{Compression, Compressors, Zstd},
-    DataReader, InclusionFilter, NippyJar, NippyJarError, PerfectHashingFunction, RefRow,
+    DataReader, InclusionFilter, NippyJar, NippyJarError, NippyJarHeader, PerfectHashingFunction,
+    RefRow,
 };
 use serde::{de::Deserialize, ser::Serialize};
 use std::{ops::Range, sync::Arc};
@@ -20,19 +21,13 @@ pub struct NippyJarCursor<'a, H = ()> {
     row: u64,
 }
 
-impl<'a, H: std::fmt::Debug> std::fmt::Debug for NippyJarCursor<'a, H>
-where
-    H: Send + Sync + Serialize + for<'b> Deserialize<'b> + core::fmt::Debug,
-{
+impl<'a, H: NippyJarHeader> std::fmt::Debug for NippyJarCursor<'a, H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NippyJarCursor").field("config", &self.jar).finish_non_exhaustive()
     }
 }
 
-impl<'a, H> NippyJarCursor<'a, H>
-where
-    H: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static,
-{
+impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     pub fn new(jar: &'a NippyJar<H>) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
         Ok(NippyJarCursor {

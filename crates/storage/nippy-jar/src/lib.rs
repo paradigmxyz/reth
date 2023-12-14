@@ -43,12 +43,28 @@ pub use writer::NippyJarWriter;
 
 const NIPPY_JAR_VERSION: usize = 1;
 
+const INDEX_FILE_EXTENSION: &str = "idx";
+const OFFSETS_FILE_EXTENSION: &str = "off";
+const CONFIG_FILE_EXTENSION: &str = "conf";
+
 /// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a
 /// memory-mapped file.
 type RefRow<'a> = Vec<&'a [u8]>;
 
-/// Alias type for a column value wrapped in `Result`
+/// Alias type for a column value wrapped in `Result`.
 pub type ColumnResult<T> = Result<T, Box<dyn StdError + Send + Sync>>;
+
+/// A trait for the user-defined header of [NippyJar].
+pub trait NippyJarHeader:
+    Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static
+{
+}
+
+// Blanket implementation for all types that implement the required traits.
+impl<T> NippyJarHeader for T where
+    T: Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static
+{
+}
 
 /// `NippyJar` is a specialized storage format designed for immutable data.
 ///
@@ -100,12 +116,12 @@ pub struct NippyJar<H = ()> {
     /// Maximum uncompressed row size of the set. This will enable decompression without any
     /// resizing of the output buffer.
     max_row_size: usize,
-    /// Data path for file. Index file will be `{path}.idx`
+    /// Data path for file. Supporting files will have a format `{path}.{extension}`.
     #[serde(skip)]
-    path: Option<PathBuf>,
+    path: PathBuf,
 }
 
-impl<H: std::fmt::Debug> std::fmt::Debug for NippyJar<H> {
+impl<H: NippyJarHeader> std::fmt::Debug for NippyJar<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NippyJar")
             .field("version", &self.version)
@@ -140,10 +156,7 @@ impl NippyJar<()> {
     }
 }
 
-impl<H> NippyJar<H>
-where
-    H: Send + Sync + Serialize + for<'a> Deserialize<'a> + std::fmt::Debug,
-{
+impl<H: NippyJarHeader> NippyJar<H> {
     /// Creates a new [`NippyJar`] with a user-defined header data.
     pub fn new(columns: usize, path: &Path, user_header: H) -> Self {
         NippyJar {
@@ -156,7 +169,7 @@ where
             filter: None,
             phf: None,
             offsets_index: PrefixSummedEliasFano::default(),
-            path: Some(path.to_path_buf()),
+            path: path.to_path_buf(),
         }
     }
 
@@ -196,12 +209,12 @@ where
         &self.user_header
     }
 
-    /// Gets a reference to `self.offsets`.
+    /// Returns the size of inclusion filter
     pub fn filter_size(&self) -> usize {
         self.size()
     }
 
-    /// Gets a reference to `self.offsets_index`.
+    /// Returns the size of offsets index
     pub fn offsets_index_size(&self) -> usize {
         self.offsets_index.size_in_bytes()
     }
@@ -222,14 +235,10 @@ where
     /// **The user must ensure the header type matches the one used during the jar's creation.**
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
         // Read [`Self`] located at the data file.
-        let config_file = File::open(
-            path.parent()
-                .expect("exists")
-                .join(format!("{}.conf", path.file_name().expect("exists").to_string_lossy())),
-        )?;
+        let config_file = File::open(path.with_extension(CONFIG_FILE_EXTENSION))?;
 
         let mut obj: Self = bincode::deserialize_from(&config_file)?;
-        obj.path = Some(path.to_path_buf());
+        obj.path = path.to_path_buf();
         Ok(obj)
     }
 
@@ -244,33 +253,24 @@ where
         Ok(self)
     }
 
-    /// Returns the path from the data file
+    /// Returns the path for the data file
     pub fn data_path(&self) -> &Path {
-        self.path.as_ref().expect("exists")
+        self.path.as_ref()
     }
 
-    /// Returns the path from the index file
+    /// Returns the path for the index file
     pub fn index_path(&self) -> PathBuf {
-        self.data_path().parent().expect("exists").join(format!(
-            "{}.idx",
-            self.data_path().file_name().expect("exists").to_string_lossy()
-        ))
+        self.path.with_extension(INDEX_FILE_EXTENSION)
     }
 
-    /// Returns the path from the offsets file
+    /// Returns the path for the offsets file
     pub fn offsets_path(&self) -> PathBuf {
-        self.data_path().parent().expect("exists").join(format!(
-            "{}.off",
-            self.data_path().file_name().expect("exists").to_string_lossy()
-        ))
+        self.path.with_extension(OFFSETS_FILE_EXTENSION)
     }
 
-    /// Returns the path from the config file
+    /// Returns the path for the config file
     pub fn config_path(&self) -> PathBuf {
-        self.data_path().parent().expect("exists").join(format!(
-            "{}.conf",
-            self.data_path().file_name().expect("exists").to_string_lossy()
-        ))
+        self.path.with_extension(CONFIG_FILE_EXTENSION)
     }
 
     /// Returns a [`DataReader`] of the data and offset file
@@ -346,7 +346,9 @@ where
         columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
         total_rows: u64,
     ) -> Result<(), NippyJarError> {
-        self.freeze_check(&columns)?;
+        self.check_before_freeze(&columns)?;
+
+        debug!(target: "nippy-jar", path=?self.data_path(), "Opening data file.");
 
         // Creates the writer, data and offsets file
         let mut writer = NippyJarWriter::new(self)?;
@@ -360,7 +362,7 @@ where
         // Write phf, filter and offset index to file
         self.freeze_filters()?;
 
-        debug!(target: "nippy-jar", jar=?self, "Finished.");
+        debug!(target: "nippy-jar", jar=?self, "Finished writing data.");
 
         Ok(())
     }
@@ -378,7 +380,7 @@ where
     }
 
     /// Safety checks before creating and returning a [`File`] handle to write data to.
-    fn freeze_check(
+    fn check_before_freeze(
         &mut self,
         columns: &[impl IntoIterator<Item = ColumnResult<Vec<u8>>>],
     ) -> Result<(), NippyJarError> {
@@ -397,8 +399,6 @@ where
             let _ = phf.get_index(&[])?;
         }
 
-        debug!(target: "nippy-jar", path=?self.data_path(), "Opening data file.");
-
         Ok(())
     }
 
@@ -408,10 +408,7 @@ where
     }
 }
 
-impl<H> InclusionFilter for NippyJar<H>
-where
-    H: Send + Sync + Serialize + for<'a> Deserialize<'a>,
-{
+impl<H: NippyJarHeader> InclusionFilter for NippyJar<H> {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
         self.filter.as_mut().ok_or(NippyJarError::FilterMissing)?.add(element)
     }
@@ -425,10 +422,7 @@ where
     }
 }
 
-impl<H> PerfectHashingFunction for NippyJar<H>
-where
-    H: Send + Sync + Serialize + for<'a> Deserialize<'a>,
-{
+impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
     fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
         self.phf.as_mut().ok_or(NippyJarError::PHFMissing)?.set_keys(keys)
     }
@@ -443,18 +437,18 @@ where
 /// Holds file and mmap descriptors of the data and offsets files of a snapshot.
 #[derive(Debug)]
 pub struct DataReader {
-    /// Data file descriptor. Needs to be kept alive as long as the respective mmap handle.
+    /// Data file descriptor. Needs to be kept alive as long as `data_mmap` handle.
     #[allow(unused)]
     data_file: File,
     /// Mmap handle for data.
     data_mmap: Mmap,
-    /// Offset file descriptor. Needs to be kept alive as long as the respective mmap handle.
+    /// Offset file descriptor. Needs to be kept alive as long as `offset_mmap` handle.
     #[allow(unused)]
     offset_file: File,
     /// Mmap handle for offsets.
     offset_mmap: Mmap,
-    /// Number of bytes that represents one offset.
-    offset_len: usize,
+    /// Number of bytes that represent one offset.
+    offset_size: u64,
 }
 
 impl DataReader {
@@ -464,7 +458,7 @@ impl DataReader {
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let data_mmap = unsafe { Mmap::map(&data_file)? };
 
-        let offset_file = File::open(PathBuf::from(format!("{}.off", path.as_ref().display())))?;
+        let offset_file = File::open(path.as_ref().with_extension(OFFSETS_FILE_EXTENSION))?;
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
@@ -472,45 +466,53 @@ impl DataReader {
             data_file,
             data_mmap,
             offset_file,
-            // First byte indicates how many bytes represent each offset
-            offset_len: offset_mmap[0] as usize,
+            // First byte is the size of one offset in bytes
+            offset_size: offset_mmap[0] as u64,
             offset_mmap,
         })
     }
 
     /// Returns the offset for the requested data index
     pub fn offset(&self, index: usize) -> u64 {
-        let mut buffer: [u8; 8] = [0; 8];
-
         // + 1 represents the offset_len u8 which is in the beginning of the file
-        let from = index * self.offset_len + 1;
-        let to = from + self.offset_len;
+        let from = index * self.offset_size as usize + 1;
 
-        buffer[..self.offset_len].copy_from_slice(&self.offset_mmap[from..to]);
-        u64::from_le_bytes(buffer)
+        self.offset_at(from)
     }
 
     /// Returns the offset for the requested data index starting from the end
     pub fn reverse_offset(&self, index: usize) -> Result<u64, NippyJarError> {
-        let mut buffer: [u8; 8] = [0; 8];
-        let offsets_file_size = self.offset_file.metadata()?.len();
+        let offsets_file_size = self.offset_file.metadata()?.len() as usize;
 
         if offsets_file_size > 1 {
-            let from = offsets_file_size as usize - self.offset_len * (index + 1);
-            let to = from + self.offset_len;
+            let from = offsets_file_size - self.offset_size as usize * (index + 1);
 
-            buffer[..self.offset_len].copy_from_slice(&self.offset_mmap[from..to]);
-            Ok(u64::from_le_bytes(buffer))
+            Ok(self.offset_at(from))
         } else {
             Ok(0)
         }
     }
 
+    /// Returns total number of offsets in the file.
+    /// The size of one offset is determined by the file itself.
     pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok(self.offset_file.metadata()?.len().saturating_sub(1) as usize / self.offset_len)
+        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size) as usize)
     }
 
-    /// Provides the underlying data as a slice on the provided offset range.
+    /// Reads one offset-sized (determined by the offset file) u64 at the provided index.
+    fn offset_at(&self, index: usize) -> u64 {
+        let mut buffer: [u8; 8] = [0; 8];
+        buffer[..self.offset_size as usize]
+            .copy_from_slice(&self.offset_mmap[index..(index + self.offset_size as usize)]);
+        u64::from_le_bytes(buffer)
+    }
+
+    /// Returns number of bytes that represent one offset.
+    pub fn offset_size(&self) -> u64 {
+        self.offset_size
+    }
+
+    /// Returns the underlying data as a slice of bytes for the provided range.
     pub fn data(&self, range: Range<usize>) -> &[u8] {
         &self.data_mmap[range]
     }
@@ -518,11 +520,6 @@ impl DataReader {
     /// Returns total size of data
     pub fn size(&self) -> usize {
         self.data_mmap.len()
-    }
-
-    /// Returns number of bytes necessary to read one offset.
-    pub fn offset_len(&self) -> usize {
-        self.offset_len
     }
 }
 
