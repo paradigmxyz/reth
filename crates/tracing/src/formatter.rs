@@ -1,7 +1,5 @@
 use clap::ValueEnum;
-
 use std::{fmt, fmt::Display};
-
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::{EnvFilter, Layer, Registry};
 
@@ -19,9 +17,19 @@ pub enum LogFormat {
 }
 
 impl LogFormat {
-    pub fn apply(&self, filter: EnvFilter, writer: Option<NonBlocking>) -> BoxedLayer<Registry> {
-        let ansi = std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(true);
+    pub fn apply(
+        &self,
+        filter: EnvFilter,
+        color: Option<String>,
+        writer: Option<NonBlocking>,
+    ) -> BoxedLayer<Registry> {
+        let ansi = if let Some(color) = color {
+            std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never")
+        } else {
+            false
+        };
         let target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(true);
+
         match self {
             LogFormat::Json => {
                 let layer =

@@ -179,9 +179,14 @@ impl<Ext: RethCliExt> Commands<Ext> {
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
-    /// The format to use for logs.
-    #[arg(long = "log.format", value_name = "FORMAT", global = true, default_value_t = LogFormat::Terminal)]
-    log_format: LogFormat,
+    /// The format to use for logs written to std.
+    #[arg(long = "log.std.format", value_name = "FORMAT", global = true, default_value_t = LogFormat::Terminal)]
+    log_std_format: LogFormat,
+
+    /// The format to use for logs written to the log file.
+    #[arg(long = "log.file.format", value_name = "FORMAT", global = true, default_value_t = LogFormat::Terminal)]
+    log_file_format: LogFormat,
+
     /// The path to put log files in.
     #[arg(long = "log.file.directory", value_name = "PATH", global = true, default_value_t)]
     log_file_directory: PlatformPath<LogsDir>,
