@@ -1,6 +1,6 @@
 use crate::{compression::Compression, ColumnResult, NippyJar, NippyJarError, NippyJarHeader};
-use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     path::Path,
@@ -112,55 +112,63 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
             OFFSET_SIZE_BYTES; // expected size of the data file
         let actual_offsets_file_size = self.offsets_file.metadata()?.len();
 
-        // Offsets configuration wasn't properly committed,
-        if expected_offsets_file_size < actual_offsets_file_size {
-            // Happened during an appending job
-            // TODO: ideally we could truncate until the last offset of the last column of the last
-            //  row inserted
-            self.offsets_file.set_len(expected_offsets_file_size)?;
-        } else if expected_offsets_file_size > actual_offsets_file_size {
-            // Happened during a pruning job
-            // `num rows = (file size - 1 - size of one offset) / num columns`
-            self.jar.rows = ((actual_offsets_file_size.
-                saturating_sub(1). // first byte is the size of one offset
-                saturating_sub(OFFSET_SIZE_BYTES) / // expected size of the data file
-                (self.jar.columns as u64)) /
-                OFFSET_SIZE_BYTES) as usize;
+        // Offsets configuration wasn't properly committed
+        match expected_offsets_file_size.cmp(&actual_offsets_file_size) {
+            Ordering::Less => {
+                // Happened during an appending job
+                // TODO: ideally we could truncate until the last offset of the last column of the
+                //  last row inserted
+                self.offsets_file.set_len(expected_offsets_file_size)?;
+            }
+            Ordering::Greater => {
+                // Happened during a pruning job
+                // `num rows = (file size - 1 - size of one offset) / num columns`
+                self.jar.rows = ((actual_offsets_file_size.
+                    saturating_sub(1). // first byte is the size of one offset
+                    saturating_sub(OFFSET_SIZE_BYTES) / // expected size of the data file
+                    (self.jar.columns as u64)) /
+                    OFFSET_SIZE_BYTES) as usize;
 
-            // Freeze row count changed
-            self.jar.freeze_config()?;
+                // Freeze row count changed
+                self.jar.freeze_config()?;
+            }
+            Ordering::Equal => {}
         }
 
         // last offset should match the data_file_len
         let last_offset = reader.reverse_offset(0)?;
         let data_file_len = self.data_file.metadata()?.len();
 
-        // Offset list wasn't properly committed,
-        if last_offset < data_file_len {
-            // Happened during an appending job, so we need to truncate the data, since there's no
-            // way to recover it.
-            self.data_file.set_len(last_offset)?;
-        } else if last_offset > data_file_len {
-            // Happened during a pruning job, so we need to reverse iterate offsets until we find
-            // the matching one.
-            for index in 0..reader.offsets_count()? {
-                let offset = reader.reverse_offset(index + 1)?;
-                if offset == data_file_len {
-                    self.offsets_file.set_len(
-                        self.offsets_file
-                            .metadata()?
-                            .len()
-                            .saturating_sub(OFFSET_SIZE_BYTES * (index as u64 + 1)),
-                    )?;
+        // Offset list wasn't properly committed
+        match last_offset.cmp(&data_file_len) {
+            Ordering::Less => {
+                // Happened during an appending job, so we need to truncate the data, since there's
+                // no way to recover it.
+                self.data_file.set_len(last_offset)?;
+            }
+            Ordering::Greater => {
+                // Happened during a pruning job, so we need to reverse iterate offsets until we
+                // find the matching one.
+                for index in 0..reader.offsets_count()? {
+                    let offset = reader.reverse_offset(index + 1)?;
+                    if offset == data_file_len {
+                        self.offsets_file.set_len(
+                            self.offsets_file
+                                .metadata()?
+                                .len()
+                                .saturating_sub(OFFSET_SIZE_BYTES * (index as u64 + 1)),
+                        )?;
 
-                    drop(reader);
+                        drop(reader);
 
-                    // Since we decrease the offset list, we need to check the consistency of
-                    // `self.jar.rows` again
-                    self.check_consistency_and_heal()?;
-                    break
+                        // Since we decrease the offset list, we need to check the consistency of
+                        // `self.jar.rows` again
+                        self.check_consistency_and_heal()?;
+                        break
+                    }
                 }
             }
+            Ordering::Equal => {}
         }
 
         self.offsets_file.seek(SeekFrom::End(0))?;

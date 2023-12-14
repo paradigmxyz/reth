@@ -3,7 +3,6 @@ use crate::{
     DataReader, InclusionFilter, NippyJar, NippyJarError, NippyJarHeader, PerfectHashingFunction,
     RefRow,
 };
-use serde::{de::Deserialize, ser::Serialize};
 use std::{ops::Range, sync::Arc};
 use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
