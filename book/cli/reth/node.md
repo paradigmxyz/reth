@@ -1,10 +1,9 @@
-# `reth node`
+# reth node
 
 Start the node
 
 ```bash
 $ reth node --help
-
 Usage: reth node [OPTIONS]
 
 Options:
@@ -94,7 +93,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.13-10a83e594/aarch64-apple-darwin]
+          [default: reth/v0.1.0-alpha.13-<SHA>/aarch64-apple-darwin]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -174,7 +173,7 @@ RPC:
       --ipcpath <IPCPATH>
           Filename for IPC socket/pipe within the datadir
           
-          [default: /tmp/reth.ipc]
+          [default: <CACHE_DIR>.ipc]
 
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
@@ -426,7 +425,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
