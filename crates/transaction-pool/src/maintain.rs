@@ -672,6 +672,7 @@ mod tests {
         assert!(changed_acc.eq(&ChangedAccountEntry(copy)));
     }
 
+    #[cfg(not(feature = "optimism"))]
     use crate::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
