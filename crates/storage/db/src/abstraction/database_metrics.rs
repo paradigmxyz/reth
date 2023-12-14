@@ -42,7 +42,7 @@ impl<DB: DatabaseMetrics> DatabaseMetrics for Arc<DB> {
 }
 
 /// The type used to store metadata about the database.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DatabaseMetadataValue {
     /// The freelist size
     freelist_size: Option<usize>,
@@ -60,10 +60,10 @@ impl DatabaseMetadataValue {
     }
 }
 
-/// Extends [Database] to include a [Metadata] type, which can be used by methods which need to
-/// dynamically retrieve information about the database.
+/// Extends [Database] to include a [DatabaseMetadataValue] type, which can be used by methods
+/// which need to dynamically retrieve information about the database.
 pub trait DatabaseMetadata {
-    /// TODO
+    /// Returns a metadata type, [DatabaseMetadataValue] for the database.
     fn metadata(&self) -> DatabaseMetadataValue;
 }
 
