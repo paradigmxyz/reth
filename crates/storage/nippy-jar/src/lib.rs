@@ -380,7 +380,7 @@ where
         self.freeze_check(&columns)?;
 
         // Creates the writer, data and offsets file
-        let mut writer = NippyJarWriter::new(self)?;
+        let mut writer = NippyJarWriter::from_mut(self)?;
 
         // Append rows to file while holding offsets in memory
         writer.append_rows(columns, total_rows)?;
