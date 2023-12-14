@@ -25,7 +25,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
-    BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
+    BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN, BeaconConsensusEngineError,
 };
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
@@ -317,284 +317,6 @@ impl NodeConfig {
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
 
-        // spawn txpool maintenance task
-        {
-            let pool = transaction_pool.clone();
-            let chain_events = blockchain_db.canonical_state_stream();
-            let client = blockchain_db.clone();
-            executor.spawn_critical(
-                "txpool maintenance task",
-                reth_transaction_pool::maintain::maintain_transaction_pool_future(
-                    client,
-                    pool,
-                    chain_events,
-                    executor.clone(),
-                    Default::default(),
-                ),
-            );
-            debug!(target: "reth::cli", "Spawned txpool maintenance task");
-        }
-
-        info!(target: "reth::cli", "Connecting to P2P network");
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
-        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
-        let secret_key = get_secret_key(&network_secret_path)?;
-        let default_peers_path = data_dir.known_peers_path();
-        let network_config = self.load_network_config(
-            &config,
-            Arc::clone(&db),
-            executor.clone(),
-            head,
-            secret_key,
-            default_peers_path.clone(),
-        );
-
-        let network_client = network_config.client.clone();
-        let mut network_builder = NetworkManager::builder(network_config).await?;
-
-        let components = RethNodeComponentsImpl {
-            provider: blockchain_db.clone(),
-            pool: transaction_pool.clone(),
-            network: network_builder.handle(),
-            task_executor: executor.clone(),
-            events: blockchain_db.clone(),
-        };
-
-        // allow network modifications
-        ext.configure_network(network_builder.network_mut(), &components)?;
-
-        // launch network
-        let network = self.start_network(
-            network_builder,
-            &executor,
-            transaction_pool.clone(),
-            network_client,
-            default_peers_path,
-        );
-
-        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
-        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
-        let network_client = network.fetch_client().await?;
-
-        ext.on_components_initialized(&components)?;
-
-        debug!(target: "reth::cli", "Spawning payload builder service");
-        let payload_builder = ext.spawn_payload_builder_service(&self.builder, &components)?;
-
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
-        let max_block = if let Some(block) = self.debug.max_block {
-            Some(block)
-        } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(&db, &network_client, tip).await?)
-        } else {
-            None
-        };
-
-        // Configure the pipeline
-        let (mut pipeline, client) = if self.dev.dev {
-            info!(target: "reth::cli", "Starting Reth in dev mode");
-
-            let mining_mode = if let Some(interval) = self.dev.block_time {
-                MiningMode::interval(interval)
-            } else if let Some(max_transactions) = self.dev.block_max_transactions {
-                MiningMode::instant(
-                    max_transactions,
-                    transaction_pool.pending_transactions_listener(),
-                )
-            } else {
-                info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
-                MiningMode::instant(1, transaction_pool.pending_transactions_listener())
-            };
-
-            let (_, client, mut task) = AutoSealBuilder::new(
-                Arc::clone(&self.chain),
-                blockchain_db.clone(),
-                transaction_pool.clone(),
-                consensus_engine_tx.clone(),
-                canon_state_notification_sender,
-                mining_mode,
-            )
-            .build();
-
-            let mut pipeline = self
-                .build_networked_pipeline(
-                    &config.stages,
-                    client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory,
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                )
-                .await?;
-
-            let pipeline_events = pipeline.events();
-            task.set_pipeline_events(pipeline_events);
-            debug!(target: "reth::cli", "Spawning auto mine task");
-            executor.spawn(Box::pin(task));
-
-            (pipeline, EitherDownloader::Left(client))
-        } else {
-            let pipeline = self
-                .build_networked_pipeline(
-                    &config.stages,
-                    network_client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory,
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                )
-                .await?;
-
-            (pipeline, EitherDownloader::Right(network_client))
-        };
-
-        let pipeline_events = pipeline.events();
-
-        let initial_target = if let Some(tip) = self.debug.tip {
-            // Set the provided tip as the initial pipeline target.
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            Some(tip)
-        } else if self.debug.continuous {
-            // Set genesis as the initial pipeline target.
-            // This will allow the downloader to start
-            debug!(target: "reth::cli", "Continuous sync mode enabled");
-            Some(genesis_hash)
-        } else {
-            None
-        };
-
-        let mut hooks = EngineHooks::new();
-
-        let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = self.build_pruner(
-                &prune_config,
-                db.clone(),
-                tree_config,
-                snapshotter.highest_snapshot_receiver(),
-            );
-
-            let events = pruner.events();
-            hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
-
-            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
-            Either::Left(events)
-        } else {
-            Either::Right(stream::empty())
-        };
-
-        // Configure the consensus engine
-        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
-            client,
-            pipeline,
-            blockchain_db.clone(),
-            Box::new(executor.clone()),
-            Box::new(network.clone()),
-            max_block,
-            self.debug.continuous,
-            payload_builder.clone(),
-            initial_target,
-            MIN_BLOCKS_FOR_PIPELINE_RUN,
-            consensus_engine_tx,
-            consensus_engine_rx,
-            hooks,
-        )?;
-        info!(target: "reth::cli", "Consensus engine initialized");
-
-        let events = stream_select!(
-            network.event_listener().map(Into::into),
-            beacon_engine_handle.event_listener().map(Into::into),
-            pipeline_events.map(Into::into),
-            if self.debug.tip.is_none() {
-                Either::Left(
-                    ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
-                        .map(Into::into),
-                )
-            } else {
-                Either::Right(stream::empty())
-            },
-            pruner_events.map(Into::into)
-        );
-        executor.spawn_critical(
-            "events task",
-            events::handle_events(Some(network.clone()), Some(head.number), events, db.clone()),
-        );
-
-        let engine_api = EngineApi::new(
-            blockchain_db.clone(),
-            self.chain.clone(),
-            beacon_engine_handle,
-            payload_builder.into(),
-            Box::new(executor.clone()),
-        );
-        info!(target: "reth::cli", "Engine API handler initialized");
-
-        // extract the jwt secret from the args if possible
-        let default_jwt_path = data_dir.jwt_path();
-        let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
-
-        // adjust rpc port numbers based on instance number
-        self.adjust_instance_ports();
-
-        // Start RPC servers
-        let rpc_server_handles =
-            self.rpc.start_servers(&components, engine_api, jwt_secret, &mut ext).await?;
-
-        // Run consensus engine to completion
-        let (tx, rx) = oneshot::channel();
-        info!(target: "reth::cli", "Starting consensus engine");
-        executor.spawn_critical_blocking("consensus engine", async move {
-            let res = beacon_consensus_engine.await;
-            let _ = tx.send(res);
-        });
-
-        ext.on_node_started(&components)?;
-
-        // If `enable_genesis_walkback` is set to true, the rollup client will need to
-        // perform the derivation pipeline from genesis, validating the data dir.
-        // When set to false, set the finalized, safe, and unsafe head block hashes
-        // on the rollup client using a fork choice update. This prevents the rollup
-        // client from performing the derivation pipeline from genesis, and instead
-        // starts syncing from the current tip in the DB.
-        #[cfg(feature = "optimism")]
-        if self.chain.is_optimism() && !self.rollup.enable_genesis_walkback {
-            let client = rpc_server_handles.auth.http_client();
-            reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
-                &client,
-                reth_rpc_types::engine::ForkchoiceState {
-                    head_block_hash: head.hash,
-                    safe_block_hash: head.hash,
-                    finalized_block_hash: head.hash,
-                },
-                None,
-            )
-            .await?;
-        }
-
-        // we should return here
-        let _node_handle = NodeHandle { _rpc_server_handles: rpc_server_handles };
-
-        // TODO: we need a way to do this in the background because this method will just block
-        // until the consensus engine exits
-        //
-        // We should probably return the node handle AND `rx` so the `execute` method can do all of
-        // this stuff below, in the meantime we will spawn everything (analogous to foundry
-        // spawning the NodeService).
-        rx.await??;
-
-        info!(target: "reth::cli", "Consensus engine has exited.");
-
-        if self.debug.terminate {
-            todo!()
-        } else {
-            // The pipeline has finished downloading blocks up to `--debug.tip` or
-            // `--debug.max-block`. Keep other node components alive for further usage.
-            futures::future::pending().await
-        }
     }
 
     /// Set the datadir for the node
@@ -1210,7 +932,324 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
         let genesis_hash = init_genesis(Arc::clone(&self.database), self.config.chain.clone())?;
 
         info!(target: "reth::cli", "{}", DisplayHardforks::new(self.config.chain.hardforks()));
-        todo!()
+
+        let consensus = self.consensus();
+
+        debug!(target: "reth::cli", "Spawning stages metrics listener task");
+        let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
+        let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
+        ctx.task_executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
+
+        let prune_config =
+            self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
+
+        // configure blockchain tree
+        let tree_externals = TreeExternals::new(
+            provider_factory.clone(),
+            Arc::clone(&consensus),
+            EvmProcessorFactory::new(self.chain.clone()),
+        );
+        let tree_config = BlockchainTreeConfig::default();
+        let tree = BlockchainTree::new(
+            tree_externals,
+            tree_config,
+            prune_config.clone().map(|config| config.segments),
+        )?
+        .with_sync_metrics_tx(sync_metrics_tx.clone());
+        let canon_state_notification_sender = tree.canon_state_notification_sender();
+        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        debug!(target: "reth::cli", "configured blockchain tree");
+
+        // fetch the head block from the database
+        let head = self.lookup_head(Arc::clone(&db)).wrap_err("the head block is missing")?;
+
+        // setup the blockchain provider
+        let blockchain_db =
+            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
+        let blob_store = InMemoryBlobStore::default();
+        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
+            .with_head_timestamp(head.timestamp)
+            .kzg_settings(self.kzg_settings()?)
+            .with_additional_tasks(1)
+            .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
+
+        let transaction_pool =
+            reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
+        info!(target: "reth::cli", "Transaction pool initialized");
+
+        // spawn txpool maintenance task
+        {
+            let pool = transaction_pool.clone();
+            let chain_events = blockchain_db.canonical_state_stream();
+            let client = blockchain_db.clone();
+            ctx.task_executor.spawn_critical(
+                "txpool maintenance task",
+                reth_transaction_pool::maintain::maintain_transaction_pool_future(
+                    client,
+                    pool,
+                    chain_events,
+                    ctx.task_executor.clone(),
+                    Default::default(),
+                ),
+            );
+            debug!(target: "reth::cli", "Spawned txpool maintenance task");
+        }
+
+        info!(target: "reth::cli", "Connecting to P2P network");
+        let network_secret_path =
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
+        let secret_key = get_secret_key(&network_secret_path)?;
+        let default_peers_path = data_dir.known_peers_path();
+        let network_config = self.load_network_config(
+            &config,
+            Arc::clone(&db),
+            ctx.task_executor.clone(),
+            head,
+            secret_key,
+            default_peers_path.clone(),
+        );
+
+        let network_client = network_config.client.clone();
+        let mut network_builder = NetworkManager::builder(network_config).await?;
+
+        let components = RethNodeComponentsImpl {
+            provider: blockchain_db.clone(),
+            pool: transaction_pool.clone(),
+            network: network_builder.handle(),
+            task_executor: ctx.task_executor.clone(),
+            events: blockchain_db.clone(),
+        };
+
+        // allow network modifications
+        self.ext.configure_network(network_builder.network_mut(), &components)?;
+
+        // launch network
+        let network = self.start_network(
+            network_builder,
+            &ctx.task_executor,
+            transaction_pool.clone(),
+            network_client,
+            default_peers_path,
+        );
+
+        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), enode = %network.local_node_record(), "Connected to P2P network");
+        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
+        let network_client = network.fetch_client().await?;
+
+        self.ext.on_components_initialized(&components)?;
+
+        debug!(target: "reth::cli", "Spawning payload builder service");
+        let payload_builder = self.ext.spawn_payload_builder_service(&self.builder, &components)?;
+
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        let max_block = if let Some(block) = self.debug.max_block {
+            Some(block)
+        } else if let Some(tip) = self.debug.tip {
+            Some(self.lookup_or_fetch_tip(&db, &network_client, tip).await?)
+        } else {
+            None
+        };
+
+        // Configure the pipeline
+        let (mut pipeline, client) = if self.dev.dev {
+            info!(target: "reth::cli", "Starting Reth in dev mode");
+
+            let mining_mode = if let Some(interval) = self.dev.block_time {
+                MiningMode::interval(interval)
+            } else if let Some(max_transactions) = self.dev.block_max_transactions {
+                MiningMode::instant(
+                    max_transactions,
+                    transaction_pool.pending_transactions_listener(),
+                )
+            } else {
+                info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
+                MiningMode::instant(1, transaction_pool.pending_transactions_listener())
+            };
+
+            let (_, client, mut task) = AutoSealBuilder::new(
+                Arc::clone(&self.chain),
+                blockchain_db.clone(),
+                transaction_pool.clone(),
+                consensus_engine_tx.clone(),
+                canon_state_notification_sender,
+                mining_mode,
+            )
+            .build();
+
+            let mut pipeline = self
+                .build_networked_pipeline(
+                    &config.stages,
+                    client.clone(),
+                    Arc::clone(&consensus),
+                    provider_factory,
+                    &ctx.task_executor,
+                    sync_metrics_tx,
+                    prune_config.clone(),
+                    max_block,
+                )
+                .await?;
+
+            let pipeline_events = pipeline.events();
+            task.set_pipeline_events(pipeline_events);
+            debug!(target: "reth::cli", "Spawning auto mine task");
+            ctx.task_executor.spawn(Box::pin(task));
+
+            (pipeline, EitherDownloader::Left(client))
+        } else {
+            let pipeline = self
+                .build_networked_pipeline(
+                    &config.stages,
+                    network_client.clone(),
+                    Arc::clone(&consensus),
+                    provider_factory,
+                    &ctx.task_executor,
+                    sync_metrics_tx,
+                    prune_config.clone(),
+                    max_block,
+                )
+                .await?;
+
+            (pipeline, EitherDownloader::Right(network_client))
+        };
+
+        let pipeline_events = pipeline.events();
+
+        let initial_target = if let Some(tip) = self.debug.tip {
+            // Set the provided tip as the initial pipeline target.
+            debug!(target: "reth::cli", %tip, "Tip manually set");
+            Some(tip)
+        } else if self.debug.continuous {
+            // Set genesis as the initial pipeline target.
+            // This will allow the downloader to start
+            debug!(target: "reth::cli", "Continuous sync mode enabled");
+            Some(genesis_hash)
+        } else {
+            None
+        };
+
+        let mut hooks = EngineHooks::new();
+
+        let pruner_events = if let Some(prune_config) = prune_config {
+            let mut pruner = self.build_pruner(
+                &prune_config,
+                db.clone(),
+                tree_config,
+                snapshotter.highest_snapshot_receiver(),
+            );
+
+            let events = pruner.events();
+            hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
+
+            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
+            Either::Left(events)
+        } else {
+            Either::Right(stream::empty())
+        };
+
+        // Configure the consensus engine
+        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
+            client,
+            pipeline,
+            blockchain_db.clone(),
+            Box::new(ctx.task_executor.clone()),
+            Box::new(network.clone()),
+            max_block,
+            self.debug.continuous,
+            payload_builder.clone(),
+            initial_target,
+            MIN_BLOCKS_FOR_PIPELINE_RUN,
+            consensus_engine_tx,
+            consensus_engine_rx,
+            hooks,
+        )?;
+        info!(target: "reth::cli", "Consensus engine initialized");
+
+        let events = stream_select!(
+            network.event_listener().map(Into::into),
+            beacon_engine_handle.event_listener().map(Into::into),
+            pipeline_events.map(Into::into),
+            if self.debug.tip.is_none() {
+                Either::Left(
+                    ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
+                        .map(Into::into),
+                )
+            } else {
+                Either::Right(stream::empty())
+            },
+            pruner_events.map(Into::into)
+        );
+        ctx.task_executor.spawn_critical(
+            "events task",
+            events::handle_events(Some(network.clone()), Some(head.number), events, db.clone()),
+        );
+
+        let engine_api = EngineApi::new(
+            blockchain_db.clone(),
+            self.chain.clone(),
+            beacon_engine_handle,
+            payload_builder.into(),
+            Box::new(ctx.task_executor.clone()),
+        );
+        info!(target: "reth::cli", "Engine API handler initialized");
+
+        // extract the jwt secret from the args if possible
+        let default_jwt_path = data_dir.jwt_path();
+        let jwt_secret = self.rpc.auth_jwt_secret(default_jwt_path)?;
+
+        // adjust rpc port numbers based on instance number
+        self.adjust_instance_ports();
+
+        // Start RPC servers
+        let _rpc_server_handles =
+            self.rpc.start_servers(&components, engine_api, jwt_secret, &mut self.ext).await?;
+
+        // Run consensus engine to completion
+        let (tx, rx) = oneshot::channel();
+        info!(target: "reth::cli", "Starting consensus engine");
+        ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
+            let res = beacon_consensus_engine.await;
+            let _ = tx.send(res);
+        });
+
+        self.ext.on_node_started(&components)?;
+
+        // If `enable_genesis_walkback` is set to true, the rollup client will need to
+        // perform the derivation pipeline from genesis, validating the data dir.
+        // When set to false, set the finalized, safe, and unsafe head block hashes
+        // on the rollup client using a fork choice update. This prevents the rollup
+        // client from performing the derivation pipeline from genesis, and instead
+        // starts syncing from the current tip in the DB.
+        #[cfg(feature = "optimism")]
+        if self.chain.is_optimism() && !self.rollup.enable_genesis_walkback {
+            let client = _rpc_server_handles.auth.http_client();
+            reth_rpc_api::EngineApiClient::fork_choice_updated_v2(
+                &client,
+                reth_rpc_types::engine::ForkchoiceState {
+                    head_block_hash: head.hash,
+                    safe_block_hash: head.hash,
+                    finalized_block_hash: head.hash,
+                },
+                None,
+            )
+            .await?;
+        }
+
+        // construct node handle and return
+        let _node_handle = NodeHandle { _rpc_server_handles, _consensus_engine_rx: rx };
+        return Ok(_node_handle)
+
+        // rx.await??;
+
+        // info!(target: "reth::cli", "Consensus engine has exited.");
+
+        // if self.debug.terminate {
+        //     Ok(())
+        // } else {
+        //     // The pipeline has finished downloading blocks up to `--debug.tip` or
+        //     // `--debug.max-block`. Keep other node components alive for further usage.
+        //     futures::future::pending().await
+        // }
     }
 }
 
@@ -1223,6 +1262,8 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
 pub struct NodeHandle {
     /// The handles to the RPC servers
     _rpc_server_handles: RethRpcServerHandles,
+    /// The receiver half of the channel for the consensus engine
+    _consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
 }
 
 /// The node service
