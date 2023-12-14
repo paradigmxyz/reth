@@ -263,7 +263,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         )?;
 
         provider_factory = provider_factory
-            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
+            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver())?;
 
         self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 

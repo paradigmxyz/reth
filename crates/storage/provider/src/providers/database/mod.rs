@@ -86,12 +86,12 @@ impl<DB> ProviderFactory<DB> {
         mut self,
         snapshots_path: PathBuf,
         highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
-    ) -> Self {
+    ) -> ProviderResult<Self> {
         self.snapshot_provider = Some(Arc::new(
-            SnapshotProvider::new(snapshots_path)
+            SnapshotProvider::new(snapshots_path)?
                 .with_highest_tracker(Some(highest_snapshot_tracker)),
         ));
-        self
+        Ok(self)
     }
 }
 
