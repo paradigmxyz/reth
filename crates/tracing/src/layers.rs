@@ -16,7 +16,7 @@ pub struct Layers {
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 3] =
     ["hyper::proto::h1=off", "trust_dns_proto=off", "atrust_dns_resolver=off"];
 
-fn env_filter(directives: &str) -> eyre::Result<EnvFilter> {
+fn build_env_filter(directives: &str) -> eyre::Result<EnvFilter> {
     let env_filter = EnvFilter::builder().from_env_lossy();
 
     DEFAULT_ENV_FILTER_DIRECTIVES
@@ -36,7 +36,7 @@ impl Layers {
     }
 
     pub fn journald(&mut self, filter: &str) -> eyre::Result<()> {
-        let journald_filter = env_filter(filter)?;
+        let journald_filter = build_env_filter(filter)?;
         let layer = tracing_journald::layer().unwrap().with_filter(journald_filter).boxed();
         self.inner.push(layer);
         Ok(())
@@ -52,7 +52,7 @@ impl Layers {
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
     {
-        let filter = env_filter(filter)?;
+        let filter = build_env_filter(filter)?;
         let layer = format.apply(filter, color, None);
         self.inner.push(layer.boxed());
         Ok(())
@@ -67,7 +67,7 @@ impl Layers {
         let log_dir = file_info.create_log_dir();
         let (writer, guard) = file_info.create_log_writer(&log_dir);
 
-        let file_filter = env_filter(&filter.to_string())?;
+        let file_filter = build_env_filter(&filter.to_string())?;
         let layer = format.apply(file_filter, None, Some(writer));
         self.inner.push(layer);
         Ok(guard)
