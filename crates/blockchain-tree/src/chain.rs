@@ -202,9 +202,6 @@ impl AppendableChain {
         // some checks are done before blocks comes here.
         externals.consensus.validate_header_against_parent(&block, parent_block)?;
 
-        let (block, senders) = block.into_components();
-        let block = block.unseal();
-
         // get the state provider.
         let canonical_fork = bundle_state_data_provider.canonical_fork();
         let state_provider =
@@ -213,7 +210,8 @@ impl AppendableChain {
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 
         let mut executor = externals.executor_factory.with_state(&provider);
-        executor.execute_and_verify_receipt(&block, U256::MAX, Some(senders))?;
+        let block = block.unseal();
+        executor.execute_and_verify_receipt(&block, U256::MAX)?;
         let bundle_state = executor.take_output_state();
 
         // check state root if the block extends the canonical chain __and__ if state root
@@ -225,7 +223,7 @@ impl AppendableChain {
                 return Err(ConsensusError::BodyStateRootDiff(
                     GotExpected { got: state_root, expected: block.state_root }.into(),
                 )
-                .into())
+                .into());
             }
         }
 

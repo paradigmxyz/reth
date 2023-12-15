@@ -166,9 +166,9 @@ impl Command {
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
         executor.execute_and_verify_receipt(
-            &block.clone().unseal(),
+            //todo
+            &block.clone().unseal().with_recovered_senders().unwrap(),
             merkle_block_td + block.difficulty,
-            None,
         )?;
         let block_state = executor.take_output_state();
 
@@ -185,7 +185,7 @@ impl Command {
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
-            return Ok(())
+            return Ok(());
         }
 
         let provider_rw = factory.provider_rw()?;
