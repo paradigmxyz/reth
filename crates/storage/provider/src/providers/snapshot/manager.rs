@@ -221,7 +221,7 @@ impl SnapshotProvider {
         let mut block_index = self.snapshots_block_index.write();
         let mut tx_index = self.snapshots_tx_index.write();
 
-        for (segment, block_range, tx_range) in iter_snapshots(&self.path).unwrap() {
+        for (segment, block_range, tx_range) in iter_snapshots(&self.path)? {
             let block_end = *block_range.end();
             let tx_end = *tx_range.end();
 
