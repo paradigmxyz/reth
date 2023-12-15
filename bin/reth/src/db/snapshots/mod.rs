@@ -82,8 +82,16 @@ impl Command {
         let all_combinations = self
             .segments
             .iter()
-            .cartesian_product(self.compression.iter())
-            .cartesian_product(self.phf.iter());
+            .cartesian_product(if self.compression.is_empty() {
+                vec![Compression::Uncompressed]
+            } else {
+                self.compression
+            })
+            .cartesian_product(if self.phf.is_empty() {
+                vec![None]
+            } else {
+                self.phf.into_iter().map(Some).collect::<Vec<_>>()
+            });
 
         {
             let db = open_db_read_only(db_path, None)?;
@@ -91,8 +99,8 @@ impl Command {
 
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
-                    let filters = if self.with_filters {
-                        Filters::WithFilters(InclusionFilter::Cuckoo, *phf)
+                    let filters = if let (true, Some(phf)) = (self.with_filters, phf) {
+                        Filters::WithFilters(InclusionFilter::Cuckoo, phf)
                     } else {
                         Filters::WithoutFilters
                     };
@@ -100,15 +108,15 @@ impl Command {
                     match mode {
                         SnapshotSegment::Headers => self.generate_snapshot::<DatabaseEnv>(
                             factory.clone(),
-                            snap_segments::Headers::new(*compression, filters),
+                            snap_segments::Headers::new(compression, filters),
                         )?,
                         SnapshotSegment::Transactions => self.generate_snapshot::<DatabaseEnv>(
                             factory.clone(),
-                            snap_segments::Transactions::new(*compression, filters),
+                            snap_segments::Transactions::new(compression, filters),
                         )?,
                         SnapshotSegment::Receipts => self.generate_snapshot::<DatabaseEnv>(
                             factory.clone(),
-                            snap_segments::Receipts::new(*compression, filters),
+                            snap_segments::Receipts::new(compression, filters),
                         )?,
                     }
                 }
@@ -122,25 +130,25 @@ impl Command {
                         db_path,
                         log_level,
                         chain.clone(),
-                        *compression,
+                        compression,
                         InclusionFilter::Cuckoo,
-                        *phf,
+                        phf,
                     )?,
                     SnapshotSegment::Transactions => self.bench_transactions_snapshot(
                         db_path,
                         log_level,
                         chain.clone(),
-                        *compression,
+                        compression,
                         InclusionFilter::Cuckoo,
-                        *phf,
+                        phf,
                     )?,
                     SnapshotSegment::Receipts => self.bench_receipts_snapshot(
                         db_path,
                         log_level,
                         chain.clone(),
-                        *compression,
+                        compression,
                         InclusionFilter::Cuckoo,
-                        *phf,
+                        phf,
                     )?,
                 }
             }
