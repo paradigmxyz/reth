@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ChainSpec, ForkCondition, ForkFilter, ForkId};
 use std::{fmt::Display, str::FromStr};
 
 /// The name of an Ethereum hardfork.
@@ -37,35 +36,19 @@ pub enum Hardfork {
     GrayGlacier,
     /// Paris.
     Paris,
-    /// Shanghai.
-    Shanghai,
-    /// Cancun.
-    Cancun,
     /// Bedrock.
     #[cfg(feature = "optimism")]
     Bedrock,
     /// Regolith
     #[cfg(feature = "optimism")]
     Regolith,
-}
-
-impl Hardfork {
-    /// Get the [ForkId] for this hardfork in the given spec, if the fork is activated at any point.
-    pub fn fork_id(&self, spec: &ChainSpec) -> Option<ForkId> {
-        match spec.fork(*self) {
-            ForkCondition::Never => None,
-            _ => Some(spec.fork_id(&spec.satisfy(spec.fork(*self)))),
-        }
-    }
-
-    /// Get the [ForkFilter] for this hardfork in the given spec, if the fork is activated at any
-    /// point.
-    pub fn fork_filter(&self, spec: &ChainSpec) -> Option<ForkFilter> {
-        match spec.fork(*self) {
-            ForkCondition::Never => None,
-            _ => Some(spec.fork_filter(spec.satisfy(spec.fork(*self)))),
-        }
-    }
+    /// Shanghai.
+    Shanghai,
+    /// Canyon
+    #[cfg(feature = "optimism")]
+    Canyon,
+    /// Cancun.
+    Cancun,
 }
 
 impl FromStr for Hardfork {
@@ -95,6 +78,8 @@ impl FromStr for Hardfork {
             "bedrock" => Hardfork::Bedrock,
             #[cfg(feature = "optimism")]
             "regolith" => Hardfork::Regolith,
+            #[cfg(feature = "optimism")]
+            "canyon" => Hardfork::Canyon,
             _ => return Err(format!("Unknown hardfork: {s}")),
         };
         Ok(hardfork)
@@ -110,8 +95,6 @@ impl Display for Hardfork {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Chain, Genesis};
-    use std::collections::BTreeMap;
 
     #[test]
     fn check_hardfork_from_str() {
@@ -163,8 +146,8 @@ mod tests {
     #[test]
     #[cfg(feature = "optimism")]
     fn check_op_hardfork_from_str() {
-        let hardfork_str = ["beDrOck", "rEgOlITH"];
-        let expected_hardforks = [Hardfork::Bedrock, Hardfork::Regolith];
+        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN"];
+        let expected_hardforks = [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon];
 
         let hardforks: Vec<Hardfork> =
             hardfork_str.iter().map(|h| Hardfork::from_str(h).unwrap()).collect();
@@ -175,35 +158,5 @@ mod tests {
     #[test]
     fn check_nonexistent_hardfork_from_str() {
         assert!(Hardfork::from_str("not a hardfork").is_err());
-    }
-
-    #[test]
-    fn check_fork_id_chainspec_with_fork_condition_never() {
-        let spec = ChainSpec {
-            chain: Chain::mainnet(),
-            genesis: Genesis::default(),
-            genesis_hash: None,
-            hardforks: BTreeMap::from([(Hardfork::Frontier, ForkCondition::Never)]),
-            paris_block_and_final_difficulty: None,
-            deposit_contract: None,
-            ..Default::default()
-        };
-
-        assert_eq!(Hardfork::Frontier.fork_id(&spec), None);
-    }
-
-    #[test]
-    fn check_fork_filter_chainspec_with_fork_condition_never() {
-        let spec = ChainSpec {
-            chain: Chain::mainnet(),
-            genesis: Genesis::default(),
-            genesis_hash: None,
-            hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Never)]),
-            paris_block_and_final_difficulty: None,
-            deposit_contract: None,
-            ..Default::default()
-        };
-
-        assert_eq!(Hardfork::Shanghai.fork_filter(&spec), None);
     }
 }

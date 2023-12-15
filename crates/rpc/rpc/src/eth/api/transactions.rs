@@ -18,7 +18,7 @@ use reth_primitives::{
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     revm_primitives::{db::DatabaseCommit, Env, ExecutionResult, ResultAndState, SpecId, State},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
-    IntoRecoveredTransaction, Receipt, SealedBlock,
+    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U128, U256, U64,
 };
@@ -30,8 +30,8 @@ use reth_revm::{
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
-    BlockError, CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt,
-    TransactionRequest, TypedTransactionRequest,
+    CallRequest, Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -99,6 +99,14 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// Returns `None` if block does not exist.
     async fn block_by_id(&self, id: BlockId) -> EthResult<Option<SealedBlock>>;
+
+    /// Get the entire block for the given id.
+    ///
+    /// Returns `None` if block does not exist.
+    async fn block_by_id_with_senders(
+        &self,
+        id: BlockId,
+    ) -> EthResult<Option<SealedBlockWithSenders>>;
 
     /// Get all transactions in the block with the given hash.
     ///
@@ -365,6 +373,13 @@ where
         self.block(id).await
     }
 
+    async fn block_by_id_with_senders(
+        &self,
+        id: BlockId,
+    ) -> EthResult<Option<SealedBlockWithSenders>> {
+        self.block_with_senders(id).await
+    }
+
     async fn transactions_by_block_id(
         &self,
         block: BlockId,
@@ -379,8 +394,11 @@ where
                 match this.provider().transaction_by_hash_with_meta(hash)? {
                     None => Ok(None),
                     Some((tx, meta)) => {
+                        // Note: we assume this transaction is valid, because it's mined (or part of
+                        // pending block) and already. We don't need to
+                        // check for pre EIP-2 because this transaction could be pre-EIP-2.
                         let transaction = tx
-                            .into_ecrecovered()
+                            .into_ecrecovered_unchecked()
                             .ok_or(EthApiError::InvalidTransactionSignature)?;
 
                         let tx = TransactionSource::Block {
@@ -530,6 +548,7 @@ where
                     max_fee_per_blob_gas: None,
                 },
                 BlockId::Number(BlockNumberOrTag::Pending),
+                None,
             )
             .await?;
         let gas_limit = estimated_gas;
@@ -779,12 +798,9 @@ where
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) =
-            futures::try_join!(self.evm_env_at(block_id), self.block_by_id(block_id),)?;
+            futures::try_join!(self.evm_env_at(block_id), self.block_with_senders(block_id))?;
 
-        let block = match block {
-            Some(block) => block,
-            None => return Ok(None),
-        };
+        let Some(block) = block else { return Ok(None) };
 
         // replay all transactions of the block
         self.spawn_tracing_task_with(move |this| {
@@ -799,13 +815,13 @@ where
             // prepare transactions, we do everything upfront to reduce time spent with open state
             let max_transactions =
                 highest_index.map_or(block.body.len(), |highest| highest as usize);
-            let transactions = block
-                .body
-                .into_iter()
+            let mut results = Vec::with_capacity(max_transactions);
+
+            let mut transactions = block
+                .into_transactions_ecrecovered()
                 .take(max_transactions)
                 .enumerate()
-                .map(|(idx, tx)| -> EthResult<_> {
-                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                .map(|(idx, tx)| {
                     let tx_info = TransactionInfo {
                         hash: Some(tx.hash()),
                         index: Some(idx as u64),
@@ -814,18 +830,13 @@ where
                         base_fee: Some(base_fee),
                     };
                     let tx_env = tx_env_with_recovered(&tx);
-
-                    Ok((tx_info, tx_env))
+                    (tx_info, tx_env)
                 })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let mut results = Vec::with_capacity(transactions.len());
+                .peekable();
 
             // now get the state
             let state = this.state_at(state_at.into())?;
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-            let mut transactions = transactions.into_iter().peekable();
 
             while let Some((tx_info, tx)) = transactions.next() {
                 let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
@@ -1045,19 +1056,16 @@ where
         block_id: impl Into<BlockId>,
         index: Index,
     ) -> EthResult<Option<Transaction>> {
-        let block_id = block_id.into();
-
-        if let Some(block) = self.block(block_id).await? {
+        if let Some(block) = self.block_with_senders(block_id.into()).await? {
             let block_hash = block.hash;
-            let block = block.unseal();
-            if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
-                let tx =
-                    tx_signed.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+            let block_number = block.number;
+            let base_fee_per_gas = block.base_fee_per_gas;
+            if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
                 return Ok(Some(from_recovered_with_block_context(
                     tx,
                     block_hash,
-                    block.header.number,
-                    block.header.base_fee_per_gas,
+                    block_number,
+                    base_fee_per_gas,
                     index.into(),
                 )))
             }
@@ -1156,15 +1164,20 @@ impl From<TransactionSource> for Transaction {
 }
 
 /// Helper function to construct a transaction receipt
+///
+/// Note: This requires _all_ block receipts because we need to calculate the gas used by the
+/// transaction.
 pub(crate) fn build_transaction_receipt_with_block_receipts(
-    tx: TransactionSigned,
+    transaction: TransactionSigned,
     meta: TransactionMeta,
     receipt: Receipt,
     all_receipts: &[Receipt],
     #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
 ) -> EthResult<TransactionReceipt> {
-    let transaction =
-        tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+    // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
+    // we don't need to check for pre EIP-2
+    let from =
+        transaction.recover_signer_unchecked().ok_or(EthApiError::InvalidTransactionSignature)?;
 
     // get the previous transaction cumulative gas used
     let gas_used = if meta.index == 0 {
@@ -1183,14 +1196,14 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         transaction_index: U64::from(meta.index),
         block_hash: Some(meta.block_hash),
         block_number: Some(U256::from(meta.block_number)),
-        from: transaction.signer(),
+        from,
         to: None,
         cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
         gas_used: Some(U256::from(gas_used)),
         contract_address: None,
         logs: Vec::with_capacity(receipt.logs.len()),
         effective_gas_price: U128::from(transaction.effective_gas_price(meta.base_fee)),
-        transaction_type: tx.transaction.tx_type().into(),
+        transaction_type: transaction.transaction.tx_type().into(),
         // TODO pre-byzantium receipts have a post-transaction state root
         state_root: None,
         logs_bloom: receipt.bloom_slow(),
@@ -1206,7 +1219,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     #[cfg(feature = "optimism")]
     if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
-        if !tx.is_deposit() {
+        if !transaction.is_deposit() {
             res_receipt.l1_fee = optimism_tx_meta.l1_fee;
             res_receipt.l1_gas_used =
                 optimism_tx_meta.l1_data_gas.map(|dg| dg + l1_block_info.l1_fee_overhead);
@@ -1216,10 +1229,9 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         }
     }
 
-    match tx.transaction.kind() {
+    match transaction.transaction.kind() {
         Create => {
-            res_receipt.contract_address =
-                Some(transaction.signer().create(tx.transaction.nonce()));
+            res_receipt.contract_address = Some(from.create(transaction.transaction.nonce()));
         }
         Call(addr) => {
             res_receipt.to = Some(*addr);

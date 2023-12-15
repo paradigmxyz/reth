@@ -22,7 +22,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     ops::{RangeBounds, RangeInclusive},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::sync::watch;
@@ -93,12 +93,17 @@ impl<DB> ProviderFactory<DB> {
         ));
         Ok(self)
     }
+
+    /// Returns reference to the underlying database.
+    pub fn db_ref(&self) -> &DB {
+        &self.db
+    }
 }
 
 impl<DB: Database> ProviderFactory<DB> {
     /// create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
-    pub fn new_with_database_path<P: AsRef<std::path::Path>>(
+    pub fn new_with_database_path<P: AsRef<Path>>(
         path: P,
         chain_spec: Arc<ChainSpec>,
         log_level: Option<LogLevel>,

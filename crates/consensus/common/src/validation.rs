@@ -263,7 +263,8 @@ fn check_gas_limit(
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
     if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
-        parent_gas_limit = parent.gas_limit * chain_spec.base_fee_params.elasticity_multiplier;
+        parent_gas_limit =
+            parent.gas_limit * chain_spec.base_fee_params(child.timestamp).elasticity_multiplier;
     }
 
     if child.gas_limit > parent_gas_limit {
@@ -336,7 +337,7 @@ pub fn validate_header_regarding_parent(
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have them.
                 parent
-                    .next_block_base_fee(chain_spec.base_fee_params)
+                    .next_block_base_fee(chain_spec.base_fee_params(child.timestamp))
                     .ok_or(ConsensusError::BaseFeeMissing)?
             };
         if expected_base_fee != base_fee {

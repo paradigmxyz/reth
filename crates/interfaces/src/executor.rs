@@ -1,4 +1,4 @@
-use crate::RethError;
+use crate::provider::ProviderError;
 use reth_primitives::{
     revm_primitives::EVMError, BlockNumHash, Bloom, GotExpected, GotExpectedBoxed,
     PruneSegmentError, B256,
@@ -15,7 +15,7 @@ pub enum BlockValidationError {
         hash: B256,
         /// The EVM error.
         #[source]
-        error: Box<EVMError<RethError>>,
+        error: Box<EVMError<ProviderError>>,
     },
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
@@ -127,11 +127,14 @@ pub enum BlockExecutionError {
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum OptimismBlockExecutionError {
     /// Error when trying to parse L1 block info
-    #[error("Could not get L1 block info from L2 block: {message:?}")]
+    #[error("could not get L1 block info from L2 block: {message:?}")]
     L1BlockInfoError {
         /// The inner error message
         message: String,
     },
+    /// Thrown when force deploy of create2deployer code fails.
+    #[error("failed to force create2deployer account code")]
+    ForceCreate2DeployerFail,
 }
 
 impl BlockExecutionError {

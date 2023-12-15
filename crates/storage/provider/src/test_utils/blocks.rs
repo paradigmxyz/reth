@@ -139,6 +139,8 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             }],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
         })]]),
         number,
     );
@@ -196,6 +198,8 @@ fn block2(
             }],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
         })]]),
         number,
     );

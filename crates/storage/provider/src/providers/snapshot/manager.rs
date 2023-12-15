@@ -49,6 +49,9 @@ pub struct SnapshotProvider {
     highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
     /// Directory where snapshots are located
     path: PathBuf,
+    /// Whether [`SnapshotJarProvider`] loads filters into memory. If not, `by_hash` queries won't
+    /// be able to be queried directly.
+    load_filters: bool,
 }
 
 impl SnapshotProvider {
@@ -60,10 +63,17 @@ impl SnapshotProvider {
             snapshots_tx_index: Default::default(),
             highest_tracker: None,
             path: path.as_ref().to_path_buf(),
+            load_filters: false,
         };
 
         provider.update_index()?;
         Ok(provider)
+    }
+
+    /// Loads filters into memory when creating a [`SnapshotJarProvider`].
+    pub fn with_filters(mut self) -> Self {
+        self.load_filters = true;
+        self
     }
 
     /// Adds a highest snapshot tracker to the provider
@@ -149,12 +159,15 @@ impl SnapshotProvider {
         if let Some(jar) = self.map.get(&key) {
             Ok(jar.into())
         } else {
-            self.map.insert(
-                key,
-                LoadedJar::new(NippyJar::load(
-                    &self.path.join(segment.filename(block_range, tx_range)),
-                )?)?,
-            );
+            let jar = NippyJar::load(&self.path.join(segment.filename(block_range, tx_range)))
+                .map(|jar| {
+                if self.load_filters {
+                    return jar.load_filters()
+                }
+                Ok(jar)
+            })??;
+
+            self.map.insert(key, LoadedJar::new(jar)?);
             Ok(self.map.get(&key).expect("qed").into())
         }
     }

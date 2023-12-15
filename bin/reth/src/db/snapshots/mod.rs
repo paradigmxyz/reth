@@ -1,9 +1,10 @@
 use clap::{builder::RangedU64ValueParser, Parser};
+use human_bytes::human_bytes;
 use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_db::{database::Database, open_db_read_only, DatabaseEnv};
 use reth_interfaces::db::LogLevel;
-use reth_nippy_jar::NippyJar;
+use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_primitives::{
     snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentHeader},
     BlockNumber, ChainSpec, SnapshotSegment,
@@ -204,7 +205,6 @@ impl Command {
     /// statistics about various aspects of each snapshot, such as filters size,
     /// offset index size, offset list size, and loading time.
     fn stats(&self, snapshots: Vec<impl AsRef<Path>>) -> eyre::Result<()> {
-        let mb = 1024.0 * 1024.0;
         let mut total_filters_size = 0;
         let mut total_index_size = 0;
         let mut total_offsets_size = 0;
@@ -214,6 +214,7 @@ impl Command {
         for snap in &snapshots {
             let start_time = Instant::now();
             let jar = NippyJar::<SegmentHeader>::load(snap.as_ref())?;
+            let _cursor = NippyJarCursor::new(&jar)?;
             let duration = start_time.elapsed();
             let file_size = snap.as_ref().metadata()?.len();
 
@@ -224,10 +225,10 @@ impl Command {
             total_file_size += file_size;
 
             println!("Snapshot: {:?}", snap.as_ref().file_name());
-            println!("  File Size:           {:>7.2} MB", file_size as f64 / mb);
-            println!("  Filters Size:        {:>7.2} MB", jar.filter_size() as f64 / mb);
-            println!("  Offset Index Size:   {:>7.2} MB", jar.offsets_index_size() as f64 / mb);
-            println!("  Offset List Size:    {:>7.2} MB", jar.offsets_size() as f64 / mb);
+            println!("  File Size:           {:>7}", human_bytes(file_size as f64));
+            println!("  Filters Size:        {:>7}", human_bytes(jar.filter_size() as f64));
+            println!("  Offset Index Size:   {:>7}", human_bytes(jar.offsets_index_size() as f64));
+            println!("  Offset List Size:    {:>7}", human_bytes(jar.offsets_size() as f64));
             println!(
                 "  Loading Time:        {:>7.2} ms | {:>7.2} µs",
                 duration.as_millis() as f64,
@@ -237,10 +238,10 @@ impl Command {
 
         let avg_duration = total_duration / snapshots.len() as u32;
 
-        println!("Total Filters Size:     {:>7.2} MB", total_filters_size as f64 / mb);
-        println!("Total Offset Index Size: {:>7.2} MB", total_index_size as f64 / mb);
-        println!("Total Offset List Size:  {:>7.2} MB", total_offsets_size as f64 / mb);
-        println!("Total File Size:         {:>7.2} GB", total_file_size as f64 / (mb * 1024.0));
+        println!("Total Filters Size:     {:>7}", human_bytes(total_filters_size as f64));
+        println!("Total Offset Index Size: {:>7}", human_bytes(total_index_size as f64));
+        println!("Total Offset List Size:  {:>7}", human_bytes(total_offsets_size as f64));
+        println!("Total File Size:         {:>7}", human_bytes(total_file_size as f64));
         println!(
             "Average Loading Time:    {:>7.2} ms | {:>7.2} µs",
             avg_duration.as_millis() as f64,

@@ -3,14 +3,18 @@
 use alloy_rlp::Encodable;
 use reth_network::protocol::IntoRlpxSubProtocol;
 use reth_primitives::{Bytes, BytesMut};
-use reth_rpc::{eth::gas_oracle::GasPriceOracleConfig, JwtError, JwtSecret};
+use reth_rpc::{
+    eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig},
+    JwtError, JwtSecret,
+};
 use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
     ServerBuilder, TransportRpcModuleConfig,
 };
+use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, path::PathBuf, time::Duration};
 
-/// A trait that provides configured RPC server.
+/// A trait that provides a configured RPC server.
 ///
 /// This provides all basic config values for the RPC server and is implemented by the
 /// [RpcServerArgs](crate::args::RpcServerArgs) type.
@@ -23,6 +27,9 @@ pub trait RethRpcConfig {
 
     /// The configured ethereum RPC settings.
     fn eth_config(&self) -> EthConfig;
+
+    /// Returns state cache configuration.
+    fn state_cache_config(&self) -> EthStateCacheConfig;
 
     /// Returns the max request size in bytes.
     fn rpc_max_request_size_bytes(&self) -> u32;
@@ -120,4 +127,11 @@ impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         reth_network::NetworkManager::add_rlpx_sub_protocol(self, protocol);
     }
+}
+
+/// A trait that provides all basic config values for the transaction pool and is implemented by the
+/// [TxPoolArgs](crate::args::TxPoolArgs) type.
+pub trait RethTransactionPoolConfig {
+    /// Returns transaction pool configuration.
+    fn pool_config(&self) -> PoolConfig;
 }

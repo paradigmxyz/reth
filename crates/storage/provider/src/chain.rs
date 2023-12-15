@@ -6,6 +6,7 @@ use reth_primitives::{
     Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, TxHash,
 };
+use revm::db::BundleState;
 use std::{borrow::Cow, collections::BTreeMap, fmt};
 
 /// A chain of blocks and their final state.
@@ -57,6 +58,11 @@ impl Chain {
     /// Get post state of this chain
     pub fn state(&self) -> &BundleStateWithReceipts {
         &self.state
+    }
+
+    /// Prepends the given state to the current state.
+    pub fn prepend_state(&mut self, state: BundleState) {
+        self.state.prepend_state(state);
     }
 
     /// Return true if chain is empty and has no blocks.
@@ -426,7 +432,7 @@ mod tests {
 
     #[test]
     fn chain_append() {
-        let block = SealedBlockWithSenders::default();
+        let block: SealedBlockWithSenders = SealedBlockWithSenders::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);

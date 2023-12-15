@@ -4,17 +4,16 @@ use crate::{
     stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
-    RethError,
-};
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     revm::env::{fill_cfg_and_block_env, fill_tx_env},
     Address, Block, BlockNumber, Bloom, ChainSpec, GotExpected, Hardfork, Header, PruneMode,
     PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, B256,
     MINIMUM_PRUNING_DISTANCE, U256,
 };
-use reth_provider::{BlockExecutor, BlockExecutorStats, PrunableBlockExecutor, StateProvider};
+use reth_provider::{
+    BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
+};
 use revm::{
     db::{states::bundle_state::BundleRetention, StateDBBox},
     primitives::ResultAndState,
@@ -53,7 +52,7 @@ pub struct EVMProcessor<'a> {
     /// The configured chain-spec
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
-    pub(crate) evm: EVM<StateDBBox<'a, RethError>>,
+    pub(crate) evm: EVM<StateDBBox<'a, ProviderError>>,
     /// Hook and inspector stack that we want to invoke on that hook.
     stack: InspectorStack,
     /// The collection of receipts.
@@ -115,7 +114,7 @@ impl<'a> EVMProcessor<'a> {
     /// Create a new EVM processor with the given revm state.
     pub fn new_with_state(
         chain_spec: Arc<ChainSpec>,
-        revm_state: StateDBBox<'a, RethError>,
+        revm_state: StateDBBox<'a, ProviderError>,
     ) -> Self {
         let mut evm = EVM::new();
         evm.database(revm_state);
@@ -143,7 +142,7 @@ impl<'a> EVMProcessor<'a> {
     }
 
     /// Returns a reference to the database
-    pub fn db_mut(&mut self) -> &mut StateDBBox<'a, RethError> {
+    pub fn db_mut(&mut self) -> &mut StateDBBox<'a, ProviderError> {
         // Option will be removed from EVM in the future.
         // as it is always some.
         // https://github.com/bluealloy/revm/issues/697
@@ -531,10 +530,18 @@ pub fn verify_receipt<'a>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
+    #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
+    #[cfg(feature = "optimism")] timestamp: u64,
 ) -> Result<(), BlockExecutionError> {
     // Check receipts root.
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
+    let receipts_root = reth_primitives::proofs::calculate_receipt_root(
+        &receipts_with_bloom,
+        #[cfg(feature = "optimism")]
+        chain_spec,
+        #[cfg(feature = "optimism")]
+        timestamp,
+    );
     if receipts_root != expected_receipts_root {
         return Err(BlockValidationError::ReceiptRootDiff(
             GotExpected { got: receipts_root, expected: expected_receipts_root }.into(),

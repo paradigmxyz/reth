@@ -16,14 +16,13 @@ pub trait PrefixSetAbstraction: Default {
     fn contains(&mut self, key: Nibbles) -> bool;
 }
 
-/// Abstractions used for benching
 impl PrefixSetAbstraction for PrefixSetMut {
     fn insert(&mut self, key: Nibbles) {
-        self.insert(key)
+        PrefixSetMut::insert(self, key)
     }
 
     fn contains(&mut self, key: Nibbles) -> bool {
-        PrefixSetMut::contains(self, key)
+        PrefixSetMut::contains(self, &key)
     }
 }
 
@@ -95,12 +94,12 @@ fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
     let mut preload = vec(vec(any::<u8>(), 32), size).new_tree(&mut runner).unwrap().current();
     preload.dedup();
     preload.sort();
-    let preload = preload.into_iter().map(|hash| Nibbles::from(&hash[..])).collect::<Vec<_>>();
+    let preload = preload.into_iter().map(Nibbles::from_nibbles_unchecked).collect::<Vec<_>>();
 
     let mut input = vec(vec(any::<u8>(), 0..=32), size).new_tree(&mut runner).unwrap().current();
     input.dedup();
     input.sort();
-    let input = input.into_iter().map(|bytes| Nibbles::from(&bytes[..])).collect::<Vec<_>>();
+    let input = input.into_iter().map(Nibbles::from_nibbles_unchecked).collect::<Vec<_>>();
 
     let expected = input
         .iter()
@@ -145,11 +144,11 @@ mod implementations {
         fn contains(&mut self, prefix: Nibbles) -> bool {
             let range = match self.last_checked.as_ref() {
                 // presumably never hit
-                Some(last) if &prefix < last => (Bound::Unbounded, Bound::Excluded(last)),
+                Some(last) if prefix < *last => (Bound::Unbounded, Bound::Excluded(last)),
                 Some(last) => (Bound::Included(last), Bound::Unbounded),
                 None => (Bound::Unbounded, Bound::Unbounded),
             };
-            for key in self.keys.range(range) {
+            for key in self.keys.range::<Nibbles, _>(range) {
                 if key.has_prefix(&prefix) {
                     self.last_checked = Some(prefix);
                     return true

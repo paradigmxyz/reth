@@ -278,7 +278,7 @@ where
                                 return Poll::Ready(Some(Err(err.into())))
                             }
                         } else {
-                            break;
+                            break
                         }
                     }
                     Poll::Pending => {
