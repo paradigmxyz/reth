@@ -896,15 +896,15 @@ impl Compact for TransactionSignedNoHash {
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
-            TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                let mut decompressor = decompressor.borrow_mut();
-                let mut tmp: Vec<u8> = Vec::with_capacity(200);
+            TRANSACTION_DECOMPRESSOR.with(|decompressor_pack| {
+                let decompressor = &mut decompressor_pack.borrow_mut().0;
+                let tmp = &mut decompressor_pack.borrow_mut().1;
 
                 // `decompress_to_buffer` will return an error if the output buffer doesn't have
                 // enough capacity. However we don't actually have information on the required
                 // length. So we hope for the best, and keep trying again with a fairly bigger size
                 // if it fails.
-                while let Err(err) = decompressor.decompress_to_buffer(buf, &mut tmp) {
+                while let Err(err) = decompressor.decompress_to_buffer(buf, tmp) {
                     let err = err.to_string();
                     if !err.contains("Destination buffer is too small") {
                         panic!("Failed to decompress: {}", err);
