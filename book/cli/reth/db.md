@@ -1,11 +1,22 @@
-# `reth init`
+# reth db
 
-Initialize the database from a genesis file
+Database debugging utilities
 
 ```bash
-$ reth init --help
+$ reth db --help
+Usage: reth db [OPTIONS] <COMMAND>
 
-Usage: reth init [OPTIONS]
+Commands:
+  stats     Lists all the tables, their entry count and their size
+  list      Lists the contents of a table
+  diff      Create a diff between two database tables or two entire databases
+  get       Gets the content of a table for the given key
+  drop      Deletes all database entries
+  clear     Deletes all table entries
+  snapshot  Snapshots tables from database
+  version   Lists current and local database versions
+  path      Returns the full database path
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --datadir <DATA_DIR>
@@ -60,7 +71,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

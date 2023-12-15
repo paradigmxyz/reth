@@ -20,7 +20,7 @@ impl DurationsRecorder {
     /// `action` label.
     pub(crate) fn record_duration(&mut self, action: Action, duration: Duration) {
         self.actions.push((action, duration));
-        Metrics::new_with_labels(&[("action", format!("{action:?}"))]).duration.record(duration);
+        Metrics::new_with_labels(&[("action", action.as_str())]).duration.record(duration);
         self.latest = Some(self.start.elapsed());
     }
 

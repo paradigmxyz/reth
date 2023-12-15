@@ -347,7 +347,10 @@ impl CallTraceNode {
 
         // we need to populate error and revert reason
         if !self.trace.success {
-            call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref());
+            // decode the revert reason, but don't include it if it's empty
+            call_frame.revert_reason = decode_revert_reason(self.trace.output.as_ref())
+                .filter(|reason| !reason.is_empty());
+
             // Note: the call tracer mimics parity's trace transaction and geth maps errors to parity style error messages, <https://github.com/ethereum/go-ethereum/blob/34d507215951fb3f4a5983b65e127577989a6db8/eth/tracers/native/call_flat.go#L39-L55>
             call_frame.error = self.trace.as_error_msg(TraceStyle::Parity);
         }
@@ -674,5 +677,16 @@ impl RecordedMemory {
 impl AsRef<[u8]> for RecordedMemory {
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_empty_revert() {
+        let reason = decode_revert_reason("".as_bytes());
+        assert_eq!(reason, Some("".to_string()));
     }
 }

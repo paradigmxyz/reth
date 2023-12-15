@@ -59,7 +59,7 @@ pub struct Command {
     only_bench: bool,
 
     /// Compression algorithms to use.
-    #[arg(long, short, value_delimiter = ',', default_value = "lz4")]
+    #[arg(long, short, value_delimiter = ',', default_value = "uncompressed")]
     compression: Vec<Compression>,
 
     /// Flag to enable inclusion list filters and PHFs.
@@ -79,11 +79,14 @@ impl Command {
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
     ) -> eyre::Result<()> {
-        let all_combinations = self
-            .segments
-            .iter()
-            .cartesian_product(self.compression.iter())
-            .cartesian_product(self.phf.iter());
+        let all_combinations =
+            self.segments.iter().cartesian_product(self.compression.iter()).cartesian_product(
+                if self.phf.is_empty() {
+                    vec![None]
+                } else {
+                    self.phf.iter().copied().map(Some).collect::<Vec<_>>()
+                },
+            );
 
         {
             let db = open_db_read_only(db_path, None)?;
@@ -91,8 +94,8 @@ impl Command {
 
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
-                    let filters = if self.with_filters {
-                        Filters::WithFilters(InclusionFilter::Cuckoo, *phf)
+                    let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
+                        Filters::WithFilters(InclusionFilter::Cuckoo, phf)
                     } else {
                         Filters::WithoutFilters
                     };
@@ -124,7 +127,7 @@ impl Command {
                         chain.clone(),
                         *compression,
                         InclusionFilter::Cuckoo,
-                        *phf,
+                        phf,
                     )?,
                     SnapshotSegment::Transactions => self.bench_transactions_snapshot(
                         db_path,
@@ -132,7 +135,7 @@ impl Command {
                         chain.clone(),
                         *compression,
                         InclusionFilter::Cuckoo,
-                        *phf,
+                        phf,
                     )?,
                     SnapshotSegment::Receipts => self.bench_receipts_snapshot(
                         db_path,
@@ -140,7 +143,7 @@ impl Command {
                         chain.clone(),
                         *compression,
                         InclusionFilter::Cuckoo,
-                        *phf,
+                        phf,
                     )?,
                 }
             }
