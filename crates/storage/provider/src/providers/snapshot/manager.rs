@@ -1,21 +1,26 @@
 use super::{LoadedJar, SnapshotJarProvider};
-use crate::{to_range, BlockHashReader, BlockNumReader, HeaderProvider, TransactionsProvider};
+use crate::{
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
+    ReceiptProvider, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    WithdrawalsProvider,
+};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
-    snapshot::{HeaderMask, SnapshotCursor, TransactionMask},
+    models::StoredBlockBodyIndices,
+    snapshot::{HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::HighestSnapshots, Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo,
-    Header, SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
+    snapshot::{iter_snapshots, HighestSnapshots},
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
-use revm::primitives::HashMap;
 use std::{
-    collections::BTreeMap,
+    collections::{hash_map::Entry, BTreeMap, HashMap},
     ops::{Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
 };
@@ -36,9 +41,9 @@ pub struct SnapshotProvider {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
-    /// Available snapshot ranges on disk indexed by max blocks.
+    /// Available snapshot transaction ranges on disk indexed by max blocks.
     snapshots_block_index: RwLock<SegmentRanges>,
-    /// Available snapshot ranges on disk indexed by max transactions.
+    /// Available snapshot block ranges on disk indexed by max transactions.
     snapshots_tx_index: RwLock<SegmentRanges>,
     /// Tracks the highest snapshot of every segment.
     highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
@@ -48,14 +53,17 @@ pub struct SnapshotProvider {
 
 impl SnapshotProvider {
     /// Creates a new [`SnapshotProvider`].
-    pub fn new(path: impl AsRef<Path>) -> Self {
-        Self {
+    pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        let provider = Self {
             map: Default::default(),
             snapshots_block_index: Default::default(),
             snapshots_tx_index: Default::default(),
             highest_tracker: None,
             path: path.as_ref().to_path_buf(),
-        }
+        };
+
+        provider.update_index()?;
+        Ok(provider)
     }
 
     /// Adds a highest snapshot tracker to the provider
@@ -166,6 +174,10 @@ impl SnapshotProvider {
         let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
 
         while let Some((block_end, tx_range)) = snapshots_rev_iter.next() {
+            if block > *block_end {
+                // request block is higher than highest snapshot block
+                return None
+            }
             // `unwrap_or(0) is safe here as it sets block_start to 0 if the iterator is empty,
             // indicating the lowest height snapshot has been reached.
             let block_start =
@@ -192,6 +204,10 @@ impl SnapshotProvider {
         let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
 
         while let Some((tx_end, block_range)) = snapshots_rev_iter.next() {
+            if tx > *tx_end {
+                // request tx is higher than highest snapshot tx
+                return None
+            }
             let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
                 return Some((block_range.clone(), tx_start..=*tx_end))
@@ -200,11 +216,49 @@ impl SnapshotProvider {
         None
     }
 
-    /// Gets the highest snapshot if it exists for a snapshot segment.
-    pub fn get_highest_snapshot(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
+    /// Updates the inner transaction and block index
+    pub fn update_index(&self) -> ProviderResult<()> {
+        let mut block_index = self.snapshots_block_index.write();
+        let mut tx_index = self.snapshots_tx_index.write();
+
+        for (segment, block_range, tx_range) in iter_snapshots(&self.path)? {
+            let block_end = *block_range.end();
+            let tx_end = *tx_range.end();
+
+            match tx_index.entry(segment) {
+                Entry::Occupied(mut index) => {
+                    index.get_mut().insert(tx_end, block_range);
+                }
+                Entry::Vacant(index) => {
+                    index.insert(BTreeMap::from([(tx_end, block_range)]));
+                }
+            };
+
+            match block_index.entry(segment) {
+                Entry::Occupied(mut index) => {
+                    index.get_mut().insert(block_end, tx_range);
+                }
+                Entry::Vacant(index) => {
+                    index.insert(BTreeMap::from([(block_end, tx_range)]));
+                }
+            };
+        }
+
+        Ok(())
+    }
+
+    /// Gets the highest snapshot block if it exists for a snapshot segment.
+    pub fn get_highest_snapshot_block(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
         self.highest_tracker
             .as_ref()
             .and_then(|tracker| tracker.borrow().and_then(|highest| highest.highest(segment)))
+    }
+
+    /// Gets the highest snapshotted transaction.
+    pub fn get_highest_snapshot_tx(&self, segment: SnapshotSegment) -> Option<TxNumber> {
+        let snapshots = self.snapshots_tx_index.read();
+        let segment_snapshots: &BTreeMap<u64, RangeInclusive<u64>> = snapshots.get(&segment)?;
+        segment_snapshots.last_key_value().map(|(k, _)| *k)
     }
 
     /// Iterates through segment snapshots in reverse order, executing a function until it returns
@@ -244,7 +298,7 @@ impl SnapshotProvider {
     /// This function iteratively retrieves data using `get_fn` for each item in the given range.
     /// It continues fetching until the end of the range is reached or the provided `predicate`
     /// returns false.
-    fn fetch_range<T, F, P>(
+    pub fn fetch_range<T, F, P>(
         &self,
         segment: SnapshotSegment,
         range: Range<u64>,
@@ -266,7 +320,9 @@ impl SnapshotProvider {
         let mut provider = get_provider(range.start)?;
         let mut cursor = provider.cursor()?;
 
+        // advances number in range
         'outer: for number in range {
+            // advances snapshot files if `get_fn` returns None
             'inner: loop {
                 match get_fn(&mut cursor, number)? {
                     Some(res) => {
@@ -277,9 +333,6 @@ impl SnapshotProvider {
                         break 'inner;
                     }
                     None => {
-                        if number > self.get_highest_snapshot(segment).unwrap_or_default() {
-                            return Ok(result);
-                        }
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
                     }
@@ -376,21 +429,51 @@ impl BlockHashReader for SnapshotProvider {
     }
 }
 
-impl BlockNumReader for SnapshotProvider {
-    fn chain_info(&self) -> ProviderResult<ChainInfo> {
-        todo!()
+impl ReceiptProvider for SnapshotProvider {
+    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
+        self.get_segment_provider_from_transaction(SnapshotSegment::Receipts, num, None)?
+            .receipt(num)
     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        todo!()
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+        if let Some(num) = self.transaction_id(hash)? {
+            return self.receipt(num)
+        }
+        Ok(None)
     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        todo!()
+    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+        unreachable!()
     }
 
-    fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        todo!()
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        self.fetch_range(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
+            |_| true,
+        )
+    }
+}
+
+impl TransactionsProviderExt for SnapshotProvider {
+    fn transaction_hashes_by_range(
+        &self,
+        tx_range: Range<TxNumber>,
+    ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
+        self.fetch_range(
+            SnapshotSegment::Transactions,
+            tx_range,
+            |cursor, number| {
+                let tx =
+                    cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?;
+                Ok(tx.map(|tx| (tx.hash(), cursor.number())))
+            },
+            |_| true,
+        )
     }
 }
 
@@ -437,42 +520,150 @@ impl TransactionsProvider for SnapshotProvider {
         &self,
         _hash: TxHash,
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
-        todo!()
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        todo!()
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        todo!()
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
-        todo!()
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn senders_by_tx_range(
         &self,
-        _range: impl RangeBounds<TxNumber>,
+        range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        todo!()
+        let txes = self.transactions_by_tx_range(range)?;
+        TransactionSignedNoHash::recover_signers(&txes, txes.len())
+            .ok_or(ProviderError::SenderRecoveryError)
     }
 
     fn transactions_by_tx_range(
         &self,
-        _range: impl RangeBounds<TxNumber>,
+        range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
-        todo!()
+        self.fetch_range(
+            SnapshotSegment::Transactions,
+            to_range(range),
+            |cursor, number| {
+                cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())
+            },
+            |_| true,
+        )
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
         Ok(self.transaction_by_id_no_hash(id)?.and_then(|tx| tx.recover_signer()))
+    }
+}
+
+/* Cannot be successfully implemented but must exist for trait requirements */
+
+impl BlockNumReader for SnapshotProvider {
+    fn chain_info(&self) -> ProviderResult<ChainInfo> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl BlockReader for SnapshotProvider {
+    fn find_block_by_hash(
+        &self,
+        _hash: B256,
+        _source: BlockSource,
+    ) -> ProviderResult<Option<Block>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<BlockWithSenders>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl WithdrawalsProvider for SnapshotProvider {
+    fn withdrawals_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+        // Required data not present in snapshots
+        Err(ProviderError::UnsupportedProvider)
     }
 }
