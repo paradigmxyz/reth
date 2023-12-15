@@ -6,7 +6,7 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment};
+use reth_primitives::{BlockNumber, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{ProviderFactory, PruneCheckpointReader};
 use reth_snapshot::HighestSnapshotsTracker;
 use reth_tokio_util::EventListeners;
@@ -46,8 +46,7 @@ pub struct Pruner<DB> {
 impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
     pub fn new(
-        db: DB,
-        chain_spec: Arc<ChainSpec>,
+        provider_factory: ProviderFactory<DB>,
         segments: Vec<Arc<dyn Segment<DB>>>,
         min_block_interval: usize,
         delete_limit: usize,
@@ -55,7 +54,7 @@ impl<DB: Database> Pruner<DB> {
         highest_snapshots_tracker: HighestSnapshotsTracker,
     ) -> Self {
         Self {
-            provider_factory: ProviderFactory::new(db, chain_spec),
+            provider_factory,
             segments,
             min_block_interval,
             previous_tip_block_number: None,
@@ -267,12 +266,14 @@ mod tests {
     use crate::Pruner;
     use reth_db::test_utils::create_test_rw_db;
     use reth_primitives::MAINNET;
+    use reth_provider::ProviderFactory;
     use tokio::sync::watch;
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let mut pruner = Pruner::new(db, MAINNET.clone(), vec![], 5, 0, 5, watch::channel(None).1);
+        let provider_factory = ProviderFactory::new(db, MAINNET.clone());
+        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5, watch::channel(None).1);
 
         // No last pruned block number was set before
         let first_block_number = 1;
