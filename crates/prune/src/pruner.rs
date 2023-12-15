@@ -77,7 +77,7 @@ impl<DB: Database> Pruner<DB> {
             self.previous_tip_block_number = Some(tip_block_number);
 
             trace!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::Finished);
+            return Ok(PruneProgress::Finished)
         }
 
         trace!(target: "pruner", %tip_block_number, "Pruner started");
@@ -110,7 +110,7 @@ impl<DB: Database> Pruner<DB> {
 
         for segment in &self.segments {
             if delete_limit == 0 {
-                break;
+                break
             }
 
             if let Some((to_block, prune_mode)) = segment
