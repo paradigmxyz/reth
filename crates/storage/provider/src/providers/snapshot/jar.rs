@@ -286,4 +286,20 @@ impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
         // provider with `receipt()` instead for each
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        let range = to_range(range);
+        let mut cursor = self.cursor()?;
+        let mut receipts = Vec::with_capacity((range.end - range.start) as usize);
+
+        for num in range {
+            if let Some(tx) = cursor.get_one::<ReceiptMask<Receipt>>(num.into())? {
+                receipts.push(tx)
+            }
+        }
+        Ok(receipts)
+    }
 }

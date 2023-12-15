@@ -9,19 +9,18 @@ use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     models::StoredBlockBodyIndices,
-    snapshot::{HeaderMask, SnapshotCursor, TransactionMask},
+    snapshot::{HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::HighestSnapshots, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
-    BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    snapshot::{iter_snapshots, HighestSnapshots},
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
-use revm::primitives::HashMap;
 use std::{
-    collections::BTreeMap,
+    collections::{hash_map::Entry, BTreeMap, HashMap},
     ops::{Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
 };
@@ -42,9 +41,9 @@ pub struct SnapshotProvider {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
-    /// Available snapshot ranges on disk indexed by max blocks.
+    /// Available snapshot transaction ranges on disk indexed by max blocks.
     snapshots_block_index: RwLock<SegmentRanges>,
-    /// Available snapshot ranges on disk indexed by max transactions.
+    /// Available snapshot block ranges on disk indexed by max transactions.
     snapshots_tx_index: RwLock<SegmentRanges>,
     /// Tracks the highest snapshot of every segment.
     highest_tracker: Option<watch::Receiver<Option<HighestSnapshots>>>,
@@ -54,14 +53,17 @@ pub struct SnapshotProvider {
 
 impl SnapshotProvider {
     /// Creates a new [`SnapshotProvider`].
-    pub fn new(path: impl AsRef<Path>) -> Self {
-        Self {
+    pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        let provider = Self {
             map: Default::default(),
             snapshots_block_index: Default::default(),
             snapshots_tx_index: Default::default(),
             highest_tracker: None,
             path: path.as_ref().to_path_buf(),
-        }
+        };
+
+        provider.update_index()?;
+        Ok(provider)
     }
 
     /// Adds a highest snapshot tracker to the provider
@@ -214,6 +216,37 @@ impl SnapshotProvider {
         None
     }
 
+    /// Updates the inner transaction and block index
+    pub fn update_index(&self) -> ProviderResult<()> {
+        let mut block_index = self.snapshots_block_index.write();
+        let mut tx_index = self.snapshots_tx_index.write();
+
+        for (segment, block_range, tx_range) in iter_snapshots(&self.path)? {
+            let block_end = *block_range.end();
+            let tx_end = *tx_range.end();
+
+            match tx_index.entry(segment) {
+                Entry::Occupied(mut index) => {
+                    index.get_mut().insert(tx_end, block_range);
+                }
+                Entry::Vacant(index) => {
+                    index.insert(BTreeMap::from([(tx_end, block_range)]));
+                }
+            };
+
+            match block_index.entry(segment) {
+                Entry::Occupied(mut index) => {
+                    index.get_mut().insert(block_end, tx_range);
+                }
+                Entry::Vacant(index) => {
+                    index.insert(BTreeMap::from([(block_end, tx_range)]));
+                }
+            };
+        }
+
+        Ok(())
+    }
+
     /// Gets the highest snapshot block if it exists for a snapshot segment.
     pub fn get_highest_snapshot_block(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
         self.highest_tracker
@@ -265,7 +298,7 @@ impl SnapshotProvider {
     /// This function iteratively retrieves data using `get_fn` for each item in the given range.
     /// It continues fetching until the end of the range is reached or the provided `predicate`
     /// returns false.
-    fn fetch_range<T, F, P>(
+    pub fn fetch_range<T, F, P>(
         &self,
         segment: SnapshotSegment,
         range: Range<u64>,
@@ -397,16 +430,32 @@ impl BlockHashReader for SnapshotProvider {
 }
 
 impl ReceiptProvider for SnapshotProvider {
-    fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        todo!()
+    fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
+        self.get_segment_provider_from_transaction(SnapshotSegment::Receipts, num, None)?
+            .receipt(num)
     }
 
-    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Receipt>> {
-        todo!()
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
+        if let Some(num) = self.transaction_id(hash)? {
+            return self.receipt(num)
+        }
+        Ok(None)
     }
 
     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
-        todo!()
+        unreachable!()
+    }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        self.fetch_range(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
+            |_| true,
+        )
     }
 }
 

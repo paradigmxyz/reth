@@ -1604,7 +1604,12 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        Ok(self.tx.get::<tables::Receipts>(id)?)
+        self.get_with_snapshot(
+            SnapshotSegment::Receipts,
+            id,
+            |snapshot| snapshot.receipt(id),
+            || Ok(self.tx.get::<tables::Receipts>(id)?),
+        )
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
@@ -1622,16 +1627,30 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    let mut receipts_cursor = self.tx.cursor_read::<tables::Receipts>()?;
-                    let receipts = receipts_cursor
-                        .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, receipt)| receipt))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok(Some(receipts))
+                    self.receipts_by_tx_range(tx_range).map(Some)
                 }
             }
         }
         Ok(None)
+    }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        self.get_range_with_snapshot(
+            SnapshotSegment::Receipts,
+            to_range(range),
+            |snapshot, range, _| snapshot.receipts_by_tx_range(range),
+            |range, _| {
+                self.tx
+                    .cursor_read::<tables::Receipts>()?
+                    .walk_range(range)?
+                    .map(|result| result.map_err(Into::into).map(|(_, receipt)| receipt))
+                    .collect::<Result<Vec<_>, _>>()
+            },
+            |_| true,
+        )
     }
 }
 
