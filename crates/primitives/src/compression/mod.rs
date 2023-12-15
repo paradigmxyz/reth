@@ -23,13 +23,13 @@ thread_local! {
 
     /// Thread receipt compressor.
     pub static RECEIPT_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
-        Compressor::with_dictionary(0, &RECEIPT_DICTIONARY)
+        Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
             .expect("Failed to initialize compressor."),
     );
 
     /// Thread receipt decompressor.
     pub static RECEIPT_DECOMPRESSOR: RefCell<Decompressor<'static>> = RefCell::new(
-        Decompressor::with_dictionary(&RECEIPT_DICTIONARY)
+        Decompressor::with_dictionary(RECEIPT_DICTIONARY)
             .expect("Failed to initialize decompressor."),
     );
 }
