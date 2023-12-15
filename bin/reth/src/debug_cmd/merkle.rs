@@ -311,7 +311,7 @@ impl Command {
                                 "Nibbles don't match"
                             );
                             if incremental.1 != clean.1 &&
-                                clean.0.len() > self.skip_node_depth.unwrap_or_default()
+                                clean.0 .0.len() > self.skip_node_depth.unwrap_or_default()
                             {
                                 incremental_account_mismatched.push(incremental);
                                 clean_account_mismatched.push(clean);
