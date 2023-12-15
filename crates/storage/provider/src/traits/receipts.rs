@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, Receipt, TxHash, TxNumber};
 
@@ -20,6 +22,12 @@ pub trait ReceiptProvider: Send + Sync {
     ///
     /// Returns `None` if the block is not found.
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>>;
+
+    /// Get receipts by tx range.
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>>;
 }
 
 /// Trait extension for `ReceiptProvider`, for types that implement `BlockId` conversion.
