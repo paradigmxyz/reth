@@ -28,7 +28,46 @@ use tracing_subscriber::{
 pub use tracing;
 pub use tracing_subscriber;
 
+/// The `tracer` module provides functionalities for setting up and configuring logging.
+///
+/// It includes structures and functions to create and manage various logging layers: stdout,
+/// file, or journald. The module's primary entry point is the `Tracer` struct, which can be
+/// configured to use different logging formats and destinations. If no layer is specified, it will
+/// default to stdout.
+///
+/// # Examples
+///
+/// Basic usage:
+///
+/// ```
+/// use reth_tracing::{
+///     tracer::{LayerInfo, Tracer},
+///     tracing::level_filters::LevelFilter,
+///     LogFormat,
+/// };
+///
+/// fn main() -> eyre::Result<()> {
+///     let tracer = Tracer::new().with_stdout(LayerInfo::new(
+///         LogFormat::Json,
+///         "debug".to_string(),
+///         LevelFilter::INFO.into(),
+///         None,
+///     ));
+///
+///     tracer.init()?;
+///
+///     // Your application logic here
+///
+///     Ok(())
+/// }
+/// ```
+///
+/// This example sets up a tracer with JSON format logging for journald and terminal-friendly format
+/// for file logging.
 pub mod tracer;
+
+// Re-export LogFormat
+pub use formatter::LogFormat;
 
 mod formatter;
 mod layers;

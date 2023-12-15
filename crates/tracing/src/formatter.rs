@@ -1,9 +1,8 @@
+use crate::BoxedLayer;
 use clap::ValueEnum;
 use std::{fmt, fmt::Display};
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::{EnvFilter, Layer, Registry};
-
-use crate::BoxedLayer;
 
 /// Represents the logging format.
 ///

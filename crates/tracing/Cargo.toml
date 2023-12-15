@@ -16,4 +16,4 @@ tracing-journald = "0.3"
 tracing-logfmt = "0.3.3"
 rolling-file = "0.2.0"
 eyre.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["derive"] }

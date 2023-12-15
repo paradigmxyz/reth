@@ -1,9 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
-use tracing::Subscriber;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter, Layer, Registry};
+use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
 
 use crate::{formatter::LogFormat, BoxedLayer, FileWorkerGuard};
 
@@ -27,7 +26,7 @@ fn build_env_filter(
     directives: &str,
 ) -> eyre::Result<EnvFilter> {
     let env_filter = if let Some(default_directive) = default_directive {
-        EnvFilter::builder().with_default_directive(default_directive.into()).from_env_lossy()
+        EnvFilter::builder().with_default_directive(default_directive).from_env_lossy()
     } else {
         EnvFilter::builder().from_env_lossy()
     };
@@ -44,18 +43,18 @@ fn build_env_filter(
 ///
 /// `Layers` acts as a container for different logging layers such as stdout, file, or journald.
 /// Each layer can be configured separately and then combined into a tracing subscriber.
-pub struct Layers {
+pub(crate) struct Layers {
     inner: Vec<BoxedLayer<Registry>>,
 }
 
 impl Layers {
     /// Creates a new `Layers` instance.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { inner: vec![] }
     }
 
     /// Consumes the `Layers` instance, returning the inner vector of layers.
-    pub fn into_inner(self) -> Vec<BoxedLayer<Registry>> {
+    pub(crate) fn into_inner(self) -> Vec<BoxedLayer<Registry>> {
         self.inner
     }
 
@@ -66,9 +65,9 @@ impl Layers {
     ///
     /// # Returns
     /// An `eyre::Result<()>` indicating the success or failure of the operation.
-    pub fn journald(&mut self, filter: &str) -> eyre::Result<()> {
+    pub(crate) fn journald(&mut self, filter: &str) -> eyre::Result<()> {
         let journald_filter = build_env_filter(None, filter)?;
-        let layer = tracing_journald::layer().unwrap().with_filter(journald_filter).boxed();
+        let layer = tracing_journald::layer()?.with_filter(journald_filter).boxed();
         self.inner.push(layer);
         Ok(())
     }
@@ -86,17 +85,13 @@ impl Layers {
     ///
     /// # Returns
     /// An `eyre::Result<()>` indicating the success or failure of the operation.
-    pub fn stdout<S>(
+    pub(crate) fn stdout(
         &mut self,
         format: LogFormat,
         directive: Directive,
         filter: &str,
         color: Option<String>,
-    ) -> eyre::Result<()>
-    where
-        S: Subscriber,
-        for<'a> S: LookupSpan<'a>,
-    {
+    ) -> eyre::Result<()> {
         let filter = build_env_filter(Some(directive), filter)?;
         let layer = format.apply(filter, color, None);
         self.inner.push(layer.boxed());
@@ -112,14 +107,14 @@ impl Layers {
     ///
     /// # Returns
     /// An `eyre::Result<FileWorkerGuard>` representing the file logging worker.
-    pub fn file(
+    pub(crate) fn file(
         &mut self,
         format: LogFormat,
         filter: String,
         file_info: FileInfo,
     ) -> eyre::Result<FileWorkerGuard> {
         let log_dir = file_info.create_log_dir();
-        let (writer, guard) = file_info.create_log_writer(&log_dir);
+        let (writer, guard) = file_info.create_log_writer(log_dir);
 
         let file_filter = build_env_filter(None, &filter)?;
         let layer = format.apply(file_filter, None, Some(writer));
