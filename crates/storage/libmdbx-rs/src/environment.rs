@@ -2,7 +2,7 @@ use crate::{
     database::Database,
     error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
-    transaction::{RO, RW},
+    transaction::{CommitLatency, RO, RW},
     Mode, Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
@@ -303,7 +303,7 @@ unsafe impl Sync for EnvPtr {}
 pub(crate) enum TxnManagerMessage {
     Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
     Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
-    Commit { tx: TxnPtr, sender: SyncSender<Result<bool>> },
+    Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
 }
 
 /// Environment statistics.
@@ -603,9 +603,13 @@ impl EnvironmentBuilder {
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             sender
-                                .send(mdbx_result(unsafe {
-                                    ffi::mdbx_txn_commit_ex(tx.0, ptr::null_mut())
-                                }))
+                                .send({
+                                    let mut latency = CommitLatency::new();
+                                    mdbx_result(unsafe {
+                                        ffi::mdbx_txn_commit_ex(tx.0, latency.mdb_commit_latency())
+                                    })
+                                    .map(|v| (v, latency))
+                                })
                                 .unwrap();
                         }
                     },

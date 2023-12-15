@@ -666,6 +666,11 @@ impl ChainSpec {
         self.genesis.timestamp
     }
 
+    /// Returns the final total difficulty if the Paris hardfork is known.
+    pub fn get_final_paris_total_difficulty(&self) -> Option<U256> {
+        self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
+    }
+
     /// Returns the final total difficulty if the given block number is after the Paris hardfork.
     ///
     /// Note: technically this would also be valid for the block before the paris upgrade, but this

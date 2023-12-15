@@ -27,7 +27,7 @@ impl Command {
         chain: Arc<ChainSpec>,
         compression: Compression,
         inclusion_filter: InclusionFilter,
-        phf: PerfectHashingFunction,
+        phf: Option<PerfectHashingFunction>,
     ) -> eyre::Result<()> {
         let factory = ProviderFactory::new(open_db_read_only(db_path, log_level)?, chain.clone());
         let provider = factory.provider()?;
@@ -35,7 +35,7 @@ impl Command {
         let block_range =
             self.block_ranges(tip).first().expect("has been generated before").clone();
 
-        let filters = if self.with_filters {
+        let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
             Filters::WithFilters(inclusion_filter, phf)
         } else {
             Filters::WithoutFilters
