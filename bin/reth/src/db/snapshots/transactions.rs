@@ -35,7 +35,7 @@ impl Command {
         let block_range =
             self.block_ranges(tip).first().expect("has been generated before").clone();
 
-        let filters = if let (true, Some(phf)) = (self.with_filters, phf) {
+        let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
             Filters::WithFilters(inclusion_filter, phf)
         } else {
             Filters::WithoutFilters

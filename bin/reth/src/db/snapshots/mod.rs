@@ -85,12 +85,12 @@ impl Command {
             .cartesian_product(if self.compression.is_empty() {
                 vec![Compression::Uncompressed]
             } else {
-                self.compression
+                self.compression.clone()
             })
             .cartesian_product(if self.phf.is_empty() {
                 vec![None]
             } else {
-                self.phf.into_iter().map(Some).collect::<Vec<_>>()
+                self.phf.iter().copied().map(Some).collect::<Vec<_>>()
             });
 
         {
@@ -99,7 +99,7 @@ impl Command {
 
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
-                    let filters = if let (true, Some(phf)) = (self.with_filters, phf) {
+                    let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
                         Filters::WithFilters(InclusionFilter::Cuckoo, phf)
                     } else {
                         Filters::WithoutFilters
