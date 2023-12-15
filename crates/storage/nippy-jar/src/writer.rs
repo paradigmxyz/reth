@@ -16,7 +16,9 @@ const OFFSET_SIZE_BYTES: u64 = 8;
 ///
 /// ## Offset file layout
 /// The first byte is the size of a single offset in bytes, `m`.
-/// Then, the file contains `n` entries, each with a size of `m`. Each entry represents an offset, except for the last entry, which represents both the total size of the data file, as well as the next offset to write new data to.
+/// Then, the file contains `n` entries, each with a size of `m`. Each entry represents an offset,
+/// except for the last entry, which represents both the total size of the data file, as well as the
+/// next offset to write new data to.
 ///
 /// ## Data file layout
 /// The data file is represented just as a sequence of bytes of data without any delimiters
@@ -80,6 +82,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
 
             // First byte of the offset file is the size of one offset in bytes
             offsets.write_all(&[OFFSET_SIZE_BYTES as u8])?;
+            offsets.sync_all()?;
 
             offsets
         } else {
@@ -320,6 +323,9 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
             }
         }
 
+        self.offsets_file.sync_all()?;
+        self.data_file.sync_all()?;
+
         self.offsets_file.seek(SeekFrom::End(0))?;
         self.data_file.seek(SeekFrom::End(0))?;
 
@@ -345,6 +351,8 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
 
     /// Commits configuration and offsets to disk. It drains the internal offset list.
     pub fn commit(&mut self) -> Result<(), NippyJarError> {
+        self.data_file.sync_all()?;
+
         self.commit_offsets()?;
 
         // Flushes `max_row_size` and total `rows` to disk.
@@ -378,6 +386,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;
         }
+        self.offsets_file.sync_all()?;
 
         Ok(())
     }
