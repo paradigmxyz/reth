@@ -70,12 +70,14 @@ pub struct NippyJarWriter<'a, H: NippyJarHeader = ()> {
 }
 
 impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
-    /// Creates a [`NippyJarWriter`] from mutable refence of [`NippyJar`]
+    /// Creates a [`NippyJarWriter`] from mutable refence of [`NippyJar`]. It also does consistency
+    /// checks and self heals.
     pub fn from_mut(jar: &'a mut NippyJar<H>) -> Result<Self, NippyJarError> {
         Self::new(JarHolder::MutRef(jar))
     }
 
-    /// Creates a [`NippyJarWriter`] from an owned [`NippyJar`]
+    /// Creates a [`NippyJarWriter`] from an owned [`NippyJar`]. It also does consistency checks and
+    /// self heals.
     pub fn from_owned(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         Self::new(JarHolder::Owned(jar))
     }
