@@ -1,9 +1,6 @@
 use super::cache::EthStateCache;
 use crate::{
-    eth::{
-        error::{EthApiError, EthResult},
-        logs_utils,
-    },
+    eth::{error::EthApiError, logs_utils},
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
@@ -11,11 +8,11 @@ use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, Receipt, SealedBlock, TxHash};
+use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, TxHash, U256};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
-    Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
+    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
 use reth_tasks::TaskSpawner;
@@ -141,7 +138,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
+                return Ok(FilterChanges::Empty);
             }
 
             // update filter
@@ -211,7 +208,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(FilterError::FilterNotFound(id))
+                return Err(FilterError::FilterNotFound(id));
             }
         };
 
@@ -402,19 +399,6 @@ where
         Ok(id)
     }
 
-    /// Fetches both receipts and block for the given block number.
-    async fn block_and_receipts_by_number(
-        &self,
-        hash_or_number: BlockHashOrNumber,
-    ) -> EthResult<Option<(SealedBlock, Arc<Vec<Receipt>>)>> {
-        let block_hash = match self.provider.convert_block_hash(hash_or_number)? {
-            Some(hash) => hash,
-            None => return Ok(None),
-        };
-
-        Ok(self.eth_cache.get_block_and_receipts(block_hash).await?)
-    }
-
     /// Returns all logs in the given _inclusive_ range that match the filter
     ///
     /// Returns an error if:
@@ -429,7 +413,7 @@ where
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
         if to_block - from_block > self.max_blocks_per_filter {
-            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
+            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
         }
 
         let mut all_logs = Vec::new();
@@ -458,27 +442,64 @@ where
                 if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
                     FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
-                    if let Some((block, receipts)) =
-                        self.block_and_receipts_by_number(num_hash).await?
-                    {
-                        let block_hash = block.hash;
+                    let block_hash = match self.provider.convert_block_hash(num_hash)? {
+                        Some(hash) => hash,
+                        None => continue,
+                    };
+                    let block_number = header.number;
+                    let block_number_u256 = U256::from(block_number);
+                    let block = BlockNumHash::new(block_number, block_hash);
 
-                        logs_utils::append_matching_block_logs(
-                            &mut all_logs,
-                            &filter_params,
-                            (block.number, block_hash).into(),
-                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts.iter()),
-                            false,
-                        );
+                    let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? else {
+                        continue
+                    };
 
-                        // size check but only if range is multiple blocks, so we always return all
-                        // logs of a single block
-                        let is_multi_block_range = from_block != to_block;
-                        if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
-                            return Err(FilterError::QueryExceedsMaxResults(
-                                self.max_logs_per_response,
-                            ))
+                    // tracks the index of a log in the entire block
+                    let mut log_index: u32 = 0;
+                    for (receipt_idx, receipt) in receipts.iter().enumerate() {
+                        let logs = &receipt.logs;
+                        for log in logs.into_iter() {
+                            if crate::eth::logs_utils::log_matches_filter(
+                                block,
+                                &log,
+                                &filter_params,
+                            ) {
+                                let indices = self
+                                    .provider
+                                    .block_body_indices(block_number)?
+                                    .expect("block indices should be present");
+
+                                let id = indices.first_tx_num + receipt_idx as u64;
+                                let transaction_hash = self
+                                    .provider
+                                    .transaction_by_id(id)?
+                                    .expect("tx should be present")
+                                    .hash();
+
+                                let log = Log {
+                                    address: log.address,
+                                    topics: log.topics.clone(),
+                                    data: log.data.clone(),
+                                    block_hash: Some(block.hash),
+                                    block_number: Some(block_number_u256),
+                                    transaction_hash: Some(transaction_hash),
+                                    // The transaction index and the receipt index is always the
+                                    // same.
+                                    transaction_index: Some(U256::from(receipt_idx)),
+                                    log_index: Some(U256::from(log_index)),
+                                    removed: false,
+                                };
+                                all_logs.push(log);
+                            }
+                            log_index += 1;
                         }
+                    }
+
+                    // size check but only if range is multiple blocks, so we always return all
+                    // logs of a single block
+                    let is_multi_block_range = from_block != to_block;
+                    if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
+                        return Err(FilterError::QueryExceedsMaxResults(self.max_logs_per_response));
                     }
                 }
             }
@@ -716,7 +737,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None
+            return None;
         }
         Some((start, end))
     }
