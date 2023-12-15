@@ -3,21 +3,34 @@ use std::path::{Path, PathBuf};
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use tracing::Subscriber;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{registry::LookupSpan, EnvFilter, Layer, Registry};
+use tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter, Layer, Registry};
 
 use crate::{formatter::LogFormat, BoxedLayer, FileWorkerGuard};
-
-pub struct Layers {
-    inner: Vec<BoxedLayer<Registry>>,
-}
 
 /// Default [directives](Directive) for [EnvFilter] which disables high-frequency debug logs from
 /// `hyper` and `trust-dns`
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 3] =
     ["hyper::proto::h1=off", "trust_dns_proto=off", "atrust_dns_resolver=off"];
 
-fn build_env_filter(directives: &str) -> eyre::Result<EnvFilter> {
-    let env_filter = EnvFilter::builder().from_env_lossy();
+/// Builds an environment filter for logging.
+///
+/// The events are filtered by `default_directive`, unless overridden by `RUST_LOG`.
+///
+/// # Arguments
+/// * `default_directive` - An optional `Directive` that sets the default directive.
+/// * `directives` - Additional directives as a comma-separated string.
+///
+/// # Returns
+/// An `eyre::Result<EnvFilter>` that can be used to configure a tracing subscriber.
+fn build_env_filter(
+    default_directive: Option<Directive>,
+    directives: &str,
+) -> eyre::Result<EnvFilter> {
+    let env_filter = if let Some(default_directive) = default_directive {
+        EnvFilter::builder().with_default_directive(default_directive.into()).from_env_lossy()
+    } else {
+        EnvFilter::builder().from_env_lossy()
+    };
 
     DEFAULT_ENV_FILTER_DIRECTIVES
         .into_iter()
@@ -27,24 +40,56 @@ fn build_env_filter(directives: &str) -> eyre::Result<EnvFilter> {
         })
 }
 
+/// Manages the collection of layers for a tracing subscriber.
+///
+/// `Layers` acts as a container for different logging layers such as stdout, file, or journald.
+/// Each layer can be configured separately and then combined into a tracing subscriber.
+pub struct Layers {
+    inner: Vec<BoxedLayer<Registry>>,
+}
+
 impl Layers {
+    /// Creates a new `Layers` instance.
     pub fn new() -> Self {
         Self { inner: vec![] }
     }
+
+    /// Consumes the `Layers` instance, returning the inner vector of layers.
     pub fn into_inner(self) -> Vec<BoxedLayer<Registry>> {
         self.inner
     }
 
+    /// Adds a journald layer to the layers collection.
+    ///
+    /// # Arguments
+    /// * `filter` - A string containing additional filter directives for this layer.
+    ///
+    /// # Returns
+    /// An `eyre::Result<()>` indicating the success or failure of the operation.
     pub fn journald(&mut self, filter: &str) -> eyre::Result<()> {
-        let journald_filter = build_env_filter(filter)?;
+        let journald_filter = build_env_filter(None, filter)?;
         let layer = tracing_journald::layer().unwrap().with_filter(journald_filter).boxed();
         self.inner.push(layer);
         Ok(())
     }
 
+    /// Adds a stdout layer with specified formatting and filtering.
+    ///
+    /// # Type Parameters
+    /// * `S` - The type of subscriber that will use these layers.
+    ///
+    /// # Arguments
+    /// * `format` - The log message format.
+    /// * `directive` - Directive for the default logging level.
+    /// * `filter` - Additional filter directives as a string.
+    /// * `color` - Optional color configuration for the log messages.
+    ///
+    /// # Returns
+    /// An `eyre::Result<()>` indicating the success or failure of the operation.
     pub fn stdout<S>(
         &mut self,
         format: LogFormat,
+        directive: Directive,
         filter: &str,
         color: Option<String>,
     ) -> eyre::Result<()>
@@ -52,12 +97,21 @@ impl Layers {
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
     {
-        let filter = build_env_filter(filter)?;
+        let filter = build_env_filter(Some(directive), filter)?;
         let layer = format.apply(filter, color, None);
         self.inner.push(layer.boxed());
         Ok(())
     }
 
+    /// Adds a file logging layer to the layers collection.
+    ///
+    /// # Arguments
+    /// * `format` - The format for log messages.
+    /// * `filter` - Additional filter directives as a string.
+    /// * `file_info` - Information about the log file including path and rotation strategy.
+    ///
+    /// # Returns
+    /// An `eyre::Result<FileWorkerGuard>` representing the file logging worker.
     pub fn file(
         &mut self,
         format: LogFormat,
@@ -67,13 +121,18 @@ impl Layers {
         let log_dir = file_info.create_log_dir();
         let (writer, guard) = file_info.create_log_writer(&log_dir);
 
-        let file_filter = build_env_filter(&filter.to_string())?;
+        let file_filter = build_env_filter(None, &filter)?;
         let layer = format.apply(file_filter, None, Some(writer));
         self.inner.push(layer);
         Ok(guard)
     }
 }
 
+/// Holds configuration information for file logging.
+///
+/// Contains details about the log file's path, name, size, and rotation strategy.
+
+#[derive(Debug)]
 pub struct FileInfo {
     dir: PathBuf,
     file_name: String,
@@ -82,8 +141,11 @@ pub struct FileInfo {
 }
 
 impl FileInfo {
+    /// Creates the log directory if it doesn't exist.
+    ///
+    /// # Returns
+    /// A reference to the path of the log directory.
     fn create_log_dir(&self) -> &Path {
-        // Create log dir if it doesn't exist (RFA doesn't do this for us)
         let log_dir: &Path = self.dir.as_ref();
         if !log_dir.exists() {
             std::fs::create_dir_all(log_dir).expect("Could not create log directory");
@@ -91,6 +153,13 @@ impl FileInfo {
         log_dir
     }
 
+    /// Creates a non-blocking writer for the log file.
+    ///
+    /// # Arguments
+    /// * `log_dir` - Reference to the log directory path.
+    ///
+    /// # Returns
+    /// A tuple containing the non-blocking writer and its associated worker guard.
     fn create_log_writer(
         &self,
         log_dir: &Path,

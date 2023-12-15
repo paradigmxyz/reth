@@ -5,18 +5,39 @@ use tracing_subscriber::{EnvFilter, Layer, Registry};
 
 use crate::BoxedLayer;
 
-/// The log format
+/// Represents the logging format.
+///
+/// This enum defines the supported formats for logging output.
+/// It is used to configure the format layer of a tracing subscriber.
 #[derive(Debug, Copy, Clone, ValueEnum, Eq, PartialEq)]
 pub enum LogFormat {
-    /// Json formatting
+    /// Represents JSON formatting for logs.
+    /// This format outputs log records as JSON objects,
+    /// making it suitable for structured logging.
     Json,
-    /// Logfmt formatting
+
+    /// Represents logfmt (key=value) formatting for logs.
+    /// This format is concise and human-readable,
+    /// typically used in command-line applications.
     LogFmt,
-    /// Terminal formatting
+
+    /// Represents terminal-friendly formatting for logs.
     Terminal,
 }
 
 impl LogFormat {
+    /// Applies the specified logging format to create a new layer.
+    ///
+    /// This method constructs a tracing layer with the selected format,
+    /// along with additional configurations for filtering and output.
+    ///
+    /// # Arguments
+    /// * `filter` - An `EnvFilter` used to determine which log records to output.
+    /// * `color` - An optional string that enables or disables ANSI color codes in the logs.
+    /// * `file_writer` - An optional `NonBlocking` writer for directing logs to a file.
+    ///
+    /// # Returns
+    /// A `BoxedLayer<Registry>` that can be added to a tracing subscriber.
     pub fn apply(
         &self,
         filter: EnvFilter,
