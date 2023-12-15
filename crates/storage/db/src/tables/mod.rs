@@ -36,7 +36,7 @@ use crate::{
 };
 use reth_primitives::{
     stage::StageCheckpoint,
-    trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibblesSubKey},
+    trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
     PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
@@ -384,7 +384,7 @@ dupsort!(
 
 table!(
     /// Stores the current state's Merkle Patricia Tree.
-    ( AccountsTrie ) Nibbles | BranchNodeCompact
+    ( AccountsTrie ) StoredNibbles | BranchNodeCompact
 );
 
 dupsort!(
