@@ -1,29 +1,80 @@
-# `reth recover`
+# reth db snapshot
 
-Scripts for node recovery
+Snapshots tables from database
 
 ```bash
-$ reth recover --help
+$ reth db snapshot --help
+Usage: reth db snapshot [OPTIONS] [SEGMENTS]...
 
-Usage: reth recover [OPTIONS] <COMMAND>
+Arguments:
+  [SEGMENTS]...
+          Snapshot segments to generate
 
-Commands:
-  storage-tries  Recover the node by deleting dangling storage tries
-  help           Print this message or the help of the given subcommand(s)
+          Possible values:
+          - headers:      Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
+          - transactions: Snapshot segment responsible for the `Transactions` table
+          - receipts:     Snapshot segment responsible for the `Receipts` table
 
 Options:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+          
+          Defaults to the OS-specific data directory:
+          
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+          
+          [default: default]
+
+  -f, --from <FROM>
+          Starting block for the snapshot
+          
+          [default: 0]
+
+  -b, --block-interval <BLOCK_INTERVAL>
+          Number of blocks in the snapshot
+          
+          [default: 500000]
+
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
-          
           Possible values are either a built-in chain or the path to a chain specification file.
           
           Built-in chains:
-          - mainnet
-          - goerli
-          - sepolia
-          - holesky
+              mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
+
+  -p, --parallel <PARALLEL>
+          Sets the number of snapshots built in parallel. Note: Each parallel build is memory-intensive
+          
+          [default: 1]
+
+      --only-stats
+          Flag to skip snapshot creation and print snapshot files stats
+
+      --bench
+          Flag to enable database-to-snapshot benchmarking
+
+      --only-bench
+          Flag to skip snapshot creation and only run benchmarks on existing snapshots
+
+  -c, --compression <COMPRESSION>
+          Compression algorithms to use
+          
+          [default: lz4]
+          [possible values: lz4, zstd, zstd-with-dictionary, uncompressed]
+
+      --with-filters
+          Flag to enable inclusion list filters and PHFs
+
+      --phf <PHF>
+          Specifies the perfect hashing function to use
+
+          Possible values:
+          - fmph:    Fingerprint-Based Minimal Perfect Hash Function
+          - go-fmph: Fingerprint-Based Minimal Perfect Hash Function with Group Optimization
 
       --instance <INSTANCE>
           Add a new instance of a node.
@@ -43,7 +94,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
@@ -90,14 +141,4 @@ Display:
 
   -q, --quiet
           Silence all log output
-```
-
-## `reth recover storage-tries`
-
-Recover the node by deleting dangling storage tries
-
-```bash
-$ reth recover storage-tries --help
-
-Usage: reth recover storage-tries [OPTIONS]
 ```

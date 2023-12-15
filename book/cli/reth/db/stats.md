@@ -1,11 +1,10 @@
-# `reth init`
+# reth db stats
 
-Initialize the database from a genesis file
+Lists all the tables, their entry count and their size
 
 ```bash
-$ reth init --help
-
-Usage: reth init [OPTIONS]
+$ reth db stats --help
+Usage: reth db stats [OPTIONS]
 
 Options:
       --datadir <DATA_DIR>
@@ -21,14 +20,10 @@ Options:
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
-          
           Possible values are either a built-in chain or the path to a chain specification file.
           
           Built-in chains:
-          - mainnet
-          - goerli
-          - sepolia
-          - holesky
+              mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
 
@@ -46,25 +41,11 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
-Database:
-      --db.log-level <LOG_LEVEL>
-          Database logging level. Levels higher than "notice" require a debug build
-
-          Possible values:
-          - fatal:   Enables logging for critical conditions, i.e. assertion failures
-          - error:   Enables logging for error conditions
-          - warn:    Enables logging for warning conditions
-          - notice:  Enables logging for normal but significant condition
-          - verbose: Enables logging for verbose informational
-          - debug:   Enables logging for debug-level messages
-          - trace:   Enables logging for trace debug-level messages
-          - extra:   Enables logging for extra debug-level messages
-
 Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

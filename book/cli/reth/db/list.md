@@ -1,31 +1,77 @@
-# `reth config`
+# reth db list
 
-Write config to stdout
+Lists the contents of a table
 
 ```bash
-$ reth config --help
+$ reth db list --help
+Usage: reth db list [OPTIONS] <TABLE>
 
-Usage: reth config [OPTIONS]
+Arguments:
+  <TABLE>
+          The table name
 
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+          
+          Defaults to the OS-specific data directory:
+          
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+          
+          [default: default]
 
-      --default
-          Show the default config
+  -s, --skip <SKIP>
+          Skip first N entries
+          
+          [default: 0]
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
-          
           Possible values are either a built-in chain or the path to a chain specification file.
           
           Built-in chains:
-          - mainnet
-          - goerli
-          - sepolia
-          - holesky
+              mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
+
+  -r, --reverse
+          Reverse the order of the entries. If enabled last table entries are read
+
+  -l, --len <LEN>
+          How many items to take from the walker
+          
+          [default: 5]
+
+      --search <SEARCH>
+          Search parameter for both keys and values. Prefix it with `0x` to search for binary data, and text otherwise.
+          
+          ATTENTION! For compressed tables (`Transactions` and `Receipts`), there might be missing results since the search uses the raw uncompressed value from the database.
+
+      --min-row-size <MIN_ROW_SIZE>
+          Minimum size of row in bytes
+          
+          [default: 0]
+
+      --min-key-size <MIN_KEY_SIZE>
+          Minimum size of key in bytes
+          
+          [default: 0]
+
+      --min-value-size <MIN_VALUE_SIZE>
+          Minimum size of value in bytes
+          
+          [default: 0]
+
+  -c, --count
+          Returns the number of rows found
+
+  -j, --json
+          Dump as JSON instead of using TUI
+
+      --raw
+          Output bytes instead of human-readable decoded value
 
       --instance <INSTANCE>
           Add a new instance of a node.
@@ -45,7 +91,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

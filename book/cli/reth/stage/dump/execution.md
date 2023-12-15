@@ -1,42 +1,23 @@
-# `reth debug`
+# reth stage dump execution
 
-Various debug routines
+Execution stage
 
 ```bash
-$ reth debug --help
-
-Usage: reth debug [OPTIONS] <COMMAND>
-
-Commands:
-  execution         Debug the roundtrip execution of blocks as well as the generated data
-  merkle            Debug the clean & incremental state root calculations
-  in-memory-merkle  Debug in-memory state root calculation
-  help              Print this message or the help of the given subcommand(s)
+$ reth stage dump execution --help
+Usage: reth stage dump execution [OPTIONS] --output-db <OUTPUT_PATH> --from <FROM> --to <TO>
 
 Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-          
-          Defaults to the OS-specific data directory:
-          
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-          
-          [default: default]
+      --output-db <OUTPUT_PATH>
+          The path to the new database folder.
 
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          
-          Possible values are either a built-in chain or the path to a chain specification file.
-          
-          Built-in chains:
-          - mainnet
-          - goerli
-          - sepolia
-          - holesky
-          
-          [default: mainnet]
+  -f, --from <FROM>
+          From which block
+
+  -t, --to <TO>
+          To which block
+
+  -d, --dry-run
+          If passed, it will dry-run a stage execution from the newly created database right after dumping
 
       --instance <INSTANCE>
           Add a new instance of a node.
@@ -56,7 +37,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
@@ -103,34 +84,4 @@ Display:
 
   -q, --quiet
           Silence all log output
-```
-
-## `reth debug execution`
-
-Debug the roundtrip execution of blocks as well as the generated data
-
-```bash
-$ reth debug execution --help
-
-Usage: reth debug execution [OPTIONS] --to <TO>
-```
-
-## `reth debug merkle`
-
-Debug the clean & incremental state root calculations
-
-```bash
-$ reth debug merkle --help
-
-Usage: reth debug merkle [OPTIONS] --to <TO>
-```
-
-## `reth debug in-memory-merkle`
-
-Debug in-memory state root calculation
-
-```bash
-$ reth debug in-memory-merkle --help
-
-Usage: reth debug in-memory-merkle [OPTIONS]
 ```

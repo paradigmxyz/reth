@@ -749,6 +749,12 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
+    /// Convenience method to check if [Hardfork::Homestead] is active at a given block number.
+    #[inline]
+    pub fn is_homestead_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::Homestead).active_at_block(block_number)
+    }
+
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.forks_iter().filter_map(|(_, condition)| {

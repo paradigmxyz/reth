@@ -19,9 +19,11 @@ use reth_primitives::{
         db::{DatabaseCommit, DatabaseRef},
         BlockEnv, CfgEnv,
     },
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSigned, B256,
+    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256,
 };
-use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox, TransactionVariant};
+use reth_provider::{
+    BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
+};
 use reth_revm::{
     database::{StateProviderDatabase, SubState},
     tracing::{
@@ -73,7 +75,7 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
 
 impl<Provider, Eth> DebugApi<Provider, Eth>
 where
-    Provider: BlockReaderIdExt + HeaderProvider + 'static,
+    Provider: BlockReaderIdExt + HeaderProvider + ChainSpecProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Acquires a permit to execute a tracing call.
@@ -85,7 +87,7 @@ where
     async fn trace_block_with(
         &self,
         at: BlockId,
-        transactions: Vec<TransactionSigned>,
+        transactions: Vec<TransactionSignedEcRecovered>,
         cfg: CfgEnv,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
@@ -100,13 +102,19 @@ where
 
                 let mut transactions = transactions.into_iter().peekable();
                 while let Some(tx) = transactions.next() {
-                    let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+                    let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                     let (result, state_changes) =
-                        this.trace_transaction(opts.clone(), env, at, &mut db)?;
-                    results.push(TraceResult::Success { result });
+                        this.trace_transaction(opts.clone(), env, at, &mut db).map_err(|err| {
+                            results.push(TraceResult::Error {
+                                error: err.to_string(),
+                                tx_hash: Some(tx_hash),
+                            });
+                            err
+                        })?;
 
+                    results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
@@ -133,10 +141,32 @@ where
             Block::decode(&mut rlp_block.as_ref()).map_err(BlockError::RlpDecodeRawBlock)?;
 
         let (cfg, block_env) = self.inner.eth_api.evm_env_for_raw_block(&block.header).await?;
-
         // we trace on top the block's parent block
         let parent = block.parent_hash;
-        self.trace_block_with(parent.into(), block.body, cfg, block_env, opts).await
+
+        // Depending on EIP-2 we need to recover the transactions differently
+        let transactions =
+            if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number) {
+                block
+                    .body
+                    .into_iter()
+                    .map(|tx| {
+                        tx.into_ecrecovered()
+                            .ok_or_else(|| EthApiError::InvalidTransactionSignature)
+                    })
+                    .collect::<EthResult<Vec<_>>>()?
+            } else {
+                block
+                    .body
+                    .into_iter()
+                    .map(|tx| {
+                        tx.into_ecrecovered_unchecked()
+                            .ok_or_else(|| EthApiError::InvalidTransactionSignature)
+                    })
+                    .collect::<EthResult<Vec<_>>>()?
+            };
+
+        self.trace_block_with(parent.into(), transactions, cfg, block_env, opts).await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -153,7 +183,7 @@ where
 
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(block_hash.into()),
-            self.inner.eth_api.block_by_id(block_id),
+            self.inner.eth_api.block_by_id_with_senders(block_id),
         )?;
 
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
@@ -161,7 +191,14 @@ where
         // its parent block's state
         let state_at = block.parent_hash;
 
-        self.trace_block_with(state_at.into(), block.body, cfg, block_env, opts).await
+        self.trace_block_with(
+            state_at.into(),
+            block.into_transactions_ecrecovered().collect(),
+            cfg,
+            block_env,
+            opts,
+        )
+        .await
     }
 
     /// Trace the transaction according to the provided options.
@@ -354,11 +391,10 @@ where
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
 
-        let target_block = block_number
-            .unwrap_or(reth_rpc_types::BlockId::Number(reth_rpc_types::BlockNumberOrTag::Latest));
+        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(target_block),
-            self.inner.eth_api.block_by_id(target_block),
+            self.inner.eth_api.block_by_id_with_senders(target_block),
         )?;
 
         let opts = opts.unwrap_or_default();
@@ -389,11 +425,10 @@ where
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
-                    let transactions = block.body.into_iter().take(num_txs);
+                    let transactions = block.into_transactions_ecrecovered().take(num_txs);
 
                     // Execute all transactions until index
                     for tx in transactions {
-                        let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                         let tx = tx_env_with_recovered(&tx);
                         let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
                         let (res, _) = transact(&mut db, env)?;
@@ -632,7 +667,7 @@ where
 #[async_trait]
 impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
 where
-    Provider: BlockReaderIdExt + HeaderProvider + 'static,
+    Provider: BlockReaderIdExt + HeaderProvider + ChainSpecProvider + 'static,
     Eth: EthApiSpec + 'static,
 {
     /// Handler for `debug_getRawHeader`
@@ -656,6 +691,136 @@ where
         }
 
         Ok(res.into())
+    }
+
+    /// Handler for `debug_getRawBlock`
+    async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        let block = self.inner.provider.block_by_id(block_id).to_rpc_result()?;
+
+        let mut res = Vec::new();
+        if let Some(mut block) = block {
+            // In RPC withdrawals are always present
+            if block.withdrawals.is_none() {
+                block.withdrawals = Some(vec![]);
+            }
+            block.encode(&mut res);
+        }
+
+        Ok(res.into())
+    }
+
+    /// Handler for `debug_getRawTransaction`
+    /// Returns the bytes of the transaction for the given hash.
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
+        let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
+        Ok(tx
+            .map(TransactionSource::into_recovered)
+            .map(|tx| tx.envelope_encoded())
+            .unwrap_or_default())
+    }
+
+    /// Handler for `debug_getRawTransactions`
+    /// Returns the bytes of the transaction for the given hash.
+    async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
+        let block = self
+            .inner
+            .provider
+            .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
+            .to_rpc_result()?
+            .unwrap_or_default();
+        Ok(block.into_transactions_ecrecovered().map(|tx| tx.envelope_encoded()).collect())
+    }
+
+    /// Handler for `debug_getRawReceipts`
+    async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
+        let receipts =
+            self.inner.provider.receipts_by_block_id(block_id).to_rpc_result()?.unwrap_or_default();
+        let mut all_receipts = Vec::with_capacity(receipts.len());
+
+        for receipt in receipts {
+            let mut buf = Vec::new();
+            let receipt = receipt.with_bloom();
+            receipt.encode(&mut buf);
+            all_receipts.push(buf.into());
+        }
+
+        Ok(all_receipts)
+    }
+
+    /// Handler for `debug_getBadBlocks`
+    async fn bad_blocks(&self) -> RpcResult<Vec<RichBlock>> {
+        Err(internal_rpc_err("unimplemented"))
+    }
+
+    /// Handler for `debug_traceChain`
+    async fn debug_trace_chain(
+        &self,
+        _start_exclusive: BlockNumberOrTag,
+        _end_inclusive: BlockNumberOrTag,
+    ) -> RpcResult<Vec<BlockTraceResult>> {
+        Err(internal_rpc_err("unimplemented"))
+    }
+
+    /// Handler for `debug_traceBlock`
+    async fn debug_trace_block(
+        &self,
+        rlp_block: Bytes,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(DebugApi::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default()).await?)
+    }
+
+    /// Handler for `debug_traceBlockByHash`
+    async fn debug_trace_block_by_hash(
+        &self,
+        block: B256,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(DebugApi::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
+    }
+
+    /// Handler for `debug_traceBlockByNumber`
+    async fn debug_trace_block_by_number(
+        &self,
+        block: BlockNumberOrTag,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(DebugApi::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
+    }
+
+    /// Handler for `debug_traceTransaction`
+    async fn debug_trace_transaction(
+        &self,
+        tx_hash: B256,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<GethTrace> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(DebugApi::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default()).await?)
+    }
+
+    /// Handler for `debug_traceCall`
+    async fn debug_trace_call(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<GethTrace> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(DebugApi::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
+            .await?)
+    }
+
+    async fn debug_trace_call_many(
+        &self,
+        bundles: Vec<Bundle>,
+        state_context: Option<StateContext>,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<Vec<Vec<GethTrace>>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts).await?)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
@@ -867,136 +1032,6 @@ where
 
     async fn debug_write_mutex_profile(&self, _file: String) -> RpcResult<()> {
         Ok(())
-    }
-
-    /// Handler for `debug_getRawBlock`
-    async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
-        let block = self.inner.provider.block_by_id(block_id).to_rpc_result()?;
-
-        let mut res = Vec::new();
-        if let Some(mut block) = block {
-            // In RPC withdrawals are always present
-            if block.withdrawals.is_none() {
-                block.withdrawals = Some(vec![]);
-            }
-            block.encode(&mut res);
-        }
-
-        Ok(res.into())
-    }
-
-    /// Handler for `debug_getRawTransaction`
-    /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
-        let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
-        Ok(tx
-            .map(TransactionSource::into_recovered)
-            .map(|tx| tx.envelope_encoded())
-            .unwrap_or_default())
-    }
-
-    /// Handler for `debug_getRawTransactions`
-    /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        let block = self
-            .inner
-            .provider
-            .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
-            .to_rpc_result()?
-            .unwrap_or_default();
-        Ok(block.into_transactions_ecrecovered().map(|tx| tx.envelope_encoded()).collect())
-    }
-
-    /// Handler for `debug_getRawReceipts`
-    async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        let receipts =
-            self.inner.provider.receipts_by_block_id(block_id).to_rpc_result()?.unwrap_or_default();
-        let mut all_receipts = Vec::with_capacity(receipts.len());
-
-        for receipt in receipts {
-            let mut buf = Vec::new();
-            let receipt = receipt.with_bloom();
-            receipt.encode(&mut buf);
-            all_receipts.push(buf.into());
-        }
-
-        Ok(all_receipts)
-    }
-
-    /// Handler for `debug_getBadBlocks`
-    async fn bad_blocks(&self) -> RpcResult<Vec<RichBlock>> {
-        Err(internal_rpc_err("unimplemented"))
-    }
-
-    /// Handler for `debug_traceChain`
-    async fn debug_trace_chain(
-        &self,
-        _start_exclusive: BlockNumberOrTag,
-        _end_inclusive: BlockNumberOrTag,
-    ) -> RpcResult<Vec<BlockTraceResult>> {
-        Err(internal_rpc_err("unimplemented"))
-    }
-
-    /// Handler for `debug_traceBlock`
-    async fn debug_trace_block(
-        &self,
-        rlp_block: Bytes,
-        opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default()).await?)
-    }
-
-    /// Handler for `debug_traceBlockByHash`
-    async fn debug_trace_block_by_hash(
-        &self,
-        block: B256,
-        opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
-    }
-
-    /// Handler for `debug_traceBlockByNumber`
-    async fn debug_trace_block_by_number(
-        &self,
-        block: BlockNumberOrTag,
-        opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
-    }
-
-    /// Handler for `debug_traceTransaction`
-    async fn debug_trace_transaction(
-        &self,
-        tx_hash: B256,
-        opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default()).await?)
-    }
-
-    /// Handler for `debug_traceCall`
-    async fn debug_trace_call(
-        &self,
-        request: CallRequest,
-        block_number: Option<BlockId>,
-        opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
-            .await?)
-    }
-
-    async fn debug_trace_call_many(
-        &self,
-        bundles: Vec<Bundle>,
-        state_context: Option<StateContext>,
-        opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<Vec<GethTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts).await?)
     }
 }
 

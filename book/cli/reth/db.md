@@ -1,34 +1,24 @@
-# `reth p2p`
+# reth db
 
-P2P Debugging utilities
+Database debugging utilities
 
 ```bash
-$ reth p2p --help
-
-Usage: reth p2p [OPTIONS] <COMMAND>
+$ reth db --help
+Usage: reth db [OPTIONS] <COMMAND>
 
 Commands:
-  header  Download block header
-  body    Download block body
-  help    Print this message or the help of the given subcommand(s)
+  stats     Lists all the tables, their entry count and their size
+  list      Lists the contents of a table
+  diff      Create a diff between two database tables or two entire databases
+  get       Gets the content of a table for the given key
+  drop      Deletes all database entries
+  clear     Deletes all table entries
+  snapshot  Snapshots tables from database
+  version   Lists current and local database versions
+  path      Returns the full database path
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
-
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          
-          Possible values are either a built-in chain or the path to a chain specification file.
-          
-          Built-in chains:
-          - mainnet
-          - goerli
-          - sepolia
-          - holesky
-          
-          [default: mainnet]
-
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
           
@@ -40,33 +30,14 @@ Options:
           
           [default: default]
 
-      --p2p-secret-key <PATH>
-          Secret key to use for this node.
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
           
-          This also will deterministically set the peer ID.
-
-  -d, --disable-discovery
-          Disable the discovery service
-
-      --disable-dns-discovery
-          Disable the DNS discovery
-
-      --disable-discv4-discovery
-          Disable Discv4 discovery
-
-      --discovery.port <DISCOVERY_PORT>
-          The UDP port to use for P2P discovery/networking. default: 30303
-
-      --trusted-peer <TRUSTED_PEER>
-          Target trusted peer
-
-      --trusted-only
-          Connect only to trusted peers
-
-      --retries <RETRIES>
-          The number of retries per request
+          Built-in chains:
+              mainnet, sepolia, goerli, holesky, dev
           
-          [default: 5]
+          [default: mainnet]
 
       --instance <INSTANCE>
           Add a new instance of a node.
@@ -78,9 +49,6 @@ Options:
           Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
           
           [default: 1]
-
-      --nat <NAT>
-          [default: any]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -103,7 +71,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: /reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
@@ -150,32 +118,4 @@ Display:
 
   -q, --quiet
           Silence all log output
-```
-
-## `reth p2p body`
-
-Download block body
-
-```bash
-$ reth p2p body --help
-
-Usage: reth p2p body [OPTIONS] <ID>
-
-Arguments:
-  <ID>
-          The block number or hash
-```
-
-## `reth p2p header`
-
-Download block header
-
-```bash
-$ reth p2p header --help
-
-Usage: reth p2p header [OPTIONS] <ID>
-
-Arguments:
-  <ID>
-          The header number or hash
 ```

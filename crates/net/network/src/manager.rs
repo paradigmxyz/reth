@@ -46,6 +46,7 @@ use reth_primitives::{ForkId, NodeRecord, PeerId, B256};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use reth_tokio_util::EventListeners;
+use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -160,6 +161,11 @@ impl<C> NetworkManager<C> {
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         self.handle.bandwidth_meter()
     }
+
+    /// Returns the secret key used for authenticating sessions.
+    pub fn secret_key(&self) -> SecretKey {
+        self.swarm.sessions().secret_key()
+    }
 }
 
 impl<C> NetworkManager<C>
@@ -245,6 +251,7 @@ where
             Arc::clone(&num_active_peers),
             listener_address,
             to_manager_tx,
+            secret_key,
             local_peer_id,
             peers_handle,
             network_mode,

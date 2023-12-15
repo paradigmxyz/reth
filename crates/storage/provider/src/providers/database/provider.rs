@@ -2304,10 +2304,9 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
+            debug!(target: "providers::db", "Attempted to append empty block range");
             return Ok(())
         }
-        let new_tip = blocks.last().unwrap();
-        let new_tip_number = new_tip.number;
 
         let first_number = blocks.first().unwrap().number;
 
@@ -2339,10 +2338,10 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
 
         // Update pipeline progress
-        self.update_pipeline_stages(new_tip_number, false)?;
+        self.update_pipeline_stages(last_block_number, false)?;
         durations_recorder.record_relative(metrics::Action::UpdatePipelineStages);
 
-        debug!(target: "providers::db", actions = ?durations_recorder.actions, "Appended blocks");
+        debug!(target: "providers::db", range = ?first_number..=last_block_number, actions = ?durations_recorder.actions, "Appended blocks");
 
         Ok(())
     }
