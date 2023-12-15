@@ -15,10 +15,8 @@ const OFFSET_SIZE_BYTES: u64 = 8;
 /// calling `commit()`.
 ///
 /// ## Offset file layout
-/// 1. First byte – size of one offset in bytes
-/// 2. N offsets, each "size of one offset" bytes
-/// 2. Last "size of one offset" bytes – total size of the data file (also, the next offset where
-///    the data should be written next)
+/// The first byte is the size of a single offset in bytes, `m`.
+/// Then, the file contains `n` entries, each with a size of `m`. Each entry represents an offset, except for the last entry, which represents both the total size of the data file, as well as the next offset to write new data to.
 ///
 /// ## Data file layout
 /// The data file is represented just as a sequence of bytes of data without any delimiters
