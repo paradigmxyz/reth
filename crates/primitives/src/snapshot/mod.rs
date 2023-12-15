@@ -53,14 +53,13 @@ impl HighestSnapshots {
     }
 }
 
+/// Alias type for a map of [`SnapshotSegment`] and sorted lists of existing snapshot ranges.
+type SortedSnapshots =
+    HashMap<SnapshotSegment, Vec<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>>;
+
 /// Given the snapshot's location, it returns a list over the existing snapshots organized by
 /// [`SnapshotSegment`]. Each segment has a sorted list of block ranges and transaction ranges.
-pub fn iter_snapshots(
-    path: impl AsRef<Path>,
-) -> Result<
-    HashMap<SnapshotSegment, Vec<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>>,
-    FsPathError,
-> {
+pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, FsPathError> {
     let mut static_files: HashMap<SnapshotSegment, Vec<_>> = HashMap::default();
     let entries = crate::fs::read_dir(path.as_ref())?.filter_map(Result::ok).collect::<Vec<_>>();
 
