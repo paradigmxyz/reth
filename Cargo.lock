@@ -4578,6 +4578,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nybbles"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47dddada2357f8e7786f4f4d837db7bdddec02c7c3e5da7840d92c70390f6dc0"
+dependencies = [
+ "alloy-rlp",
+ "arbitrary",
+ "const-hex",
+ "proptest",
+ "serde",
+ "smallvec",
+]
+
+[[package]]
 name = "object"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6209,6 +6223,7 @@ dependencies = [
  "itertools 0.11.0",
  "modular-bitfield",
  "num_enum 0.7.1",
+ "nybbles",
  "once_cell",
  "plain_hasher",
  "pprof",
