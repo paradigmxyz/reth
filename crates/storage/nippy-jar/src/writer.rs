@@ -21,7 +21,7 @@ const OFFSET_SIZE_BYTES: u64 = 8;
 ///    the data should be written next)
 ///
 /// ## Data file layout
-/// Data file is represented just as a sequence of bytes of data without any delimiters
+/// The data file is represented just as a sequence of bytes of data without any delimiters
 pub struct NippyJarWriter<'a, H> {
     /// Reference to the associated [`NippyJar`], containing all necessary configurations for data
     /// handling.
