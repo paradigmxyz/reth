@@ -157,7 +157,7 @@ boa_engine = "0.17"
 boa_gc = "0.17"
 
 # misc
-aquamarine = "0.3"
+aquamarine = "0.4"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
