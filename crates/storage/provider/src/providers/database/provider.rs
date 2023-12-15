@@ -1,6 +1,7 @@
 use crate::{
     bundle_state::{BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit},
-    providers::{database::metrics, SnapshotProvider, SnapshotWriter},
+    providers::{database::metrics, snapshot::SnapshotWriter, SnapshotProvider},
+    to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
@@ -39,9 +40,9 @@ use reth_primitives::{
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, B256, U256,
+    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment,
+    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use reth_trie::{
     hashed_cursor::HashedPostState, prefix_set::PrefixSetMut, updates::TrieUpdates, StateRoot,
@@ -199,6 +200,118 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             .cursor_read::<T>()?
             .walk(Some(T::Key::default()))?
             .collect::<Result<Vec<_>, DatabaseError>>()
+    }
+
+    /// Gets data within a specified range, potentially spanning different snapshots and database.
+    ///
+    /// # Arguments
+    /// * `segment` - The segment of the snapshot to query.
+    /// * `block_range` - The range of data to fetch.
+    /// * `fetch_from_snapshot` - A function to fetch data from the snapshot.
+    /// * `fetch_from_database` - A function to fetch data from the database.
+    /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is
+    ///   terminated when this function returns false, thereby filtering the data based on the
+    ///   provided condition.
+    fn get_range_with_snapshot<T, P, FS, FD>(
+        &self,
+        segment: SnapshotSegment,
+        mut block_or_tx_range: Range<u64>,
+        fetch_from_snapshot: FS,
+        mut fetch_from_database: FD,
+        mut predicate: P,
+    ) -> ProviderResult<Vec<T>>
+    where
+        FS: Fn(&SnapshotProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
+        P: FnMut(&T) -> bool,
+    {
+        let mut data = Vec::new();
+
+        if let Some(snapshot_provider) = &self.snapshot_provider {
+            // If there is, check the maximum block or transaction number of the segment.
+            if let Some(snapshot_upper_bound) = match segment {
+                SnapshotSegment::Headers => snapshot_provider.get_highest_snapshot_block(segment),
+                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                    snapshot_provider.get_highest_snapshot_tx(segment)
+                }
+            } {
+                if block_or_tx_range.start <= snapshot_upper_bound {
+                    let end = block_or_tx_range.end.min(snapshot_upper_bound + 1);
+                    data.extend(fetch_from_snapshot(
+                        snapshot_provider,
+                        block_or_tx_range.start..end,
+                        &mut predicate,
+                    )?);
+                    block_or_tx_range.start = end;
+                }
+            }
+        }
+
+        if block_or_tx_range.end > block_or_tx_range.start {
+            data.extend(fetch_from_database(block_or_tx_range, predicate)?)
+        }
+
+        Ok(data)
+    }
+
+    /// Retrieves data from the database or snapshot, wherever it's available.
+    ///
+    /// # Arguments
+    /// * `segment` - The segment of the snapshot to check against.
+    /// * `index_key` - Requested index key, usually a block or transaction number.
+    /// * `fetch_from_snapshot` - A closure that defines how to fetch the data from the snapshot
+    ///   provider.
+    /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
+    ///   when the snapshot doesn't contain the required data or is not available.
+    fn get_with_snapshot<T, FS, FD>(
+        &self,
+        segment: SnapshotSegment,
+        number: u64,
+        fetch_from_snapshot: FS,
+        fetch_from_database: FD,
+    ) -> ProviderResult<Option<T>>
+    where
+        FS: Fn(&SnapshotProvider) -> ProviderResult<Option<T>>,
+        FD: Fn() -> ProviderResult<Option<T>>,
+    {
+        if let Some(provider) = &self.snapshot_provider {
+            // If there is, check the maximum block or transaction number of the segment.
+            let snapshot_upper_bound = match segment {
+                SnapshotSegment::Headers => provider.get_highest_snapshot_block(segment),
+                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                    provider.get_highest_snapshot_tx(segment)
+                }
+            };
+
+            if snapshot_upper_bound
+                .map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
+            {
+                return fetch_from_snapshot(provider);
+            }
+        }
+        fetch_from_database()
+    }
+
+    fn transactions_by_tx_range_with_cursor<C>(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+        cursor: &mut C,
+    ) -> ProviderResult<Vec<TransactionSignedNoHash>>
+    where
+        C: DbCursorRO<tables::Transactions>,
+    {
+        self.get_range_with_snapshot(
+            SnapshotSegment::Transactions,
+            to_range(range),
+            |snapshot, range, _| snapshot.transactions_by_tx_range(range),
+            |range, _| {
+                cursor
+                    .walk_range(range)?
+                    .map(|entry| entry.map(|tx| tx.1).map_err(Into::into))
+                    .collect::<ProviderResult<Vec<_>>>()
+            },
+            |_| true,
+        )
     }
 }
 
@@ -936,7 +1049,12 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        Ok(self.tx.get::<tables::Headers>(num)?)
+        self.get_with_snapshot(
+            SnapshotSegment::Headers,
+            num,
+            |snapshot| snapshot.header_by_number(num),
+            || Ok(self.tx.get::<tables::Headers>(num)?),
+        )
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
@@ -954,52 +1072,85 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
             return Ok(Some(td))
         }
 
-        Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
+        self.get_with_snapshot(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.header_td_by_number(number),
+            || Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0)),
+        )
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        let mut cursor = self.tx.cursor_read::<tables::Headers>()?;
-        cursor
-            .walk_range(range)?
-            .map(|result| result.map(|(_, header)| header).map_err(Into::into))
-            .collect::<ProviderResult<Vec<_>>>()
+        self.get_range_with_snapshot(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |snapshot, range, _| snapshot.headers_range(range),
+            |range, _| {
+                self.tx
+                    .cursor_read::<tables::Headers>()?
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, header)| header).map_err(Into::into))
+                    .collect::<ProviderResult<Vec<_>>>()
+            },
+            |_| true,
+        )
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        if let Some(header) = self.header_by_number(number)? {
-            let hash = self
-                .block_hash(number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-            Ok(Some(header.seal(hash)))
-        } else {
-            Ok(None)
-        }
+        self.get_with_snapshot(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.sealed_header(number),
+            || {
+                if let Some(header) = self.header_by_number(number)? {
+                    let hash = self
+                        .block_hash(number)?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+                    Ok(Some(header.seal(hash)))
+                } else {
+                    Ok(None)
+                }
+            },
+        )
     }
 
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        mut predicate: impl FnMut(&SealedHeader) -> bool,
+        predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        let mut headers = vec![];
-        for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
-            let (number, header) = entry?;
-            let hash = self
-                .block_hash(number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-            let sealed = header.seal(hash);
-            if !predicate(&sealed) {
-                break
-            }
-            headers.push(sealed);
-        }
-        Ok(headers)
+        self.get_range_with_snapshot(
+            SnapshotSegment::Headers,
+            to_range(range),
+            |snapshot, range, predicate| snapshot.sealed_headers_while(range, predicate),
+            |range, mut predicate| {
+                let mut headers = vec![];
+                for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
+                    let (number, header) = entry?;
+                    let hash = self
+                        .block_hash(number)?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+                    let sealed = header.seal(hash);
+                    if !predicate(&sealed) {
+                        break
+                    }
+                    headers.push(sealed);
+                }
+                Ok(headers)
+            },
+            predicate,
+        )
     }
 }
 
 impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        Ok(self.tx.get::<tables::CanonicalHeaders>(number)?)
+        self.get_with_snapshot(
+            SnapshotSegment::Headers,
+            number,
+            |snapshot| snapshot.block_hash(number),
+            || Ok(self.tx.get::<tables::CanonicalHeaders>(number)?),
+        )
     }
 
     fn canonical_hashes_range(
@@ -1007,12 +1158,19 @@ impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let range = start..end;
-        let mut cursor = self.tx.cursor_read::<tables::CanonicalHeaders>()?;
-        cursor
-            .walk_range(range)?
-            .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-            .collect::<ProviderResult<Vec<_>>>()
+        self.get_range_with_snapshot(
+            SnapshotSegment::Headers,
+            start..end,
+            |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
+            |range, _| {
+                self.tx
+                    .cursor_read::<tables::CanonicalHeaders>()?
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
+                    .collect::<ProviderResult<Vec<_>>>()
+            },
+            |_| true,
+        )
     }
 }
 
@@ -1185,10 +1343,10 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     let body = if tx_range.is_empty() {
                         Vec::new()
                     } else {
-                        tx_cursor
-                            .walk_range(tx_range)?
-                            .map(|result| result.map(|(_, tx)| tx.into()))
-                            .collect::<Result<Vec<_>, _>>()?
+                        self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
+                            .into_iter()
+                            .map(Into::into)
+                            .collect()
                     };
 
                     // If we are past shanghai, then all blocks should have a withdrawal list,
@@ -1225,53 +1383,63 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
         &self,
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
-        let tx_range_size = tx_range.clone().count();
-        let tx_walker = tx_cursor.walk_range(tx_range)?;
+        self.get_range_with_snapshot(
+            SnapshotSegment::Transactions,
+            tx_range,
+            |snapshot, range, _| snapshot.transaction_hashes_by_range(range),
+            |tx_range, _| {
+                let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+                let tx_range_size = tx_range.clone().count();
+                let tx_walker = tx_cursor.walk_range(tx_range)?;
 
-        let chunk_size = (tx_range_size / rayon::current_num_threads()).max(1);
-        let mut channels = Vec::with_capacity(chunk_size);
-        let mut transaction_count = 0;
+                let chunk_size = (tx_range_size / rayon::current_num_threads()).max(1);
+                let mut channels = Vec::with_capacity(chunk_size);
+                let mut transaction_count = 0;
 
-        #[inline]
-        fn calculate_hash(
-            entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
-            rlp_buf: &mut Vec<u8>,
-        ) -> Result<(B256, TxNumber), Box<ProviderError>> {
-            let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
-            tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-            Ok((keccak256(rlp_buf), tx_id))
-        }
-
-        for chunk in &tx_walker.chunks(chunk_size) {
-            let (tx, rx) = mpsc::channel();
-            channels.push(rx);
-
-            // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
-            let chunk: Vec<_> = chunk.collect();
-            transaction_count += chunk.len();
-
-            // Spawn the task onto the global rayon pool
-            // This task will send the results through the channel after it has calculated the hash.
-            rayon::spawn(move || {
-                let mut rlp_buf = Vec::with_capacity(128);
-                for entry in chunk {
-                    rlp_buf.clear();
-                    let _ = tx.send(calculate_hash(entry, &mut rlp_buf));
+                #[inline]
+                fn calculate_hash(
+                    entry: Result<(TxNumber, TransactionSignedNoHash), DatabaseError>,
+                    rlp_buf: &mut Vec<u8>,
+                ) -> Result<(B256, TxNumber), Box<ProviderError>> {
+                    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
+                    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+                    Ok((keccak256(rlp_buf), tx_id))
                 }
-            });
-        }
-        let mut tx_list = Vec::with_capacity(transaction_count);
 
-        // Iterate over channels and append the tx hashes unsorted
-        for channel in channels {
-            while let Ok(tx) = channel.recv() {
-                let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
-                tx_list.push((tx_hash, tx_id));
-            }
-        }
+                for chunk in &tx_walker.chunks(chunk_size) {
+                    let (tx, rx) = mpsc::channel();
+                    channels.push(rx);
 
-        Ok(tx_list)
+                    // Note: Unfortunate side-effect of how chunk is designed in itertools (it is
+                    // not Send)
+                    let chunk: Vec<_> = chunk.collect();
+                    transaction_count += chunk.len();
+
+                    // Spawn the task onto the global rayon pool
+                    // This task will send the results through the channel after it has calculated
+                    // the hash.
+                    rayon::spawn(move || {
+                        let mut rlp_buf = Vec::with_capacity(128);
+                        for entry in chunk {
+                            rlp_buf.clear();
+                            let _ = tx.send(calculate_hash(entry, &mut rlp_buf));
+                        }
+                    });
+                }
+                let mut tx_list = Vec::with_capacity(transaction_count);
+
+                // Iterate over channels and append the tx hashes unsorted
+                for channel in channels {
+                    while let Ok(tx) = channel.recv() {
+                        let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
+                        tx_list.push((tx_hash, tx_id));
+                    }
+                }
+
+                Ok(tx_list)
+            },
+            |_| true,
+        )
     }
 }
 
@@ -1283,14 +1451,24 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into))
+        self.get_with_snapshot(
+            SnapshotSegment::Transactions,
+            id,
+            |snapshot| snapshot.transaction_by_id(id),
+            || Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into)),
+        )
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        Ok(self.tx.get::<tables::Transactions>(id)?)
+        self.get_with_snapshot(
+            SnapshotSegment::Transactions,
+            id,
+            |snapshot| snapshot.transaction_by_id_no_hash(id),
+            || Ok(self.tx.get::<tables::Transactions>(id)?),
+        )
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -1359,17 +1537,19 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+
         if let Some(block_number) = self.convert_hash_or_number(id)? {
             if let Some(body) = self.block_body_indices(block_number)? {
                 let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    let transactions = tx_cursor
-                        .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok(Some(transactions))
+                    Ok(Some(
+                        self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                    ))
                 }
             }
         }
@@ -1380,9 +1560,9 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
         let mut results = Vec::new();
         let mut body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
         for entry in body_cursor.walk_range(range)? {
             let (_, body) = entry?;
             let tx_num_range = body.tx_num_range();
@@ -1390,10 +1570,10 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                 results.push(Vec::new());
             } else {
                 results.push(
-                    tx_cursor
-                        .walk_range(tx_num_range)?
-                        .map(|result| result.map(|(_, tx)| tx.into()))
-                        .collect::<Result<Vec<_>, _>>()?,
+                    self.transactions_by_tx_range_with_cursor(tx_num_range, &mut tx_cursor)?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
                 );
             }
         }
@@ -1404,12 +1584,10 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
-        Ok(self
-            .tx
-            .cursor_read::<tables::Transactions>()?
-            .walk_range(range)?
-            .map(|entry| entry.map(|tx| tx.1))
-            .collect::<Result<Vec<_>, _>>()?)
+        self.transactions_by_tx_range_with_cursor(
+            range,
+            &mut self.tx.cursor_read::<tables::Transactions>()?,
+        )
     }
 
     fn senders_by_tx_range(
@@ -1431,7 +1609,12 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        Ok(self.tx.get::<tables::Receipts>(id)?)
+        self.get_with_snapshot(
+            SnapshotSegment::Receipts,
+            id,
+            |snapshot| snapshot.receipt(id),
+            || Ok(self.tx.get::<tables::Receipts>(id)?),
+        )
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
@@ -1449,16 +1632,30 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    let mut receipts_cursor = self.tx.cursor_read::<tables::Receipts>()?;
-                    let receipts = receipts_cursor
-                        .walk_range(tx_range)?
-                        .map(|result| result.map(|(_, receipt)| receipt))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok(Some(receipts))
+                    self.receipts_by_tx_range(tx_range).map(Some)
                 }
             }
         }
         Ok(None)
+    }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        self.get_range_with_snapshot(
+            SnapshotSegment::Receipts,
+            to_range(range),
+            |snapshot, range, _| snapshot.receipts_by_tx_range(range),
+            |range, _| {
+                self.tx
+                    .cursor_read::<tables::Receipts>()?
+                    .walk_range(range)?
+                    .map(|result| result.map_err(Into::into).map(|(_, receipt)| receipt))
+                    .collect::<Result<Vec<_>, _>>()
+            },
+            |_| true,
+        )
     }
 }
 

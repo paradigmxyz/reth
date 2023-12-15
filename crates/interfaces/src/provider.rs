@@ -14,6 +14,9 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] crate::db::DatabaseError),
+    /// Filesystem path error.
+    #[error("{0}")]
+    FsPathError(String),
     /// Nippy jar error.
     #[error("nippy jar error: {0}")]
     NippyJar(String),
@@ -127,6 +130,12 @@ pub enum ProviderError {
 impl From<reth_nippy_jar::NippyJarError> for ProviderError {
     fn from(err: reth_nippy_jar::NippyJarError) -> Self {
         ProviderError::NippyJar(err.to_string())
+    }
+}
+
+impl From<reth_primitives::fs::FsPathError> for ProviderError {
+    fn from(err: reth_primitives::fs::FsPathError) -> Self {
+        ProviderError::FsPathError(err.to_string())
     }
 }
 

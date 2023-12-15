@@ -6,9 +6,8 @@ use crate::{
 };
 
 use reth_interfaces::provider::ProviderResult;
-use reth_nippy_jar::{ColumnResult, NippyJar, PHFKey};
+use reth_nippy_jar::{ColumnResult, NippyJar, NippyJarHeader, PHFKey};
 use reth_tracing::tracing::*;
-use serde::{Deserialize, Serialize};
 use std::{error::Error as StdError, ops::RangeInclusive};
 
 /// Macro that generates snapshot creation functions that take an arbitratry number of [`Table`] and
@@ -35,7 +34,7 @@ macro_rules! generate_snapshot_func {
                 pub fn [<create_snapshot$(_ $tbl)+>]<
                     $($tbl: Table<Key=K>,)+
                     K,
-                    H: for<'a> Deserialize<'a> + Send + Serialize + Sync + std::fmt::Debug
+                    H: NippyJarHeader
                 >
                 (
                     tx: &impl DbTx,

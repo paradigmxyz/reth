@@ -220,7 +220,7 @@ impl SegmentHeader {
     }
 
     /// Removes `num` elements from end of block or tx range depending on segment.
-    pub fn prune(&mut self, num_txes: u64) {
+    pub fn prune(&mut self, num: u64) {
         match self.segment {
             SnapshotSegment::Headers => {
                 self.block_range =
