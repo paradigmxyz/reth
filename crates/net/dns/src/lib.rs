@@ -220,7 +220,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             // already resolved
             let cached = ResolveEntryResult { entry: Some(Ok(entry)), link, hash, kind };
             self.on_resolved_entry(cached);
-            return
+            return;
         }
         self.queries.resolve_entry(link, hash, kind)
     }
@@ -298,7 +298,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
         loop {
             // drain buffered events first
             if let Some(event) = self.queued_events.pop_front() {
-                return Poll::Ready(event)
+                return Poll::Ready(event);
             }
 
             // process all incoming commands
@@ -351,7 +351,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             }
 
             if !progress && self.queued_events.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -412,7 +412,7 @@ mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
     use alloy_rlp::Encodable;
-    use enr::{EnrBuilder, EnrKey};
+    use enr::{Enr, EnrKey};
     use reth_primitives::{Chain, Hardfork, MAINNET};
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
@@ -460,7 +460,7 @@ mod tests {
             LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
         resolver.insert(link.domain.clone(), root.to_string());
 
-        let mut builder = EnrBuilder::new("v4");
+        let mut builder = Enr::builder();
         let mut buf = Vec::new();
         let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier).unwrap();
         fork_id.encode(&mut buf);
@@ -529,7 +529,7 @@ mod tests {
         // await recheck timeout
         tokio::time::sleep(config.recheck_interval).await;
 
-        let enr = EnrBuilder::new("v4").build(&secret_key).unwrap();
+        let enr = Enr::builder().build(&secret_key).unwrap();
         resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
 
         let event = poll_fn(|cx| service.poll(cx)).await;

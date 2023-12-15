@@ -199,7 +199,7 @@ jsonrpsee-core = { version = "0.20" }
 jsonrpsee-types = { version = "0.20" }
 
 # crypto
-secp256k1 = { version = "0.28", default-features = false, features = [
+secp256k1 = { version = "0.27", default-features = false, features = [
     "global-context",
     "rand-std",
     "recovery",

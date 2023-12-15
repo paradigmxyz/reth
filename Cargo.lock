@@ -4160,7 +4160,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-network",
  "reth-primitives",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "tokio",
 ]
 
@@ -5646,7 +5646,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "shellexpand",
@@ -5782,7 +5782,7 @@ dependencies = [
  "reth-net-nat",
  "reth-network",
  "reth-primitives",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -5835,7 +5835,7 @@ dependencies = [
  "reth-nippy-jar",
  "reth-primitives",
  "reth-tracing",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -5861,7 +5861,7 @@ dependencies = [
  "reth-primitives",
  "reth-tracing",
  "rlp",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "thiserror",
  "tokio",
@@ -5883,7 +5883,7 @@ dependencies = [
  "reth-primitives",
  "reth-tracing",
  "schnellru",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "serde_with",
  "thiserror",
@@ -5939,7 +5939,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-net-common",
  "reth-primitives",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "sha2",
  "sha3",
  "thiserror",
@@ -5974,7 +5974,7 @@ dependencies = [
  "reth-net-common",
  "reth-primitives",
  "reth-tracing",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "snap",
  "test-fuzz",
@@ -6021,7 +6021,7 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
  "revm-primitives",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -6163,7 +6163,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "serial_test",
@@ -6263,7 +6263,7 @@ dependencies = [
  "reth-rpc-types",
  "revm",
  "revm-primitives",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "sha2",
@@ -6398,7 +6398,7 @@ dependencies = [
  "revm",
  "revm-primitives",
  "schnellru",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -6510,7 +6510,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "secp256k1 0.28.0",
+ "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -7107,7 +7107,9 @@ version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25996b82292a7a57ed3508f052cfff8640d38d32018784acd714758b43da9c8f"
 dependencies = [
+ "rand 0.8.5",
  "secp256k1-sys 0.8.1",
+ "serde",
 ]
 
 [[package]]
@@ -7116,9 +7118,7 @@ version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2acea373acb8c21ecb5a23741452acd2593ed44ee3d343e72baaa143bc89d0d5"
 dependencies = [
- "rand 0.8.5",
  "secp256k1-sys 0.9.1",
- "serde",
 ]
 
 [[package]]
