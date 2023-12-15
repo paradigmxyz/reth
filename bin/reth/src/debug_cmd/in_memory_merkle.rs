@@ -21,6 +21,7 @@ use reth_provider::{
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StorageReader,
 };
+use reth_rpc_types::BlockError;
 use reth_tasks::TaskExecutor;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, updates::TrieKey, StateRoot};
 use std::{
@@ -166,8 +167,7 @@ impl Command {
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
         executor.execute_and_verify_receipt(
-            //todo
-            &block.clone().unseal().with_recovered_senders().unwrap(),
+            &block.clone().unseal().with_recovered_senders().ok_or(BlockError::InvalidSignature)?,
             merkle_block_td + block.difficulty,
         )?;
         let block_state = executor.take_output_state();
