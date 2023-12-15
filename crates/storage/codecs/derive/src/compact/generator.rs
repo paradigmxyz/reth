@@ -114,20 +114,12 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
             let decompressor = format_ident!("{}_DECOMPRESSOR", ident.to_string().to_uppercase());
             quote! {
                 if flags.__zstd() != 0 {
-                    #decompressor.with(|decompressor_pack| {
-                        let decompressor = &mut decompressor_pack.borrow_mut().0;
-                        let tmp = &mut decompressor_pack.borrow_mut().1;
-
-                        while let Err(err) = decompressor.decompress_to_buffer(&buf[..], tmp) {
-                            let err = err.to_string();
-                            if !err.contains("Destination buffer is too small") {
-                                panic!("Failed to decompress: {}", err);
-                            }
-                            tmp.reserve(tmp.capacity() + 10_000);
-                        }
+                    #decompressor.with(|decompressor| {
+                        let decompressor = &mut decompressor.borrow_mut();
+                        let decompressed = decompressor.decompress(buf);
                         let mut original_buf = buf;
 
-                        let mut buf: &[u8] = tmp.as_slice();
+                        let mut buf: &[u8] = decompressed;
                         #(#lines)*
                         (obj, original_buf)
                     })

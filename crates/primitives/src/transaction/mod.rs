@@ -896,26 +896,14 @@ impl Compact for TransactionSignedNoHash {
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
-            TRANSACTION_DECOMPRESSOR.with(|decompressor_pack| {
-                let decompressor = &mut decompressor_pack.borrow_mut().0;
-                let tmp = &mut decompressor_pack.borrow_mut().1;
-
-                // `decompress_to_buffer` will return an error if the output buffer doesn't have
-                // enough capacity. However we don't actually have information on the required
-                // length. So we hope for the best, and keep trying again with a fairly bigger size
-                // if it fails.
-                while let Err(err) = decompressor.decompress_to_buffer(buf, tmp) {
-                    let err = err.to_string();
-                    if !err.contains("Destination buffer is too small") {
-                        panic!("Failed to decompress: {}", err);
-                    }
-                    tmp.reserve(tmp.capacity() + 24_000);
-                }
+            TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                let decompressor = &mut decompressor.borrow_mut();
 
                 // TODO: enforce that zstd is only present at a "top" level type
 
                 let transaction_type = (bitflags & 0b110) >> 1;
-                let (transaction, _) = Transaction::from_compact(tmp.as_slice(), transaction_type);
+                let (transaction, _) =
+                    Transaction::from_compact(decompressor.decompress(buf), transaction_type);
 
                 (transaction, buf)
             })

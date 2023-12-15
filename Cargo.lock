@@ -540,6 +540,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-stream"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd56dd203fef61ac097dd65721a419ddccb106b2d2b70ba60a6b529f03961a51"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16e62a023e7c117e27523144c5d2459f4397fcc3cab0085af8e2224f643a0193"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.39",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4556,6 +4578,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nybbles"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47dddada2357f8e7786f4f4d837db7bdddec02c7c3e5da7840d92c70390f6dc0"
+dependencies = [
+ "alloy-rlp",
+ "arbitrary",
+ "const-hex",
+ "proptest",
+ "serde",
+ "smallvec",
+]
+
+[[package]]
 name = "object"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5150,6 +5186,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "731e0d9356b0c25f16f33b5be79b1c57b562f141ebfcdb0ad8ac2c13a24293b4"
 dependencies = [
  "bitflags 2.4.1",
+ "chrono",
+ "flate2",
  "hex",
  "lazy_static",
  "procfs-core",
@@ -5163,6 +5201,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d3554923a69f4ce04c4a754260c338f505ce22642d3830e049a399fc2059a29"
 dependencies = [
  "bitflags 2.4.1",
+ "chrono",
  "hex",
 ]
 
@@ -5543,6 +5582,7 @@ dependencies = [
  "metrics-util",
  "pin-project",
  "pretty_assertions",
+ "procfs",
  "proptest",
  "rand 0.8.5",
  "rayon",
@@ -5889,6 +5929,7 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
+ "async-stream",
  "async-trait",
  "bytes",
  "derive_more",
@@ -6182,6 +6223,7 @@ dependencies = [
  "itertools 0.11.0",
  "modular-bitfield",
  "num_enum 0.7.1",
+ "nybbles",
  "once_cell",
  "plain_hasher",
  "pprof",

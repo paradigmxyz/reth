@@ -1,4 +1,4 @@
-use clap::{builder::RangedU64ValueParser, Args};
+use clap::Args;
 use reth_rpc::eth::cache::{
     DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CONCURRENT_DB_REQUESTS, DEFAULT_ENV_CACHE_MAX_LEN,
     DEFAULT_RECEIPT_CACHE_MAX_LEN,
@@ -13,7 +13,6 @@ pub struct RpcStateCacheArgs {
     #[arg(
         long = "rpc-cache.max-blocks",
         default_value_t = DEFAULT_BLOCK_CACHE_MAX_LEN,
-        value_parser = RangedU64ValueParser::<u32>::new().range(1..)
     )]
     pub max_blocks: u32,
 
@@ -21,7 +20,6 @@ pub struct RpcStateCacheArgs {
     #[arg(
         long = "rpc-cache.max-receipts",
         default_value_t = DEFAULT_RECEIPT_CACHE_MAX_LEN,
-        value_parser = RangedU64ValueParser::<u32>::new().range(1..)
     )]
     pub max_receipts: u32,
 
@@ -29,7 +27,6 @@ pub struct RpcStateCacheArgs {
     #[arg(
         long = "rpc-cache.max-envs",
         default_value_t = DEFAULT_ENV_CACHE_MAX_LEN,
-        value_parser = RangedU64ValueParser::<u32>::new().range(1..)
     )]
     pub max_envs: u32,
 
@@ -37,7 +34,6 @@ pub struct RpcStateCacheArgs {
     #[arg(
         long = "rpc-cache.max-concurrent-db-requests",
         default_value_t = DEFAULT_CONCURRENT_DB_REQUESTS,
-        value_parser = RangedU64ValueParser::<usize>::new().range(1..)
     )]
     pub max_concurrent_db_requests: usize,
 }

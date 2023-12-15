@@ -19,7 +19,7 @@ pub use crate::{
     },
     error::{Error, Result},
     flags::*,
-    transaction::{Transaction, TransactionKind, RO, RW},
+    transaction::{CommitLatency, Transaction, TransactionKind, RO, RW},
 };
 pub mod ffi {
     pub use ffi::{MDBX_dbi as DBI, MDBX_log_level_t as LogLevel};
