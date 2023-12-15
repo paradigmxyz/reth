@@ -415,7 +415,7 @@ Dev testnet:
           Interval between blocks.
           
           Parses strings using [humantime::parse_duration]
-          --dev.block_time 12s
+          --dev.block-time 12s
 
 Pruning:
       --full
