@@ -359,7 +359,7 @@ where
                         &mut all_logs,
                         &filter,
                         (block_hash, block.number).into(),
-                        block.body.into_iter().map(|tx| tx.hash()).zip(receipts.to_vec()),
+                        block.body.into_iter().map(|tx| tx.hash()).zip(receipts.iter()),
                         false,
                     );
                 }
@@ -467,11 +467,7 @@ where
                             &mut all_logs,
                             &filter_params,
                             (block.number, block_hash).into(),
-                            block
-                                .body
-                                .into_iter()
-                                .map(|tx| tx.hash())
-                                .zip(receipts.iter().map(|receipt| receipt.clone())), /* TODO: think of something better to avoid cloning */
+                            block.body.into_iter().map(|tx| tx.hash()).zip(receipts.iter()),
                             false,
                         );
 

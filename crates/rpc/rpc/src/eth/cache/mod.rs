@@ -336,7 +336,7 @@ where
 
         // cache good receipts
         if let Ok(Some(receipts)) = res {
-            self.receipts_cache.insert(block_hash, Arc::clone(&receipts));
+            self.receipts_cache.insert(block_hash, receipts);
         }
     }
 
@@ -434,12 +434,9 @@ where
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
-                                    // TODO rename receipts option
-                                    let res = provider.receipts_by_block(block_hash.into()).map(
-                                        |receipts_option| {
-                                            receipts_option.map(|receipts| Arc::new(receipts))
-                                        },
-                                    );
+                                    let res = provider
+                                        .receipts_by_block(block_hash.into())
+                                        .map(|maybe_receipts| maybe_receipts.map(Arc::new));
 
                                     let _ = action_tx
                                         .send(CacheAction::ReceiptsResult { block_hash, res });
@@ -511,11 +508,7 @@ where
                                 this.on_new_receipts(
                                     block_receipts.block_hash,
                                     Ok(Some(Arc::new(
-                                        block_receipts
-                                            .receipts
-                                            .into_iter()
-                                            .flatten()
-                                            .collect::<Vec<Receipt>>(),
+                                        block_receipts.receipts.into_iter().flatten().collect(),
                                     ))),
                                 );
                             }

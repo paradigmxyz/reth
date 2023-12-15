@@ -3,14 +3,14 @@ use reth_rpc_types::{FilteredParams, Log};
 use reth_rpc_types_compat::log::from_primitive_log;
 
 /// Returns all matching logs of a block's receipts grouped with the hash of their transaction.
-pub(crate) fn matching_block_logs<I>(
+pub(crate) fn matching_block_logs<'a, I>(
     filter: &FilteredParams,
     block: BlockNumHash,
     tx_and_receipts: I,
     removed: bool,
 ) -> Vec<Log>
 where
-    I: IntoIterator<Item = (TxHash, Receipt)>,
+    I: IntoIterator<Item = (TxHash, &'a Receipt)>,
 {
     let mut all_logs = Vec::new();
     append_matching_block_logs(&mut all_logs, filter, block, tx_and_receipts, removed);
@@ -18,26 +18,25 @@ where
 }
 
 /// Appends all matching logs of a block's receipts grouped with the hash of their transaction
-pub(crate) fn append_matching_block_logs<I>(
+pub(crate) fn append_matching_block_logs<'a, I>(
     all_logs: &mut Vec<Log>,
     filter: &FilteredParams,
     block: BlockNumHash,
     tx_and_receipts: I,
     removed: bool,
 ) where
-    I: IntoIterator<Item = (TxHash, Receipt)>,
+    I: IntoIterator<Item = (TxHash, &'a Receipt)>,
 {
     let block_number_u256 = U256::from(block.number);
     // tracks the index of a log in the entire block
     let mut log_index: u32 = 0;
     for (transaction_idx, (transaction_hash, receipt)) in tx_and_receipts.into_iter().enumerate() {
-        let logs = receipt.logs;
-        for log in logs.into_iter() {
-            if log_matches_filter(block, &log, filter) {
+        for log in receipt.logs.iter() {
+            if log_matches_filter(block, log, filter) {
                 let log = Log {
                     address: log.address,
-                    topics: log.topics,
-                    data: log.data,
+                    topics: log.topics.clone(),
+                    data: log.data.clone(),
                     block_hash: Some(block.hash),
                     block_number: Some(block_number_u256),
                     transaction_hash: Some(transaction_hash),

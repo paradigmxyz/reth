@@ -92,7 +92,7 @@ where
             let receipts = block
                 .body
                 .into_iter()
-                .zip(receipts.clone().iter())
+                .zip(receipts.iter())
                 .enumerate()
                 .map(|(idx, (tx, receipt))| {
                     let meta = TransactionMeta {
