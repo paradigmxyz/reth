@@ -1172,15 +1172,7 @@ impl MockTransactionSet {
         tx_count: usize,
         tx_type: TxType,
     ) -> Self {
-        let mut txs = Vec::with_capacity(tx_count);
-        let mut current_tx = MockTransaction::new_from_type(tx_type).with_sender(sender);
-
-        for _ in 0..tx_count {
-            txs.push(current_tx.clone());
-            current_tx = current_tx.next();
-        }
-
-        Self::new(txs)
+        Self::dependent(sender, 0, tx_count, tx_type)
     }
 
     /// Add transactions to the [MockTransactionSet]
