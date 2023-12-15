@@ -59,7 +59,7 @@ pub struct Command {
     only_bench: bool,
 
     /// Compression algorithms to use.
-    #[arg(long, short, value_delimiter = ',', default_value = "lz4")]
+    #[arg(long, short, value_delimiter = ',', default_value = "uncompressed")]
     compression: Vec<Compression>,
 
     /// Flag to enable inclusion list filters and PHFs.
@@ -79,19 +79,14 @@ impl Command {
         log_level: Option<LogLevel>,
         chain: Arc<ChainSpec>,
     ) -> eyre::Result<()> {
-        let all_combinations = self
-            .segments
-            .iter()
-            .cartesian_product(if self.compression.is_empty() {
-                vec![Compression::Uncompressed]
-            } else {
-                self.compression.clone()
-            })
-            .cartesian_product(if self.phf.is_empty() {
-                vec![None]
-            } else {
-                self.phf.iter().copied().map(Some).collect::<Vec<_>>()
-            });
+        let all_combinations =
+            self.segments.iter().cartesian_product(self.compression.iter()).cartesian_product(
+                if self.phf.is_empty() {
+                    vec![None]
+                } else {
+                    self.phf.iter().copied().map(Some).collect::<Vec<_>>()
+                },
+            );
 
         {
             let db = open_db_read_only(db_path, None)?;
@@ -108,15 +103,15 @@ impl Command {
                     match mode {
                         SnapshotSegment::Headers => self.generate_snapshot::<DatabaseEnv>(
                             factory.clone(),
-                            snap_segments::Headers::new(compression, filters),
+                            snap_segments::Headers::new(*compression, filters),
                         )?,
                         SnapshotSegment::Transactions => self.generate_snapshot::<DatabaseEnv>(
                             factory.clone(),
-                            snap_segments::Transactions::new(compression, filters),
+                            snap_segments::Transactions::new(*compression, filters),
                         )?,
                         SnapshotSegment::Receipts => self.generate_snapshot::<DatabaseEnv>(
                             factory.clone(),
-                            snap_segments::Receipts::new(compression, filters),
+                            snap_segments::Receipts::new(*compression, filters),
                         )?,
                     }
                 }
@@ -130,7 +125,7 @@ impl Command {
                         db_path,
                         log_level,
                         chain.clone(),
-                        compression,
+                        *compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
@@ -138,7 +133,7 @@ impl Command {
                         db_path,
                         log_level,
                         chain.clone(),
-                        compression,
+                        *compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
@@ -146,7 +141,7 @@ impl Command {
                         db_path,
                         log_level,
                         chain.clone(),
-                        compression,
+                        *compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
