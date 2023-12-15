@@ -514,11 +514,11 @@ where
             BlockchainTree::new(externals, config, None).expect("failed to create tree"),
         );
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
-        let blockchain_provider = BlockchainProvider::with_latest(provider_factory, tree, latest);
+        let blockchain_provider =
+            BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
 
         let pruner = Pruner::new(
-            db.clone(),
-            self.base_config.chain_spec.clone(),
+            provider_factory,
             vec![],
             5,
             self.base_config.chain_spec.prune_delete_limit,
