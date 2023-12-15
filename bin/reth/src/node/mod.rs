@@ -426,7 +426,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     &config.stages,
                     client.clone(),
                     Arc::clone(&consensus),
-                    provider_factory,
+                    provider_factory.clone(),
                     &ctx.task_executor,
                     sync_metrics_tx,
                     prune_config.clone(),
@@ -446,7 +446,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                     &config.stages,
                     network_client.clone(),
                     Arc::clone(&consensus),
-                    provider_factory,
+                    provider_factory.clone(),
                     &ctx.task_executor,
                     sync_metrics_tx,
                     prune_config.clone(),
@@ -477,7 +477,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let pruner_events = if let Some(prune_config) = prune_config {
             let mut pruner = self.build_pruner(
                 &prune_config,
-                db.clone(),
+                provider_factory,
                 tree_config,
                 snapshotter.highest_snapshot_receiver(),
             );
@@ -979,7 +979,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
     fn build_pruner<DB: Database>(
         &self,
         config: &PruneConfig,
-        db: DB,
+        provider_factory: ProviderFactory<DB>,
         tree_config: BlockchainTreeConfig,
         highest_snapshots_rx: HighestSnapshotsTracker,
     ) -> Pruner<DB> {
@@ -1013,8 +1013,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             );
 
         Pruner::new(
-            db,
-            self.chain.clone(),
+            provider_factory,
             segments.into_vec(),
             config.block_interval,
             self.chain.prune_delete_limit,
