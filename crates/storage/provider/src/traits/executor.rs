@@ -23,13 +23,6 @@ pub trait ExecutorFactory: Send + Sync + 'static {
 /// An executor capable of executing a block.
 pub trait BlockExecutor {
     /// Execute a block.
-    ///
-    /// The number of `senders` should be equal to the number of transactions in the block.
-    ///
-    /// If no senders are specified, the `execute` function MUST recover the senders for the
-    /// provided block's transactions internally. We use this to allow for calculating senders in
-    /// parallel in e.g. staged sync, so that execution can happen without paying for sender
-    /// recovery costs.
     fn execute(
         &mut self,
         block: &BlockWithSenders,
