@@ -64,7 +64,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// classDef pending fill:#FFCA3A
 /// classDef sidechain fill:#FF595E
 /// ```
-///
+/// 
 ///
 /// main functions:
 /// * [BlockchainTree::insert_block]: Connect block to chain, execute it and if valid insert block
