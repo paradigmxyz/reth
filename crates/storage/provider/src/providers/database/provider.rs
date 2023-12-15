@@ -2150,8 +2150,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
 impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     fn insert_block(
         &self,
-        block: SealedBlock,
-        senders: Option<Vec<Address>>,
+        block: SealedBlockWithSenders,
         prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
@@ -2185,7 +2184,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         if !block.ommers.is_empty() {
             self.tx.put::<tables::BlockOmmers>(
                 block_number,
-                StoredBlockOmmers { ommers: block.ommers },
+                StoredBlockOmmers { ommers: block.block.ommers },
             )?;
             durations_recorder.record_relative(metrics::Action::InsertBlockOmmers);
         }
@@ -2199,29 +2198,14 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         durations_recorder.record_relative(metrics::Action::GetNextTxNum);
         let first_tx_num = next_tx_num;
 
-        let tx_count = block.body.len() as u64;
+        let tx_count = block.block.body.len() as u64;
 
         // Ensures we have all the senders for the block's transactions.
-        let senders = match senders {
-            Some(senders) if block.body.len() == senders.len() => {
-                // senders have the correct length as transactions in the block
-                senders
-            }
-            _ => {
-                // recover senders from transactions
-                let senders = TransactionSigned::recover_signers(&block.body, block.body.len())
-                    .ok_or(ProviderError::SenderRecoveryError)?;
-                durations_recorder.record_relative(metrics::Action::RecoverSigners);
-                debug_assert_eq!(senders.len(), block.body.len(), "missing one or more senders");
-                senders
-            }
-        };
-
         let mut tx_senders_elapsed = Duration::default();
         let mut transactions_elapsed = Duration::default();
         let mut tx_hash_numbers_elapsed = Duration::default();
 
-        for (transaction, sender) in block.body.into_iter().zip(senders) {
+        for (transaction, sender) in block.block.body.into_iter().zip(block.senders.iter()) {
             let hash = transaction.hash();
 
             if prune_modes
@@ -2230,7 +2214,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
                 .is_none()
             {
                 let start = Instant::now();
-                self.tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+                self.tx.put::<tables::TxSenders>(next_tx_num, *sender)?;
                 tx_senders_elapsed += start.elapsed();
             }
 
@@ -2266,7 +2250,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         durations_recorder
             .record_duration(metrics::Action::InsertTxHashNumbers, tx_hash_numbers_elapsed);
 
-        if let Some(withdrawals) = block.withdrawals {
+        if let Some(withdrawals) = block.block.withdrawals {
             if !withdrawals.is_empty() {
                 self.tx.put::<tables::BlockWithdrawals>(
                     block_number,
@@ -2317,8 +2301,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         // Insert the blocks
         for block in blocks {
-            let (block, senders) = block.into_components();
-            self.insert_block(block, Some(senders), prune_modes)?;
+            self.insert_block(block, prune_modes)?;
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
