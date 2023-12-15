@@ -25,7 +25,8 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
-    BeaconConsensus, BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN, BeaconConsensusEngineError,
+    BeaconConsensus, BeaconConsensusEngine, BeaconConsensusEngineError,
+    MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
@@ -34,7 +35,7 @@ use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
 };
-use reth_db::{database::Database, init_db, DatabaseEnv, database_metrics::DatabaseMetrics};
+use reth_db::{database::Database, database_metrics::DatabaseMetrics, init_db, DatabaseEnv};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -46,7 +47,7 @@ use reth_interfaces::{
         either::EitherDownloader,
         headers::{client::HeadersClient, downloader::HeaderDownloader},
     },
-    RethResult,
+    RethResult, blockchain_tree::BlockchainTreeEngine,
 };
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle, NetworkManager};
 use reth_network_api::{NetworkInfo, PeersInfo};
@@ -58,7 +59,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, CanonStateSubscriptions,
-    HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
+    ExecutorFactory, HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader, BlockchainTreePendingStateProvider,
 };
 use reth_prune::{segments::SegmentSet, Pruner};
 use reth_revm::EvmProcessorFactory;
@@ -75,7 +76,7 @@ use reth_stages::{
 };
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::InMemoryBlobStore, TransactionPool, TransactionValidationTaskExecutor, EthTransactionValidator, EthPooledTransaction, CoinbaseTipOrdering,
 };
 use secp256k1::SecretKey;
 use std::{
@@ -191,6 +192,50 @@ impl NodeConfig {
         todo!()
     }
 
+    /// Build a transaction pool and spawn the transaction pool maintenance task
+    pub fn build_and_spawn_txpool<DB, EF, Tree>(
+        &self,
+        blockchain_db: BlockchainProvider<DB, Tree>,
+        head: Head,
+        executor: TaskExecutor,
+    ) -> eyre::Result<reth_transaction_pool::Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<DB, Tree>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, InMemoryBlobStore>>
+    where
+        DB: Database + Unpin + Clone + 'static,
+        EF: ExecutorFactory + Clone + 'static,
+        Tree: BlockchainTreeEngine + BlockchainTreePendingStateProvider + CanonStateSubscriptions + Clone,
+    {
+        let blob_store = InMemoryBlobStore::default();
+        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
+            .with_head_timestamp(head.timestamp)
+            .kzg_settings(self.kzg_settings()?)
+            .with_additional_tasks(1)
+            .build_with_tasks(blockchain_db.clone(), executor.clone(), blob_store.clone());
+
+        let transaction_pool =
+            reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
+        info!(target: "reth::cli", "Transaction pool initialized");
+
+        // spawn txpool maintenance task
+        {
+            let pool = transaction_pool.clone();
+            let chain_events = blockchain_db.canonical_state_stream();
+            let client = blockchain_db.clone();
+            executor.spawn_critical(
+                "txpool maintenance task",
+                reth_transaction_pool::maintain::maintain_transaction_pool_future(
+                    client,
+                    pool,
+                    chain_events,
+                    executor.clone(),
+                    Default::default(),
+                ),
+            );
+            debug!(target: "reth::cli", "Spawned txpool maintenance task");
+        }
+
+        Ok(transaction_pool)
+    }
+
     /// Launches the node, also adding any RPC extensions passed.
     ///
     /// # Example
@@ -212,22 +257,22 @@ impl NodeConfig {
         executor: TaskExecutor,
     ) -> eyre::Result<NodeHandle> {
         let data_dir = self.data_dir().expect("see below");
-        let db_path = data_dir.db_path();
 
         // TODO: set up test database, see if we can configure either real or test db
-        // let db_instance =
-        //     DatabaseBuilder::new(self.database).build_db(self.db.log_level, self.chain.chain)?;
+        let database = std::mem::take(&mut self.database);
+        let db_instance =
+            DatabaseBuilder::new(database).build_db(self.db.log_level, self.chain.chain)?;
 
-        // match db_instance {
-        //     DatabaseInstance::Real(database) => {
-        //         // let builder = NodeBuilderWithDatabase { config: self, database, data_dir };
-        //         // todo!()
-        //     },
-        //     DatabaseInstance::Test(database) => {
-        //         // let builder = NodeBuilderWithDatabase { config: self, database, data_dir };
-        //         // todo!();
-        //     },
-        // }
+        return match db_instance {
+            DatabaseInstance::Real(database) => {
+                let builder = NodeBuilderWithDatabase { config: self, database, data_dir };
+                builder.launch::<E>(ext, executor).await
+            }
+            DatabaseInstance::Test(database) => {
+                let builder = NodeBuilderWithDatabase { config: self, database, data_dir };
+                builder.launch::<E>(ext, executor).await
+            }
+        };
 
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
@@ -316,7 +361,6 @@ impl NodeConfig {
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
-
     }
 
     /// Set the datadir for the node
@@ -912,7 +956,20 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
         mut ext: E::Node,
         executor: TaskExecutor,
     ) -> eyre::Result<NodeHandle> {
-        let mut provider_factory = ProviderFactory::new(Arc::clone(&self.database), Arc::clone(&self.config.chain));
+        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+
+        // Raise the fd limit of the process.
+        // Does not do anything on windows.
+        raise_fd_limit();
+
+        // get config
+        let config = self.config.load_config()?;
+
+        let prometheus_handle = self.config.install_prometheus_recorder()?;
+        info!(target: "reth::cli", "Database opened");
+
+        let mut provider_factory =
+            ProviderFactory::new(Arc::clone(&self.database), Arc::clone(&self.config.chain));
 
         // configure snapshotter
         let snapshotter = reth_snapshot::Snapshotter::new(
@@ -921,10 +978,11 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
             self.config.chain.snapshot_block_interval,
         )?;
 
-        provider_factory = provider_factory
-            .with_snapshots(self.data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver());
+        provider_factory = provider_factory.with_snapshots(
+            self.data_dir.snapshots_path(),
+            snapshotter.highest_snapshot_receiver(),
+        );
 
-        let prometheus_handle = self.config.install_prometheus_recorder()?;
         self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.database)).await?;
 
         debug!(target: "reth::cli", chain=%self.config.chain.chain, genesis=?self.config.chain.genesis_hash(), "Initializing genesis");
@@ -933,15 +991,18 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
 
         info!(target: "reth::cli", "{}", DisplayHardforks::new(self.config.chain.hardforks()));
 
-        let consensus = self.consensus();
+        let consensus = self.config.consensus();
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
-        ctx.task_executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
+        executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
-        let prune_config =
-            self.pruning.prune_config(Arc::clone(&self.chain))?.or(config.prune.clone());
+        let prune_config = self
+            .config
+            .pruning
+            .prune_config(Arc::clone(&self.config.chain))?
+            .or(config.prune.clone());
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
@@ -966,34 +1027,7 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
         // setup the blockchain provider
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
-        let blob_store = InMemoryBlobStore::default();
-        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
-            .with_head_timestamp(head.timestamp)
-            .kzg_settings(self.kzg_settings()?)
-            .with_additional_tasks(1)
-            .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
-
-        let transaction_pool =
-            reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
-        info!(target: "reth::cli", "Transaction pool initialized");
-
-        // spawn txpool maintenance task
-        {
-            let pool = transaction_pool.clone();
-            let chain_events = blockchain_db.canonical_state_stream();
-            let client = blockchain_db.clone();
-            ctx.task_executor.spawn_critical(
-                "txpool maintenance task",
-                reth_transaction_pool::maintain::maintain_transaction_pool_future(
-                    client,
-                    pool,
-                    chain_events,
-                    ctx.task_executor.clone(),
-                    Default::default(),
-                ),
-            );
-            debug!(target: "reth::cli", "Spawned txpool maintenance task");
-        }
+        let transaction_pool = self.config.build_and_spawn_txpool(blockchain_db, head, executor)?;
 
         info!(target: "reth::cli", "Connecting to P2P network");
         let network_secret_path =
@@ -1098,6 +1132,7 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
             (pipeline, EitherDownloader::Left(client))
         } else {
             let pipeline = self
+                .config
                 .build_networked_pipeline(
                     &config.stages,
                     network_client.clone(),
@@ -1115,11 +1150,11 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
 
         let pipeline_events = pipeline.events();
 
-        let initial_target = if let Some(tip) = self.debug.tip {
+        let initial_target = if let Some(tip) = self.config.debug.tip {
             // Set the provided tip as the initial pipeline target.
             debug!(target: "reth::cli", %tip, "Tip manually set");
             Some(tip)
-        } else if self.debug.continuous {
+        } else if self.config.debug.continuous {
             // Set genesis as the initial pipeline target.
             // This will allow the downloader to start
             debug!(target: "reth::cli", "Continuous sync mode enabled");
@@ -1131,7 +1166,7 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = self.build_pruner(
+            let mut pruner = self.config.build_pruner(
                 &prune_config,
                 db.clone(),
                 tree_config,
@@ -1237,7 +1272,7 @@ impl<DB: Database + DatabaseMetrics + 'static> NodeBuilderWithDatabase<DB> {
 
         // construct node handle and return
         let _node_handle = NodeHandle { _rpc_server_handles, _consensus_engine_rx: rx };
-        return Ok(_node_handle)
+        return Ok(_node_handle);
 
         // rx.await??;
 
