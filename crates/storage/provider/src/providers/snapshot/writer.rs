@@ -1,7 +1,7 @@
 use super::SnapshotProvider;
 use reth_codecs::Compact;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
-use reth_nippy_jar::{NippyJar, NippyJarWriter};
+use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     snapshot::SegmentHeader, BlockNumber, SnapshotSegment, TransactionSignedNoHash, TxNumber,
 };
@@ -58,7 +58,15 @@ impl<'a> SnapshotProviderRW<'a> {
             }
             Err(err) => return Err(err),
         };
-        Ok((NippyJarWriter::from_owned(jar)?, path))
+
+        match NippyJarWriter::from_owned(jar) {
+            Ok(writer) => Ok((writer, path)),
+            Err(NippyJarError::FrozenJar) => {
+                // This snapshot has been frozen, so we should
+                return Err(ProviderError::FinalizedSnapshot(segment, block))
+            }
+            Err(e) => return Err(e.into()),
+        }
     }
 
     /// Commits configuration changes to disk, and updates the filename to reflect the updated block
@@ -191,6 +199,10 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<()> {
         let segment = SnapshotSegment::Transactions;
         debug_assert!(self.writer.user_header().segment() == segment);
+
+        if self.writer.user_header().tx_range().contains(&tx_num) {
+            return Ok(())
+        }
 
         self.append(block, segment, tx, |segment_header| {
             let block_range = segment_header.block_start()..=segment_header.block_end();

@@ -108,11 +108,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
         let (from_block, to_block) = input.next_block_range().into_inner();
-        let mut snapshotter = provider
-            .snapshot_provider
-            .as_ref()
-            .expect("should exist")
-            .writer(from_block, SnapshotSegment::Transactions)?;
 
         // Cursors used to write bodies, ommers and transactions
         let tx = provider.tx_ref();
@@ -121,11 +116,22 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
-        // Get id for the next tx_num of zero if there are no transactions.
-        let mut next_tx_num = snapshotter
+        let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
+        let mut snapshotter =
+            snapshot_provider.writer(from_block, SnapshotSegment::Transactions)?;
+
+        // Make sure Transactions static file is at the same height. If it's further, this
+        // input execution was interrupted previously and we need to unwind the static file.
+        let snapshot_tx_num = snapshot_provider
             .get_highest_snapshot_tx(SnapshotSegment::Transactions)
-            .map(|id| id + 1)
             .unwrap_or_default();
+        let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().1;
+        if snapshot_tx_num > db_tx_num {
+            snapshotter.prune_transactions(snapshot_tx_num - db_tx_num)?;
+        }
+
+        // Get id for the next tx_num of zero if there are no transactions.
+        let mut next_tx_num = db_tx_num + 1;
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
 
@@ -213,8 +219,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
 
         let mut rev_walker = body_cursor.walk_back(None)?;
-        let mut tx_count = 0;
-        let mut from_block = None;
 
         while let Some((number, block_meta)) = rev_walker.next().transpose()? {
             if number <= input.unwind_to {
@@ -238,24 +242,21 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 tx_block_cursor.delete_current()?;
             }
 
-            if from_block.is_none() {
-                from_block = Some(number)
-            }
-            tx_count += block_meta.tx_count();
-
             // Delete the current body value
             rev_walker.delete_current()?;
         }
 
-        if let Some(from_block) = from_block {
-            let mut snapshotter = provider
-                .snapshot_provider
-                .as_ref()
-                .expect("should exist")
-                .writer(from_block, SnapshotSegment::Transactions)?;
-
-            snapshotter.prune_transactions(tx_count)?;
-        }
+        // Unwind from static files. Get the current last expected transaction from DB, and match it
+        // on static file
+        let current_tx =
+            body_cursor.last()?.map(|(_, block_meta)| block_meta.last_tx_num()).unwrap_or_default();
+        let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
+        let snapshot_tx_num: u64 = snapshot_provider
+            .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+            .unwrap_or_default();
+        snapshot_provider
+            .latest_writer(SnapshotSegment::Transactions)?
+            .prune_transactions(snapshot_tx_num.saturating_sub(current_tx))?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)

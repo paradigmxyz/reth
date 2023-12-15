@@ -172,6 +172,16 @@ impl SegmentHeader {
         self.segment
     }
 
+    /// Returns block range.
+    pub fn block_range(&self) -> &RangeInclusive<BlockNumber> {
+        &self.block_range
+    }
+
+    /// Returns transaction range.
+    pub fn tx_range(&self) -> &RangeInclusive<TxNumber> {
+        &self.tx_range
+    }
+
     /// Returns the first block number of the segment.
     pub fn block_start(&self) -> BlockNumber {
         *self.block_range.start()
@@ -210,7 +220,7 @@ impl SegmentHeader {
     }
 
     /// Removes `num` elements from end of block or tx range depending on segment.
-    pub fn prune(&mut self, num: u64) {
+    pub fn prune(&mut self, num_txes: u64) {
         match self.segment {
             SnapshotSegment::Headers => {
                 self.block_range =

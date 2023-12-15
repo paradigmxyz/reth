@@ -278,6 +278,12 @@ pub trait SnapshotWriter {
         segment: SnapshotSegment,
     ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>>;
 
+    /// Returns a mutable reference to a [`SnapshotProviderRW`] of the latest [`SnapshotSegment`].
+    fn latest_writer(
+        &self,
+        segment: SnapshotSegment,
+    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>>;
+
     /// Commits all changes of all [`SnapshotProviderRW`] of all [`SnapshotSegment`].
     fn commit(&self) -> ProviderResult<()>;
 }
@@ -291,12 +297,16 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
         if let Some(writer) = self.writers.get_mut(&segment) {
             Ok(writer)
         } else {
-            self.writers.insert(
-                segment,
-                SnapshotProviderRW::new(SnapshotSegment::Transactions, block, self.clone())?,
-            );
+            self.writers.insert(segment, SnapshotProviderRW::new(segment, block, self.clone())?);
             Ok(self.writers.get_mut(&segment).expect("qed").into())
         }
+    }
+
+    fn latest_writer(
+        &self,
+        segment: SnapshotSegment,
+    ) -> ProviderResult<RefMut<'_, SnapshotSegment, SnapshotProviderRW<'static>>> {
+        self.writer(self.get_highest_snapshot(segment).unwrap_or_default(), segment)
     }
 
     fn commit(&self) -> ProviderResult<()> {

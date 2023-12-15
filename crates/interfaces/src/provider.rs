@@ -119,6 +119,9 @@ pub enum ProviderError {
     /// Snapshot file is not found for requested transaction.
     #[error("not able to find {0} snapshot file for transaction id {1}")]
     MissingSnapshotTx(SnapshotSegment, TxNumber),
+    /// Snapshot is finalized and cannot be written to.
+    #[error("not able to write to finalized snapshot {0} #{1}")]
+    FinalizedSnapshot(SnapshotSegment, BlockNumber),
 }
 
 impl From<reth_nippy_jar::NippyJarError> for ProviderError {
