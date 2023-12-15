@@ -13,6 +13,7 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
+use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
@@ -21,7 +22,6 @@ use reth_provider::{
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StorageReader,
 };
-use reth_rpc_types::BlockError;
 use reth_tasks::TaskExecutor;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, updates::TrieKey, StateRoot};
 use std::{
@@ -167,7 +167,11 @@ impl Command {
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
         executor.execute_and_verify_receipt(
-            &block.clone().unseal().with_recovered_senders().ok_or(BlockError::InvalidSignature)?,
+            &block
+                .clone()
+                .unseal()
+                .with_recovered_senders()
+                .ok_or(BlockValidationError::SenderRecoveryError)?,
             merkle_block_td + block.difficulty,
         )?;
         let block_state = executor.take_output_state();

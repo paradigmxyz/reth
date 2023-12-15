@@ -79,7 +79,7 @@ impl<'a> BlockExecutor for EVMProcessor<'a> {
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
-        for (transaction, sender) in block.body.iter().zip(block.senders.iter()) {
+        for (sender, transactio) in block.transactions_with_sender() {
             let time = Instant::now();
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.

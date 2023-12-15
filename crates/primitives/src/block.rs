@@ -79,9 +79,7 @@ impl Block {
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
     /// transactions.
     ///
-    /// Returns `None` if the number of senders does not match the number of transactions in the
-    /// block and the signer recovery for one of the transactions fails.
-    #[track_caller]
+    /// Returns `None` if a transaction is invalid.
     pub fn with_recovered_senders(self) -> Option<BlockWithSenders> {
         let senders = self.senders()?;
         Some(BlockWithSenders { block: self, senders })
