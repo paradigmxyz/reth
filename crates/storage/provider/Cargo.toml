@@ -35,6 +35,7 @@ itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
 dashmap = { version = "5.5", features = ["inline"] }
+strum.workspace = true
 
 # test-utils
 alloy-rlp = { workspace = true, optional = true }
