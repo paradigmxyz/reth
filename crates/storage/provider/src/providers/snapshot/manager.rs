@@ -520,7 +520,7 @@ impl ReceiptProvider for SnapshotProvider {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
         self.fetch_range(
-            SnapshotSegment::Headers,
+            SnapshotSegment::Receipts,
             to_range(range),
             |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
             |_| true,

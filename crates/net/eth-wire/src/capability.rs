@@ -317,6 +317,14 @@ impl SharedCapability {
         }
     }
 
+    /// Returns the eth version if it's the `eth` capability.
+    pub fn eth_version(&self) -> Option<EthVersion> {
+        match self {
+            SharedCapability::Eth { version, .. } => Some(*version),
+            _ => None,
+        }
+    }
+
     /// Returns the message ID offset of the current capability.
     ///
     /// This represents the message ID offset for the first message of the eth capability in the
@@ -375,8 +383,8 @@ impl SharedCapabilities {
 
     /// Returns the negotiated eth version if it is shared.
     #[inline]
-    pub fn eth_version(&self) -> Result<u8, P2PStreamError> {
-        self.eth().map(|cap| cap.version())
+    pub fn eth_version(&self) -> Result<EthVersion, P2PStreamError> {
+        self.eth().map(|cap| cap.eth_version().expect("is eth; qed"))
     }
 
     /// Returns true if the shared capabilities contain the given capability.
@@ -437,6 +445,18 @@ impl SharedCapabilities {
         cap: &Capability,
     ) -> Result<&SharedCapability, UnsupportedCapabilityError> {
         self.find(cap).ok_or_else(|| UnsupportedCapabilityError { capability: cap.clone() })
+    }
+
+    /// Returns the number of shared capabilities.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns true if there are no shared capabilities.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 

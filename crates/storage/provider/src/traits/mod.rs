@@ -50,8 +50,8 @@ pub use executor::{BlockExecutor, BlockExecutorStats, ExecutorFactory, PrunableB
 
 mod chain;
 pub use chain::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    CanonStateSubscriptions,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
+    CanonStateNotifications, CanonStateSubscriptions,
 };
 
 mod spec;

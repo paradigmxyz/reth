@@ -13,6 +13,7 @@ use reth_network_api::{
 };
 use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
+use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
     sync::{
@@ -41,6 +42,7 @@ impl NetworkHandle {
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
         to_manager_tx: UnboundedSender<NetworkHandleMessage>,
+        secret_key: SecretKey,
         local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
@@ -53,6 +55,7 @@ impl NetworkHandle {
             num_active_peers,
             to_manager_tx,
             listener_address,
+            secret_key,
             local_peer_id,
             peers,
             network_mode,
@@ -152,6 +155,11 @@ impl NetworkHandle {
     /// Whether tx gossip is disabled
     pub fn tx_gossip_disabled(&self) -> bool {
         self.inner.tx_gossip_disabled
+    }
+
+    /// Returns the secret key used for authenticating sessions.
+    pub fn secret_key(&self) -> &SecretKey {
+        &self.inner.secret_key
     }
 }
 
@@ -328,6 +336,8 @@ struct NetworkInner {
     to_manager_tx: UnboundedSender<NetworkHandleMessage>,
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
+    /// The secret key used for authenticating sessions.
+    secret_key: SecretKey,
     /// The identifier used by this node.
     local_peer_id: PeerId,
     /// Access to the all the nodes.
