@@ -40,7 +40,7 @@ type BlockTransactionsResponseSender =
 type BlockWithSendersResponseSender = oneshot::Sender<ProviderResult<Option<BlockWithSenders>>>;
 
 /// The type that can send the response to the requested receipts of a block.
-type ReceiptsResponseSender = oneshot::Sender<ProviderResult<Option<Vec<Receipt>>>>;
+type ReceiptsResponseSender = oneshot::Sender<ProviderResult<Option<Arc<Vec<Receipt>>>>>;
 
 /// The type that can send the response to a requested env
 type EnvResponseSender = oneshot::Sender<ProviderResult<(CfgEnv, BlockEnv)>>;
@@ -52,7 +52,8 @@ type BlockLruCache<L> = MultiConsumerLruCache<
     Either<BlockWithSendersResponseSender, BlockTransactionsResponseSender>,
 >;
 
-type ReceiptsLruCache<L> = MultiConsumerLruCache<B256, Vec<Receipt>, L, ReceiptsResponseSender>;
+type ReceiptsLruCache<L> =
+    MultiConsumerLruCache<B256, Arc<Vec<Receipt>>, L, ReceiptsResponseSender>;
 
 type EnvLruCache<L> = MultiConsumerLruCache<B256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
 
@@ -180,7 +181,7 @@ impl EthStateCache {
     pub async fn get_transactions_and_receipts(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<(Vec<TransactionSigned>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(Vec<TransactionSigned>, Arc<Vec<Receipt>>)>> {
         let transactions = self.get_block_transactions(block_hash);
         let receipts = self.get_receipts(block_hash);
 
@@ -214,7 +215,10 @@ impl EthStateCache {
     /// Requests the [Receipt] for the block hash
     ///
     /// Returns `None` if the block was not found.
-    pub async fn get_receipts(&self, block_hash: B256) -> ProviderResult<Option<Vec<Receipt>>> {
+    pub async fn get_receipts(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<Arc<Vec<Receipt>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetReceipts { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -224,7 +228,7 @@ impl EthStateCache {
     pub async fn get_block_and_receipts(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlock, Arc<Vec<Receipt>>)>> {
         let block = self.get_sealed_block(block_hash);
         let receipts = self.get_receipts(block_hash);
 
@@ -268,7 +272,7 @@ pub(crate) struct EthStateCacheService<
     LimitEnvs = ByLength,
 > where
     LimitBlocks: Limiter<B256, BlockWithSenders>,
-    LimitReceipts: Limiter<B256, Vec<Receipt>>,
+    LimitReceipts: Limiter<B256, Arc<Vec<Receipt>>>,
     LimitEnvs: Limiter<B256, (CfgEnv, BlockEnv)>,
 {
     /// The type used to lookup data from disk
@@ -318,7 +322,11 @@ where
         }
     }
 
-    fn on_new_receipts(&mut self, block_hash: B256, res: ProviderResult<Option<Vec<Receipt>>>) {
+    fn on_new_receipts(
+        &mut self,
+        block_hash: B256,
+        res: ProviderResult<Option<Arc<Vec<Receipt>>>>,
+    ) {
         if let Some(queued) = self.receipts_cache.remove(&block_hash) {
             // send the response to queued senders
             for tx in queued {
@@ -426,7 +434,10 @@ where
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
-                                    let res = provider.receipts_by_block(block_hash.into());
+                                    let res = provider
+                                        .receipts_by_block(block_hash.into())
+                                        .map(|maybe_receipts| maybe_receipts.map(Arc::new));
+
                                     let _ = action_tx
                                         .send(CacheAction::ReceiptsResult { block_hash, res });
                                 }));
@@ -496,9 +507,9 @@ where
                             for block_receipts in receipts {
                                 this.on_new_receipts(
                                     block_receipts.block_hash,
-                                    Ok(Some(
+                                    Ok(Some(Arc::new(
                                         block_receipts.receipts.into_iter().flatten().collect(),
-                                    )),
+                                    ))),
                                 );
                             }
                         }
@@ -517,7 +528,7 @@ enum CacheAction {
     GetEnv { block_hash: B256, response_tx: EnvResponseSender },
     GetReceipts { block_hash: B256, response_tx: ReceiptsResponseSender },
     BlockWithSendersResult { block_hash: B256, res: ProviderResult<Option<BlockWithSenders>> },
-    ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Vec<Receipt>>> },
+    ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Arc<Vec<Receipt>>>> },
     EnvResult { block_hash: B256, res: Box<ProviderResult<(CfgEnv, BlockEnv)>> },
     CacheNewCanonicalChain { blocks: Vec<SealedBlockWithSenders>, receipts: Vec<BlockReceipts> },
 }
