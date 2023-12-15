@@ -273,7 +273,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Note: for a transaction with nonce higher than the current on chain nonce this will always
     /// return an ancestor since all transaction in this pool are gapless.
     fn ancestor(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
-        self.by_id.get(&id.unchecked_ancestor()?)
+        self.get(&id.unchecked_ancestor()?)
     }
 
     /// Adds a new transactions to the pending queue.
@@ -287,9 +287,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
         base_fee: u64,
     ) {
         assert!(
-            !self.by_id.contains_key(tx.id()),
+            !self.contains(tx.id()),
             "transaction already included {:?}",
-            self.by_id.contains_key(tx.id())
+            self.get(tx.id()).unwrap().transaction.hash()
         );
 
         // keep track of size
@@ -320,7 +320,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         // mark the next as independent if it exists
-        if let Some(unlocked) = self.by_id.get(&id.descendant()) {
+        if let Some(unlocked) = self.get(&id.descendant()) {
             self.independent_transactions.insert(unlocked.clone());
         };
         self.remove_transaction(id)
@@ -486,9 +486,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// Returns `true` if the transaction with the given id is already included in this pool.
-    #[cfg(test)]
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
+    }
+
+    /// Retrieves a transaction with the given ID from the pool, if it exists.
+    fn get(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
+        self.by_id.get(id)
     }
 
     /// Asserts that the bijection between `by_id` and `all` is valid.
@@ -564,15 +568,13 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use reth_primitives::address;
-
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
+    use reth_primitives::address;
+    use std::collections::HashSet;
 
     #[test]
     fn test_enforce_basefee() {
@@ -581,7 +583,7 @@ mod tests {
         let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
         pool.add_transaction(tx.clone(), 0);
 
-        assert!(pool.by_id.contains_key(tx.id()));
+        assert!(pool.contains(tx.id()));
         assert_eq!(pool.len(), 1);
 
         let removed = pool.update_base_fee(0);
@@ -603,8 +605,8 @@ mod tests {
         let descendant_tx = f.validated_arc(t.inc_nonce().decr_price());
         pool.add_transaction(descendant_tx.clone(), 0);
 
-        assert!(pool.by_id.contains_key(root_tx.id()));
-        assert!(pool.by_id.contains_key(descendant_tx.id()));
+        assert!(pool.contains(root_tx.id()));
+        assert!(pool.contains(descendant_tx.id()));
         assert_eq!(pool.len(), 2);
 
         assert_eq!(pool.independent_transactions.len(), 1);
@@ -621,8 +623,8 @@ mod tests {
             assert_eq!(removed.len(), 1);
             assert_eq!(pool2.len(), 1);
             // descendant got popped
-            assert!(pool2.by_id.contains_key(root_tx.id()));
-            assert!(!pool2.by_id.contains_key(descendant_tx.id()));
+            assert!(pool2.contains(root_tx.id()));
+            assert!(!pool2.contains(descendant_tx.id()));
         }
 
         // remove root transaction via fee
