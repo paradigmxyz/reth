@@ -157,7 +157,7 @@ boa_engine = "0.17"
 boa_gc = "0.17"
 
 # misc
-aquamarine = "0.3"
+aquamarine = "0.4"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
@@ -171,7 +171,7 @@ rand = "0.8.5"
 schnellru = "0.2"
 strum = "0.25"
 rayon = "1.7"
-itertools = "0.11"
+itertools = "0.12"
 parking_lot = "0.12"
 metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
@@ -199,12 +199,12 @@ jsonrpsee-core = { version = "0.20" }
 jsonrpsee-types = { version = "0.20" }
 
 # crypto
-secp256k1 = { version = "0.27.0", default-features = false, features = [
+secp256k1 = { version = "0.28", default-features = false, features = [
     "global-context",
     "rand-std",
     "recovery",
 ] }
-enr = { version = "0.9", default-features = false, features = ["k256"] }
+enr = { version = "0.10", default-features = false, features = ["k256"] }
 # for eip-4844
 c-kzg = "0.4.0"
 

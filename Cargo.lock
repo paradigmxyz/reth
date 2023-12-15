@@ -332,16 +332,16 @@ checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 
 [[package]]
 name = "aquamarine"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df752953c49ce90719c7bf1fc587bc8227aed04732ea0c0f85e5397d7fdbd1a1"
+checksum = "074b80d14d0240b6ce94d68f059a2d26a5d77280ae142662365a21ef6e2594ef"
 dependencies = [
  "include_dir",
  "itertools 0.10.5",
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.39",
 ]
 
 [[package]]
@@ -2077,7 +2077,7 @@ dependencies = [
  "aes-gcm",
  "arrayvec",
  "delay_map",
- "enr",
+ "enr 0.9.1",
  "fnv",
  "futures",
  "hashlink",
@@ -2275,6 +2275,24 @@ dependencies = [
  "base64 0.21.5",
  "bytes",
  "ed25519-dalek",
+ "hex",
+ "k256",
+ "log",
+ "rand 0.8.5",
+ "rlp",
+ "serde",
+ "sha3",
+ "zeroize",
+]
+
+[[package]]
+name = "enr"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a3d8dc56e02f954cac8eb489772c552c473346fc34f67412bb6244fd647f7e4"
+dependencies = [
+ "base64 0.21.5",
+ "bytes",
  "hex",
  "k256",
  "log",
@@ -2567,7 +2585,7 @@ dependencies = [
  "base64 0.21.5",
  "bytes",
  "const-hex",
- "enr",
+ "enr 0.9.1",
  "ethers-core",
  "futures-channel",
  "futures-core",
@@ -3725,6 +3743,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4133,7 +4160,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-network",
  "reth-primitives",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "tokio",
 ]
 
@@ -5573,7 +5600,7 @@ dependencies = [
  "human_bytes",
  "humantime",
  "hyper",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jemalloc-ctl",
  "jemallocator",
  "metrics",
@@ -5619,7 +5646,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "serde_json",
  "shellexpand",
@@ -5755,7 +5782,7 @@ dependencies = [
  "reth-net-nat",
  "reth-network",
  "reth-primitives",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -5788,7 +5815,7 @@ dependencies = [
  "futures",
  "heapless",
  "iai",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "modular-bitfield",
  "page_size",
@@ -5808,7 +5835,7 @@ dependencies = [
  "reth-nippy-jar",
  "reth-primitives",
  "reth-tracing",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -5825,7 +5852,7 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "alloy-rlp",
  "discv5",
- "enr",
+ "enr 0.10.0",
  "generic-array",
  "parking_lot 0.12.1",
  "rand 0.8.5",
@@ -5834,7 +5861,7 @@ dependencies = [
  "reth-primitives",
  "reth-tracing",
  "rlp",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "thiserror",
  "tokio",
@@ -5849,14 +5876,14 @@ dependencies = [
  "alloy-rlp",
  "async-trait",
  "data-encoding",
- "enr",
+ "enr 0.10.0",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
  "reth-primitives",
  "reth-tracing",
  "schnellru",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "serde_with",
  "thiserror",
@@ -5874,7 +5901,7 @@ dependencies = [
  "assert_matches",
  "futures",
  "futures-util",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "pin-project",
  "rayon",
@@ -5912,7 +5939,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-net-common",
  "reth-primitives",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "sha2",
  "sha3",
  "thiserror",
@@ -5947,7 +5974,7 @@ dependencies = [
  "reth-net-common",
  "reth-primitives",
  "reth-tracing",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "snap",
  "test-fuzz",
@@ -5994,7 +6021,7 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
  "revm-primitives",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -6105,7 +6132,7 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "criterion",
- "enr",
+ "enr 0.10.0",
  "ethers-core",
  "ethers-middleware",
  "ethers-providers",
@@ -6136,7 +6163,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "serde_json",
  "serial_test",
@@ -6236,7 +6263,7 @@ dependencies = [
  "reth-rpc-types",
  "revm",
  "revm-primitives",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "serde_json",
  "sha2",
@@ -6260,7 +6287,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "dashmap",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "parking_lot 0.12.1",
  "pin-project",
@@ -6284,7 +6311,7 @@ name = "reth-prune"
 version = "0.1.0-alpha.13"
 dependencies = [
  "assert_matches",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "rayon",
  "reth-db",
@@ -6371,7 +6398,7 @@ dependencies = [
  "revm",
  "revm-primitives",
  "schnellru",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -6478,12 +6505,12 @@ dependencies = [
  "bytes",
  "ethereum_ssz",
  "ethereum_ssz_derive",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jsonrpsee-types",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "secp256k1 0.27.0",
+ "secp256k1 0.28.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -6530,7 +6557,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "futures-util",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "metrics",
  "num-traits",
  "paste",
@@ -7080,9 +7107,7 @@ version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25996b82292a7a57ed3508f052cfff8640d38d32018784acd714758b43da9c8f"
 dependencies = [
- "rand 0.8.5",
  "secp256k1-sys 0.8.1",
- "serde",
 ]
 
 [[package]]
@@ -7091,7 +7116,9 @@ version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2acea373acb8c21ecb5a23741452acd2593ed44ee3d343e72baaa143bc89d0d5"
 dependencies = [
+ "rand 0.8.5",
  "secp256k1-sys 0.9.1",
+ "serde",
 ]
 
 [[package]]
