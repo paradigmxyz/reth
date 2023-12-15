@@ -13,6 +13,7 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
+use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
@@ -166,9 +167,12 @@ impl Command {
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
         executor.execute_and_verify_receipt(
-            &block.clone().unseal(),
+            &block
+                .clone()
+                .unseal()
+                .with_recovered_senders()
+                .ok_or(BlockValidationError::SenderRecoveryError)?,
             merkle_block_td + block.difficulty,
-            None,
         )?;
         let block_state = executor.take_output_state();
 
@@ -185,7 +189,7 @@ impl Command {
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
-            return Ok(())
+            return Ok(());
         }
 
         let provider_rw = factory.provider_rw()?;
