@@ -3,8 +3,8 @@ use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
 use reth_primitives::{
-    revm::compat::into_reth_log, revm_primitives::ResultAndState, Address, BlockWithSenders,
-    Hardfork, Receipt, U256,
+    revm::compat::into_reth_log, revm_primitives::ResultAndState, BlockWithSenders, Hardfork,
+    Receipt, U256,
 };
 use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
 use revm::DatabaseCommit;
