@@ -37,6 +37,8 @@ pub trait BlockExecutor {
     ) -> Result<(), BlockExecutionError>;
 
     /// Executes the block and checks receipts.
+    ///
+    /// See [execute](BlockExecutor::execute) for more details.
     fn execute_and_verify_receipt(
         &mut self,
         block: &BlockWithSenders,
@@ -53,6 +55,8 @@ pub trait BlockExecutor {
     /// 0, and so on).
     ///
     /// The second returned value represents the total gas used by this block of transactions.
+    ///
+    /// See [execute](BlockExecutor::execute) for more details.
     fn execute_transactions(
         &mut self,
         block: &BlockWithSenders,
@@ -90,7 +94,7 @@ pub struct BlockExecutorStats {
     /// Time needed to merge transitions and create reverts.
     /// It this time transitions are applies to revm bundle state.
     pub merge_transitions_duration: Duration,
-    /// Time needed to caclulate receipt roots.
+    /// Time needed to calculate receipt roots.
     pub receipt_root_duration: Duration,
 }
 
