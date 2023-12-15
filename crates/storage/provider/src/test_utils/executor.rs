@@ -4,7 +4,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, Block, BlockNumber, ChainSpec, PruneModes, Receipt, U256};
+use reth_primitives::{BlockNumber, BlockWithSenders, ChainSpec, PruneModes, Receipt, U256};
 use std::sync::Arc;
 /// Test executor with mocked result.
 #[derive(Debug)]
@@ -13,33 +13,30 @@ pub struct TestExecutor(pub Option<BundleStateWithReceipts>);
 impl BlockExecutor for TestExecutor {
     fn execute(
         &mut self,
-        _block: &Block,
+        _block: &BlockWithSenders,
         _total_difficulty: U256,
-        _senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError> {
         if self.0.is_none() {
-            return Err(BlockExecutionError::UnavailableForTest)
+            return Err(BlockExecutionError::UnavailableForTest);
         }
         Ok(())
     }
 
     fn execute_and_verify_receipt(
         &mut self,
-        _block: &Block,
+        _block: &BlockWithSenders,
         _total_difficulty: U256,
-        _senders: Option<Vec<Address>>,
     ) -> Result<(), BlockExecutionError> {
         if self.0.is_none() {
-            return Err(BlockExecutionError::UnavailableForTest)
+            return Err(BlockExecutionError::UnavailableForTest);
         }
         Ok(())
     }
 
     fn execute_transactions(
         &mut self,
-        _block: &Block,
+        _block: &BlockWithSenders,
         _total_difficulty: U256,
-        _senders: Option<Vec<Address>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
         Err(BlockExecutionError::UnavailableForTest)
     }

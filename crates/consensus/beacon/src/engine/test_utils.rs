@@ -88,7 +88,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.send_new_payload(payload.clone(), cancun_fields.clone()).await?;
             if !result.is_syncing() {
-                return Ok(result)
+                return Ok(result);
             }
         }
     }
@@ -109,7 +109,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.engine_handle.fork_choice_updated(state, None).await?;
             if !result.is_syncing() {
-                return Ok(result)
+                return Ok(result);
             }
         }
     }
@@ -182,45 +182,34 @@ where
 {
     fn execute(
         &mut self,
-        block: &reth_primitives::Block,
+        block: &reth_primitives::BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<reth_primitives::Address>>,
     ) -> Result<(), BlockExecutionError> {
         match self {
-            EitherBlockExecutor::Left(a) => a.execute(block, total_difficulty, senders),
-            EitherBlockExecutor::Right(b) => b.execute(block, total_difficulty, senders),
+            EitherBlockExecutor::Left(a) => a.execute(block, total_difficulty),
+            EitherBlockExecutor::Right(b) => b.execute(block, total_difficulty),
         }
     }
 
     fn execute_and_verify_receipt(
         &mut self,
-        block: &reth_primitives::Block,
+        block: &reth_primitives::BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<reth_primitives::Address>>,
     ) -> Result<(), BlockExecutionError> {
         match self {
-            EitherBlockExecutor::Left(a) => {
-                a.execute_and_verify_receipt(block, total_difficulty, senders)
-            }
-            EitherBlockExecutor::Right(b) => {
-                b.execute_and_verify_receipt(block, total_difficulty, senders)
-            }
+            EitherBlockExecutor::Left(a) => a.execute_and_verify_receipt(block, total_difficulty),
+            EitherBlockExecutor::Right(b) => b.execute_and_verify_receipt(block, total_difficulty),
         }
     }
 
     fn execute_transactions(
         &mut self,
-        block: &reth_primitives::Block,
+        block: &reth_primitives::BlockWithSenders,
         total_difficulty: U256,
-        senders: Option<Vec<reth_primitives::Address>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
         match self {
-            EitherBlockExecutor::Left(a) => {
-                a.execute_transactions(block, total_difficulty, senders)
-            }
-            EitherBlockExecutor::Right(b) => {
-                b.execute_transactions(block, total_difficulty, senders)
-            }
+            EitherBlockExecutor::Left(a) => a.execute_transactions(block, total_difficulty),
+            EitherBlockExecutor::Right(b) => b.execute_transactions(block, total_difficulty),
         }
     }
 

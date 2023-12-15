@@ -139,7 +139,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break
+            break;
         }
         cursor.delete_current()?;
 
@@ -148,12 +148,12 @@ where
         let first = list.iter(0).next().expect("List can't be empty");
         if first >= block_number as usize {
             item = cursor.prev()?;
-            continue
+            continue;
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
-            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>())
+            return Ok(list.iter(0).take_while(|i| *i < block_number as usize).collect::<Vec<_>>());
         } else {
-            return Ok(list.iter(0).collect::<Vec<_>>())
+            return Ok(list.iter(0).collect::<Vec<_>>());
         }
     }
 
@@ -236,7 +236,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BundleStateWithReceipts> {
         if range.is_empty() {
-            return Ok(BundleStateWithReceipts::default())
+            return Ok(BundleStateWithReceipts::default());
         }
         let start_block_number = *range.start();
 
@@ -414,7 +414,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         // Compute the first and last tx ID in the range
@@ -423,7 +423,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect());
         }
 
         // Get transactions and senders
@@ -552,7 +552,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let block_headers = self.get_or_take::<tables::Headers, TAKE>(range.clone())?;
         if block_headers.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         let block_header_hashes =
@@ -658,7 +658,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         while let Some(Ok((entry_key, _))) = reverse_walker.next() {
             if selector(entry_key.clone()) <= key {
-                break
+                break;
             }
             reverse_walker.delete_current()?;
             deleted += 1;
@@ -705,7 +705,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 if deleted == limit {
-                    break
+                    break;
                 }
             }
         }
@@ -736,7 +736,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 if deleted == limit {
-                    break
+                    break;
                 }
             }
         }
@@ -756,7 +756,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             // delete old shard so new one can be inserted.
             self.tx.delete::<T>(shard_key, None)?;
             let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-            return Ok(list)
+            return Ok(list);
         }
         Ok(Vec::new())
     }
@@ -948,7 +948,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td))
+            return Ok(Some(td));
         }
 
         Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0))
@@ -986,7 +986,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
                 .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
             let sealed = header.seal(hash);
             if !predicate(&sealed) {
-                break
+                break;
             }
             headers.push(sealed);
         }
@@ -1064,7 +1064,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     None => return Ok(None),
                 };
 
-                return Ok(Some(Block { header, body: transactions, ommers, withdrawals }))
+                return Ok(Some(Block { header, body: transactions, ommers, withdrawals }));
             }
         }
 
@@ -1088,11 +1088,11 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
             if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()))
+                return Ok(Some(Vec::new()));
             }
 
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
+            return Ok(ommers);
         }
 
         Ok(None)
@@ -1158,7 +1158,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         if range.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         let len = range.end().saturating_sub(*range.start()) as usize;
@@ -1336,7 +1336,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                                 excess_blob_gas: header.excess_blob_gas,
                             };
 
-                            return Ok(Some((transaction, meta)))
+                            return Ok(Some((transaction, meta)));
                         }
                     }
                 }
@@ -1367,7 +1367,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                         .map(|result| result.map(|(_, tx)| tx.into()))
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok(Some(transactions))
-                }
+                };
             }
         }
         Ok(None)
@@ -1452,7 +1452,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
                         .map(|result| result.map(|(_, receipt)| receipt))
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok(Some(receipts))
-                }
+                };
             }
         }
         Ok(None)
@@ -1474,7 +1474,7 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
                     .get::<tables::BlockWithdrawals>(number)
                     .map(|w| w.map(|w| w.withdrawals))?
                     .unwrap_or_default();
-                return Ok(Some(withdrawals))
+                return Ok(Some(withdrawals));
             }
         }
         Ok(None)
@@ -1906,7 +1906,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     root: GotExpected { got: state_root, expected: expected_state_root },
                     block_number: *range.end(),
                     block_hash: end_block_hash,
-                })))
+                })));
             }
             trie_updates.flush(&self.tx)?;
         }
@@ -2121,7 +2121,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     root: GotExpected { got: new_state_root, expected: parent_state_root },
                     block_number: parent_number,
                     block_hash: parent_hash,
-                })))
+                })));
             }
             trie_updates.flush(&self.tx)?;
         }
@@ -2305,7 +2305,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
-            return Ok(())
+            return Ok(());
         }
 
         let first_number = blocks.first().unwrap().number;
