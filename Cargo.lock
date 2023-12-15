@@ -4589,8 +4589,7 @@ dependencies = [
 [[package]]
 name = "nybbles"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47dddada2357f8e7786f4f4d837db7bdddec02c7c3e5da7840d92c70390f6dc0"
+source = "git+https://github.com/dvush/nybbles?branch=pop-idx-mut#a1eec9c0556c90c1edbe3dc1853645d8eb355003"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
