@@ -131,7 +131,7 @@ mod test {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = SnapshotProvider::new(snap_path.path()).with_filters();
+            let manager = SnapshotProvider::new(snap_path.path()).unwrap().with_filters();
             let jar_provider = manager
                 .get_segment_provider_from_block(SnapshotSegment::Headers, 0, Some(&snap_file))
                 .unwrap();

@@ -53,7 +53,7 @@ impl Command {
             .filename_with_configuration(filters, compression, &block_range, &tx_range)
             .into();
 
-        let provider = SnapshotProvider::default();
+        let provider = SnapshotProvider::new(PathBuf::default())?;
         let jar_provider = provider.get_segment_provider_from_block(
             SnapshotSegment::Receipts,
             self.from,
