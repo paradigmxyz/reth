@@ -51,7 +51,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         assert!(
             !self.contains(&id),
             "transaction already included {:?}",
-            self.get(&id).unwrap().transaction.hash()
+            self.get(&id).unwrap().transaction.transaction
         );
         let submission_id = self.next_id();
 

@@ -289,7 +289,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         assert!(
             !self.contains(tx.id()),
             "transaction already included {:?}",
-            self.get(tx.id()).unwrap().transaction.hash()
+            self.get(tx.id()).unwrap().transaction
         );
 
         // keep track of size
@@ -507,8 +507,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
             self.highest_nonces.len() <= self.all.len(),
             "independent_descendants.len() > all.len()"
         );
-        assert!(
-            self.highest_nonces.len() == self.independent_transactions.len(),
+        assert_eq!(
+            self.highest_nonces.len(),
+            self.independent_transactions.len(),
             "independent.len() = independent_descendants.len()"
         );
     }
