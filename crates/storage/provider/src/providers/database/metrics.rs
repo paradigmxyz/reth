@@ -59,7 +59,6 @@ pub(crate) enum Action {
     InsertBlockBodyIndices,
     InsertTransactionBlock,
 
-    RecoverSigners,
     GetNextTxNum,
     GetParentTD,
 }
@@ -86,7 +85,6 @@ impl Action {
             Action::InsertBlockWithdrawals => "insert block withdrawals",
             Action::InsertBlockBodyIndices => "insert block body indices",
             Action::InsertTransactionBlock => "insert transaction block",
-            Action::RecoverSigners => "recover signers",
             Action::GetNextTxNum => "get next tx num",
             Action::GetParentTD => "get parent TD",
         }

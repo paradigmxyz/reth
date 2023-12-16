@@ -332,16 +332,16 @@ checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 
 [[package]]
 name = "aquamarine"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df752953c49ce90719c7bf1fc587bc8227aed04732ea0c0f85e5397d7fdbd1a1"
+checksum = "074b80d14d0240b6ce94d68f059a2d26a5d77280ae142662365a21ef6e2594ef"
 dependencies = [
  "include_dir",
  "itertools 0.10.5",
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.39",
 ]
 
 [[package]]
@@ -4578,6 +4578,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nybbles"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47dddada2357f8e7786f4f4d837db7bdddec02c7c3e5da7840d92c70390f6dc0"
+dependencies = [
+ "alloy-rlp",
+ "arbitrary",
+ "const-hex",
+ "proptest",
+ "serde",
+ "smallvec",
+]
+
+[[package]]
 name = "object"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6209,6 +6223,7 @@ dependencies = [
  "itertools 0.11.0",
  "modular-bitfield",
  "num_enum 0.7.1",
+ "nybbles",
  "once_cell",
  "plain_hasher",
  "pprof",

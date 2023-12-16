@@ -37,40 +37,25 @@ use tracing::{debug, error, info, instrument, trace, warn};
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A Tree of chains.
 ///
-/// Mermaid flowchart represents all the states a block can have inside the blockchaintree.
-/// Green blocks belong to canonical chain and are saved inside then database, they are our main
-/// chain. Pending blocks and sidechains are found in memory inside [`BlockchainTree`].
-/// Both pending and sidechains have same mechanisms only difference is when they get committed to
-/// the database. For pending it is an append operation but for sidechains they need to move current
-/// canonical blocks to BlockchainTree and commit the sidechain to the database to become canonical
-/// chain (reorg). ```mermaid
-/// flowchart BT
-/// subgraph canonical chain
-/// CanonState:::state
-/// block0canon:::canon -->block1canon:::canon -->block2canon:::canon -->block3canon:::canon -->
-/// block4canon:::canon --> block5canon:::canon end
-/// block5canon --> block6pending1:::pending
-/// block5canon --> block6pending2:::pending
-/// subgraph sidechain2
-/// S2State:::state
-/// block3canon --> block4s2:::sidechain --> block5s2:::sidechain
-/// end
-/// subgraph sidechain1
-/// S1State:::state
-/// block2canon --> block3s1:::sidechain --> block4s1:::sidechain --> block5s1:::sidechain -->
-/// block6s1:::sidechain end
-/// classDef state fill:#1882C4
-/// classDef canon fill:#8AC926
-/// classDef pending fill:#FFCA3A
-/// classDef sidechain fill:#FF595E
-/// ```
-/// 
+/// The flowchart represents all the states a block can have inside the tree.
 ///
-/// main functions:
-/// * [BlockchainTree::insert_block]: Connect block to chain, execute it and if valid insert block
-///   into the tree.
-/// * [BlockchainTree::finalize_block]: Remove chains that are branch off the now finalized block.
-/// * [BlockchainTree::make_canonical]: Check if we have the hash of block that is the current
+/// - Green blocks belong to the canonical chain and are saved inside the database.
+/// - Pending blocks and sidechains are found in-memory inside [`BlockchainTree`].
+///
+/// Both pending chains and sidechains have the same mechanisms, the only difference is when they
+/// get committed to the database.
+///
+/// For pending, it is an append operation, but for sidechains they need to move the current
+/// canonical blocks to the tree (by removing them from the database), and commit the sidechain
+/// blocks to the database to become the canonical chain (reorg).
+///
+/// include_mmd!("docs/mermaid/tree.mmd")
+///
+/// # Main functions
+/// * [BlockchainTree::insert_block]: Connect a block to a chain, execute it, and if valid, insert
+///   the block into the tree.
+/// * [BlockchainTree::finalize_block]: Remove chains that branch off of the now finalized block.
+/// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
 pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
@@ -161,33 +146,35 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         if block.number <= last_finalized_block {
             // check if block is canonical
             if self.is_block_hash_canonical(&block.hash)? {
-                return Ok(Some(BlockStatus::Valid))
+                return Ok(Some(BlockStatus::Valid));
             }
 
             // check if block is inside database
             if self.externals.provider_factory.provider()?.block_number(block.hash)?.is_some() {
-                return Ok(Some(BlockStatus::Valid))
+                return Ok(Some(BlockStatus::Valid));
             }
 
             return Err(BlockchainTreeError::PendingBlockIsFinalized {
                 last_finalized: last_finalized_block,
             }
-            .into())
+            .into());
         }
 
         // check if block is part of canonical chain
         if self.is_block_hash_canonical(&block.hash)? {
-            return Ok(Some(BlockStatus::Valid))
+            return Ok(Some(BlockStatus::Valid));
         }
 
         // is block inside chain
         if let Some(status) = self.is_block_inside_chain(&block) {
-            return Ok(Some(status))
+            return Ok(Some(status));
         }
 
         // check if block is disconnected
         if let Some(block) = self.state.buffered_blocks.block(block) {
-            return Ok(Some(BlockStatus::Disconnected { missing_ancestor: block.parent_num_hash() }))
+            return Ok(Some(BlockStatus::Disconnected {
+                missing_ancestor: block.parent_num_hash(),
+            }));
         }
 
         Ok(None)
@@ -278,7 +265,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
-            return Some(BundleStateData { state, parent_block_hashed, canonical_fork })
+            return Some(BundleStateData { state, parent_block_hashed, canonical_fork });
         }
 
         // check if there is canonical block
@@ -288,7 +275,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 canonical_fork: ForkBlock { number: canonical_number, hash: block_hash },
                 state: BundleStateWithReceipts::default(),
                 parent_block_hashed: self.canonical_chain().inner().clone(),
-            })
+            });
         }
 
         None
@@ -311,7 +298,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         // check if block parent can be found in any side chain.
         if let Some(chain_id) = self.block_indices().get_blocks_chain_id(&parent.hash) {
             // found parent in side tree, try to insert there
-            return self.try_insert_block_into_side_chain(block, chain_id, block_validation_kind)
+            return self.try_insert_block_into_side_chain(block, chain_id, block_validation_kind);
         }
 
         // if not found, check if the parent can be found inside canonical chain.
@@ -319,7 +306,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             .is_block_hash_canonical(&parent.hash)
             .map_err(|err| InsertBlockError::new(block.block.clone(), err.into()))?
         {
-            return self.try_append_canonical_chain(block, block_validation_kind)
+            return self.try_append_canonical_chain(block, block_validation_kind);
         }
 
         // this is another check to ensure that if the block points to a canonical block its block
@@ -335,7 +322,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                         block_number: block.number,
                     },
                     block.block,
-                ))
+                ));
             }
         }
 
@@ -412,7 +399,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 return Err(InsertBlockError::execution_error(
                     BlockValidationError::BlockPreMerge { hash: block.hash }.into(),
                     block.block,
-                ))
+                ));
             }
 
             let parent_header = provider
@@ -575,7 +562,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             } else {
                 // if there is no fork block that point to other chains, break the loop.
                 // it means that this fork joins to canonical block.
-                break
+                break;
             }
         }
         hashes
@@ -596,9 +583,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             // get fork block chain
             if let Some(fork_chain_id) = self.block_indices().get_blocks_chain_id(&fork.hash) {
                 chain_id = fork_chain_id;
-                continue
+                continue;
             }
-            break
+            break;
         }
         (self.block_indices().canonical_hash(&fork.number) == Some(fork.hash)).then_some(fork)
     }
@@ -705,7 +692,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     pub fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         // validate block consensus rules
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.block))
+            return Err(InsertBlockError::consensus_error(err, block.block));
         }
 
         self.state.buffered_blocks.insert_block(block);
@@ -722,17 +709,17 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 ?block,
                 "Failed to validate total difficulty for block {}: {e:?}", block.header.hash
             );
-            return Err(e)
+            return Err(e);
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
             error!(?block, "Failed to validate header {}: {e:?}", block.header.hash);
-            return Err(e)
+            return Err(e);
         }
 
         if let Err(e) = self.externals.consensus.validate_block(block) {
             error!(?block, "Failed to validate block {}: {e:?}", block.header.hash);
-            return Err(e)
+            return Err(e);
         }
 
         Ok(())
@@ -753,7 +740,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 Some(BlockStatus::Valid)
             } else {
                 Some(BlockStatus::Accepted)
-            }
+            };
         }
         None
     }
@@ -794,7 +781,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         // validate block consensus rules
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.block))
+            return Err(InsertBlockError::consensus_error(err, block.block));
         }
 
         Ok(InsertPayloadOk::Inserted(
@@ -963,7 +950,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         }
 
         if header.is_none() && self.is_block_hash_inside_chain(*hash) {
-            return Ok(None)
+            return Ok(None);
         }
 
         if header.is_none() {
@@ -1018,9 +1005,9 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
                     hash: *block_hash,
                 })
-                .into())
+                .into());
             }
-            return Ok(CanonicalOutcome::AlreadyCanonical { header })
+            return Ok(CanonicalOutcome::AlreadyCanonical { header });
         }
 
         let Some(chain_id) = self.block_indices().get_blocks_chain_id(block_hash) else {
@@ -1028,7 +1015,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
                 block_hash: *block_hash,
             })
-            .into())
+            .into());
         };
         let chain = self.state.chains.remove(&chain_id).expect("To be present");
 
@@ -1190,7 +1177,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                     block_number: tip.number,
                     block_hash: tip.hash,
                 },
-            ))))
+            ))));
         }
 
         let (blocks, state) = chain.into_inner();
@@ -1214,7 +1201,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
     pub fn unwind(&mut self, unwind_to: BlockNumber) -> RethResult<()> {
         // nothing to be done if unwind_to is higher then the tip
         if self.block_indices().canonical_tip().number <= unwind_to {
-            return Ok(())
+            return Ok(());
         }
         // revert `N` blocks from current canonical chain and put them inside BlockchanTree
         let old_canon_chain = self.revert_canonical_from_database(unwind_to)?;
@@ -1242,7 +1229,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
 
         let tip = provider_rw.last_block_number()?;
         let revert_range = (revert_until + 1)..=tip;
-        info!(target: "blockchain_tree", "Unwinding canonical chain blocks: {:?}", revert_range);
+        info!(target: "blockchain_tree", "REORG: revert canonical from database by unwinding chain blocks {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider_rw
             .take_block_and_execution_range(
@@ -1343,7 +1330,12 @@ mod tests {
         genesis.header.header.state_root = EMPTY_ROOT_HASH;
         let provider = factory.provider_rw().unwrap();
 
-        provider.insert_block(genesis, None, None).unwrap();
+        provider
+            .insert_block(
+                genesis.try_seal_with_senders().expect("invalid tx signature in genesis"),
+                None,
+            )
+            .unwrap();
 
         // insert first 10 blocks
         for i in 0..10 {
@@ -1454,8 +1446,9 @@ mod tests {
             let provider_rw = provider_factory.provider_rw().unwrap();
             provider_rw
                 .insert_block(
-                    SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default()),
-                    Some(Vec::new()),
+                    SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default())
+                        .try_seal_with_senders()
+                        .unwrap(),
                     None,
                 )
                 .unwrap();

@@ -169,6 +169,9 @@ pub struct NetworkConfigBuilder {
     head: Option<Head>,
     /// Whether tx gossip is disabled
     tx_gossip_disabled: bool,
+    /// The block importer type
+    #[serde(skip)]
+    block_import: Option<Box<dyn BlockImport>>,
     /// Optimism Network Config Builder
     #[cfg(feature = "optimism")]
     optimism_network_config: OptimismNetworkConfigBuilder,
@@ -204,6 +207,7 @@ impl NetworkConfigBuilder {
             extra_protocols: Default::default(),
             head: None,
             tx_gossip_disabled: false,
+            block_import: None,
             #[cfg(feature = "optimism")]
             optimism_network_config: OptimismNetworkConfigBuilder::default(),
         }
@@ -396,6 +400,12 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Sets the block import type.
+    pub fn block_import(mut self, block_import: Box<dyn BlockImport>) -> Self {
+        self.block_import = Some(block_import);
+        self
+    }
+
     /// Sets the sequencer HTTP endpoint.
     #[cfg(feature = "optimism")]
     pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
@@ -427,6 +437,7 @@ impl NetworkConfigBuilder {
             extra_protocols,
             head,
             tx_gossip_disabled,
+            block_import,
             #[cfg(feature = "optimism")]
                 optimism_network_config: OptimismNetworkConfigBuilder { sequencer_endpoint },
         } = self;
@@ -473,7 +484,7 @@ impl NetworkConfigBuilder {
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
             chain_spec,
-            block_import: Box::<ProofOfStakeBlockImport>::default(),
+            block_import: block_import.unwrap_or(Box::<ProofOfStakeBlockImport>::default()),
             network_mode,
             executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
             status,

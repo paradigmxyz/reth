@@ -87,8 +87,9 @@ impl Case for BlockchainTestCase {
                     SealedBlock::new(
                         case.genesis_block_header.clone().into(),
                         BlockBody::default(),
-                    ),
-                    None,
+                    )
+                    .try_seal_with_senders()
+                    .unwrap(),
                     None,
                 )
                 .map_err(|err| Error::RethError(err.into()))?;
@@ -98,7 +99,7 @@ impl Case for BlockchainTestCase {
             let last_block = case.blocks.iter().try_fold(None, |_, block| {
                 let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                 provider
-                    .insert_block(decoded.clone(), None, None)
+                    .insert_block(decoded.clone().try_seal_with_senders().unwrap(), None)
                     .map_err(|err| Error::RethError(err.into()))?;
                 Ok::<Option<SealedBlock>, Error>(Some(decoded))
             })?;
