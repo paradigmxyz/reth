@@ -1689,34 +1689,17 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
         // Aggregate all block changesets and make a list of accounts that have been changed.
-        // let hashed_accounts = self
-        //     .tx
-        //     .cursor_read::<tables::AccountChangeSet>()?
-        //     .walk_range(range)?
-        //     .map(|entry| entry.map(|(_, e)| (keccak256(e.address), e.info)))
-        //     .collect::<Result<BTreeMap<_, _>, DatabaseError>>()?;
-
+        // Note that collecting and then reversing the order is necessary to ensure that the
+        // changes are applied in the correct order.
         let hashed_accounts = self
             .tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
+            .map(|entry| entry.map(|(_, e)| (keccak256(e.address), e.info)))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .rev()
-            // fold all account to get the old balance/nonces and account that needs to be removed
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, Option<Account>>, (_, account_before)| {
-                    accounts.insert(account_before.address, account_before.info);
-                    accounts
-                },
-            )
-            .into_iter()
-            // hash addresses and collect it inside sorted BTreeMap.
-            // We are doing keccak only once per address.
-            .map(|(address, account)| (keccak256(address), account))
             .collect::<BTreeMap<_, _>>();
-        eprintln!("{hashed_accounts:#?}");
 
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
         for (hashed_address, account) in &hashed_accounts {
@@ -1735,15 +1718,8 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
-
-        let hashed_accounts = accounts.into_iter().fold(
-            BTreeMap::new(),
-            |mut map: BTreeMap<B256, Option<Account>>, (address, account)| {
-                map.insert(keccak256(address), account);
-                map
-            },
-        );
-
+        let hashed_accounts =
+            accounts.into_iter().map(|(ad, ac)| (keccak256(ad), ac)).collect::<BTreeMap<_, _>>();
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(*hashed_address, *account)?;
@@ -1751,7 +1727,6 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                 hashed_accounts_cursor.delete_current()?;
             }
         }
-
         Ok(hashed_accounts)
     }
 
@@ -1773,7 +1748,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
 
         let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> = HashMap::new();
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorage>()?;
-        for (hashed_address, key, value) in hashed_storages {
+        for (hashed_address, key, value) in hashed_storages.into_iter().rev() {
             hashed_storage_keys.entry(hashed_address).or_default().insert(key);
 
             if hashed_storage
