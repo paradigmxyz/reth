@@ -8,6 +8,7 @@ use crate::{
     BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob,
 };
 use futures_util::{future::FutureExt, StreamExt};
+use reth_provider::CanonStateSubscriptions;
 use reth_rpc_types::engine::PayloadId;
 use std::{
     fmt,
@@ -160,9 +161,10 @@ impl PayloadBuilderHandle {
 /// does know nothing about how to build them, it just drives their jobs to completion.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct PayloadBuilderService<Gen>
+pub struct PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator,
+    St: CanonStateSubscriptions + Clone + 'static,
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
@@ -174,17 +176,20 @@ where
     command_rx: UnboundedReceiverStream<PayloadServiceCommand>,
     /// Metrics for the payload builder service
     metrics: PayloadBuilderServiceMetrics,
+    /// CanoncialState notification channel
+    events: St,
 }
 
 // === impl PayloadBuilderService ===
 
-impl<Gen> PayloadBuilderService<Gen>
+impl<Gen, St> PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator,
+    St: CanonStateSubscriptions + Clone + 'static,
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
-    pub fn new(generator: Gen) -> (Self, PayloadBuilderHandle) {
+    pub fn new(generator: Gen, mut events: St) -> (Self, PayloadBuilderHandle) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let service = Self {
             generator,
@@ -192,6 +197,7 @@ where
             service_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             metrics: Default::default(),
+            events,
         };
         let handle = service.handle();
         (service, handle)
@@ -271,10 +277,11 @@ where
     }
 }
 
-impl<Gen> Future for PayloadBuilderService<Gen>
+impl<Gen, St> Future for PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
+    St: CanonStateSubscriptions + Unpin + Clone + 'static,
 {
     type Output = ();
 

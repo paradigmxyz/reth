@@ -161,7 +161,9 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             components.chain_spec(),
             payload_builder,
         );
-        let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
+        let events_clone = Box::pin(components.events().clone());
+        let (payload_service, payload_builder) =
+            PayloadBuilderService::new(payload_generator, events_clone);
 
         components
             .task_executor()
