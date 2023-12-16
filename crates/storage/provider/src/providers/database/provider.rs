@@ -127,9 +127,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         f: impl FnMut(T::Key, T::Value) -> Result<R, DatabaseError>,
     ) -> Result<Vec<R>, DatabaseError> {
         let capacity = match range_size_hint(&range) {
-            // Some(0) | None => return Ok(Vec::new()),
-            Some(0) | None => 0,
-
+            Some(0) | None => return Ok(Vec::new()),
             Some(capacity) => capacity,
         };
         let mut cursor = self.tx.cursor_read::<T>()?;
@@ -1691,15 +1689,34 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
         // Aggregate all block changesets and make a list of accounts that have been changed.
+        // let hashed_accounts = self
+        //     .tx
+        //     .cursor_read::<tables::AccountChangeSet>()?
+        //     .walk_range(range)?
+        //     .map(|entry| entry.map(|(_, e)| (keccak256(e.address), e.info)))
+        //     .collect::<Result<BTreeMap<_, _>, DatabaseError>>()?;
+
         let hashed_accounts = self
             .tx
             .cursor_read::<tables::AccountChangeSet>()?
             .walk_range(range)?
-            .map(|entry| {
-                let (_, account_before) = entry?;
-                Ok((keccak256(account_before.address), account_before.info))
-            })
-            .collect::<Result<BTreeMap<_, _>, DatabaseError>>()?;
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .rev()
+            // fold all account to get the old balance/nonces and account that needs to be removed
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, Option<Account>>, (_, account_before)| {
+                    accounts.insert(account_before.address, account_before.info);
+                    accounts
+                },
+            )
+            .into_iter()
+            // hash addresses and collect it inside sorted BTreeMap.
+            // We are doing keccak only once per address.
+            .map(|(address, account)| (keccak256(address), account))
+            .collect::<BTreeMap<_, _>>();
+        eprintln!("{hashed_accounts:#?}");
 
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
         for (hashed_address, account) in &hashed_accounts {
@@ -1727,14 +1744,13 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
             },
         );
 
-        hashed_accounts.iter().try_for_each(|(hashed_address, account)| -> ProviderResult<()> {
+        for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, *account)?
+                hashed_accounts_cursor.upsert(*hashed_address, *account)?;
             } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
-            Ok(())
-        })?;
+        }
 
         Ok(hashed_accounts)
     }
@@ -2311,7 +2327,7 @@ fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
         Bound::Unbounded => 0,
     };
     let end = match range.end_bound().cloned() {
-        Bound::Included(end) => end.checked_add(1)?,
+        Bound::Included(end) => end.saturating_add(1),
         Bound::Excluded(end) => end,
         Bound::Unbounded => return None,
     };
