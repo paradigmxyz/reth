@@ -47,11 +47,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
         assert!(tx.is_eip4844(), "transaction is not a blob tx");
         let id = *tx.id();
-        assert!(
-            !self.by_id.contains_key(&id),
-            "transaction already included {:?}",
-            self.by_id.contains_key(&id)
-        );
+        assert!(!self.contains(&id), "transaction already included {:?}", self.contains(&id));
         let submission_id = self.next_id();
 
         // keep track of size
@@ -204,10 +200,13 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     }
 
     /// Returns `true` if the transaction with the given id is already included in this pool.
-    #[cfg(test)]
-    #[allow(unused)]
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
+    }
+
+    /// Retrieves a transaction with the given ID from the pool, if it exists.
+    fn get(&self, id: &TransactionId) -> Option<&BlobTransaction<T>> {
+        self.by_id.get(id)
     }
 
     /// Asserts that the bijection between `by_id` and `all` is valid.
