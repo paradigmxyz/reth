@@ -171,7 +171,7 @@ where
                 if !self.eip2718 {
                     return TransactionValidationOutcome::Invalid(
                         transaction,
-                        InvalidTransactionError::Eip1559Disabled.into(),
+                        InvalidTransactionError::Eip2930Disabled.into(),
                     )
                 }
             }
