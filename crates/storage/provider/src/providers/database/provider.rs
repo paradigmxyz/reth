@@ -127,7 +127,9 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         f: impl FnMut(T::Key, T::Value) -> Result<R, DatabaseError>,
     ) -> Result<Vec<R>, DatabaseError> {
         let capacity = match range_size_hint(&range) {
-            Some(0) | None => return Ok(Vec::new()),
+            // Some(0) | None => return Ok(Vec::new()),
+            Some(0) | None => 0,
+
             Some(capacity) => capacity,
         };
         let mut cursor = self.tx.cursor_read::<T>()?;
