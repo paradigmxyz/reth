@@ -47,7 +47,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
         assert!(tx.is_eip4844(), "transaction is not a blob tx");
         let id = *tx.id();
-        assert!(!self.contains(&id), "transaction already included {:?}", self.contains(&id));
+        assert!(!self.contains(&id), "transaction already included {:?}", self.get(&id).unwrap());
         let submission_id = self.next_id();
 
         // keep track of size
