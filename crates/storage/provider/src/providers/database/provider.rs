@@ -126,11 +126,10 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         range: impl RangeBounds<T::Key>,
         f: impl FnMut(T::Key, T::Value) -> Result<R, DatabaseError>,
     ) -> Result<Vec<R>, DatabaseError> {
-        let capacity = range_size_hint(&range);
-        if capacity == Some(0) {
-            return Ok(Vec::new());
-        }
-        let capacity = capacity.unwrap_or(0);
+        let capacity = match range_size_hint(&range) {
+            Some(0) | None => return Ok(Vec::new()),
+            Some(capacity) => capacity,
+        };
         let mut cursor = self.tx.cursor_read::<T>()?;
         self.cursor_collect_with_capacity(&mut cursor, range, capacity, f)
     }
