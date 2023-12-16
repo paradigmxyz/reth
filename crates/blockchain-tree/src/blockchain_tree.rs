@@ -1809,7 +1809,7 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::new()))
             .assert(&tree);
 
-        assert!(tree.make_canonical(&block1a_hash).is_ok());
+        assert_matches!(tree.make_canonical(&block1a_hash), Ok(_));
         // Trie state:
         //       b2a   b2 (side chain)
         //       |   /
