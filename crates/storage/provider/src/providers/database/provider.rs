@@ -1701,6 +1701,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
             .rev()
             .collect::<BTreeMap<_, _>>();
 
+        // Apply values to HashedState, and remove the account if it's None.
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccount>()?;
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
@@ -1746,6 +1747,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
             .collect::<Result<Vec<_>, _>>()?;
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
 
+        // Apply values to HashedState, and remove the account if it's None.
         let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> = HashMap::new();
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorage>()?;
         for (hashed_address, key, value) in hashed_storages.into_iter().rev() {
