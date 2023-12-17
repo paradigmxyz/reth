@@ -3,7 +3,7 @@ use crate::{
         error::{EthApiError, EthResult},
         revm_utils::{
             clone_into_empty_db, inspect, inspect_and_return_db, prepare_call_env,
-            replay_transactions_until, transact, EvmOverrides,
+            replay_transactions_until, transact, EvmOverrides, apply_state_overrides
         },
         EthTransactions, TransactionSource,
     },
@@ -238,6 +238,52 @@ where
                 )?;
 
                 let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+                this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
+            })
+            .await
+    }
+
+    /// Trace the transaction according to the provided options.
+    ///
+    /// Ref: <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers>
+    pub async fn debug_trace_transaction_overrides(
+        &self,
+        tx_hash: B256,
+        call_opts: GethDebugTracingCallOptions
+    ) -> EthResult<GethTrace> {
+        let opts = call_opts.tracing_options;
+        let state_overrides = call_opts.state_overrides;
+
+        let (transaction, block) = match self.inner.eth_api.transaction_and_block(tx_hash).await? {
+            None => return Err(EthApiError::TransactionNotFound),
+            Some(res) => res,
+        };
+        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash.into()).await?;
+
+        // we need to get the state of the parent block because we're essentially replaying the
+        // block the transaction is included in
+        let state_at: BlockId = block.parent_hash.into();
+        let block_txs = block.body;
+
+        let this = self.clone();
+        self.inner
+            .eth_api
+            .spawn_with_state_at_block(state_at, move |state| {
+                // configure env for the target transaction
+                let tx = transaction.into_recovered();
+
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                // replay all transactions prior to the targeted transaction
+                replay_transactions_until(
+                    &mut db,
+                    cfg.clone(),
+                    block_env.clone(),
+                    block_txs,
+                    tx.hash,
+                )?;
+
+                let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
+                apply_state_overrides(state_overrides.unwrap_or_default(), &mut db)?;
                 this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
             })
             .await
@@ -799,6 +845,16 @@ where
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
         Ok(DebugApi::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default()).await?)
+    }
+
+    /// Handler for `debug_traceTransactionOverrides`
+    async fn debug_trace_transaction_overrides(
+        &self,
+        tx_hash: B256,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<GethTrace> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(DebugApi::debug_trace_transaction_overrides(self, tx_hash, opts.unwrap_or_default()).await?)
     }
 
     /// Handler for `debug_traceCall`

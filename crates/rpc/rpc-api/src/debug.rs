@@ -90,6 +90,17 @@ pub trait DebugApi {
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace>;
 
+    /// The `debug_traceTransaction` debugging method will attempt to run the transaction in the
+    /// exact same manner as it was executed on the network. It will replay any transaction that
+    /// may have been executed prior to this one before it will finally attempt to execute the
+    /// transaction that corresponds to the given hash.
+    #[method(name = "traceTransactionOverrides")]
+    async fn debug_trace_transaction_overrides(
+        &self,
+        tx_hash: B256,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<GethTrace>;
+
     /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given
     /// block execution using the final state of parent block as the base.
     ///
