@@ -7,8 +7,8 @@ use crate::{
     error::PayloadBuilderError, metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator,
     BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes, PayloadJob,
 };
-use futures_util::{future::FutureExt, StreamExt};
-use reth_provider::CanonStateSubscriptions;
+use futures_util::{future::FutureExt, Stream, StreamExt};
+use reth_provider::CanonStateNotification;
 use reth_rpc_types::engine::PayloadId;
 use std::{
     fmt,
@@ -164,7 +164,7 @@ impl PayloadBuilderHandle {
 pub struct PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator,
-    St: CanonStateSubscriptions + Clone + 'static,
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     /// The type that knows how to create new payloads.
     generator: Gen,
@@ -176,8 +176,8 @@ where
     command_rx: UnboundedReceiverStream<PayloadServiceCommand>,
     /// Metrics for the payload builder service
     metrics: PayloadBuilderServiceMetrics,
-    /// CanoncialState notification channel
-    events: St,
+    /// Chain events notification stream
+    chain_events: St,
 }
 
 // === impl PayloadBuilderService ===
@@ -185,11 +185,11 @@ where
 impl<Gen, St> PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator,
-    St: CanonStateSubscriptions + Clone + 'static,
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     /// Creates a new payload builder service and returns the [PayloadBuilderHandle] to interact
     /// with it.
-    pub fn new(generator: Gen, mut events: St) -> (Self, PayloadBuilderHandle) {
+    pub fn new(generator: Gen, mut chain_events: St) -> (Self, PayloadBuilderHandle) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let service = Self {
             generator,
@@ -197,7 +197,7 @@ where
             service_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             metrics: Default::default(),
-            events,
+            chain_events,
         };
         let handle = service.handle();
         (service, handle)
@@ -281,7 +281,7 @@ impl<Gen, St> Future for PayloadBuilderService<Gen, St>
 where
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
-    St: CanonStateSubscriptions + Unpin + Clone + 'static,
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 {
     type Output = ();
 

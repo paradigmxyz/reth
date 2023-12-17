@@ -217,6 +217,10 @@ where
             builder: self.builder.clone(),
         })
     }
+
+    fn on_new_state(&self) {
+        ()
+    }
 }
 
 /// Restricts how many generator tasks can be executed at once.

@@ -5,8 +5,11 @@ use crate::cli::{
     config::{PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig},
 };
 use clap::Args;
+
+use futures_util::Stream;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_provider::CanonStateNotification;
 use reth_tasks::TaskSpawner;
 use std::{fmt, marker::PhantomData};
 
@@ -124,14 +127,16 @@ pub trait RethNodeCommandConfig: fmt::Debug {
     ///
     /// By default this spawns a [BasicPayloadJobGenerator] with the default configuration
     /// [BasicPayloadJobGeneratorConfig].
-    fn spawn_payload_builder_service<Conf, Reth>(
+    fn spawn_payload_builder_service<Conf, Reth, St>(
         &mut self,
         conf: &Conf,
         components: &Reth,
+        chain_events: St,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
+        St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     {
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
@@ -161,9 +166,8 @@ pub trait RethNodeCommandConfig: fmt::Debug {
             components.chain_spec(),
             payload_builder,
         );
-        let events_clone = Box::pin(components.events().clone());
         let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, events_clone);
+            PayloadBuilderService::new(payload_generator, chain_events);
 
         components
             .task_executor()
@@ -312,18 +316,20 @@ impl<T: RethNodeCommandConfig> RethNodeCommandConfig for NoArgs<T> {
         }
     }
 
-    fn spawn_payload_builder_service<Conf, Reth>(
+    fn spawn_payload_builder_service<Conf, Reth, St>(
         &mut self,
         conf: &Conf,
         components: &Reth,
+        chain_events: St,
     ) -> eyre::Result<PayloadBuilderHandle>
     where
         Conf: PayloadBuilderConfig,
         Reth: RethNodeComponents,
+        St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     {
         self.inner_mut()
             .ok_or_else(|| eyre::eyre!("config value must be set"))?
-            .spawn_payload_builder_service(conf, components)
+            .spawn_payload_builder_service(conf, components, chain_events)
     }
 }
 
