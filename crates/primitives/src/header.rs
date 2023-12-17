@@ -132,9 +132,12 @@ impl Header {
 
     /// Checks if the header is empty - has no transactions and no ommers
     pub fn is_empty(&self) -> bool {
-        self.transaction_root_is_empty() &&
-            self.ommers_hash_is_empty() &&
-            self.withdrawals_root.map_or(true, |root| root == EMPTY_ROOT_HASH)
+        let txs_and_ommers_empty = self.transaction_root_is_empty() && self.ommers_hash_is_empty();
+        if let Some(withdrawals_root) = self.withdrawals_root {
+            txs_and_ommers_empty && withdrawals_root == EMPTY_ROOT_HASH
+        } else {
+            txs_and_ommers_empty
+        }
     }
 
     /// Check if the ommers hash equals to empty hash list.
