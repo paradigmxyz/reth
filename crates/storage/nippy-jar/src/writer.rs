@@ -79,7 +79,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
     /// Creates a [`NippyJarWriter`] from an owned [`NippyJar`]. It also does consistency checks and
     /// self heals.
     pub fn from_owned(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
-        Self::new(JarHolder::Owned(jar))
+        Self::new(JarHolder::Owned(Box::new(jar)))
     }
 
     /// Returns a reference to `H` of [`NippyJar`]
