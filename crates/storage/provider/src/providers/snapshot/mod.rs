@@ -21,7 +21,7 @@ pub struct LoadedJar {
 
 impl LoadedJar {
     fn new(jar: NippyJar<SegmentHeader>) -> ProviderResult<Self> {
-        let mmap_handle = Arc::new(jar.open_data()?);
+        let mmap_handle = Arc::new(jar.open_data_reader()?);
         Ok(Self { jar, mmap_handle })
     }
 

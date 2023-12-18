@@ -210,7 +210,6 @@ impl Command {
     fn stats(&self, snapshots: Vec<impl AsRef<Path>>) -> eyre::Result<()> {
         let mut total_filters_size = 0;
         let mut total_index_size = 0;
-        let mut total_offsets_size = 0;
         let mut total_duration = Duration::new(0, 0);
         let mut total_file_size = 0;
 
@@ -223,7 +222,6 @@ impl Command {
 
             total_filters_size += jar.filter_size();
             total_index_size += jar.offsets_index_size();
-            total_offsets_size += jar.offsets_size();
             total_duration += duration;
             total_file_size += file_size;
 
@@ -231,7 +229,6 @@ impl Command {
             println!("  File Size:           {:>7}", human_bytes(file_size as f64));
             println!("  Filters Size:        {:>7}", human_bytes(jar.filter_size() as f64));
             println!("  Offset Index Size:   {:>7}", human_bytes(jar.offsets_index_size() as f64));
-            println!("  Offset List Size:    {:>7}", human_bytes(jar.offsets_size() as f64));
             println!(
                 "  Loading Time:        {:>7.2} ms | {:>7.2} µs",
                 duration.as_millis() as f64,
@@ -243,7 +240,6 @@ impl Command {
 
         println!("Total Filters Size:     {:>7}", human_bytes(total_filters_size as f64));
         println!("Total Offset Index Size: {:>7}", human_bytes(total_index_size as f64));
-        println!("Total Offset List Size:  {:>7}", human_bytes(total_offsets_size as f64));
         println!("Total File Size:         {:>7}", human_bytes(total_file_size as f64));
         println!(
             "Average Loading Time:    {:>7.2} ms | {:>7.2} µs",
