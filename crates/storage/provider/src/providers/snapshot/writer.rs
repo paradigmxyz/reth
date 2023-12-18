@@ -1,9 +1,11 @@
 use super::SnapshotProvider;
 use reth_codecs::Compact;
+use reth_db::table::Table;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
-    snapshot::SegmentHeader, BlockNumber, SnapshotSegment, TransactionSignedNoHash, TxNumber,
+    snapshot::SegmentHeader, BlockNumber, Header, Receipt, SnapshotSegment,
+    TransactionSignedNoHash, TxNumber,
 };
 use std::{
     ops::{Deref, RangeInclusive},
@@ -190,6 +192,26 @@ impl<'a> SnapshotProviderRW<'a> {
         Ok(())
     }
 
+    /// Appends to tx number-based snapshot file.
+    fn append_with_tx_number<V: Compact>(
+        &mut self,
+        segment: SnapshotSegment,
+        block: BlockNumber,
+        tx_num: TxNumber,
+        value: V,
+    ) -> ProviderResult<()> {
+        debug_assert!(self.writer.user_header().segment() == segment);
+
+        if self.writer.user_header().tx_range().contains(&tx_num) {
+            return Ok(())
+        }
+
+        self.append(block, segment, value, |segment_header| {
+            let block_range = segment_header.block_start()..=segment_header.block_end();
+            *segment_header = SegmentHeader::new(block_range, tx_num..=tx_num, segment);
+        })
+    }
+
     /// Appends transaction to snapshot file.
     pub fn append_transaction(
         &mut self,
@@ -197,17 +219,17 @@ impl<'a> SnapshotProviderRW<'a> {
         tx_num: TxNumber,
         tx: TransactionSignedNoHash,
     ) -> ProviderResult<()> {
-        let segment = SnapshotSegment::Transactions;
-        debug_assert!(self.writer.user_header().segment() == segment);
+        self.append_with_tx_number(SnapshotSegment::Transactions, block, tx_num, tx)
+    }
 
-        if self.writer.user_header().tx_range().contains(&tx_num) {
-            return Ok(())
-        }
-
-        self.append(block, segment, tx, |segment_header| {
-            let block_range = segment_header.block_start()..=segment_header.block_end();
-            *segment_header = SegmentHeader::new(block_range, tx_num..=tx_num, segment);
-        })
+    /// Appends receipt to snapshot file.
+    pub fn append_receipt(
+        &mut self,
+        block: BlockNumber,
+        tx_num: TxNumber,
+        receipt: Receipt,
+    ) -> ProviderResult<()> {
+        self.append_with_tx_number(SnapshotSegment::Receipts, block, tx_num, receipt)
     }
 
     /// Prunes `to_delete` number of transactions from snapshots.

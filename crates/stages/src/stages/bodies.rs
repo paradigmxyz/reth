@@ -11,10 +11,13 @@ use reth_db::{
 use reth_interfaces::p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    SnapshotSegment,
+    SnapshotSegment, TransactionSignedNoHash,
 };
 use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW};
-use std::{task::{ready, Context, Poll}, cmp::Ordering};
+use std::{
+    cmp::Ordering,
+    task::{ready, Context, Poll},
+};
 use tracing::*;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
@@ -129,9 +132,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         match snapshot_tx_num.cmp(&db_tx_num) {
             Ordering::Less => snapshotter.prune_transactions(snapshot_tx_num - db_tx_num)?,
-            Ordering::Greater => {
-                return Err(StageError::MissingSnapshotData)
-            }
+            Ordering::Greater => return Err(StageError::MissingSnapshotData),
             Ordering::Equal => {}
         }
 
