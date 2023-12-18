@@ -14,7 +14,7 @@ use reth_primitives::{
     SnapshotSegment,
 };
 use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW};
-use std::task::{ready, Context, Poll};
+use std::{task::{ready, Context, Poll}, cmp::Ordering};
 use tracing::*;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
@@ -126,8 +126,13 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             .get_highest_snapshot_tx(SnapshotSegment::Transactions)
             .unwrap_or_default();
         let db_tx_num = tx_block_cursor.last()?.unwrap_or_default().1;
-        if snapshot_tx_num > db_tx_num {
-            snapshotter.prune_transactions(snapshot_tx_num - db_tx_num)?;
+
+        match snapshot_tx_num.cmp(&db_tx_num) {
+            Ordering::Less => snapshotter.prune_transactions(snapshot_tx_num - db_tx_num)?,
+            Ordering::Greater => {
+                return Err(StageError::MissingSnapshotData)
+            }
+            Ordering::Equal => {}
         }
 
         // Get id for the next tx_num of zero if there are no transactions.
@@ -216,6 +221,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
 
+        let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
         let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
@@ -252,17 +258,29 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             rev_walker.delete_current()?;
         }
 
+        let mut snapshotter = snapshot_provider.latest_writer(SnapshotSegment::Transactions)?;
+
         // Unwind from static files. Get the current last expected transaction from DB, and match it
         // on static file
-        let current_tx =
+        let db_tx_num =
             body_cursor.last()?.map(|(_, block_meta)| block_meta.last_tx_num()).unwrap_or_default();
-        let snapshot_provider = provider.snapshot_provider.as_ref().expect("should exist");
         let snapshot_tx_num: u64 = snapshot_provider
             .get_highest_snapshot_tx(SnapshotSegment::Transactions)
             .unwrap_or_default();
-        snapshot_provider
-            .latest_writer(SnapshotSegment::Transactions)?
-            .prune_transactions(snapshot_tx_num.saturating_sub(current_tx))?;
+
+        // If there are more transactions
+        if db_tx_num > snapshot_tx_num {
+            return Err(StageError::MissingSnapshotData)
+        }
+
+        // Unwinds static file
+        snapshotter.prune_transactions(snapshot_tx_num.saturating_sub(db_tx_num))?;
+
+        // Committing static file.
+        snapshotter.commit()?;
+
+        // Updates the inner snapshot provider index with the current max block and tx num
+        snapshot_provider.update_index()?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
