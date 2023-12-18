@@ -649,9 +649,8 @@ pub async fn local_transactions_backup_task<P>(
 
     let mut graceful_guard = None;
     tokio::select! {
-        _ = &mut pool_maintanance_future => { println!("future done"); },
+        _ = &mut pool_maintanance_future => {},
         guard = shutdown => {
-            println!("shutdown triggered");
             graceful_guard = Some(guard);
         },
     }
