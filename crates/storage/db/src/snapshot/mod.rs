@@ -23,7 +23,7 @@ mod masks;
 type SortedSnapshots =
     HashMap<SnapshotSegment, Vec<(RangeInclusive<BlockNumber>, RangeInclusive<TxNumber>)>>;
 
-/// Given the snapshot's location, it returns a list over the existing snapshots organized by
+/// Given the snapshots directory path, it returns a list over the existing snapshots organized by
 /// [`SnapshotSegment`]. Each segment has a sorted list of block ranges and transaction ranges.
 pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, NippyJarError> {
     let mut static_files = SortedSnapshots::default();
