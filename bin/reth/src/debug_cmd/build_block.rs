@@ -179,7 +179,7 @@ impl Command {
         let mut blobs_bundle = self
             .blobs_bundle_path
             .map(|path| -> eyre::Result<BlobsBundleV1> {
-                let contents = std::fs::read_to_string(&path)
+                let contents = fs::read_to_string(&path)
                     .wrap_err(format!("could not read {}", path.display()))?;
                 serde_json::from_str(&contents).wrap_err("failed to deserialize blobs bundle")
             })
