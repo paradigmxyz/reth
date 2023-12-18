@@ -7,7 +7,7 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    cli::{db_type::DatabaseType, ext::RethCliExt, node_config::NodeBuilder},
+    cli::{db_type::DatabaseType, ext::RethCliExt, node_builder::NodeBuilder},
     dirs::{DataDirPath, MaybePlatformPath},
     runner::CliContext,
     version::SHORT_VERSION,
