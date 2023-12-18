@@ -58,16 +58,26 @@ impl MakeCanonicalDurationsRecorder {
     }
 }
 
+/// Represents actions for making a canonical chain.
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum MakeCanonicalAction {
+    /// Cloning old blocks for canonicalization.
     CloneOldBlocks,
+    /// Finding the canonical header.
     FindCanonicalHeader,
+    /// Splitting the chain for canonicalization.
     SplitChain,
+    /// Splitting chain forks for canonicalization.
     SplitChainForks,
+    /// Merging all chains for canonicalization.
     MergeAllChains,
+    /// Updating the canonical index during canonicalization.
     UpdateCanonicalIndex,
+    /// Committing the canonical chain to the database.
     CommitCanonicalChainToDatabase,
+    /// Reverting the canonical chain from the database.
     RevertCanonicalChainFromDatabase,
+    /// Inserting an old canonical chain.
     InsertOldCanonicalChain,
 }
 
