@@ -221,18 +221,18 @@ impl ssz::Encode for ExecutionPayloadV2 {
     }
 
     fn ssz_bytes_len(&self) -> usize {
-        <ExecutionPayloadV1 as ssz::Encode>::ssz_bytes_len(&self.payload_inner)
-            + ssz::BYTES_PER_LENGTH_OFFSET
-            + self.withdrawals.ssz_bytes_len()
+        <ExecutionPayloadV1 as ssz::Encode>::ssz_bytes_len(&self.payload_inner) +
+            ssz::BYTES_PER_LENGTH_OFFSET +
+            self.withdrawals.ssz_bytes_len()
     }
 
     fn ssz_append(&self, buf: &mut Vec<u8>) {
-        let offset = <B256 as ssz::Encode>::ssz_fixed_len() * 5
-            + <Address as ssz::Encode>::ssz_fixed_len()
-            + <Bloom as ssz::Encode>::ssz_fixed_len()
-            + <u64 as ssz::Encode>::ssz_fixed_len() * 4
-            + <U256 as ssz::Encode>::ssz_fixed_len()
-            + ssz::BYTES_PER_LENGTH_OFFSET * 3;
+        let offset = <B256 as ssz::Encode>::ssz_fixed_len() * 5 +
+            <Address as ssz::Encode>::ssz_fixed_len() +
+            <Bloom as ssz::Encode>::ssz_fixed_len() +
+            <u64 as ssz::Encode>::ssz_fixed_len() * 4 +
+            <U256 as ssz::Encode>::ssz_fixed_len() +
+            ssz::BYTES_PER_LENGTH_OFFSET * 3;
 
         let mut encoder = ssz::SszEncoder::container(buf, offset);
 
@@ -350,17 +350,17 @@ impl ssz::Encode for ExecutionPayloadV3 {
     }
 
     fn ssz_bytes_len(&self) -> usize {
-        <ExecutionPayloadV2 as ssz::Encode>::ssz_bytes_len(&self.payload_inner)
-            + <u64 as ssz::Encode>::ssz_fixed_len() * 2
+        <ExecutionPayloadV2 as ssz::Encode>::ssz_bytes_len(&self.payload_inner) +
+            <u64 as ssz::Encode>::ssz_fixed_len() * 2
     }
 
     fn ssz_append(&self, buf: &mut Vec<u8>) {
-        let offset = <B256 as ssz::Encode>::ssz_fixed_len() * 5
-            + <Address as ssz::Encode>::ssz_fixed_len()
-            + <Bloom as ssz::Encode>::ssz_fixed_len()
-            + <u64 as ssz::Encode>::ssz_fixed_len() * 6
-            + <U256 as ssz::Encode>::ssz_fixed_len()
-            + ssz::BYTES_PER_LENGTH_OFFSET * 3;
+        let offset = <B256 as ssz::Encode>::ssz_fixed_len() * 5 +
+            <Address as ssz::Encode>::ssz_fixed_len() +
+            <Bloom as ssz::Encode>::ssz_fixed_len() +
+            <u64 as ssz::Encode>::ssz_fixed_len() * 6 +
+            <U256 as ssz::Encode>::ssz_fixed_len() +
+            ssz::BYTES_PER_LENGTH_OFFSET * 3;
 
         let mut encoder = ssz::SszEncoder::container(buf, offset);
 
