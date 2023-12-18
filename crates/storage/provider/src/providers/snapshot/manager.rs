@@ -398,7 +398,7 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
             Ok(writer)
         } else {
             self.writers.insert(segment, SnapshotProviderRW::new(segment, block, self.clone())?);
-            Ok(self.writers.get_mut(&segment).expect("qed").into())
+            Ok(self.writers.get_mut(&segment).expect("qed"))
         }
     }
 
