@@ -16,10 +16,9 @@ thread_local! {
     );
 
     /// Thread Transaction decompressor.
-    pub static TRANSACTION_DECOMPRESSOR: RefCell<Decompressor<'static>> = RefCell::new(
-        Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
-            .expect("Failed to initialize decompressor."),
-    );
+    pub static TRANSACTION_DECOMPRESSOR: RefCell<ReusableDecompressor> = RefCell::new(
+                ReusableDecompressor::new(Decompressor::with_dictionary(TRANSACTION_DICTIONARY).expect("Failed to initialize decompressor."))
+   );
 
     /// Thread receipt compressor.
     pub static RECEIPT_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
@@ -28,8 +27,38 @@ thread_local! {
     );
 
     /// Thread receipt decompressor.
-    pub static RECEIPT_DECOMPRESSOR: RefCell<Decompressor<'static>> = RefCell::new(
-        Decompressor::with_dictionary(RECEIPT_DICTIONARY)
-            .expect("Failed to initialize decompressor."),
-    );
+    pub static RECEIPT_DECOMPRESSOR: RefCell<ReusableDecompressor> = RefCell::new(
+                        ReusableDecompressor::new(Decompressor::with_dictionary(RECEIPT_DICTIONARY).expect("Failed to initialize decompressor."))
+);
+}
+
+/// Reusable decompressor that uses its own internal buffer.
+#[allow(missing_debug_implementations)]
+pub struct ReusableDecompressor {
+    /// zstd decompressor
+    decompressor: Decompressor<'static>,
+    /// buffer to decompress to.
+    buf: Vec<u8>,
+}
+
+impl ReusableDecompressor {
+    fn new(decompressor: Decompressor<'static>) -> Self {
+        Self { decompressor, buf: Vec::with_capacity(4096) }
+    }
+
+    /// Decompresses `src` reusing the decompressor and its internal buffer.
+    pub fn decompress(&mut self, src: &[u8]) -> &[u8] {
+        // `decompress_to_buffer` will return an error if the output buffer doesn't have
+        // enough capacity. However we don't actually have information on the required
+        // length. So we hope for the best, and keep trying again with a fairly bigger size
+        // if it fails.
+        while let Err(err) = self.decompressor.decompress_to_buffer(src, &mut self.buf) {
+            let err = err.to_string();
+            if !err.contains("Destination buffer is too small") {
+                panic!("Failed to decompress: {}", err);
+            }
+            self.buf.reserve(self.buf.capacity() + 24_000);
+        }
+        &self.buf
+    }
 }

@@ -310,6 +310,7 @@ impl SnapshotProvider {
 
         Ok(None)
     }
+
     /// Fetches data within a specified range across multiple snapshot files.
     ///
     /// This function iteratively retrieves data using `get_fn` for each item in the given range.
