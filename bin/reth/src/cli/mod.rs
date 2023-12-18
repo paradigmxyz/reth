@@ -23,7 +23,7 @@ pub mod components;
 pub mod config;
 pub mod db_type;
 pub mod ext;
-pub mod node_config;
+pub mod node_builder;
 
 /// Default [directives](Directive) for [EnvFilter] which disables high-frequency debug logs from
 /// `hyper` and `trust-dns`
