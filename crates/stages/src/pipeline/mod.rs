@@ -49,39 +49,7 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// After the entire pipeline has been run, it will run again unless asked to stop (see
 /// [Pipeline::set_max_block]).
 ///
-/// ```mermaid
-/// graph TB
-///   Start[Start]
-///   Done[Done]
-///   Error[Error]
-///   subgraph Unwind
-///     StartUnwind(Unwind in reverse order of execution)
-///     UnwindStage(Unwind stage)
-///     NextStageToUnwind(Next stage)
-///   end
-///   subgraph Single loop
-///     RunLoop(Run loop)
-///     NextStage(Next stage)
-///     LoopDone(Loop done)
-///     subgraph Stage Execution
-///       Execute(Execute stage)
-///     end
-///   end
-///   Start --> RunLoop --> NextStage
-///   NextStage --> |No stages left| LoopDone
-///   NextStage --> |Next stage| Execute
-///   Execute --> |Not done| Execute
-///   Execute --> |Unwind requested| StartUnwind
-///   Execute --> |Done| NextStage
-///   Execute --> |Error| Error
-///   StartUnwind --> NextStageToUnwind
-///   NextStageToUnwind --> |Next stage| UnwindStage
-///   NextStageToUnwind --> |No stages left| RunLoop
-///   UnwindStage --> |Error| Error
-///   UnwindStage --> |Unwound| NextStageToUnwind
-///   LoopDone --> |Target block reached| Done
-///   LoopDone --> |Target block not reached| RunLoop
-/// ```
+/// include_mmd!("docs/mermaid/pipeline.mmd")
 ///
 /// # Unwinding
 ///
@@ -193,7 +161,7 @@ where
                     max_block = ?self.max_block,
                     "Terminating pipeline."
                 );
-                return Ok(())
+                return Ok(());
             }
         }
     }
@@ -229,7 +197,7 @@ where
                 ControlFlow::Continue { block_number } => self.progress.update(block_number),
                 ControlFlow::Unwind { target, bad_block } => {
                     self.unwind(target, Some(bad_block.number))?;
-                    return Ok(ControlFlow::Unwind { target, bad_block })
+                    return Ok(ControlFlow::Unwind { target, bad_block });
                 }
             }
 
@@ -272,7 +240,7 @@ where
                     "Unwind point too far for stage"
                 );
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
-                continue
+                continue;
             }
 
             debug!(
@@ -317,7 +285,7 @@ where
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
-                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
+                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))));
                     }
                 }
             }
@@ -357,7 +325,7 @@ where
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress {
                     block_number: prev_checkpoint.map(|progress| progress.block_number),
-                })
+                });
             }
 
             let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
@@ -412,7 +380,7 @@ where
                             ControlFlow::Continue { block_number }
                         } else {
                             ControlFlow::NoProgress { block_number: Some(block_number) }
-                        })
+                        });
                     }
                 }
                 Err(err) => {
@@ -421,7 +389,7 @@ where
                     if let Some(ctrl) =
                         on_stage_error(&self.provider_factory, stage_id, prev_checkpoint, err)?
                     {
-                        return Ok(ctrl)
+                        return Ok(ctrl);
                     }
                 }
             }

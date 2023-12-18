@@ -304,6 +304,7 @@ pub fn try_into_sealed_block(
 ///
 /// If the provided block hash does not match the block hash computed from the provided block, this
 /// returns [PayloadError::BlockHash].
+#[inline]
 pub fn validate_block_hash(
     expected_block_hash: B256,
     block: Block,

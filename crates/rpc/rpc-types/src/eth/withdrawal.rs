@@ -13,6 +13,7 @@ pub const GWEI_TO_WEI: u64 = 1_000_000_000;
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "ssz", derive(ssz_derive::Encode, ssz_derive::Decode))]
 pub struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
     #[serde(with = "u64_hex")]
