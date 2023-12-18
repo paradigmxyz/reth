@@ -417,7 +417,7 @@ where
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
         if to_block - from_block > self.max_blocks_per_filter {
-            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
+            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
         }
 
         let mut all_logs = Vec::new();
