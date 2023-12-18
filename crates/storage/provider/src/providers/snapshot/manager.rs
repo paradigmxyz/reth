@@ -241,6 +241,11 @@ impl SnapshotProvider {
                 let jar = NippyJar::<SegmentHeader>::load(
                     &self.path.join(segment.filename(&block_range, &tx_range)),
                 )?;
+
+                if jar.user_header().tx_range() != &tx_range {
+                    // TODO(joshie): rename
+                }
+                
                 ranges.push((
                     jar.user_header().block_range().clone(),
                     jar.user_header().tx_range().clone(),
