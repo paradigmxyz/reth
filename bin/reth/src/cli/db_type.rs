@@ -1,7 +1,6 @@
 //! A real or test database type
 
-use std::sync::Arc;
-use crate::dirs::{DataDirPath, MaybePlatformPath};
+use crate::dirs::{ChainPath, DataDirPath, MaybePlatformPath};
 use reth_db::{
     init_db,
     test_utils::{create_test_rw_db, TempDatabase},
@@ -9,6 +8,7 @@ use reth_db::{
 };
 use reth_interfaces::db::LogLevel;
 use reth_primitives::Chain;
+use std::{str::FromStr, sync::Arc};
 
 /// A type that represents either a _real_ (represented by a path), or _test_ database, which will
 /// use a [TempDatabase].
@@ -55,12 +55,21 @@ impl DatabaseBuilder {
         chain: Chain,
     ) -> eyre::Result<DatabaseInstance> {
         match self.db_type {
-            DatabaseType::Test => Ok(DatabaseInstance::Test(create_test_rw_db())),
-            DatabaseType::Real(path) => {
-                let chain_dir = path.unwrap_or_chain_default(chain);
+            DatabaseType::Test => {
+                let db = create_test_rw_db();
+                let db_path_str = db.path().to_str().expect("Path is not valid unicode");
+                let path = MaybePlatformPath::<DataDirPath>::from_str(db_path_str)
+                    .expect("Path is not valid");
+                let data_dir = path.unwrap_or_chain_default(chain);
 
-                tracing::info!(target: "reth::cli", path = ?chain_dir, "Opening database");
-                Ok(DatabaseInstance::Real(Arc::new(init_db(chain_dir, log_level)?)))
+                Ok(DatabaseInstance::Test { db, data_dir })
+            }
+            DatabaseType::Real(path) => {
+                let data_dir = path.unwrap_or_chain_default(chain);
+
+                tracing::info!(target: "reth::cli", path = ?data_dir, "Opening database");
+                let db = Arc::new(init_db(data_dir.clone(), log_level)?);
+                Ok(DatabaseInstance::Real { db, data_dir })
             }
         }
     }
@@ -70,7 +79,27 @@ impl DatabaseBuilder {
 #[derive(Debug, Clone)]
 pub enum DatabaseInstance {
     /// The test database
-    Test(Arc<TempDatabase<DatabaseEnv>>),
+    Test {
+        /// The database
+        db: Arc<TempDatabase<DatabaseEnv>>,
+        /// The data dir
+        data_dir: ChainPath<DataDirPath>,
+    },
     /// The right database
-    Real(Arc<DatabaseEnv>),
+    Real {
+        /// The database
+        db: Arc<DatabaseEnv>,
+        /// The data dir
+        data_dir: ChainPath<DataDirPath>,
+    },
+}
+
+impl DatabaseInstance {
+    /// Returns the data dir for this database instance
+    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
+        match self {
+            Self::Test { data_dir, .. } => data_dir,
+            Self::Real { data_dir, .. } => data_dir,
+        }
+    }
 }
