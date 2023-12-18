@@ -1,6 +1,9 @@
 use super::cache::EthStateCache;
 use crate::{
-    eth::{error::EthApiError, logs_utils},
+    eth::{
+        error::EthApiError,
+        logs_utils::{self, append_matching_block_logs},
+    },
     result::{rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
@@ -8,7 +11,7 @@ use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{BlockHashOrNumber, IntoRecoveredTransaction, TxHash, U256};
+use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
@@ -348,17 +351,18 @@ where
             FilterBlockOption::AtBlockHash(block_hash) => {
                 let mut all_logs = Vec::new();
                 // all matching logs in the block, if it exists
-                if let Some((block, receipts)) =
-                    self.eth_cache.get_block_and_receipts(block_hash).await?
-                {
-                    let filter = FilteredParams::new(Some(filter));
-                    logs_utils::append_matching_block_logs(
-                        &mut all_logs,
-                        &filter,
-                        (block_hash, block.number).into(),
-                        block.body.into_iter().map(|tx| tx.hash()).zip(receipts.iter()),
-                        false,
-                    );
+                if let Some(block_number) = self.provider.block_number_for_id(block_hash.into())? {
+                    if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
+                        let filter = FilteredParams::new(Some(filter));
+                        logs_utils::append_matching_block_logs(
+                            &mut all_logs,
+                            &self.provider,
+                            &filter,
+                            (block_hash, block_number).into(),
+                            &receipts,
+                            false,
+                        )?;
+                    }
                 }
                 Ok(all_logs)
             }
@@ -431,75 +435,38 @@ where
             let headers = self.provider.headers_range(from..=to)?;
 
             for (idx, header) in headers.iter().enumerate() {
-                // these are consecutive headers, so we can use the parent hash of the next block to
-                // get the current header's hash
-                let num_hash: BlockHashOrNumber = headers
-                    .get(idx + 1)
-                    .map(|h| h.parent_hash.into())
-                    .unwrap_or_else(|| header.number.into());
-
                 // only if filter matches
                 if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
                     FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
-                    let block_hash = match self.provider.convert_block_hash(num_hash)? {
-                        Some(hash) => hash,
-                        None => continue,
-                    };
-                    let block_number = header.number;
-                    let block_number_u256 = U256::from(block_number);
-                    let block = BlockNumHash::new(block_number, block_hash);
-
-                    let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? else {
-                        continue
+                    // these are consecutive headers, so we can use the parent hash of the next
+                    // block to get the current header's hash
+                    let block_hash = match headers.get(idx + 1) {
+                        Some(parent) => parent.parent_hash,
+                        None => self
+                            .provider
+                            .block_hash(header.number)?
+                            .ok_or(ProviderError::BlockNotFound(header.number.into()))?,
                     };
 
-                    // tracks the index of a log in the entire block
-                    let mut log_index: u32 = 0;
-                    for (receipt_idx, receipt) in receipts.iter().enumerate() {
-                        let logs = &receipt.logs;
-                        for log in logs.into_iter() {
-                            if crate::eth::logs_utils::log_matches_filter(
-                                block,
-                                &log,
-                                &filter_params,
-                            ) {
-                                let indices = self
-                                    .provider
-                                    .block_body_indices(block_number)?
-                                    .expect("block indices should be present");
+                    if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
+                        append_matching_block_logs(
+                            &mut all_logs,
+                            &self.provider,
+                            &filter_params,
+                            BlockNumHash::new(header.number, block_hash),
+                            &receipts,
+                            false,
+                        )?;
 
-                                let id = indices.first_tx_num + receipt_idx as u64;
-                                let transaction_hash = self
-                                    .provider
-                                    .transaction_by_id(id)?
-                                    .expect("tx should be present")
-                                    .hash();
-
-                                let log = Log {
-                                    address: log.address,
-                                    topics: log.topics.clone(),
-                                    data: log.data.clone(),
-                                    block_hash: Some(block.hash),
-                                    block_number: Some(block_number_u256),
-                                    transaction_hash: Some(transaction_hash),
-                                    // The transaction index and the receipt index is always the
-                                    // same.
-                                    transaction_index: Some(U256::from(receipt_idx)),
-                                    log_index: Some(U256::from(log_index)),
-                                    removed: false,
-                                };
-                                all_logs.push(log);
-                            }
-                            log_index += 1;
+                        // size check but only if range is multiple blocks, so we always return all
+                        // logs of a single block
+                        let is_multi_block_range = from_block != to_block;
+                        if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
+                            return Err(FilterError::QueryExceedsMaxResults(
+                                self.max_logs_per_response,
+                            ))
                         }
-                    }
-
-                    // size check but only if range is multiple blocks, so we always return all
-                    // logs of a single block
-                    let is_multi_block_range = from_block != to_block;
-                    if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
-                        return Err(FilterError::QueryExceedsMaxResults(self.max_logs_per_response));
                     }
                 }
             }
