@@ -291,6 +291,12 @@ impl NodeBuilder {
         self
     }
 
+    /// Set the node instance number
+    pub fn with_instance_number(mut self, instance: u16) -> Self {
+        self.instance = instance;
+        self
+    }
+
     /// Set the rollup args for the node
     #[cfg(feature = "optimism")]
     pub fn with_rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
@@ -1369,5 +1375,13 @@ mod tests {
         // ensure that the `http_client` is none
         let maybe_client = handle.rpc_server_handles().rpc.http_client();
         assert!(maybe_client.is_none());
+    }
+
+    #[tokio::test]
+    async fn launch_multiple_nodes() {
+        // need to fix subscriber thing
+        todo!();
+        // let _first_handle = spawn_node(NodeBuilder::test()).await.unwrap();
+        // let _second_handle = spawn_node(NodeBuilder::test().with_instance(1)).await.unwrap();
     }
 }
