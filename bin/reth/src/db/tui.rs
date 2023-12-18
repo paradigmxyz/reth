@@ -195,7 +195,7 @@ where
     /// Fetch the next page of items
     fn next_page(&mut self) {
         if self.skip + self.count >= self.total_entries {
-            return;
+            return
         }
 
         self.skip += self.count;
@@ -205,7 +205,7 @@ where
     /// Fetch the previous page of items
     fn previous_page(&mut self) {
         if self.skip == 0 {
-            return;
+            return
         }
 
         self.skip = self.skip.saturating_sub(self.count);
@@ -311,7 +311,7 @@ where
             }
         }
 
-        return Ok(false);
+        return Ok(false)
     }
 
     match event {
