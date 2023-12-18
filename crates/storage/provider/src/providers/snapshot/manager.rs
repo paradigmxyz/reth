@@ -9,12 +9,12 @@ use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     models::StoredBlockBodyIndices,
-    snapshot::{HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
+    snapshot::{iter_snapshots, HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{iter_snapshots, HighestSnapshots, SegmentHeader},
+    snapshot::{HighestSnapshots},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
@@ -234,24 +234,7 @@ impl SnapshotProvider {
         let mut block_index = self.snapshots_block_index.write();
         let mut tx_index = self.snapshots_tx_index.write();
 
-        for (segment, mut ranges) in iter_snapshots(&self.path)? {
-            // The highest height static file filename might not be indicative of its actual
-            // block_range (might still being built), so we need to read it from its configuration.
-            if let Some((block_range, tx_range)) = ranges.pop() {
-                let jar = NippyJar::<SegmentHeader>::load(
-                    &self.path.join(segment.filename(&block_range, &tx_range)),
-                )?;
-
-                if jar.user_header().tx_range() != &tx_range {
-                    // TODO(joshie): rename
-                }
-                
-                ranges.push((
-                    jar.user_header().block_range().clone(),
-                    jar.user_header().tx_range().clone(),
-                ))
-            }
-
+        for (segment, ranges) in iter_snapshots(&self.path)? {
             for (block_range, tx_range) in ranges {
                 let block_end = *block_range.end();
                 let tx_end = *tx_range.end();

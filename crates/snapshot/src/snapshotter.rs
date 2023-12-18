@@ -1,16 +1,10 @@
 //! Support for snapshotting.
 
 use crate::{segments, segments::Segment, SnapshotterError};
-use reth_db::database::Database;
+use reth_db::{database::Database, snapshot::iter_snapshots};
 use reth_interfaces::{RethError, RethResult};
-use reth_nippy_jar::NippyJar;
-use reth_primitives::{
-    snapshot::{iter_snapshots, HighestSnapshots, SegmentHeader},
-    BlockNumber, TxNumber,
-};
-use reth_provider::{
-    BlockReader, DatabaseProviderRO, ProviderError, ProviderFactory, TransactionsProviderExt,
-};
+use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, TxNumber};
+use reth_provider::{BlockReader, DatabaseProviderRO, ProviderFactory, TransactionsProviderExt};
 use std::{
     collections::HashMap,
     ops::RangeInclusive,
@@ -158,21 +152,9 @@ impl<DB: Database> Snapshotter<DB> {
         // It walks over the directory and parses the snapshot filenames extracting
         // `SnapshotSegment` and their inclusive range. It then takes the maximum block
         // number for each specific segment.
-        for (segment, mut ranges) in iter_snapshots(&self.snapshots_path)? {
-            // The highest height static file filename might not be indicative of its actual
-            // block_range, so we need to read its actual configuration.
-            if let Some((block_range, tx_range)) = ranges.pop() {
-                let jar = NippyJar::<SegmentHeader>::load(
-                    &self.snapshots_path.join(segment.filename(&block_range, &tx_range)),
-                )
-                .map_err(|err| RethError::Provider(ProviderError::NippyJar(err.to_string())))?;
-
-                ranges.push((
-                    jar.user_header().block_range().clone(),
-                    jar.user_header().tx_range().clone(),
-                ))
-            }
-
+        for (segment, ranges) in
+            iter_snapshots(&self.snapshots_path).map_err(|err| RethError::Provider(err.into()))?
+        {
             for (block_range, _) in ranges {
                 let max_segment_block = self.highest_snapshots.as_mut(segment);
                 if max_segment_block.map_or(true, |block| block < *block_range.end()) {
