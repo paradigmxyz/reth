@@ -81,6 +81,6 @@ pub trait PayloadJobGenerator: Send + Sync {
         attr: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError>;
 
-    /// New func on_new_state
+    /// Handles new chain state events
     fn on_new_state(&self);
 }

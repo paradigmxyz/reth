@@ -199,6 +199,7 @@ where
             metrics: Default::default(),
             chain_events,
         };
+
         let handle = service.handle();
         (service, handle)
     }
@@ -287,6 +288,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+
 
         loop {
             // we poll all jobs first, so we always have the latest payload that we can report if

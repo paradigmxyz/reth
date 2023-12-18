@@ -160,7 +160,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     let _ = tx.send(res);
                 }
                 .boxed()
-            };
+            ;
             reload_accounts_fut = rx.fuse();
             task_spawner.spawn_blocking(fut);
         }
