@@ -207,21 +207,12 @@ impl SnapshotProvider {
         let snapshots = self.snapshots_tx_index.read();
         let segment_snapshots = snapshots.get(&segment)?;
 
-        // It's more probable that the request comes from a newer tx height, so we iterate
-        // the snapshots in reverse.
-        let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
+        let mut range = segment_snapshots.range(..tx);
+        let (tx_end, block_range) = range.next_back()?;
+        let tx_start = range.next_back().map(|(tx, _)| *tx).unwrap_or_default();
+        let tx_range = tx_start..=*tx_end;
 
-        while let Some((tx_end, block_range)) = snapshots_rev_iter.next() {
-            if tx > *tx_end {
-                // request tx is higher than highest snapshot tx
-                return None
-            }
-            let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
-            if tx_start <= tx {
-                return Some(block_range.clone())
-            }
-        }
-        None
+        tx_range.contains(&tx).then(|| block_range.clone())
     }
 
     /// Updates the inner transaction and block index
