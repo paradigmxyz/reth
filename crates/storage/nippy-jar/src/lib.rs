@@ -275,19 +275,30 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Renames this [`NippyJar`] alongside every satellite file.
     pub fn rename(mut self, new_path: impl AsRef<Path>) -> Result<(), NippyJarError> {
-        let previous_data: PathBuf = self.data_path().into();
-        let previous_index = self.index_path();
-        let previous_offsets = self.offsets_path();
-        let previous_config = self.config_path();
+        let previous_paths = [
+            self.data_path().to_path_buf(),
+            self.offsets_path(),
+            self.index_path(),
+            self.config_path(),
+        ];
 
+        // Update the common name prefix with updated ranges
         self.path = new_path.as_ref().into();
+
+        let new_paths = [
+            self.data_path().to_path_buf(),
+            self.offsets_path(),
+            self.index_path(),
+            self.config_path(),
+        ];
 
         // TODO(joshie): ensure consistency on unexpected shutdown
 
-        std::fs::rename(previous_data, self.data_path())?;
-        std::fs::rename(previous_index, self.index_path())?;
-        std::fs::rename(previous_offsets, self.offsets_path())?;
-        std::fs::rename(previous_config, self.config_path())?;
+        for (from, to) in previous_paths.into_iter().zip(new_paths) {
+            if from.exists() {
+                std::fs::rename(from, to)?;
+            }
+        }
 
         Ok(())
     }
