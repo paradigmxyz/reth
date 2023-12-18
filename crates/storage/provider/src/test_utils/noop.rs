@@ -222,6 +222,13 @@ impl ReceiptProvider for NoopProvider {
     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
         Ok(None)
     }
+
+    fn receipts_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Receipt>> {
+        Ok(vec![])
+    }
 }
 
 impl ReceiptProviderIdExt for NoopProvider {}

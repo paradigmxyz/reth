@@ -7,7 +7,7 @@ pub use jar::SnapshotJarProvider;
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{snapshot::SegmentHeader, SnapshotSegment};
-use std::ops::Deref;
+use std::{ops::Deref, sync::Arc};
 
 /// Alias type for each specific `NippyJar`.
 type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), LoadedJar>;
@@ -16,17 +16,17 @@ type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), Lo
 #[derive(Debug)]
 pub struct LoadedJar {
     jar: NippyJar<SegmentHeader>,
-    mmap_handle: reth_nippy_jar::MmapHandle,
+    mmap_handle: Arc<reth_nippy_jar::DataReader>,
 }
 
 impl LoadedJar {
     fn new(jar: NippyJar<SegmentHeader>) -> ProviderResult<Self> {
-        let mmap_handle = jar.open_data()?;
+        let mmap_handle = Arc::new(jar.open_data_reader()?);
         Ok(Self { jar, mmap_handle })
     }
 
     /// Returns a clone of the mmap handle that can be used to instantiate a cursor.
-    fn mmap_handle(&self) -> reth_nippy_jar::MmapHandle {
+    fn mmap_handle(&self) -> Arc<reth_nippy_jar::DataReader> {
         self.mmap_handle.clone()
     }
 }
@@ -131,7 +131,7 @@ mod test {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = SnapshotProvider::new(snap_path.path());
+            let manager = SnapshotProvider::new(snap_path.path()).unwrap().with_filters();
             let jar_provider = manager
                 .get_segment_provider_from_block(SnapshotSegment::Headers, 0, Some(&snap_file))
                 .unwrap();
