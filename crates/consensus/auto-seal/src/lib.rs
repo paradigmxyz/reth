@@ -23,8 +23,8 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
-    proofs, Address, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec,
-    Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
+    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
+    ChainSpec, Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
     EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
@@ -299,9 +299,8 @@ impl StorageInner {
     /// This returns the poststate from execution and post-block changes, as well as the gas used.
     pub(crate) fn execute(
         &mut self,
-        block: &Block,
+        block: &BlockWithSenders,
         executor: &mut EVMProcessor<'_>,
-        senders: Vec<Address>,
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError> {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
@@ -310,8 +309,7 @@ impl StorageInner {
         // set the first block to find the correct index in bundle state
         executor.set_first_block(block.number);
 
-        let (receipts, gas_used) =
-            executor.execute_transactions(block, U256::ZERO, Some(senders))?;
+        let (receipts, gas_used) = executor.execute_transactions(block, U256::ZERO)?;
 
         // Save receipts.
         executor.save_receipts(receipts)?;
@@ -379,9 +377,8 @@ impl StorageInner {
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError> {
         let header = self.build_header_template(&transactions, chain_spec.clone());
 
-        let block = Block { header, body: transactions, ommers: vec![], withdrawals: None };
-
-        let senders = TransactionSigned::recover_signers(&block.body, block.body.len())
+        let block = Block { header, body: transactions, ommers: vec![], withdrawals: None }
+            .with_recovered_senders()
             .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
 
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
@@ -393,9 +390,9 @@ impl StorageInner {
             .build();
         let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db);
 
-        let (bundle_state, gas_used) = self.execute(&block, &mut executor, senders)?;
+        let (bundle_state, gas_used) = self.execute(&block, &mut executor)?;
 
-        let Block { header, body, .. } = block;
+        let Block { header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
 
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");

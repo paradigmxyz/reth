@@ -322,14 +322,11 @@ mod ethers_compat {
         EthashConfig as EthersEthashConfig, GenesisAccount as EthersGenesisAccount,
     };
 
+    /// Converts an `ethers_core::utils::Genesis` into a `Genesis`.
     impl From<ethers_core::utils::Genesis> for Genesis {
+        /// This conversion function extracts and maps specific fields from the input `genesis` to
+        /// create a new `Genesis` instance
         fn from(genesis: ethers_core::utils::Genesis) -> Genesis {
-            let alloc = genesis
-                .alloc
-                .iter()
-                .map(|(addr, account)| (addr.0.into(), account.clone().into()))
-                .collect::<HashMap<Address, GenesisAccount>>();
-
             Genesis {
                 config: genesis.config.into(),
                 nonce: genesis.nonce.as_u64(),
@@ -343,12 +340,23 @@ mod ethers_compat {
                 // TODO: if/when ethers has cancun fields they should be added here
                 excess_blob_gas: None,
                 blob_gas_used: None,
-                alloc,
+                alloc: genesis
+                    .alloc
+                    .iter()
+                    .map(|(addr, account)| (addr.0.into(), account.clone().into()))
+                    .collect(),
             }
         }
     }
 
+    /// Converts an `EthersGenesisAccount` into a `GenesisAccount`.
     impl From<EthersGenesisAccount> for GenesisAccount {
+        /// Converts fields from `EthersGenesisAccount` to construct a `GenesisAccount`.
+        ///
+        /// - Maps the `balance` from limbs.
+        /// - Sets the `nonce`.
+        /// - Handles the `code` field, converting it if present.
+        /// - Processes the `storage` field into key-value pairs.
         fn from(genesis_account: EthersGenesisAccount) -> Self {
             Self {
                 balance: U256::from_limbs(genesis_account.balance.0),
@@ -361,6 +369,7 @@ mod ethers_compat {
         }
     }
 
+    /// Converts an `EthersChainConfig` into a `ChainConfig`.
     impl From<EthersChainConfig> for ChainConfig {
         fn from(chain_config: EthersChainConfig) -> Self {
             let EthersChainConfig {
@@ -419,12 +428,14 @@ mod ethers_compat {
         }
     }
 
+    /// Converts an `EthersEthashConfig` into an `EthashConfig`.
     impl From<EthersEthashConfig> for EthashConfig {
         fn from(_: EthersEthashConfig) -> Self {
             EthashConfig {}
         }
     }
 
+    /// Converts an `EthersCliqueConfig` into a `CliqueConfig`.
     impl From<EthersCliqueConfig> for CliqueConfig {
         fn from(clique_config: EthersCliqueConfig) -> Self {
             let EthersCliqueConfig { period, epoch } = clique_config;

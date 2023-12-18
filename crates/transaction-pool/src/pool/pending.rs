@@ -273,7 +273,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Note: for a transaction with nonce higher than the current on chain nonce this will always
     /// return an ancestor since all transaction in this pool are gapless.
     fn ancestor(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
-        self.by_id.get(&id.unchecked_ancestor()?)
+        self.get(&id.unchecked_ancestor()?)
     }
 
     /// Adds a new transactions to the pending queue.
@@ -287,9 +287,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
         base_fee: u64,
     ) {
         assert!(
-            !self.by_id.contains_key(tx.id()),
+            !self.contains(tx.id()),
             "transaction already included {:?}",
-            self.by_id.contains_key(tx.id())
+            self.get(tx.id()).unwrap().transaction
         );
 
         // keep track of size
@@ -320,7 +320,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         // mark the next as independent if it exists
-        if let Some(unlocked) = self.by_id.get(&id.descendant()) {
+        if let Some(unlocked) = self.get(&id.descendant()) {
             self.independent_transactions.insert(unlocked.clone());
         };
         self.remove_transaction(id)
@@ -486,9 +486,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// Returns `true` if the transaction with the given id is already included in this pool.
-    #[cfg(test)]
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
+    }
+
+    /// Retrieves a transaction with the given ID from the pool, if it exists.
+    fn get(&self, id: &TransactionId) -> Option<&PendingTransaction<T>> {
+        self.by_id.get(id)
     }
 
     /// Asserts that the bijection between `by_id` and `all` is valid.
@@ -503,8 +507,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
             self.highest_nonces.len() <= self.all.len(),
             "independent_descendants.len() > all.len()"
         );
-        assert!(
-            self.highest_nonces.len() == self.independent_transactions.len(),
+        assert_eq!(
+            self.highest_nonces.len(),
+            self.independent_transactions.len(),
             "independent.len() = independent_descendants.len()"
         );
     }
@@ -564,15 +569,13 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use reth_primitives::address;
-
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
+    use reth_primitives::{address, TxType};
+    use std::collections::HashSet;
 
     #[test]
     fn test_enforce_basefee() {
@@ -581,7 +584,7 @@ mod tests {
         let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
         pool.add_transaction(tx.clone(), 0);
 
-        assert!(pool.by_id.contains_key(tx.id()));
+        assert!(pool.contains(tx.id()));
         assert_eq!(pool.len(), 1);
 
         let removed = pool.update_base_fee(0);
@@ -603,8 +606,8 @@ mod tests {
         let descendant_tx = f.validated_arc(t.inc_nonce().decr_price());
         pool.add_transaction(descendant_tx.clone(), 0);
 
-        assert!(pool.by_id.contains_key(root_tx.id()));
-        assert!(pool.by_id.contains_key(descendant_tx.id()));
+        assert!(pool.contains(root_tx.id()));
+        assert!(pool.contains(descendant_tx.id()));
         assert_eq!(pool.len(), 2);
 
         assert_eq!(pool.independent_transactions.len(), 1);
@@ -621,8 +624,8 @@ mod tests {
             assert_eq!(removed.len(), 1);
             assert_eq!(pool2.len(), 1);
             // descendant got popped
-            assert!(pool2.by_id.contains_key(root_tx.id()));
-            assert!(!pool2.by_id.contains_key(descendant_tx.id()));
+            assert!(pool2.contains(root_tx.id()));
+            assert!(!pool2.contains(descendant_tx.id()));
         }
 
         // remove root transaction via fee
@@ -709,86 +712,85 @@ mod tests {
 
     #[test]
     fn truncate_by_sender() {
-        // this test ensures that we evict from the pending pool by sender
+        // This test ensures that transactions are removed from the pending pool by sender.
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
 
+        // Addresses for simulated senders A, B, C, and D.
         let a = address!("000000000000000000000000000000000000000a");
         let b = address!("000000000000000000000000000000000000000b");
         let c = address!("000000000000000000000000000000000000000c");
         let d = address!("000000000000000000000000000000000000000d");
 
-        // TODO: make creating these mock tx chains easier
-        // create a chain of transactions by sender A, B, C
-        let a1 = MockTransaction::eip1559().with_sender(a);
-        let a2 = a1.next();
-        let a3 = a2.next();
-        let a4 = a3.next();
+        // Create transaction chains for senders A, B, C, and D.
+        let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 4, TxType::EIP1559);
+        let b_txs = MockTransactionSet::sequential_transactions_by_sender(b, 3, TxType::EIP1559);
+        let c_txs = MockTransactionSet::sequential_transactions_by_sender(c, 3, TxType::EIP1559);
+        let d_txs = MockTransactionSet::sequential_transactions_by_sender(d, 1, TxType::EIP1559);
 
-        let b1 = MockTransaction::eip1559().with_sender(b);
-        let b2 = b1.next();
-        let b3 = b2.next();
-
-        // C has the same number of txs as B
-        let c1 = MockTransaction::eip1559().with_sender(c);
-        let c2 = c1.next();
-        let c3 = c2.next();
-
-        let d1 = MockTransaction::eip1559().with_sender(d);
-
-        // just construct a list of all txs to add
-        let expected_pending = vec![a1.clone(), b1.clone(), c1.clone(), a2.clone()]
-            .into_iter()
-            .map(|tx| (tx.sender(), tx.nonce()))
-            .collect::<HashSet<_>>();
-        let expected_removed = vec![
-            d1.clone(),
-            c3.clone(),
-            b3.clone(),
-            a4.clone(),
-            c2.clone(),
-            b2.clone(),
-            a3.clone(),
+        // Set up expected pending transactions.
+        let expected_pending = vec![
+            a_txs.transactions[0].clone(),
+            b_txs.transactions[0].clone(),
+            c_txs.transactions[0].clone(),
+            a_txs.transactions[1].clone(),
         ]
         .into_iter()
         .map(|tx| (tx.sender(), tx.nonce()))
         .collect::<HashSet<_>>();
-        let all_txs = vec![a1, a2, a3, a4.clone(), b1, b2, b3, c1, c2, c3, d1];
 
-        // add all the transactions to the pool
+        // Set up expected removed transactions.
+        let expected_removed = vec![
+            d_txs.transactions[0].clone(),
+            c_txs.transactions[2].clone(),
+            b_txs.transactions[2].clone(),
+            a_txs.transactions[3].clone(),
+            c_txs.transactions[1].clone(),
+            b_txs.transactions[1].clone(),
+            a_txs.transactions[2].clone(),
+        ]
+        .into_iter()
+        .map(|tx| (tx.sender(), tx.nonce()))
+        .collect::<HashSet<_>>();
+
+        // Consolidate all transactions into a single vector.
+        let all_txs =
+            [a_txs.into_vec(), b_txs.into_vec(), c_txs.into_vec(), d_txs.into_vec()].concat();
+
+        // Add all the transactions to the pool.
         for tx in all_txs {
             pool.add_transaction(f.validated_arc(tx), 0);
         }
 
-        // sanity check, make sure everything checks out
+        // Sanity check, ensuring everything is consistent.
         pool.assert_invariants();
 
-        // let's set the max total txs to 4, since we remove txs for each sender first, we remove
-        // in this order:
+        // Define the maximum total transactions to be 4, removing transactions for each sender.
+        // Expected order of removal:
         // * d1, c3, b3, a4
         // * c2, b2, a3
         //
-        // and we are left with:
+        // Remaining transactions:
         // * a1, a2
         // * b1
         // * c1
         let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
 
-        // truncate the pool
+        // Truncate the pool based on the defined limit.
         let removed = pool.truncate_pool(pool_limit);
         pool.assert_invariants();
         assert_eq!(removed.len(), expected_removed.len());
 
-        // get the inner txs from the removed txs
+        // Get the set of removed transactions and compare with the expected set.
         let removed =
             removed.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(removed, expected_removed);
 
-        // get the pending pool
+        // Retrieve the current pending transactions after truncation.
         let pending = pool.all().collect::<Vec<_>>();
         assert_eq!(pending.len(), expected_pending.len());
 
-        // get the inner txs from the pending txs
+        // Get the set of pending transactions and compare with the expected set.
         let pending =
             pending.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(pending, expected_pending);
