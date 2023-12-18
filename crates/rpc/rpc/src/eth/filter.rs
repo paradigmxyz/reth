@@ -138,7 +138,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty);
+                return Ok(FilterChanges::Empty)
             }
 
             // update filter
@@ -208,7 +208,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(FilterError::FilterNotFound(id));
+                return Err(FilterError::FilterNotFound(id))
             }
         };
 
@@ -737,7 +737,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None;
+            return None
         }
         Some((start, end))
     }
