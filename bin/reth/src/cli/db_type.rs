@@ -1,10 +1,9 @@
-use std::sync::Arc;
+//! A real or test database type
 
+use std::sync::Arc;
 use crate::dirs::{DataDirPath, MaybePlatformPath};
 use reth_db::{
-    database::Database,
     init_db,
-    mdbx::{tx, RO, RW},
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
@@ -31,7 +30,7 @@ impl Default for DatabaseType {
 
 impl DatabaseType {
     /// Creates a _test_ database
-    fn test() -> Self {
+    pub fn test() -> Self {
         Self::Test
     }
 }
