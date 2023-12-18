@@ -114,7 +114,7 @@ type RethTransactionPool<DB, Tree> = reth_transaction_pool::Pool<
 
 /// Start the node
 #[derive(Debug)]
-pub struct NodeConfig {
+pub struct NodeBuilder {
     /// The test database
     pub database: DatabaseType,
 
@@ -178,7 +178,7 @@ pub struct NodeConfig {
     pub rollup: crate::args::RollupArgs,
 }
 
-impl NodeConfig {
+impl NodeBuilder {
     /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
     pub fn test() -> Self {
         Self {
@@ -953,7 +953,7 @@ impl NodeConfig {
     }
 }
 
-impl Default for NodeConfig {
+impl Default for NodeBuilder {
     fn default() -> Self {
         Self {
             database: DatabaseType::default(),
@@ -982,7 +982,7 @@ impl Default for NodeConfig {
 /// This also contains a path to a data dir that cannot be changed.
 pub struct NodeBuilderWithDatabase<DB> {
     /// The node config
-    pub config: NodeConfig,
+    pub config: NodeBuilder,
     /// The database
     pub db: Arc<DB>,
     /// The data dir
@@ -1332,9 +1332,9 @@ impl NodeHandle {
     }
 }
 
-/// A simple function to launch a node with the specified [NodeConfig], spawning tasks on the
+/// A simple function to launch a node with the specified [NodeBuilder], spawning tasks on the
 /// [TaskExecutor] constructed from [Handle::current].
-pub async fn spawn_node(config: NodeConfig) -> eyre::Result<NodeHandle> {
+pub async fn spawn_node(config: NodeBuilder) -> eyre::Result<NodeHandle> {
     let handle = Handle::current();
     let task_manager = TaskManager::new(handle);
     let ext = DefaultRethNodeCommandConfig;
@@ -1351,7 +1351,7 @@ mod tests {
     async fn block_number_node_config_test() {
         // this launches a test node with http
         let rpc_args = RpcServerArgs::default().with_http();
-        let handle = spawn_node(NodeConfig::test().with_rpc(rpc_args)).await.unwrap();
+        let handle = spawn_node(NodeBuilder::test().with_rpc(rpc_args)).await.unwrap();
 
         // call a function on the node
         let client = handle.rpc_server_handles().rpc.http_client().unwrap();
@@ -1364,7 +1364,7 @@ mod tests {
     #[tokio::test]
     async fn rpc_handles_none_without_http() {
         // this launches a test node _without_ http
-        let handle = spawn_node(NodeConfig::test()).await.unwrap();
+        let handle = spawn_node(NodeBuilder::test()).await.unwrap();
 
         // ensure that the `http_client` is none
         let maybe_client = handle.rpc_server_handles().rpc.http_client();
