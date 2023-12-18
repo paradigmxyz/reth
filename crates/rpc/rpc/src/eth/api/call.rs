@@ -393,6 +393,7 @@ where
                     let (result, env) = inspect(&mut db, env, &mut inspector)?;
 
                     result.result.ensure_success()?;
+                    db.commit(result.state)?;
 
                     let access_list = inspector.into_access_list();
                     call.access_list = Some(access_list.clone());

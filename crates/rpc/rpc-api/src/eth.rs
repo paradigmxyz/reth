@@ -162,6 +162,7 @@ pub trait EthApi {
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<EthCallResponse>>;
 
+    // Generates an access list for a bundle of transactions
     #[method(name = "createBundleAccessList")]
     async fn create_bundle_access_list(
         &self,
