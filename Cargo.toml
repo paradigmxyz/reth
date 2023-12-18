@@ -141,7 +141,7 @@ revm = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze",  fea
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "reth_freeze", features = ["std"], default-features = false }
 
 # eth
-alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "f1176b398af6ef6d7ba080a18c0bf4d6a473bf13" }
+alloy-primitives = "0.5"
 alloy-dyn-abi = "0.5"
 alloy-sol-types = "0.5"
 alloy-rlp = "0.3"
