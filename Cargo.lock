@@ -5983,6 +5983,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-etl"
+version = "0.1.0-alpha.13"
+dependencies = [
+ "reth-db",
+ "reth-primitives",
+ "tempfile",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.1.0-alpha.13"
 dependencies = [

@@ -7,6 +7,7 @@ members = [
     "crates/consensus/beacon/",
     "crates/consensus/common/",
     "crates/ethereum-forks/",
+    "crates/etl",
     "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
@@ -104,6 +105,7 @@ reth-downloaders = { path = "crates/net/downloaders" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
+reth-etl = { path = "crates/etl" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
