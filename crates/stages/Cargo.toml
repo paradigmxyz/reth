@@ -57,6 +57,7 @@ auto_impl = "1"
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
 reth-eth-wire.workspace = true # TODO(onbjerg): We only need this for [BlockBody]
 reth-blockchain-tree.workspace = true

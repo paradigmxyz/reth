@@ -199,9 +199,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Committing static file can be done, since we unwind it if the db tx is not committed.
         snapshotter.commit()?;
 
-        // Updates the inner snapshot provider index with the next max block and tx num
-        snapshot_provider.update_index()?;
-
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
@@ -278,9 +275,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         // Committing static file.
         snapshotter.commit()?;
-
-        // Updates the inner snapshot provider index with the current max block and tx num
-        snapshot_provider.update_index()?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)

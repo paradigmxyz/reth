@@ -86,6 +86,7 @@ impl<'a> SnapshotProviderRW<'a> {
             .join(segment.filename_from_header(self.writer.user_header().clone()));
 
         NippyJar::<SegmentHeader>::load(&previous_path)?.rename(new_path)?;
+        self.reader.update_index()?;
 
         // Opens the updated snapshot
         let (writer, data_path) = Self::open(segment, block, self.reader.clone())?;
