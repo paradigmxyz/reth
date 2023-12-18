@@ -9,15 +9,15 @@ use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     models::StoredBlockBodyIndices,
-    snapshot::{HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
+    snapshot::{iter_snapshots, HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{iter_snapshots, HighestSnapshots},
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, B256, U256,
+    snapshot::HighestSnapshots, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
+    BlockWithSenders, ChainInfo, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    TxHash, TxNumber, Withdrawal, B256, U256,
 };
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -238,27 +238,29 @@ impl SnapshotProvider {
         let mut block_index = self.snapshots_block_index.write();
         let mut tx_index = self.snapshots_tx_index.write();
 
-        for (segment, block_range, tx_range) in iter_snapshots(&self.path)? {
-            let block_end = *block_range.end();
-            let tx_end = *tx_range.end();
+        for (segment, ranges) in iter_snapshots(&self.path)? {
+            for (block_range, tx_range) in ranges {
+                let block_end = *block_range.end();
+                let tx_end = *tx_range.end();
 
-            match tx_index.entry(segment) {
-                Entry::Occupied(mut index) => {
-                    index.get_mut().insert(tx_end, block_range);
-                }
-                Entry::Vacant(index) => {
-                    index.insert(BTreeMap::from([(tx_end, block_range)]));
-                }
-            };
+                match tx_index.entry(segment) {
+                    Entry::Occupied(mut index) => {
+                        index.get_mut().insert(tx_end, block_range);
+                    }
+                    Entry::Vacant(index) => {
+                        index.insert(BTreeMap::from([(tx_end, block_range)]));
+                    }
+                };
 
-            match block_index.entry(segment) {
-                Entry::Occupied(mut index) => {
-                    index.get_mut().insert(block_end, tx_range);
-                }
-                Entry::Vacant(index) => {
-                    index.insert(BTreeMap::from([(block_end, tx_range)]));
-                }
-            };
+                match block_index.entry(segment) {
+                    Entry::Occupied(mut index) => {
+                        index.get_mut().insert(block_end, tx_range);
+                    }
+                    Entry::Vacant(index) => {
+                        index.insert(BTreeMap::from([(block_end, tx_range)]));
+                    }
+                };
+            }
         }
 
         Ok(())
@@ -266,16 +268,18 @@ impl SnapshotProvider {
 
     /// Gets the highest snapshot block if it exists for a snapshot segment.
     pub fn get_highest_snapshot_block(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
-        self.highest_tracker
-            .as_ref()
-            .and_then(|tracker| tracker.borrow().and_then(|highest| highest.highest(segment)))
+        self.snapshots_block_index
+            .read()
+            .get(&segment)
+            .and_then(|index| index.last_key_value().map(|(last_block, _)| *last_block))
     }
 
     /// Gets the highest snapshotted transaction.
     pub fn get_highest_snapshot_tx(&self, segment: SnapshotSegment) -> Option<TxNumber> {
-        let snapshots = self.snapshots_tx_index.read();
-        let segment_snapshots: &BTreeMap<u64, RangeInclusive<u64>> = snapshots.get(&segment)?;
-        segment_snapshots.last_key_value().map(|(k, _)| *k)
+        self.snapshots_tx_index
+            .read()
+            .get(&segment)
+            .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
     }
 
     /// Iterates through segment snapshots in reverse order, executing a function until it returns
