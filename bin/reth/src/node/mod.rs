@@ -68,7 +68,6 @@ use reth_prune::{segments::SegmentSet, Pruner};
 use reth_revm::EvmProcessorFactory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::EngineApi;
-use reth_snapshot::HighestSnapshotsTracker;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -258,15 +257,15 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         let mut provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
 
+        provider_factory = provider_factory.with_snapshots(data_dir.snapshots_path())?;
+
         // configure snapshotter
         let snapshotter = reth_snapshot::Snapshotter::new(
             provider_factory.clone(),
-            data_dir.snapshots_path(),
-            self.chain.snapshot_block_interval,
+            provider_factory
+                .snapshot_provider
+                .expect("snapshot provider initialized via provider factory"),
         )?;
-
-        provider_factory = provider_factory
-            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver())?;
 
         self.start_metrics_endpoint(prometheus_handle, Arc::clone(&db)).await?;
 
@@ -474,12 +473,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let mut hooks = EngineHooks::new();
 
         let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = self.build_pruner(
-                &prune_config,
-                db.clone(),
-                tree_config,
-                snapshotter.highest_snapshot_receiver(),
-            );
+            let mut pruner = self.build_pruner(&prune_config, db.clone(), tree_config);
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor.clone())));
@@ -982,7 +976,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         config: &PruneConfig,
         db: DB,
         tree_config: BlockchainTreeConfig,
-        highest_snapshots_rx: HighestSnapshotsTracker,
     ) -> Pruner<DB> {
         let segments = SegmentSet::default()
             // Receipts
@@ -1020,7 +1013,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
             config.block_interval,
             self.chain.prune_delete_limit,
             tree_config.max_reorg_depth() as usize,
-            highest_snapshots_rx,
         )
     }
 

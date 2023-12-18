@@ -43,7 +43,7 @@ pub struct ProviderFactory<DB> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
-    snapshot_provider: Option<Arc<SnapshotProvider>>,
+    pub snapshot_provider: Option<Arc<SnapshotProvider>>,
 }
 
 impl<DB: Clone> Clone for ProviderFactory<DB> {
@@ -79,15 +79,8 @@ impl<DB> ProviderFactory<DB> {
     }
 
     /// Database provider that comes with a shared snapshot provider.
-    pub fn with_snapshots(
-        mut self,
-        snapshots_path: PathBuf,
-        highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
-    ) -> ProviderResult<Self> {
-        self.snapshot_provider = Some(Arc::new(
-            SnapshotProvider::new(snapshots_path)?
-                .with_highest_tracker(Some(highest_snapshot_tracker)),
-        ));
+    pub fn with_snapshots(mut self, snapshots_path: PathBuf) -> ProviderResult<Self> {
+        self.snapshot_provider = Some(Arc::new(SnapshotProvider::new(snapshots_path)?));
         Ok(self)
     }
 

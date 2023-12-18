@@ -6,9 +6,10 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment};
+use reth_primitives::{
+    BlockNumber, ChainSpec, PruneMode, PruneProgress, PruneSegment, SnapshotSegment,
+};
 use reth_provider::{ProviderFactory, PruneCheckpointReader};
-use reth_snapshot::HighestSnapshotsTracker;
 use reth_tokio_util::EventListeners;
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -37,8 +38,6 @@ pub struct Pruner<DB> {
     /// Maximum number of blocks to be pruned per run, as an additional restriction to
     /// `previous_tip_block_number`.
     prune_max_blocks_per_run: usize,
-    #[allow(dead_code)]
-    highest_snapshots_tracker: HighestSnapshotsTracker,
     metrics: Metrics,
     listeners: EventListeners<PrunerEvent>,
 }
@@ -52,7 +51,6 @@ impl<DB: Database> Pruner<DB> {
         min_block_interval: usize,
         delete_limit: usize,
         prune_max_blocks_per_run: usize,
-        highest_snapshots_tracker: HighestSnapshotsTracker,
     ) -> Self {
         Self {
             provider_factory: ProviderFactory::new(db, chain_spec),
@@ -61,7 +59,6 @@ impl<DB: Database> Pruner<DB> {
             previous_tip_block_number: None,
             delete_limit,
             prune_max_blocks_per_run,
-            highest_snapshots_tracker,
             metrics: Metrics::default(),
             listeners: Default::default(),
         }
@@ -88,9 +85,6 @@ impl<DB: Database> Pruner<DB> {
 
         let mut done = true;
         let mut stats = BTreeMap::new();
-
-        // TODO(alexey): prune snapshotted segments of data (headers, transactions)
-        let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
         // Multiply `self.delete_limit` (number of rows to delete per block) by number of blocks
         // since last pruner run. `self.previous_tip_block_number` is close to
@@ -152,8 +146,11 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        if let Some(snapshots) = highest_snapshots {
-            if let (Some(to_block), true) = (snapshots.headers, delete_limit > 0) {
+        if let Some(snapshot_provider) = self.provider_factory.provider()?.snapshot_provider {
+            if let (Some(to_block), true) = (
+                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers),
+                delete_limit > 0,
+            ) {
                 let prune_mode = PruneMode::Before(to_block + 1);
                 trace!(
                     target: "pruner",
@@ -185,7 +182,10 @@ impl<DB: Database> Pruner<DB> {
                 );
             }
 
-            if let (Some(to_block), true) = (snapshots.transactions, delete_limit > 0) {
+            if let (Some(to_block), true) = (
+                snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Transactions),
+                delete_limit > 0,
+            ) {
                 let prune_mode = PruneMode::Before(to_block + 1);
                 trace!(
                     target: "pruner",
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let mut pruner = Pruner::new(db, MAINNET.clone(), vec![], 5, 0, 5, watch::channel(None).1);
+        let mut pruner = Pruner::new(db, MAINNET.clone(), vec![], 5, 0, 5);
 
         // No last pruned block number was set before
         let first_block_number = 1;
