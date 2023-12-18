@@ -1008,7 +1008,7 @@ where
                 .body(body)
                 .send()
                 .await
-                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::HttpError))?;
+                .map_err(|err| EthApiError::Optimism(OptimismEthApiError::HttpError(err)))?;
         }
         Ok(())
     }
