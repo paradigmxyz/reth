@@ -43,6 +43,7 @@ reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-net-nat.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-prune.workspace = true

@@ -86,6 +86,7 @@ impl Block {
     }
 
     /// Returns whether or not the block contains any blob transactions.
+    #[inline]
     pub fn has_blob_transactions(&self) -> bool {
         self.body.iter().any(|tx| tx.is_eip4844())
     }
@@ -233,9 +234,30 @@ impl SealedBlock {
         )
     }
 
+    /// Returns an iterator over all blob transactions of the block
+    #[inline]
+    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.body.iter().filter(|tx| tx.is_eip4844())
+    }
+
     /// Returns only the blob transactions, if any, from the block body.
+    #[inline]
     pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
-        self.body.iter().filter(|tx| tx.is_eip4844()).collect()
+        self.blob_transactions_iter().collect()
+    }
+
+    /// Returns an iterator over all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.blob_transactions_iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+    }
+
+    /// Returns all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
+        self.blob_versioned_hashes_iter().collect()
     }
 
     /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
