@@ -4,6 +4,7 @@
 use crate::{
     beacon::{BlsPublicKey, BlsSignature},
     engine::{BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3},
+    ExecutionPayload,
 };
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
@@ -103,6 +104,36 @@ pub struct SignedBidSubmissionV3 {
     /// The Deneb block bundle for this bid.
     pub blobs_bundle: BlobsBundleV1,
     pub signature: BlsSignature,
+}
+
+/// SubmitBlockRequest is the request from the builder to submit a block.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubmitBlockRequest {
+    pub message: BidTrace,
+    #[serde(with = "crate::beacon::payload::beacon_payload")]
+    pub execution_payload: ExecutionPayload,
+    pub signature: BlsSignature,
+}
+
+/// A Request to validate a [SubmitBlockRequest] <https://github.com/flashbots/builder/blob/03ee71cf0a344397204f65ff6d3a917ee8e06724/eth/block-validation/api.go#L132-L136>
+#[serde_as]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuilderBlockValidationRequest {
+    #[serde(flatten)]
+    pub request: SubmitBlockRequest,
+    #[serde_as(as = "DisplayFromStr")]
+    pub registered_gas_limit: u64,
+}
+
+/// A Request to validate a [SubmitBlockRequest] <https://github.com/flashbots/builder/blob/03ee71cf0a344397204f65ff6d3a917ee8e06724/eth/block-validation/api.go#L204-L204>
+#[serde_as]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuilderBlockValidationRequestV2 {
+    #[serde(flatten)]
+    pub request: SubmitBlockRequest,
+    #[serde_as(as = "DisplayFromStr")]
+    pub registered_gas_limit: u64,
+    pub withdrawals_root: B256,
 }
 
 /// Query for the GET `/relay/v1/data/bidtraces/proposer_payload_delivered`
@@ -288,5 +319,14 @@ mod tests {
         let bytes = include_bytes!("../test_data/relay/signed_bid_submission_capella.ssz").to_vec();
         let bid = SignedBidSubmissionV2::from_ssz_bytes(&bytes).unwrap();
         assert_eq!(bytes, bid.as_ssz_bytes());
+    }
+
+    #[test]
+    fn test_can_parse_validation_request_body() {
+        const VALIDATION_REQUEST_BODY: &str =
+            include_str!("../test_data/relay/single_payload.json");
+
+        let _validation_request_body: BuilderBlockValidationRequest =
+            serde_json::from_str(VALIDATION_REQUEST_BODY).unwrap();
     }
 }
